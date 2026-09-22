@@ -1012,9 +1012,10 @@ pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
 	return font_ref;
 }
 
-gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
-		gboolean* hidden, GError** error) {
+gint pdf_page_has_text(fz_context* ctx, pdf_page* page,
+		gboolean* has_text, gboolean* has_hidden_text, GError** error) {
 	pdf_processor* proc = NULL;
+	pdf_text_analyzer_processor* p = NULL;
 
 	proc = pdf_new_text_analyzer_processor(ctx, NULL, 3, error);
 	if (!proc)
@@ -1030,7 +1031,13 @@ gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 		ERROR_PDF
 	}
 
-	*hidden = ((pdf_text_analyzer_processor*) proc)->has_hidden_text;
+	p = (pdf_text_analyzer_processor*) proc;
+
+	if (has_text)
+		*has_text = p->has_visible_text || p->has_hidden_text;
+	if (has_hidden_text)
+		*has_hidden_text = p->has_hidden_text;
+
 	pdf_close_processor(ctx, proc);
 	pdf_drop_processor(ctx, proc);
 

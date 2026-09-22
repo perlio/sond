@@ -301,6 +301,8 @@ filename_oeffnen(GtkWindow *window, const gchar *start_path) {
 GtkWidget*
 result_listbox_new(GtkWindow *parent_window, const gchar *titel) {
 	GtkWidget *window = NULL;
+	GtkWidget *vbox = NULL;
+	GtkWidget *header_box = NULL;
 	GtkWidget *scrolled_window = NULL;
 	GtkWidget *listbox = NULL;
 	GtkWidget *headerbar = NULL;
@@ -313,13 +315,24 @@ result_listbox_new(GtkWindow *parent_window, const gchar *titel) {
 		gtk_window_set_modal(GTK_WINDOW(window), FALSE);
 	}
 
+	/* vbox: header_box (für optionale Tabellen-Spaltenüberschriften - bleibt
+	 * beim Scrollen der Liste fest stehen, da außerhalb von scrolled_window)
+	 * oberhalb der scrollbaren Listbox. header_box bleibt hier leer - der
+	 * Aufrufer füllt sie bei Bedarf selbst (s. Objekt-Daten "header-box"). */
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	header_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
 	scrolled_window = gtk_scrolled_window_new( NULL, NULL);
 	listbox = gtk_list_box_new();
 	gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_MULTIPLE);
 	gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(listbox), FALSE);
 
 	gtk_container_add(GTK_CONTAINER(scrolled_window), listbox);
-	gtk_container_add(GTK_CONTAINER(window), scrolled_window);
+
+	gtk_box_pack_start(GTK_BOX(vbox), header_box, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), scrolled_window, TRUE, TRUE, 0);
+
+	gtk_container_add(GTK_CONTAINER(window), vbox);
 
 	//Headerbar erzeugen
 	headerbar = gtk_header_bar_new();
@@ -331,6 +344,7 @@ result_listbox_new(GtkWindow *parent_window, const gchar *titel) {
 
 	g_object_set_data(G_OBJECT(window), "listbox", listbox);
 	g_object_set_data(G_OBJECT(window), "headerbar", headerbar);
+	g_object_set_data(G_OBJECT(window), "header-box", header_box);
 
 	return window;
 }

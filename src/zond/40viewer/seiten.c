@@ -268,7 +268,7 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 /*
  **  Seiten OCR
  */
-/* Rückfrage bei Seiten, die bereits eine (versteckte) Textebene enthalten -
+/* Rückfrage bei Seiten, die bereits eine Textebene enthalten -
  * Rückgabe GTK_RESPONSE_YES: verwerfen und neu OCRen, GTK_RESPONSE_NO:
  * Seite überspringen, GTK_RESPONSE_CANCEL ("Abbrechen"-Button oder Fenster
  * per "X"/delete-event geschlossen - my_dialog_run() verknüpft das
@@ -296,8 +296,8 @@ static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
 
 	content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 
-	text = g_strdup_printf("Seite %u enthält bereits eine (versteckte) "
-			"Textebene.\nVerwerfen und neu OCRen, oder Seite überspringen?",
+	text = g_strdup_printf("Seite %u enthält bereits eine Textebene.\n"
+			"Verwerfen und neu OCRen, oder Seite überspringen?",
 			seitenzahl);
 	label = gtk_label_new(text);
 	g_free(text);
@@ -400,23 +400,23 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		//OCR-Modus für diese Seite bestimmen - versteckter Text vorhanden?
+		//OCR-Modus für diese Seite bestimmen - bereits Text vorhanden?
 		SondOcrMode mode = SOND_OCR_MODE_CHECK;
 		{
-			gboolean hidden = FALSE;
+			gboolean has_text = FALSE;
 			gint rc_hidden = 0;
 
-			rc_hidden = pdf_page_has_hidden_text(ctx, pdf_document_page->page,
-					&hidden, &error);
+			rc_hidden = pdf_page_has_text(ctx, pdf_document_page->page,
+					&has_text, NULL, &error);
 			if (rc_hidden) {
 				info_window_set_message(info_window,
-						"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
+						"Seite %u konnte nicht auf vorhandenen Text geprüft werden: %s",
 						pdf_document_page->page_akt + 1, error->message);
 				g_clear_error(&error);
 				continue;
 			}
 
-			if (hidden) {
+			if (has_text) {
 				if (mode_remembered != SOND_OCR_MODE_NONE)
 					mode = mode_remembered;
 				else {

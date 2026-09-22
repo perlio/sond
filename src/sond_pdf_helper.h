@@ -77,8 +77,18 @@ gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj**, GError** e
 
 pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error);
 
-gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
-		gboolean* hidden, GError** error);
+/**
+ * Analysiert den Content-Stream einer Seite auf vorhandenen Text, gleich
+ * welchen Textmodus (Tr). *has_text: TRUE, sobald die Seite überhaupt Text
+ * enthält, sichtbar oder unsichtbar - maßgeblich dafür, ob OCR im Modus
+ * "prüfen" übersprungen werden kann. *has_hidden_text: TRUE, wenn davon
+ * mindestens ein Textlauf mit Tr 3 (unsichtbar, typischerweise von früherer
+ * OCR) stammt - maßgeblich dafür, ob im Modus "erzwingen" vor dem Neu-OCRen
+ * etwas zu entfernen ist. Beide Ausgabeparameter dürfen einzeln NULL sein,
+ * wenn der jeweilige Wert nicht gebraucht wird.
+ */
+gint pdf_page_has_text(fz_context* ctx, pdf_page* page,
+		gboolean* has_text, gboolean* has_hidden_text, GError** error);
 
 pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
 

@@ -234,7 +234,8 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 		for (gint i = 0; i < arr_tasks->len; i++) {
 			SondOcrTask* task = NULL;
 			gint rc = 0;
-			gboolean hidden = FALSE;
+			gboolean has_text = FALSE;
+			gboolean has_hidden_text = FALSE;
 			gint status = 0;
 
 			if (g_atomic_int_get(pool->cancel_all))
@@ -258,11 +259,12 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 			}
 
 			if (status == 0) {
-				rc = pdf_page_has_hidden_text(task->ctx, task->page, &hidden, error);
+				rc = pdf_page_has_text(task->ctx, task->page, &has_text,
+						&has_hidden_text, error);
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
-								"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
+								"Seite %u konnte nicht auf vorhandenen Text geprüft werden: %s",
 							task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
@@ -270,45 +272,59 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 					continue;
 				}
 
-				if (hidden) {
+				/* has_text (sichtbar ODER unsichtbar/Tr 3) entscheidet, ob die
+				 * Seite im Modus "prüfen" übersprungen wird - ein elektronisch
+				 * erzeugtes PDF mit normal (sichtbar) gedrucktem Text hat
+				 * ebenso schon eine nutzbare Textebene wie eine frühere
+				 * OCR-Seite mit unsichtbarem Text, auch wenn nur Letzteres
+				 * als has_hidden_text zählt. */
+				if (has_text) {
 					if (mode == SOND_OCR_MODE_FORCE) {
-						fz_buffer* buf_filtered = pdf_text_filter_page(
-								task->ctx, task->page, 2 /* verstecken Text entfernen */,
-								error);
-						if (!buf_filtered) {
+						/* Nur entfernen, was tatsächlich unsichtbar ist - eine
+						 * vorhandene sichtbare Textebene (z.B. original
+						 * gedruckter Text) darf hier nicht angetastet werden;
+						 * ist has_hidden_text FALSE, gibt es nichts zu
+						 * entfernen und die Seite fällt direkt unten durch,
+						 * um trotzdem neu gerendert und OCRt zu werden. */
+						if (has_hidden_text) {
+							fz_buffer* buf_filtered = pdf_text_filter_page(
+									task->ctx, task->page, 2 /* verstecken Text entfernen */,
+									error);
+							if (!buf_filtered) {
+								if (task->log_func)
+									task->log_func(task->log_func_data,
+											"Seite %u: versteckter Text konnte nicht entfernt werden: %s",
+											task->page->super.number, (*error)->message);
+								g_clear_error(error);
+								pages_done++;
+								g_atomic_int_set(&task->status, 4);
+								continue;
+							}
+
+							rc = pdf_set_content_stream(task->ctx, task->page,
+									buf_filtered, error);
+							fz_drop_buffer(task->ctx, buf_filtered);
+							if (rc) {
+								if (task->log_func)
+									task->log_func(task->log_func_data,
+											"Seite %u: Content-Stream konnte nicht ersetzt werden: %s",
+											task->page->super.number, (*error)->message);
+								g_clear_error(error);
+								pages_done++;
+								g_atomic_int_set(&task->status, 4);
+								continue;
+							}
+
 							if (task->log_func)
 								task->log_func(task->log_func_data,
-										"Seite %u: versteckter Text konnte nicht entfernt werden: %s",
-										task->page->super.number, (*error)->message);
-							g_clear_error(error);
-							pages_done++;
-							g_atomic_int_set(&task->status, 4);
-							continue;
+										"Seite %u: versteckter Text entfernt - wird neu OCRt", task->page->super.number);
 						}
-
-						rc = pdf_set_content_stream(task->ctx, task->page,
-								buf_filtered, error);
-						fz_drop_buffer(task->ctx, buf_filtered);
-						if (rc) {
-							if (task->log_func)
-								task->log_func(task->log_func_data,
-										"Seite %u: Content-Stream konnte nicht ersetzt werden: %s",
-										task->page->super.number, (*error)->message);
-							g_clear_error(error);
-							pages_done++;
-							g_atomic_int_set(&task->status, 4);
-							continue;
-						}
-
-						if (task->log_func)
-							task->log_func(task->log_func_data,
-									"Seite %u: versteckter Text entfernt - wird neu OCRt", task->page->super.number);
 						/* weiter unten: Seite normal rendern und OCRen */
 					}
 					else {
 						if (task->log_func)
 							task->log_func(task->log_func_data,
-									"Seite %u enthält versteckten Text - OCR übersprungen", task->page->super.number);
+									"Seite %u enthält bereits Text - OCR übersprungen", task->page->super.number);
 						pages_done++;
 						g_atomic_int_set(&task->status, 4);
 						continue;

@@ -4,6 +4,9 @@
 - Rows mit Text Farbe
 - Copy_Auswertung wenn root dann Verweis auf root?
 - Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
+- Beim Kopieren von ZIP-Dateien (und anderen Containern) ins Filesystem:
+  verbotene Sonderzeichen im Dateinamen escapen
+- Durchsuchen des Dateisystems (BAUM_FS) - Anforderungen noch offen
 
  - Abschnitte neu organisieren
 
@@ -3809,21 +3812,138 @@
  Offene Punkte (21.09.2026, Nutzer-Sammlung - erstmal nur notiert, nicht
  umgesetzt):
 
- #164 Suchen-Funktion (Popup-Entry): durchsucht aktuell live node_text +
- Kommentartext der zond_treeviews sowie Dateinamen angebundener Dateien -
- unabhängig vom (neueren) Volltext-Index (sond_index.c), der nur
- Dateiinhalte erfasst, keine Knotentitel/Kommentare/Dateinamen. Fragen:
- wird die Popup-Suche neben der Index-Suche noch gebraucht? Dafür
- spricht: sie deckt node_text/Kommentare ab, die der Index gar nicht
- erfasst (das sind Metadaten des Baums, keine Dateiinhalte) - ein
- vollständiger Ersatz durch den Index bräuchte also ohnehin eine
- Erweiterung des Indexschemas um genau diese Felder. Dateinamen: im Index
- vermutlich nicht enthalten (der indiziert Inhalte, nicht Namen) - zu
- prüfen; falls nicht, wäre eine Aufnahme (z.B. als durchsuchbares
- Metadatenfeld pro file_part) eine Möglichkeit, beide Suchen ein Stück
- weit zu vereinheitlichen. Eine Beschränkung der Popup-Suche auf die
- zond_treeviews (statt z.B. auch BAUM_FS) ergibt Sinn, wenn ihr Zweck
- gerade die knoten-/kommentarbezogene Suche ist, die es nur dort gibt.
+ #164 Suchen-Funktion (Popup-Entry): Nutzer-Entscheidung (22.09.2026) -
+ inhaltlich bleibt es wie es ist (Popup-Suche für node_text/Kommentare/
+ Dateinamen der zond_treeviews, getrennt vom Volltext-Index für
+ Dateiinhalte - keine Zusammenlegung).
+
+ Verbesserungsbedarf besteht bei der DARSTELLUNG der Treffer: Treffer in
+ fileparts (Dateiinhalt/-name) und in node_texts, die denselben Knoten
+ betreffen, erscheinen aktuell als mehrere getrennte Ergebniszeilen -
+ sollen zu einem Ergebnis pro Treffer zusammengefasst werden.
+
+ Skizze für ein mögliches künftiges Projekt (Nutzer-Vorschlag): eine
+ Anzeige-Zeile pro angebundenem file_part, die diesen komplett
+ wiedergibt - links file_part und section, dann 0 oder 1 Anbindung im
+ BAUM_INHALT (mit deren node_text und Text) und anschließend 0-n Copies
+ im BAUM_AUSWERTUNG (jeweils mit node_text und Text). Vollständig
+ dargestellt wird die Zeile nur, wenn mindestens einer dieser Bestandteile
+ tatsächlich einen Treffer enthält.
+
+ Klargestellt (22.09.2026): ein file_part-Namenstreffer trifft technisch
+ auf jede Section derselben Datei (gleicher file_part-Text, nur section
+ unterschiedlich) - Nutzer-Entscheidung: eine Zeile PRO SECTION, nicht
+ zusammengefasst pro Datei. Passt zur DB-Struktur (jede Section ist ein
+ eigener FILE_PART-Knoten mit eigener ID/Anbindung/Copies) und zur obigen
+ Skizze (file_part+section als Zeilen-Identität).
+
+ Richtiggestellt (22.09.2026, nach zwischenzeitlichem Mißverständnis):
+ eine Row wird IMMER vollständig angezeigt (0-1 Anbindung, falls
+ Anbindung: 0-n Copies), unabhängig davon ob der Treffer nur aus der
+ file_part-Namensspalte oder aus node_text/text stammt - keine
+ "schlanke" Row ohne Anbindung.
+
+ Feinschliff SECTION-AGGREGATION (22.09.2026, bestätigt, aber
+ ZURÜCKGESTELLT - erst nach der Basisversion, kann später ergänzt
+ werden): reiner Namenstreffer (nur file_part-Text, geteilt von Basis-
+ Datei und allen ihren Sections) soll NICHT pro Section eine eigene Row
+ erzeugen, sondern zu einer einzigen Row für die Basis-Datei (file_part
+ ohne section, mit deren eigener Anbindung/Copies) zusammengefaßt
+ werden - Beispiel: Datei mit Anbindung (node_text "klkklk", kein Text,
+ keine Copy) und 100 Sections (je node_text "ioioi", kein Text), Suche
+ nach dem Dateinamen -> nur EINE Row (die Basis-Datei). Hat dagegen
+ einzelne(r) Section(s) zusätzlich einen EIGENEN inhaltlichen Treffer
+ (node_text/text/Copy), bekommt diese Section trotzdem ihre eigene volle
+ Row - zusätzlich zur zusammengefaßten Basis-Row. Erfordert Gruppierung
+ nach dem gemeinsamen file_part-Text (nicht nur nach Knoten-ID) VOR dem
+ Row-Aufbau; da diese Gruppierung rein additiv auf der in Phase 2/3
+ gebauten Row-pro-Knoten-Struktur aufsetzt, kann sie ohne Redesign
+ nachgerüstet werden.
+
+ Umsetzungsplan, Basisversion (22.09.2026, mit Nutzer abgestimmt, noch
+ nicht begonnen - OHNE die zurückgestellte Section-Aggregation, also
+ vorerst eine Row pro getroffenem file_part-Knoten/Section):
+ 1) zond_dbase.c: neue Funktion zond_dbase_get_baum_auswertung_copies()
+    analog zond_dbase_get_baum_auswertung_copy(), aber mit
+    do{}while(SQLITE_ROW)-Schleife (Muster wie suchen_db()) statt nur
+    der ersten Zeile - liefert alle Copy-node_ids zu einer Anbindung.
+ 2) suchen.c/suchen_db(): jeder Rohtreffer (zond_suchen, node_id) wird
+    auf seine file_part-Knoten-ID aufgelöst (Knoten selbst FILE_PART:
+    direkt; BAUM_INHALT_FILE: über link; BAUM_AUSWERTUNG_COPY: zwei Hops
+    über link->link) - Knoten ohne Datei-Bezug (reine Strukturpunkte)
+    bleiben wie bisher einzelne, einfache Zeilen. Über eine
+    GHashTable<file_part_node_id, ResultRow*> entsteht pro Section genau
+    eine ResultRow (mehrfache Rohtreffer zum selben Knoten werden beim
+    Bauen übersprungen, da schon vorhanden).
+ 3) Neue Helper-Funktion: aus einer file_part-Knoten-ID file_part+section
+    lesen, per zond_dbase_get_baum_inhalt_file_from_file_part() die 0/1
+    Anbindung (node_text+text) und per (1) alle Copies (node_text+text)
+    nachladen - immer vollständig, unabhängig von der Treffer-Quelle.
+ 4) misc.c/result_listbox_new() bleibt als Fenster-/Listbox-Gerüst
+    unverändert; nur suchen_fuellen_row() (suchen.c) wird ersetzt durch
+    eine Funktion, die pro ResultRow eine zusammengesetzte GtkBox einfügt
+    (links file_part/section, rechts Anbindung + je eine Zeile pro Copy).
+ 5) Aktivierung (cb_lb_row_activated) und Kontextmenü
+    (suchen_kopieren_listenpunkt) müssen auf Teilzeilen-Ebene (Anbindung
+    bzw. einzelne Copy) umgestellt werden, da eine zusammengesetzte Zeile
+    jetzt mehrere node_ids trägt statt nur einer.
+ 6) Verifikation ohne Compile-Möglichkeit: Klammern-/Kommentar-Balance-
+    Skript nach jeder Änderung; Testfälle gedanklich durchgehen (Treffer
+    in einer von mehreren Copies -> volle Zeile mit allen Copies;
+    Doppeltreffer im selben Knoten -> nur eine Zeile). Eigentlicher
+    Build/Test durch Nutzer.
+ 7) Danach optional die zurückgestellte Section-Aggregation (s.o.)
+    nachrüsten: zusätzliche Gruppierung nach file_part-Text VOR Phase 2,
+    Basis-Row + gesondert behandelte Sections mit eigenem Treffer.
+
+ Umsetzung Phasen 1-4 (22.09.2026): zond_dbase_get_baum_auswertung_copies()
+ ergänzt; suchen.c um ResultRow/ResultCopy/SuchenItem, suchen_resolve_
+ file_part_node() (löst Rohtreffer auf file_part-Knoten auf, drei Fälle:
+ FILE_PART direkt, BAUM_INHALT_FILE über link, BAUM_AUSWERTUNG_COPY zwei
+ Hops - VIRT_PDF als zweite Copy-link-Alternative wird aktuell nirgends
+ erzeugt und defensiv übersprungen), suchen_baue_row() und
+ suchen_aggregieren() erweitert; suchen_fuellen_row() aufgeteilt in
+ suchen_fuellen_row_simple() (unverändertes altes Verhalten für Knoten
+ ohne Datei-Bezug) und suchen_fuellen_row_composite() (neue
+ zusammengesetzte Zeile). Dabei zwei unabhängige Alt-Bugs gefunden und
+ mitbehoben: (1) "root"/"baum" Object-Data-Schlüssel-Mismatch - suchen_
+ fuellen_row() schrieb bisher unter "root", cb_lb_row_activated() las
+ aber "baum", wodurch das Sprungziel beim Aktivieren eines Suchergebnisses
+ immer fälschlich in BAUM_FS (0) statt im tatsächlichen Baum gesucht
+ wurde; (2) eine lokale Variable "root" im zond_suchen==1-Zweig
+ überschattete die äußere und verhinderte zusätzlich, dass der ermittelte
+ Wert überhaupt nach außen drang. (3) titel (g_strconcat) in
+ suchen_treeviews() wurde nie freigegeben - jetzt per g_free() nach
+ Gebrauch.
+
+ Umsetzung Phase 5 (22.09.2026, Nutzer-Vorgabe "Klick auf Spalte führt zu
+ Sprung zu Knoten; ggf. muß BAUM_FS bzw. BAUM_AUSWERTUNG erst eingeblendet
+ werden"): suchen_fuellen_row_composite() baut jetzt statt EINER
+ zusammengesetzten GtkBox mehrere GETRENNTE Listbox-Zeilen (Kopfzeile mit
+ file_part+section, inaktiv; dann je eine eigene, eingerückte Zeile für
+ die Anbindung und jede Copy) - jede Teilzeile trägt so ihr EIGENES
+ "baum"/"node-id" und nutzt den vorhandenen Doppelklick-/Auswahl-
+ Mechanismus der Listbox unverändert (kein Event-Box-Umbau nötig). Neue
+ Helper-Funktion suchen_listbox_insert_zeile() dafür.
+
+ Die Sprunglogik selbst wurde nach suchen_springe_zu_knoten() ausgelagert
+ (aus cb_lb_row_activated() heraus, jetzt auch von dort nur noch
+ aufgerufen) und um das Umschalten zwischen BAUM_FS und BAUM_AUSWERTUNG
+ ergänzt - beide teilen sich dieselbe Fläche (zond->hpaned, s.
+ app_window.c) und werden über zond->fs_button umgeschaltet; BAUM_INHALT
+ ist immer sichtbar. Gleiches Umschalt-Idiom wie schon in
+ zond_treeview_jump_to_iter() (zond_treeview.c) bzw. spiegelbildlich in
+ app_window.c (cb_jump_button_clicked) verwendet.
+
+ suchen_kopieren_listenpunkt() (Kontextmenü "In Baum Auswertung
+ kopieren") überspringt jetzt eine ausgewählte Kopfzeile (node-id 0)
+ defensiv, statt mit node_id=0 in zond_treeview_walk_tree() zu laufen -
+ der Anker bleibt für den nächsten ausgewählten Punkt unverändert.
+
+ Phase 7 (Section-Aggregation) noch offen; Klammer- und Kommentar-Balance
+ nach jeder Änderung geprüft (inkl. Prüfung auf eine Kommentaröffnung
+ innerhalb eines bereits offenen Kommentars - s. Fund/Fix weiter unten,
+ #165-Nachtrag). Build/Test durch Nutzer noch ausstehend.
 
  #165 Code-Kommentare: die in dieser Session (und wohl auch vorher)
  verwendete Form - ausführliche Herleitung mit Datumsangaben ("am xx.
@@ -3833,6 +3953,20 @@
  Gilt als Stilvorgabe für neue Kommentare; ein nachträgliches Aufräumen
  bestehender Kommentare ist ein separates, potenziell sehr großes
  Vorhaben und hier nicht mitgemeint.
+
+ Nachtrag (22.09.2026, Nutzer-Fund - Compilerfehler): der Kommentar zum
+ #164-Umsetzungsstand enthielt wörtlich die beiden Blockkommentar-
+ Begrenzungszeichen selbst (als Beschreibung der Balance-Prüfung gemeint)
+ - genau das Problem, vor dem hier gewarnt wird: die schließende
+ Zeichenfolge darin beendete den äußeren Kommentar vorzeitig, der
+ Compiler brach mit einer Fehlermeldung zum unerwarteten Komma ab.
+ Behoben durch Umformulierung ganz ohne diese Begrenzungszeichen im
+ Kommentartext. Die bisherige Verifikation (nur Endstand der Klammer-/
+ Kommentarbalance prüfen) hätte das nicht zuverlässig gefangen, wenn ein
+ späterer echter Kommentar im selben Lauf die Bilanz zufällig wieder
+ ausgleicht - Prüfung deshalb um einen expliziten Check ergänzt: jede
+ Kommentaröffnung, die auftritt während bereits ein Kommentar offen ist,
+ wird als Fehler gemeldet, unabhängig vom Endstand.
 
  #166 sond_treeviewfm bekommt Dateien, die "von außen" (außerhalb der
  App) auf Root-Ebene eingefügt werden, nicht mit - Baum aktualisiert sich
@@ -3887,7 +4021,218 @@
  sond_tvfm_item.c/.h, sond_treeviewfm_private.h und document.c/.h auf
  knappe "was + ggf. warum"-Form gekürzt, ohne Herleitungsgeschichte.
  ToDo.c selbst bleibt als dieses datierte Journal unverändert im
- bisherigen Stil. Nach jeder Änderung Klammer- (),{},[] und Kommentar-
- balance (/* */, unter Berücksichtigung von //-Zeilenkommentaren und
- String-/Char-Literalen) programmatisch geprüft - überall ausgeglichen.
+ bisherigen Stil. Nach jeder Änderung Klammerbalance ( { [ und
+ Blockkommentar-Balance (Auf/Zu, unter Berücksichtigung von Zeilen-
+ kommentaren und String-/Char-Literalen) programmatisch geprüft -
+ überall ausgeglichen.
+ */
+
+/*
+ #173 (22.09.2026, Nutzer-Fund): Bug gemeldet - eine elektronisch erzeugte
+ PDF mit direkt (sichtbar) gedrucktem Text wurde beim Indizieren trotzdem
+ auf jeder Seite gerendert und einer OSD-Prüfung unterzogen, die dabei
+ fehlschlug. Ursache: pdf_page_has_hidden_text() (sond_pdf_helper.c)
+ erkannte nur Textläufe mit Tr 3 (unsichtbar, typischerweise von früherer
+ OCR) als "vorhanden" - eine normale, sichtbare Textebene lieferte
+ has_hidden_text=FALSE, wodurch der Übersprungen-Zweig im Modus "prüfen"
+ (sond_ocr_do_tasks(), sond_ocr.c) nie griff und die Seite trotz
+ vorhandenem Text neu gerendert und OSD-geprüft wurde.
+
+ Behoben durch Umbenennung/Erweiterung zu pdf_page_has_text() mit zwei
+ Ausgabeparametern: has_text (sichtbar ODER unsichtbar - entscheidet jetzt
+ über das Überspringen im Modus "prüfen") und has_hidden_text (nur Tr 3 -
+ entscheidet weiterhin, ob im Modus "erzwingen" vor dem Neu-OCRen etwas zu
+ entfernen ist; hat die Seite nur sichtbaren Text, gibt es nichts zu
+ entfernen, sie fällt direkt durch zum Neu-OCRen). Beide Aufrufstellen
+ (sond_ocr.c, zond/40viewer/seiten.c) sowie die zugehörigen Log- und
+ Dialogtexte (seiten_ocr_abfrage_hidden_text()) entsprechend angepasst.
+ Klammer- und Blockkommentarbalance in allen vier berührten Dateien
+ (sond_pdf_helper.h/.c, sond_ocr.c, seiten.c) programmatisch geprüft -
+ überall ausgeglichen.
+ */
+
+/*
+ #174 (22.09.2026, Nutzer-Fund, direkt im Anschluß an #173): beim
+ Indizieren derselben PDF trat "db_insert_chunk: step: database disk
+ image is malformed" auf (SQLite SQLITE_CORRUPT). Betroffen ist
+ ausschließlich .sond_index.db (Volltextindex/chunks-Tabelle,
+ sond_index.c) - eine vom Fallakten-/Anbindungsbestand (dbase_zond,
+ .znd) komplett separate, jederzeit neu aufbaubare Ableitung.
+
+ Ursache: .sond_index.db liegt (anders als die "work"-DB, s. Task #42,
+ project_get_local_tmp_path()) weiterhin im SeaDrive-synchronisierten
+ Projektverzeichnis und lief bislang im WAL-Journal-Modus
+ (sond_index_ctx_new()). WAL braucht verlässliches mmap/Byte-Range-
+ Locking auf der -shm-Begleitdatei - das bietet ein Cloud-Sync-Laufwerk
+ nicht zuverlässig, was zu genau dieser Art Korruption führen kann. Die
+ bereits vorhandene Hydrierung-vor-dem-Öffnen (s. Eintrag weiter oben zu
+ project_open()) deckt nur den Zustand beim Öffnen ab, nicht laufende
+ Schreibzugriffe während der Indizierung.
+
+ Nutzer-Entscheidung: von den zwei Alternativen (Index-DB auf lokalen,
+ nicht-synchronisierten Pfad verlegen vs. WAL abschalten) wurde die
+ einfachere gewählt - WAL abschalten. Umgesetzt in sond_index_ctx_new()
+ (sond_index.c): PRAGMA journal_mode=DELETE statt WAL, PRAGMA
+ synchronous=FULL statt NORMAL (auf einem Cloud-Laufwerk das robustere,
+ wenn auch langsamere Verhalten bei klassischem Rollback-Journal). Löst
+ die Ursache nicht vollständig (die Datei liegt weiterhin auf dem
+ Cloud-Laufwerk), reduziert das Korruptionsrisiko aber erheblich. Die
+ lokale Verlegung bliebe die sauberere, hier bewußt zurückgestellte
+ Alternative, falls das Problem trotzdem wieder auftritt.
+
+ Nutzer-Einschätzung zur zurückgestellten Alternative (22.09.2026): eine
+ dauerhafte lokale Verlegung hält der Nutzer für nicht sinnvoll, da
+ jedes Projekt seine eigene Index-DB hat (also kein zentraler, fester
+ lokaler Pfad, sondern pro Projekt einer). Ein Hin-und-her-Kopieren bei
+ Projekt-Start/-Ende wäre die einzige Alternative dazu, brächte aber
+ eine eigene Fehlerquelle mit (Risiko bei einem Absturz zwischen den
+ beiden Kopiervorgängen). Alternative damit nicht nur zurückgestellt,
+ sondern von der Grundidee her verworfen.
+
+ Die zum Zeitpunkt des Funds bereits kaputte .sond_index.db muß vom
+ Nutzer einmalig gelöscht (samt evtl. vorhandener -wal/-shm-Dateien) und
+ der Index neu erstellt werden - reiner Datenverlust einer Ableitung,
+ keine Fallakten betroffen. Klammer- und Blockkommentarbalance in
+ sond_index.c programmatisch geprüft - ausgeglichen. Nicht durch
+ Kompilieren/Testen verifiziert.
+ */
+
+/*
+ #175 (22.09.2026, Nutzer-Fund, Rückkehr zum #164-Ergebnisfenster):
+ "Anklicken BAUM_FS und BAUM_INHALT funktioniert nicht" - beide Meldungen
+ hatten dieselbe Ursache in suchen_fuellen_row_simple() (suchen.c): der
+ zond_suchen==2-Zweig (Treffer im Kommentartext "text" eines Knotens ohne
+ Datei-Bezug, z.B. reiner Strukturpunkt) ermittelte "baum" nie - anders
+ als der zond_suchen==1-Zweig (Treffer im node_text), der dafür bereits
+ korrekt zond_dbase_get_tree_root() aufrief. Die lokale Variable blieb
+ beim Default 0 stehen, was zufällig BAUM_FS entspricht - ein echter
+ BAUM_INHALT- oder BAUM_AUSWERTUNG-Treffer über diesen Zweig wurde also
+ fälschlich als "BAUM_FS" verdrahtet. Ein Sprung nach BAUM_FS kann mit
+ einer "knoten"-Tabellen-ID aber grundsätzlich nie funktionieren - BAUM_FS
+ hat ein eigenes, dateisystembasiertes Baummodell ohne solche IDs
+ (zond_treeview_get_path() liest dort die falsche Spalte und läuft still
+ ins Leere). Fix: beide Zweige (1 und 2) ermitteln "baum" jetzt
+ gleichermaßen über zond_dbase_get_tree_root(); der zond_suchen==0-Zweig
+ (FilePart-Namenstreffer, seit #164 ohnehin unerreichbar, da solche
+ Treffer immer schon zur aggregierten ResultRow werden) markiert sein
+ Sprungziel jetzt defensiv inert (node_id=0) statt fälschlich BAUM_FS.
+ Zusätzlich Verteidigungs-Guard in suchen_springe_zu_knoten(): baum==
+ BAUM_FS wird jetzt explizit erkannt, geloggt und ignoriert, statt GTK
+ mit einer ungültigen Spaltenabfrage ins Leere laufen zu lassen - BAUM_FS
+ kann aus dieser Suche strukturell nie ein gültiges Sprungziel sein.
+
+ Separat angesprochen: die Zusammengehörigkeit der Zeilen einer
+ aggregierten ResultRow (Kopfzeile + Anbindung + Copies) ist aktuell nur
+ durch Reihenfolge und Einrückung erkennbar, ohne visuelle Abgrenzung
+ zwischen Gruppen, und die Kopfzeile selbst bleibt bewusst inaktiv/nicht
+ klickbar. Nutzer-Entscheidung (22.09.2026): fürs Erste nur den Bug
+ fixen, die optische Gruppierung (Trennlinie zwischen Gruppen, fette
+ Kopfzeile, ggf. Kopfzeile klickbar zur Anbindung) zurückgestellt - bei
+ Bedarf später aufgreifen.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Korrektur zu #175 (22.09.2026, unmittelbar im Anschluß, Nutzer-
+ Widerspruch): "Ist leider noch überhaupt nicht das, was ich mir
+ vorstelle! Für jeden Treffer komplette Zeile: filepart -
+ node_text(BAUM_INHALT) - text(BAUM_INHALT) n x(node_text(BAUM_AUSWERTUNG)
+ - text(BAUM_AUSWERTUNG))". Die separaten Listbox-Zeilen pro Anbindung/
+ Copy (Phase 5, oben dokumentiert) waren eine Fehleinschätzung - schon die
+ damalige Nutzer-Vorgabe "Klick auf Spalte führt zu Sprung zu Knoten"
+ (Wortwahl "Spalte", nicht "Zeile") deutete bereits auf eine einzige Zeile
+ mit mehreren klickbaren Abschnitten hin; das war beim risikoarm
+ gewählten Weg über separate Zeilen (Begründung: nicht kompilierbar/
+ testbar, daher der vermeintlich sicherere Weg über das ohnehin
+ vorhandene Zeilen-Auswahl-/Aktivierungssystem) untergegangen.
+
+ Neu umgesetzt: suchen_fuellen_row_composite() baut jetzt GENAU EINE
+ Listbox-Zeile pro ResultRow - eine horizontale GtkBox mit einem
+ (nicht-klickbaren) Label für file_part(+section), gefolgt von je einem
+ flach dargestellten GtkButton ("Spalte") für die Anbindung
+ (BAUM_INHALT: node_text - text) und jede Copy (BAUM_AUSWERTUNG: node_text
+ - text), getrennt durch " - "-Labels. Jede Spalte trägt ihr eigenes
+ "baum"/"node-id" als Objekt-Daten auf dem Button selbst (nicht auf der
+ Zeile) und ruft beim "clicked"-Signal (neu: cb_suchen_spalte_clicked())
+ direkt suchen_springe_zu_knoten() auf - unabhängig von den anderen
+ Spalten derselben Zeile. Die Zeile selbst trägt zusätzlich "baum"/
+ "node-id" der Anbindung (0/0 ohne Anbindung), damit Doppelklick auf die
+ Zeile allgemein (cb_lb_row_activated(), unverändert) und "In Baum
+ Auswertung kopieren" (suchen_kopieren_listenpunkt(), arbeitet auf der
+ Zeilenauswahl der Listbox) weiterhin ein sinnvolles Ziel haben. Die
+ jetzt ungenutzte suchen_listbox_insert_zeile() (Phase 5) wurde entfernt.
+
+ Der oben unter #175 zurückgestellte Gruppierungs-Punkt (Trennlinie
+ zwischen Gruppen, fette Kopfzeile) erledigt sich durch diese Korrektur
+ größtenteils von selbst - eine Zeile pro Treffer macht die Zugehörigkeit
+ schon durch die Zeilenstruktur selbst eindeutig, ohne zusätzliche Optik.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Zweite Korrektur zu #175 (22.09.2026, unmittelbar im Anschluß, Nutzer-
+ Präzisierung): "Ich stelle mir eine Tabelle vor: Links filepart
+ (Überschrift z.B. Dateiname), daneben node_text BAUM_INHALT (Überschrift
+ z.B. Bestandsverzeichnis), in der gleichen Spalte, unter dem node_text,
+ der text, falls vorhanden, Spalte daneben, wenn vorhanden, die Copies des
+ Punktes im Bestandsverzeichnis, node_text und text, mehrere Copies in
+ eigenen Boxen, anklickbar, untereinander. Bei Strukturpunkten bleiben die
+ anderen Spalten natürlich leer, Strukturpunkte in beiden Bäumen haben ja
+ keinerlei Beziehungen untereinander." Die eine-Zeile-mit-Buttons-
+ hintereinander-Lösung der ersten Korrektur war noch keine echte Tabelle -
+ keine Spaltenüberschriften, keine spaltenweise Ausrichtung über alle
+ Zeilen hinweg, und Strukturpunkte (suchen_fuellen_row_simple()) sahen
+ optisch noch anders aus als aggregierte Treffer.
+
+ Jetzt umgesetzt als echte Tabelle mit drei Spalten - "Dateiname",
+ "Bestandsverzeichnis" (BAUM_INHALT), "Auswertung" (BAUM_AUSWERTUNG):
+
+ - misc.c, result_listbox_new(): Fenster-Aufbau um eine vbox erweitert,
+   die eine neue, leere header_box (Objekt-Daten "header-box", bleibt beim
+   Scrollen der Liste fest stehen, da außerhalb von scrolled_window)
+   oberhalb der scrollbaren Listbox einfügt - Aufrufer füllt sie selbst.
+
+ - suchen.c, suchen_erzeugen_ergebnisfenster(): füllt header_box mit drei
+   fett dargestellten Spaltenüberschriften-Labels und legt dafür drei
+   GtkSizeGroup an (sg_filepart/sg_inhalt/sg_auswertung, via
+   g_object_set_data_full() lebensdauergebunden am Fenster) - jede hält
+   Kopf- und Datenzelle ihrer Spalte über alle (voneinander unabhängigen)
+   Zeilen-GtkBoxen hinweg gleich breit, womit trotz einer eigenständigen
+   GtkBox pro Zeile eine echte Spaltenausrichtung entsteht.
+
+ - suchen.c, neue Funktion suchen_box_knoten(): baut die "eigene Box" für
+   einen einzelnen Knoten (node_text oben, text darunter falls vorhanden,
+   klickbar - Sprung zu genau diesem Knoten) - ersetzt die vorige flache,
+   einzeilige "Spalte" (suchen_row_add_spalte(), entfernt) durch einen
+   echten zweizeiligen Button.
+
+ - suchen.c, neue Funktion suchen_zelle_leer(): leere Platzhalterzelle für
+   eine Spalte, die für eine bestimmte Zeile nicht zutrifft - trotzdem der
+   sizegroup hinzugefügt, damit die Spaltenbreite erhalten bleibt.
+
+ - suchen_fuellen_row_composite() baut jetzt drei Zellen statt einer
+   Buttonkette: Spalte 1 = file_part(+section)-Label, Spalte 2 = Box der
+   Anbindung (falls vorhanden, sonst leer), Spalte 3 = vertikale Box aller
+   Copy-Boxen untereinander (0-n, sonst leer).
+
+ - suchen_fuellen_row_simple() (reine Strukturpunkte) baut jetzt dieselbe
+   Drei-Spalten-Struktur wie suchen_fuellen_row_composite() - Spalte 1
+   bleibt immer leer (kein Datei-Bezug), und je nachdem, in welchem Baum
+   der Treffer liegt, füllt sich GENAU eine der beiden anderen Spalten mit
+   einer einzelnen Box - die andere bleibt leer, wie vom Nutzer
+   vorgegeben. Damit vereinheitlicht: zond_suchen==1 (node_text-Treffer)
+   und zond_suchen==2 (text-Treffer) zeigen jetzt dieselbe Box (node_text
+   UND text, unabhängig davon, welches Feld den Treffer auslöste) - vorher
+   gab es dafür unterschiedliche Textformatierungen; die zuvor hier
+   behobene BAUM_FS-Verwechslung (#175, erste Korrektur) bleibt in Kraft,
+   da beide Fälle weiterhin über zond_dbase_get_tree_root() aufgelöst
+   werden. Die jetzt ungenutzte suchen_format_content_line() wurde
+   entfernt.
+
+ Klammer- und Blockkommentarbalance in misc.c und suchen.c programmatisch
+ geprüft - ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
  */

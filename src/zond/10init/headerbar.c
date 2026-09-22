@@ -49,6 +49,7 @@
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
+#include "../20allgemein/xjustiz_import.h"
 #include "../20allgemein/zond_update.h"
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"
@@ -832,6 +833,61 @@ static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
 	}
 }
 
+/* Extras -> "XJustiz-Import": liest xjustiz_nachricht.xml aus einer ZIP
+ * aus dem beA-Akteneinsichtsportal und bindet die referenzierten
+ * PDF-Dokumente an der aktuellen Cursor-Position im Bestandsverzeichnis
+ * an - s. ausfuehrlichen Kommentar in xjustiz_import.h/.c (22.09.2026,
+ * neues Feature). Wie bei "Punkt einfügen"/"Einfügen" zwei Varianten
+ * (Gleiche Ebene/Unterebene, s. Untermenü in build_menu() weiter unten). */
+static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
+	GError *error = NULL;
+	gint n_angebunden = 0;
+	gint n_vorhanden = 0;
+	GPtrArray *arr_nicht_gefunden = NULL;
+	gint rc = 0;
+
+	rc = xjustiz_import(zond, child, &n_angebunden, &n_vorhanden,
+			&arr_nicht_gefunden, &error);
+	if (rc == 1)
+		return; //Dateiauswahl abgebrochen - keine Meldung
+	if (rc == -1) {
+		display_message(zond->app_window, "XJustiz-Import fehlgeschlagen\n\n",
+				error ? error->message : NULL, NULL);
+		g_clear_error(&error);
+		return;
+	}
+
+	{
+		GString *text = g_string_new(NULL);
+
+		g_string_append_printf(text, "%d Dokument(e) angebunden", n_angebunden);
+		if (n_vorhanden > 0)
+			g_string_append_printf(text, "\n%d bereits vorhanden (uebersprungen)",
+					n_vorhanden);
+		if (arr_nicht_gefunden && arr_nicht_gefunden->len > 0) {
+			g_string_append_printf(text,
+					"\n%u Datei(en) laut XML nicht im Archiv gefunden:",
+					arr_nicht_gefunden->len);
+			for (guint i = 0; i < arr_nicht_gefunden->len; i++)
+				g_string_append_printf(text, "\n- %s",
+						(gchar const*) g_ptr_array_index(arr_nicht_gefunden, i));
+		}
+
+		display_message(zond->app_window, text->str, NULL);
+		g_string_free(text, TRUE);
+	}
+
+	if (arr_nicht_gefunden)
+		g_ptr_array_unref(arr_nicht_gefunden);
+}
+
+static void cb_win_xjustiz_import_ge(GSimpleAction *a, GVariant *p, gpointer d) {
+	cb_win_xjustiz_import_common((Projekt*) d, FALSE);
+}
+static void cb_win_xjustiz_import_up(GSimpleAction *a, GVariant *p, gpointer d) {
+	cb_win_xjustiz_import_common((Projekt*) d, TRUE);
+}
+
 /* ============================================================================
  * CALLBACKS - EINSTELLUNGEN
  * ========================================================================== */
@@ -1051,6 +1107,9 @@ static void init_win_actions(Projekt *zond) {
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  zond->menu.extras = a; }
 
+	WIN_ACT("xjustiz-import-ge", cb_win_xjustiz_import_ge);
+	WIN_ACT("xjustiz-import-up", cb_win_xjustiz_import_up);
+
 	zond->menu.struktur = G_SIMPLE_ACTION(
 			g_action_map_lookup_action(G_ACTION_MAP(ag), "einf-ge"));
 	zond->menu.ansicht = G_SIMPLE_ACTION(
@@ -1258,6 +1317,12 @@ static GMenuModel* build_menu(Projekt *zond) {
 	/* ---- Extras ---- */
 	GMenu *m_ext = g_menu_new();
 	g_menu_append(m_ext, "Test", "win.test");
+	GMenu *sub_xjustiz = g_menu_new();
+	g_menu_append(sub_xjustiz, "Gleiche Ebene", "win.xjustiz-import-ge");
+	g_menu_append(sub_xjustiz, "Unterebene",    "win.xjustiz-import-up");
+	g_menu_append_submenu(m_ext, "XJustiz-Import (beA-Akteneinsicht)...",
+			G_MENU_MODEL(sub_xjustiz));
+	g_object_unref(sub_xjustiz);
 	g_menu_append_submenu(menubar, "Extras", G_MENU_MODEL(m_ext));
 	g_object_unref(m_ext);
 

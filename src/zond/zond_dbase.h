@@ -134,6 +134,13 @@ gint zond_dbase_get_baum_inhalt_file_from_file_part(ZondDBase*, gint, gint*,
 
 gint zond_dbase_get_baum_auswertung_copy(ZondDBase*, gint, gint*, GError**);
 
+/* Wie zond_dbase_get_baum_auswertung_copy(), aber liefert ALLE Copies zu
+ * einer Anbindung (node_id kann von mehreren BAUM_AUSWERTUNG_COPY-Knoten
+ * referenziert werden), nicht nur die erste Zeile. *arr_copy_ids ist ein
+ * GArray aus gint - Aufrufer muss es per g_array_unref() freigeben. */
+gint zond_dbase_get_baum_auswertung_copies(ZondDBase*, gint, GArray**,
+		GError**);
+
 gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase*, gint, gint*, gint*,
 		GError**);
 

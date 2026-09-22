@@ -366,8 +366,28 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
         return NULL;
     }
 
-    sqlite3_exec(ctx->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
-    sqlite3_exec(ctx->db, "PRAGMA synchronous=NORMAL;", NULL, NULL, NULL);
+    /* Kein WAL: .sond_index.db liegt im SeaDrive-synchronisierten Projekt-
+     * verzeichnis (anders als die "work"-DB, s. Task #42) - WAL braucht
+     * verlässliches mmap/Byte-Range-Locking auf der -shm-Datei, was ein
+     * Cloud-Sync-Laufwerk nicht zuverlässig bietet (Nutzer-Fund 22.09.2026:
+     * "database disk image is malformed" bei db_insert_chunk). Klassisches
+     * Rollback-Journal (DELETE) + synchronous=FULL ist auf einem solchen
+     * Laufwerk das robustere, wenn auch langsamere Verhalten. */
+    {
+        gint rc_pragma = 0;
+
+        rc_pragma = sqlite3_exec(ctx->db, "PRAGMA journal_mode=DELETE;", NULL,
+                NULL, NULL);
+        if (rc_pragma != SQLITE_OK)
+            g_warning("sond_index_ctx_new: PRAGMA journal_mode=DELETE "
+                    "fehlgeschlagen: %s", sqlite3_errmsg(ctx->db));
+
+        rc_pragma = sqlite3_exec(ctx->db, "PRAGMA synchronous=FULL;", NULL,
+                NULL, NULL);
+        if (rc_pragma != SQLITE_OK)
+            g_warning("sond_index_ctx_new: PRAGMA synchronous=FULL "
+                    "fehlgeschlagen: %s", sqlite3_errmsg(ctx->db));
+    }
 
     /* Schema (inkl. meta-Tabelle) muß vor dem Modell-Metadaten-Abgleich
      * unten stehen - deshalb hier vor dem Laden des llama-Modells, anders

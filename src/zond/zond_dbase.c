@@ -1787,6 +1787,47 @@ gint zond_dbase_get_baum_auswertung_copy(ZondDBase *zond_dbase, gint node_id,
 	return 0;
 }
 
+/* Wie zond_dbase_get_baum_auswertung_copy(), aber liefert ALLE Copies zu
+ * einer Anbindung statt nur der ersten Zeile - node_id kann von mehreren
+ * BAUM_AUSWERTUNG_COPY-Knoten referenziert werden. *arr_copy_ids ist ein
+ * GArray aus gint - Aufrufer muss es per g_array_unref() freigeben. */
+gint zond_dbase_get_baum_auswertung_copies(ZondDBase *zond_dbase, gint node_id,
+		GArray **arr_copy_ids, GError **error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] = { "SELECT ID FROM knoten WHERE type=3 AND link=?1;" };
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc)
+		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
+	rc = sqlite3_bind_int(stmt[0], 1, node_id);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	*arr_copy_ids = g_array_new(FALSE, FALSE, sizeof(gint));
+
+	do {
+		gint copy_id = 0;
+
+		rc = sqlite3_step(stmt[0]);
+		if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+			g_array_unref(*arr_copy_ids);
+			ERROR_Z_DBASE
+		} else if (rc == SQLITE_DONE)
+			break;
+
+		copy_id = sqlite3_column_int(stmt[0], 0);
+		g_array_append_val(*arr_copy_ids, copy_id);
+	} while (rc == SQLITE_ROW);
+
+	return 0;
+}
+
 /*	Diese Funktion prüft, ob der Knoten ID oder einer seiner Kinder
  * 	im BAUM_INHALT als BAUM_INHALT_FILE angeknüpft ist.
  * 	Falls ja, wird die ID des BAUM_INHALT_FILE-Knotens und des FILE_PART-Knoten,
