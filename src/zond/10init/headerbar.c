@@ -833,12 +833,15 @@ static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
 	}
 }
 
-/* Extras -> "XJustiz-Import": liest xjustiz_nachricht.xml aus einer ZIP
- * aus dem beA-Akteneinsichtsportal und bindet die referenzierten
+/* Extras -> "XJustiz-Import": öffnet einen Dialog zur Auswahl der
+ * xjustiz_nachricht.xml (aus dem beA-Akteneinsichtsportal, s.
+ * filepart_oeffnen() in project.c) und bindet die referenzierten
  * PDF-Dokumente an der aktuellen Cursor-Position im Bestandsverzeichnis
  * an - s. ausfuehrlichen Kommentar in xjustiz_import.h/.c (22.09.2026,
- * neues Feature). Wie bei "Punkt einfügen"/"Einfügen" zwei Varianten
- * (Gleiche Ebene/Unterebene, s. Untermenü in build_menu() weiter unten). */
+ * neues Feature; 23.09.2026 auf sond_file_part-Maschinerie/
+ * filepart_oeffnen()-Dialog umgestellt). Wie bei "Punkt einfügen"/
+ * "Einfügen" zwei Varianten (Gleiche Ebene/Unterebene, s. Untermenü in
+ * build_menu() weiter unten). */
 static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 	GError *error = NULL;
 	gint n_angebunden = 0;
@@ -849,7 +852,7 @@ static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 	rc = xjustiz_import(zond, child, &n_angebunden, &n_vorhanden,
 			&arr_nicht_gefunden, &error);
 	if (rc == 1)
-		return; //Dateiauswahl abgebrochen - keine Meldung
+		return; //Auswahldialog abgebrochen - keine Meldung
 	if (rc == -1) {
 		display_message(zond->app_window, "XJustiz-Import fehlgeschlagen\n\n",
 				error ? error->message : NULL, NULL);
@@ -866,7 +869,7 @@ static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 					n_vorhanden);
 		if (arr_nicht_gefunden && arr_nicht_gefunden->len > 0) {
 			g_string_append_printf(text,
-					"\n%u Datei(en) laut XML nicht im Archiv gefunden:",
+					"\n%u Datei(en) laut XML nicht gefunden:",
 					arr_nicht_gefunden->len);
 			for (guint i = 0; i < arr_nicht_gefunden->len; i++)
 				g_string_append_printf(text, "\n- %s",

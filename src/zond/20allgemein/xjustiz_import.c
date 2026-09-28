@@ -20,7 +20,6 @@
 
 #include <string.h>
 
-#include <zip.h>
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
 #include <libxml/xpathInternals.h>
@@ -30,6 +29,7 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
+#include "../../sond_fileparts.h"
 #include "../../misc.h"
 
 #include "../zond_init.h"
@@ -51,166 +51,6 @@ static gboolean str_has_suffix_ci(gchar const *s, gchar const *suffix) {
 		return FALSE;
 
 	return g_ascii_strcasecmp(s + (len_s - len_suffix), suffix) == 0;
-}
-
-/* ============================================================================
- * ZIP-ZUGRIFF
- * ========================================================================== */
-
-/* Öffnet eine ZIP-Datei vom Datenträger - Windows-Long-Path-sicher über
- * sond_fopen(), analog zum bestehenden Muster in
- * sond_file_part_zip_open_archive() (sond_fileparts.c, Fall "Filesystem,
- * nur lesend"). */
-static zip_t* xjustiz_open_zip(gchar const *disk_path, GError **error) {
-	FILE *f = NULL;
-	zip_error_t zip_error = { 0 };
-	zip_source_t *src = NULL;
-	zip_t *archive = NULL;
-
-	f = sond_fopen(disk_path, "rb", error);
-	if (!f)
-		return NULL;
-
-	zip_error_init(&zip_error);
-	src = zip_source_filep_create(f, 0, -1, &zip_error);
-	if (!src) {
-		fclose(f);
-		g_set_error(error, ZOND_ERROR, 0, "%s\nzip_source_filep_create: %s",
-				__func__, zip_error_strerror(&zip_error));
-		zip_error_fini(&zip_error);
-		return NULL;
-	}
-
-	archive = zip_open_from_source(src, ZIP_RDONLY, &zip_error);
-	if (!archive) {
-		zip_source_free(src);
-		g_set_error(error, ZOND_ERROR, 0, "%s\nzip_open_from_source: %s",
-				__func__, zip_error_strerror(&zip_error));
-		zip_error_fini(&zip_error);
-		return NULL;
-	}
-	zip_error_fini(&zip_error);
-
-	return archive;
-}
-
-/* Sucht im Archiv (auf beliebiger Verzeichnistiefe) einen Eintrag, dessen
- * Basename "xjustiz_nachricht.xml" lautet (Groß-/Kleinschreibung egal). */
-static gchar* xjustiz_find_nachricht_entry(zip_t *archive) {
-	zip_int64_t n = zip_get_num_entries(archive, 0);
-
-	for (zip_int64_t i = 0; i < n; i++) {
-		gchar const *name = zip_get_name(archive, i, 0);
-		gchar *base = NULL;
-		gboolean match = FALSE;
-
-		if (!name)
-			continue;
-
-		base = g_path_get_basename(name);
-		match = !g_ascii_strcasecmp(base, "xjustiz_nachricht.xml");
-		g_free(base);
-
-		if (match)
-			return g_strdup(name);
-	}
-
-	return NULL;
-}
-
-/* Liest einen Eintrag vollständig in den Speicher - Muster wie
- * extract_from_zip() in sond_text_extract.c. */
-static gchar* xjustiz_read_entry(zip_t *archive, gchar const *entry_name,
-		gsize *out_len, GError **error) {
-	struct zip_stat st;
-	zip_file_t *zf = NULL;
-	gchar *content = NULL;
-	zip_int64_t bytes_read = 0;
-
-	zip_stat_init(&st);
-	if (zip_stat(archive, entry_name, 0, &st) != 0) {
-		g_set_error(error, ZOND_ERROR, 0, "%s\nzip_stat('%s'): %s", __func__,
-				entry_name, zip_strerror(archive));
-		return NULL;
-	}
-
-	zf = zip_fopen(archive, entry_name, 0);
-	if (!zf) {
-		g_set_error(error, ZOND_ERROR, 0, "%s\nzip_fopen('%s'): %s", __func__,
-				entry_name, zip_strerror(archive));
-		return NULL;
-	}
-
-	content = g_malloc(st.size + 1);
-	bytes_read = zip_fread(zf, content, st.size);
-	zip_fclose(zf);
-
-	if (bytes_read < 0 || (zip_uint64_t) bytes_read != st.size) {
-		g_free(content);
-		g_set_error(error, ZOND_ERROR, 0, "%s\nFehler beim Lesen von '%s'",
-				__func__, entry_name);
-		return NULL;
-	}
-
-	content[bytes_read] = '\0';
-	if (out_len)
-		*out_len = (gsize) bytes_read;
-
-	return content;
-}
-
-/* Löst einen aus der XML stammenden Dateinamen (kann ein blanker Basename
- * oder ein relativer Pfad innerhalb der ZIP sein) auf einen tatsächlich im
- * Archiv vorhandenen Eintragsnamen auf: erst exakter Treffer, sonst
- * Suche über den Basename (nur bei genau einem Treffer eindeutig). */
-static gchar* xjustiz_resolve_zip_entry(zip_t *archive,
-		gchar const *dateiname, GError **error) {
-	gchar *base_wanted = NULL;
-	gchar *base_wanted_cf = NULL;
-	zip_int64_t n = 0;
-	gchar *found = NULL;
-	gint matches = 0;
-
-	if (zip_name_locate(archive, dateiname, 0) >= 0)
-		return g_strdup(dateiname);
-
-	base_wanted = g_path_get_basename(dateiname);
-	base_wanted_cf = g_utf8_casefold(base_wanted, -1);
-	g_free(base_wanted);
-
-	n = zip_get_num_entries(archive, 0);
-	for (zip_int64_t i = 0; i < n; i++) {
-		gchar const *name = zip_get_name(archive, i, 0);
-		gchar *base = NULL;
-		gchar *base_cf = NULL;
-
-		if (!name)
-			continue;
-
-		base = g_path_get_basename(name);
-		base_cf = g_utf8_casefold(base, -1);
-		g_free(base);
-
-		if (!g_strcmp0(base_cf, base_wanted_cf)) {
-			matches++;
-			g_free(found);
-			found = g_strdup(name);
-		}
-		g_free(base_cf);
-	}
-	g_free(base_wanted_cf);
-
-	if (matches == 1)
-		return found;
-
-	g_free(found);
-	if (matches == 0)
-		g_set_error(error, ZOND_ERROR, 0, "Datei '%s' nicht im Archiv gefunden",
-				dateiname);
-	else
-		g_set_error(error, ZOND_ERROR, 0,
-				"Dateiname '%s' im Archiv nicht eindeutig", dateiname);
-	return NULL;
 }
 
 /* ============================================================================
@@ -298,9 +138,18 @@ static gchar* xjustiz_format_zeitpunkt(gchar const *roh) {
  * Felder sind laut Spezifikation optional - bleiben dann NULL, statt
  * lokal per fixem Pfad zu suchen (der je nach Fachmodul/Version abweichen
  * kann) wird bewußt dieselbe "//"+local-name()-Suche wie oben verwendet,
- * unabhängig von der genauen Verschachtelung. */
+ * unabhängig von der genauen Verschachtelung.
+ *
+ * *out_is_xjustiz (23.09.2026, Nutzer-Vorgabe "Prüfung, ob xjustiz-
+ * Datensatz, sonst Meldung" - optional, NULL-Pointer wird übergangen):
+ * TRUE, wenn die XML mindestens ein Element "schriftgutobjekte" enthält -
+ * unabhängig davon, ob darin referenzierte PDF-Dokumente gefunden wurden
+ * (ein XJustiz-Datensatz ohne Dokumente ist laut Spezifikation zulässig
+ * und bleibt dann einfach ein leeres arr - s. Aufrufer). FALSE bedeutet:
+ * die markierte Datei ist erkennbar KEIN XJustiz-Datensatz. */
 static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
-		gchar **out_produktname, gchar **out_zeitpunkt, GError **error) {
+		gchar **out_produktname, gchar **out_zeitpunkt,
+		gboolean *out_is_xjustiz, GError **error) {
 	xmlDocPtr doc = NULL;
 	xmlXPathContextPtr ctx = NULL;
 	xmlXPathObjectPtr xpath_dok = NULL;
@@ -310,13 +159,14 @@ static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
 		*out_produktname = NULL;
 	if (out_zeitpunkt)
 		*out_zeitpunkt = NULL;
+	if (out_is_xjustiz)
+		*out_is_xjustiz = FALSE;
 
 	doc = xmlReadMemory(xml, (int) len, "xjustiz_nachricht.xml", NULL,
 			XML_PARSE_NOBLANKS | XML_PARSE_NONET);
 	if (!doc) {
 		g_set_error(error, ZOND_ERROR, 0,
-				"%s\nxjustiz_nachricht.xml konnte nicht geparst werden",
-				__func__);
+				"%s\nDatei konnte nicht als XML gelesen werden", __func__);
 		return NULL;
 	}
 
@@ -326,6 +176,16 @@ static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
 		g_set_error(error, ZOND_ERROR, 0, "%s\nxmlXPathNewContext fehlgeschlagen",
 				__func__);
 		return NULL;
+	}
+
+	if (out_is_xjustiz) {
+		xmlXPathObjectPtr xpath_sgo = xmlXPathEvalExpression(
+				(xmlChar const*) "//*[local-name()='schriftgutobjekte']", ctx);
+
+		*out_is_xjustiz = xpath_sgo && xpath_sgo->nodesetval
+				&& xpath_sgo->nodesetval->nodeNr > 0;
+		if (xpath_sgo)
+			xmlXPathFreeObject(xpath_sgo);
 	}
 
 	arr = g_ptr_array_new_with_free_func(xjustiz_datei_free);
@@ -442,50 +302,6 @@ static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
 }
 
 /* ============================================================================
- * ZIP-DATEI IM PROJEKTVERZEICHNIS BESTIMMEN
- * ========================================================================== */
-
-/* Öffnet IMMER den Dateiauswahl-Dialog (kein automatisches Suchen/Raten
- * im Projektverzeichnis - Nutzer-Entscheidung 22.09.2026) und liefert
- * einen zu zond->project_dir RELATIVEN Pfad zurück (nie einen absoluten!):
- * "filepart"-Strings sind in zond durchgängig relativ zu project_dir zu
- * verstehen (path_root-Konvention, s. sond_fileparts.h sowie
- * project.c/project_open() -> sond_treeviewfm_set_root(...,
- * zond->project_dir, ...)) - Code, der später aus einem filepart wieder
- * einen echten Datenträgerpfad macht, stellt project_dir selbst voran.
- * Ein hier zurückgegebener ABSOLUTER Pfad führte deshalb dort zu doppelt
- * vorangestelltem project_dir (Nutzer-Fund 22.09.2026, s. auch
- * xjustiz_import()).
- *
- * NULL ohne *error gesetzt bedeutet: Nutzer hat Dialog abgebrochen. */
-static gchar* xjustiz_choose_zip(Projekt *zond, GError **error) {
-	gchar *abs_path = NULL;
-	gsize prefix_len = 0;
-	gchar *result = NULL;
-
-	abs_path = filename_oeffnen(GTK_WINDOW(zond->app_window), zond->project_dir);
-	if (!abs_path)
-		return NULL; //Abbruch
-
-	//absoluten Pfad aus dem Dateiauswahl-Dialog in einen zu project_dir
-	//relativen Pfad umwandeln (s. Funktionskopf)
-	prefix_len = strlen(zond->project_dir);
-	if (!g_str_has_prefix(abs_path, zond->project_dir)
-			|| (abs_path[prefix_len] != '/' && abs_path[prefix_len] != '\0')) {
-		g_set_error(error, ZOND_ERROR, 0,
-				"Die gewählte Datei liegt nicht im Projektverzeichnis ('%s').",
-				zond->project_dir);
-		g_free(abs_path);
-		return NULL;
-	}
-
-	result = g_strdup(abs_path + prefix_len
-			+ (abs_path[prefix_len] == '/' ? 1 : 0));
-	g_free(abs_path);
-	return result;
-}
-
-/* ============================================================================
  * ÖFFENTLICHE FUNKTION
  * ========================================================================== */
 
@@ -496,12 +312,12 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	GtkTreeIter iter_anchor = { 0 };
 	gint anchor_id = 0;
 	gboolean in_link = FALSE;
-	gchar *zip_path_rel = NULL; //relativ zu zond->project_dir - wird als
-			//filepart in der DB gespeichert (s. xjustiz_choose_zip())
-	gchar *zip_path_abs = NULL; //nur für den eigenen Datenträgerzugriff
-	zip_t *archive = NULL;
-	gchar *nachricht_entry = NULL;
-	gchar *xml_content = NULL;
+	SondFilePart *sfp_xml = NULL;
+	SondFilePart *sfp_parent_xml = NULL; //geborgte Referenz (gehört sfp_xml)
+	gchar const *xml_path = NULL;
+	gchar *dir_prefix = NULL; //Verzeichnisanteil von xml_path (ggf. leer)
+	GBytes *xml_bytes = NULL;
+	gconstpointer xml_data = NULL;
 	gsize xml_len = 0;
 	GPtrArray *arr_dok = NULL;
 	GPtrArray *nicht_gefunden = NULL;
@@ -510,6 +326,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	gchar *zeitpunkt = NULL;
 	gchar *struktur_label = NULL;
 	gint struktur_id = 0;
+	gboolean is_xjustiz = FALSE;
 
 	if (n_angebunden)
 		*n_angebunden = 0;
@@ -541,52 +358,50 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	zip_path_rel = xjustiz_choose_zip(zond, error);
-	if (!zip_path_rel)
-		return (error && *error) ? -1 : 1; //1: Dateiauswahl abgebrochen
+	//Nutzer-Vorgabe (23.09.2026): Ausgangspunkt ist die xjustiz_nachricht.xml,
+	//ausgewählt über den container-bewussten Dialog filepart_oeffnen()
+	//(project.c/.h) - kann, anders als der normale GTK-Dateiauswahldialog,
+	//auch in eine noch nicht entpackte ZIP hineinsehen. Ursprünglich war
+	//statt dessen die Selektion im Dateiverzeichnis (BAUM_FS) vorgesehen -
+	//das erwies sich aber als nicht praktikabel, da diese Selektion
+	//verloren geht, sobald im Bestandsverzeichnis die Zielposition markiert
+	//wird (Nutzer-Fund 23.09.2026).
+	sfp_xml = filepart_oeffnen(zond, error);
+	if (!sfp_xml)
+		return (error && *error) ? -1 : 1; //1: Dialog abgebrochen
 
-	//absoluter Pfad NUR für zip_open() u.ä. (eigener Datenträgerzugriff) -
-	//im filepart (weiter unten, DB) wird bewußt zip_path_rel verwendet,
-	//s. ausführlichen Kommentar an xjustiz_choose_zip().
-	zip_path_abs = g_strconcat(zond->project_dir, "/", zip_path_rel, NULL);
-
-	archive = xjustiz_open_zip(zip_path_abs, error);
-	if (!archive) {
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
+	//Lesen über die sond_file_part-Maschinerie statt eigener libzip-
+	//Aufrufe - deckt Dateisystem/ZIP/etc. einheitlich und Windows-
+	//Long-Path-sicher ab (sond_file_helper.h-Wrapper stecken bereits in
+	//sond_file_part_get_bytes(), s. sond_fileparts.c).
+	xml_bytes = sond_file_part_get_bytes(sfp_xml, error);
+	if (!xml_bytes) {
+		g_object_unref(sfp_xml);
 		return -1;
 	}
 
-	nachricht_entry = xjustiz_find_nachricht_entry(archive);
-	if (!nachricht_entry) {
-		zip_close(archive);
-		g_set_error(error, ZOND_ERROR, 0,
-				"In '%s' wurde keine xjustiz_nachricht.xml gefunden.",
-				zip_path_abs);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
-		return -1;
-	}
+	xml_data = g_bytes_get_data(xml_bytes, &xml_len);
 
-	xml_content = xjustiz_read_entry(archive, nachricht_entry, &xml_len,
-			error);
-	g_free(nachricht_entry);
-	if (!xml_content) {
-		zip_close(archive);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
-		return -1;
-	}
-
-	arr_dok = xjustiz_parse_nachricht(xml_content, xml_len, &produktname,
-			&zeitpunkt_roh, error);
-	g_free(xml_content);
+	arr_dok = xjustiz_parse_nachricht((gchar const*) xml_data, xml_len,
+			&produktname, &zeitpunkt_roh, &is_xjustiz, error);
+	g_bytes_unref(xml_bytes);
 	if (!arr_dok) {
 		g_free(produktname);
 		g_free(zeitpunkt_roh);
-		zip_close(archive);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
+		g_object_unref(sfp_xml);
+		return -1;
+	}
+
+	//Nutzer-Vorgabe (23.09.2026): "Prüfung, ob xjustiz-Datensatz, sonst
+	//Meldung" - statt stillschweigend 0 Dokumente anzubinden.
+	if (!is_xjustiz) {
+		g_free(produktname);
+		g_free(zeitpunkt_roh);
+		g_ptr_array_unref(arr_dok);
+		g_object_unref(sfp_xml);
+		g_set_error(error, ZOND_ERROR, 0,
+				"Die markierte Datei ist kein XJustiz-Datensatz (kein "
+				"Element 'schriftgutobjekte' gefunden).");
 		return -1;
 	}
 
@@ -594,13 +409,34 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		g_free(produktname);
 		g_free(zeitpunkt_roh);
 		g_ptr_array_unref(arr_dok);
-		zip_close(archive);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
+		g_object_unref(sfp_xml);
 		g_set_error(error, ZOND_ERROR, 0,
 				"xjustiz_nachricht.xml enthält keine referenzierten "
 				"PDF-Dokumente.");
 		return -1;
+	}
+
+	/* Verzeichnis/Container von xjustiz_nachricht.xml bestimmen - Nutzer-
+	 * Vorgabe (23.09.2026): "die im gleichen Verzeichnis/Container
+	 * befindlichen Dateien lt. xml-Datensatz [werden] angebunden". Die
+	 * PDF-Dokumente werden weiter unten als GESCHWISTER von
+	 * xjustiz_nachricht.xml gesucht: sfp_parent_xml (Elternteil von
+	 * sfp_xml - NULL, wenn xjustiz_nachricht.xml direkt im Projekt-
+	 * verzeichnis bzw. direkt an der ZIP-Wurzel liegt) legt den Container
+	 * fest, dir_prefix (Verzeichnisanteil von sond_file_part_get_path(
+	 * sfp_xml) VOR dem letzten '/', bzw. leer) die Position darin -
+	 * sond_file_part_create(sfp_parent_xml, dir_prefix + "/" + dateiname)
+	 * findet so pro referenzierter PDF-Datei denselben Ort, unabhängig
+	 * davon, ob es sich um einen Dateisystem-Unterordner oder ein
+	 * ZIP-Unterverzeichnis handelt - EINE einheitliche Auflösung statt
+	 * getrennter Dateisystem-/ZIP-Logik. */
+	sfp_parent_xml = sond_file_part_get_parent(sfp_xml);
+	xml_path = sond_file_part_get_path(sfp_xml);
+	{
+		gchar *last_slash = strrchr(xml_path, '/');
+
+		dir_prefix = last_slash ?
+				g_strndup(xml_path, last_slash - xml_path) : g_strdup("");
 	}
 
 	/* Benennung des gleich anzulegenden Strukturpunkts (s.u.) - Nutzer-
@@ -628,11 +464,10 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, error);
 	if (rc) {
 		g_free(struktur_label);
+		g_free(dir_prefix);
 		g_ptr_array_unref(nicht_gefunden);
 		g_ptr_array_unref(arr_dok);
-		zip_close(archive);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
+		g_object_unref(sfp_xml);
 		return -1;
 	}
 
@@ -650,11 +485,10 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	g_free(struktur_label);
 	if (struktur_id == -1) {
 		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, error);
+		g_free(dir_prefix);
 		g_ptr_array_unref(nicht_gefunden);
 		g_ptr_array_unref(arr_dok);
-		zip_close(archive);
-		g_free(zip_path_rel);
-		g_free(zip_path_abs);
+		g_object_unref(sfp_xml);
 		return -1;
 	}
 
@@ -665,26 +499,33 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	 * beim normalen Anbinden (zond_treeview_anbinden_rekursiv,
 	 * zond_treeview.c) - nicht als Abbruch der gesamten Operation
 	 * behandelt, sondern einzeln vermerkt; die übrigen Dokumente werden
-	 * trotzdem angebunden. */
+	 * trotzdem angebunden. sfp_xml (und damit sfp_parent_xml) muß bis zum
+	 * Ende der Schleife am Leben bleiben, s. Variablendeklaration oben. */
 	for (guint i = 0; i < arr_dok->len; i++) {
 		XJustizDatei *d = g_ptr_array_index(arr_dok, i);
-		gchar *zip_entry = NULL;
+		gchar *sibling_path = NULL;
+		SondFilePart *sfp_pdf = NULL;
 		gchar *filepart = NULL;
 		gint ID_file_part = 0;
 		gint baum_inhalt_file = 0;
 		gint new_node_id = 0;
 		GError *local_error = NULL;
 
-		zip_entry = xjustiz_resolve_zip_entry(archive, d->dateiname,
+		sibling_path = (dir_prefix[0] != '\0') ?
+				g_strconcat(dir_prefix, "/", d->dateiname, NULL) :
+				g_strdup(d->dateiname);
+
+		sfp_pdf = sond_file_part_create(sfp_parent_xml, sibling_path,
 				&local_error);
-		if (!zip_entry) {
+		g_free(sibling_path);
+		if (!sfp_pdf) {
 			g_clear_error(&local_error);
 			g_ptr_array_add(nicht_gefunden, g_strdup(d->dateiname));
 			continue;
 		}
 
-		filepart = g_strconcat(zip_path_rel, "//", zip_entry, NULL);
-		g_free(zip_entry);
+		filepart = sond_file_part_get_filepart(sfp_pdf);
+		g_object_unref(sfp_pdf);
 
 		rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
 				filepart, NULL, &ID_file_part, &local_error);
@@ -744,9 +585,8 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 			(*n_angebunden)++;
 	}
 
-	zip_close(archive);
-	g_free(zip_path_rel);
-	g_free(zip_path_abs);
+	g_free(dir_prefix);
+	g_object_unref(sfp_xml);
 	g_ptr_array_unref(arr_dok);
 
 	rc = zond_dbase_commit(zond->dbase_zond->zond_dbase_work, error);

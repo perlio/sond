@@ -6,6 +6,8 @@ typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef struct _ZondPdfDocument ZondPdfDocument;
 typedef struct _ZondDBase ZondDBase;
+typedef struct _SondFilePart SondFilePart;
+typedef struct _GError GError;
 
 typedef void *gpointer;
 typedef int gint;
@@ -62,5 +64,16 @@ gchar* resolve_model_path(Projekt *zond, gchar const *settings_key,
  * zwei verschiedene Projekte mit gleichem Dateinamen in unterschiedlichen
  * Ordnern würden sonst auf denselben lokalen Pfad kollidieren. */
 gchar* project_get_local_tmp_path(gchar const *project_path, GError **error);
+
+/* Container-bewusste Alternative zu filename_oeffnen() (misc.c) - öffnet
+ * einen modalen Dialog mit einem eigenen, frischen Dateiverzeichnis-Baum
+ * (ZondTreeviewFM), der - anders als der normale GTK-Dateiauswahldialog -
+ * auch in ZIP-Archive hinabsteigen kann. s. ausführlichen Kommentar an
+ * der Definition (project.c, 23.09.2026).
+ *
+ * Rückgabe: neue Referenz auf das ausgewählte SondFilePart (Aufrufer muss
+ * g_object_unref()en), oder NULL (*error == NULL: Nutzer hat
+ * abgebrochen; *error gesetzt: echter Fehler). */
+SondFilePart* filepart_oeffnen(Projekt *zond, GError **error);
 
 #endif // PROJECT_H_INCLUDED

@@ -131,9 +131,9 @@ gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 	GdkPixbuf *main_pb = sond_icon_util_load_pixbuf(widget, base_icon_name, px);
 
 	if (!main_pb) {
-		LOG_WARN("%s: sond_icon_util_load_pixbuf(\"%s\", %d) fehlgeschlagen - "
+		LOG_WARN("sond_icon_util_load_pixbuf(""%s"", %d) fehlgeschlagen - "
 				"Overlay(s) können nicht gezeichnet werden",
-				__func__, base_icon_name ? base_icon_name : "(null)", px);
+				base_icon_name ? base_icon_name : "(null)", px);
 		g_object_set(G_OBJECT(renderer), "icon-name",
 				base_icon_name ? base_icon_name : "image-missing", NULL);
 		return FALSE;

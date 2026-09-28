@@ -309,6 +309,18 @@ static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
 	sond_treeview_expand_to_row(zond->treeview[baum], iter);
 	sond_treeview_set_cursor(zond->treeview[baum], iter);
 
+	/* Label/Textview erzwungen aktualisieren (Nachtrag #184) - verläßt sich
+	 * nicht mehr (wie vor #182/#183 angenommen) darauf, daß grab_focus() in
+	 * sond_treeview_set_cursor() zuverlässig ein echtes focus-in-event
+	 * auslöst: das geschieht bei GTK3 nur, wenn app_window bereits die
+	 * echte Fenstermanager-Fokus hat, die hier aber das separate
+	 * Ergebnisfenster hält. zond_treeview_cursor_changed() (zond_treeview.c)
+	 * ist eine normale öffentliche Funktion (kein Callback-Interna) und
+	 * bricht bei bereits aktuellem Knoten selbst ab - ein Aufruf schadet
+	 * also auch dann nicht, wenn "cursor-changed" zufällig schon verbunden
+	 * ist und den Callback ohnehin ausgelöst hat. */
+	zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->treeview[baum]), zond);
+
 	gtk_tree_iter_free(iter);
 
 	return;

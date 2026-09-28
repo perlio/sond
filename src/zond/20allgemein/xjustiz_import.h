@@ -17,15 +17,35 @@
  */
 
 /*
- * xjustiz_import.c/.h ( 22.09.2026, neues Feature "XJustiz-Import" ):
- * Extras-Menüpunkt, der eine ZIP-Datei aus dem beA-Akteneinsichtsportal
- * (Download der Akteneinsicht: xjustiz_nachricht.xml + PDF-Dokumente in
- * einer ZIP) auswertet und die darin referenzierten PDF-Dokumente OHNE
- * Entpacken - direkt aus der ZIP heraus, wie beim bereits vorhandenen
- * "ZIP-Anbinden" - anbindet. Als Baum-Beschriftung der einzelnen Dokumente
- * wird "anzeigename" aus der XML verwendet (physischer Dateiname in der
- * ZIP bleibt unverändert - analog zum bestehenden anbinden_label-
- * Mechanismus, s. sond_tvfm_item.c).
+ * xjustiz_import.c/.h ( 22.09.2026, neues Feature "XJustiz-Import";
+ * 23.09.2026 auf sond_file_part-Maschinerie umgestellt ): Extras-Menüpunkt,
+ * der eine xjustiz_nachricht.xml (aus dem beA-Akteneinsichtsportal) auswertet
+ * und die darin referenzierten PDF-Dokumente anbindet. Als Baum-Beschriftung
+ * der einzelnen Dokumente wird "anzeigename" aus der XML verwendet
+ * (physischer Dateiname bleibt unverändert - analog zum bestehenden
+ * anbinden_label-Mechanismus, s. sond_tvfm_item.c).
+ *
+ * Nutzer-Vorgabe (23.09.2026): Ausgangspunkt ist nicht mehr eine ZIP-Datei
+ * über den normalen GTK-Dateiauswahldialog, sondern die xjustiz_nachricht.xml
+ * selbst, ausgewählt über filepart_oeffnen() (project.c/.h) - ein eigener,
+ * container-bewusster Auswahldialog, der auch in eine noch nicht entpackte
+ * ZIP hineinsehen kann (der normale Dateiauswahldialog des Betriebssystems
+ * könnte das nicht). Ursprünglich war statt dessen die Selektion im
+ * Dateiverzeichnis (BAUM_FS) vorgesehen - das erwies sich aber als nicht
+ * praktikabel, da diese Selektion verloren geht, sobald anschließend im
+ * Bestandsverzeichnis die Zielposition markiert wird (Nutzer-Fund
+ * 23.09.2026). Gelesen wird über die sond_file_part-Maschinerie
+ * (sond_file_part_get_bytes(), s. sond_fileparts.h/.c) statt über eigene
+ * libzip-Aufrufe - das deckt Dateisystem UND ZIP (und potentiell weitere
+ * SondFilePart-Containertypen) einheitlich ab. Die referenzierten
+ * PDF-Dokumente werden als GESCHWISTER von xjustiz_nachricht.xml im selben
+ * Verzeichnis/Container gesucht (sond_file_part_create() mit dem Elternteil
+ * von xjustiz_nachricht.xml und dessen Verzeichnisanteil - s. ausführlichen
+ * Kommentar in xjustiz_import.c), nicht mehr durch Durchsuchen einer
+ * kompletten ZIP-Eintragsliste. Vor der eigentlichen Auswertung wird geprüft,
+ * ob die markierte Datei überhaupt ein XJustiz-Datensatz ist (Element
+ * "schriftgutobjekte" vorhanden) - sonst Fehlermeldung statt stillschweigend
+ * 0 Dokumente anzubinden.
  *
  * Nutzer-Vorgabe (22.09.2026, im Anschluß an die erste Umsetzung): die
  * Dokumente werden nicht direkt an der markierten Stelle im
@@ -61,12 +81,15 @@ typedef char gchar;
 typedef int gboolean;
 
 /*
- * Ablauf: öffnet immer den Dateiauswahl-Dialog (kein automatisches Suchen
- * im Projektverzeichnis), liest aus der gewählten ZIP xjustiz_nachricht.xml,
- * wertet die darin referenzierten PDF-Dokumente aus und bindet sie an der
- * aktuellen Cursor-Position im Bestandsverzeichnis an (Voraussetzung wie
- * beim normalen "Einfügen": Bestandsverzeichnis muß der aktive Baum sein
- * und eine Zielposition markiert sein).
+ * Ablauf: öffnet über filepart_oeffnen() einen Dialog zur Auswahl der
+ * xjustiz_nachricht.xml (kein Verzeichnis - container-bewusst, kann auch
+ * in eine noch nicht entpackte ZIP hineinsehen), prüft, ob es sich
+ * überhaupt um einen XJustiz-Datensatz handelt, wertet die darin
+ * referenzierten PDF-Dokumente aus (gesucht als Geschwister von
+ * xjustiz_nachricht.xml im selben Verzeichnis/Container) und bindet sie an
+ * der aktuellen Cursor-Position im Bestandsverzeichnis an (Voraussetzung
+ * wie beim normalen "Einfügen": Bestandsverzeichnis muß der aktive Baum
+ * sein und eine Zielposition markiert sein - wird VOR dem Dialog geprüft).
  *
  * An der markierten Stelle wird zunächst ein neuer Strukturpunkt eingefügt;
  * die einzelnen Dokumente werden als dessen Unterpunkte angebunden (nicht
@@ -89,16 +112,17 @@ typedef int gboolean;
  *
  * Rückgabe: 0 Erfolg (auch wenn 0 Dokumente angebunden wurden - s.
  * *n_angebunden, *n_vorhanden und *arr_nicht_gefunden für die Details),
- * -1 Fehler (*error gesetzt), 1 Nutzer hat Dateiauswahl abgebrochen (kein
+ * -1 Fehler (*error gesetzt - u.a. auch, wenn die gewählte Datei kein
+ * XJustiz-Datensatz ist), 1 Nutzer hat den Auswahldialog abgebrochen (kein
  * *error gesetzt, keine der out-Parameter gefüllt).
  *
  * *n_angebunden: Anzahl neu angebundener Dokumente.
  * *n_vorhanden: Anzahl Dokumente, die schon (an beliebiger Stelle)
  *   angebunden waren - wurden übersprungen (wie beim normalen Anbinden).
  * *arr_nicht_gefunden: bei Erfolg (rc==0) immer belegt (ggf. mit len==0) -
- *   GPtrArray aus gchar* (Dateinamen laut XML, die im ZIP-Archiv nicht
- *   oder nicht eindeutig gefunden wurden). Aufrufer muß IMMER
- *   g_ptr_array_unref() aufrufen, wenn rc==0.
+ *   GPtrArray aus gchar* (Dateinamen laut XML, die im selben Verzeichnis/
+ *   Container wie xjustiz_nachricht.xml nicht gefunden wurden). Aufrufer
+ *   muß IMMER g_ptr_array_unref() aufrufen, wenn rc==0.
  */
 gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		gint *n_vorhanden, GPtrArray **arr_nicht_gefunden, GError **error);

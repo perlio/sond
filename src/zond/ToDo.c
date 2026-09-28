@@ -4568,3 +4568,39 @@
  Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
  ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
  */
+
+/*
+ #184 Nachfrage (23.09.2026): "Aber wie kann ich programmatisch ein focus-
+ in-event auslösen, so daß der Callback feuert." - im Anschluß an die #182-
+ Erkenntnis, daß grab_focus() beim Sprung aus dem separaten Ergebnisfenster
+ kein echtes focus-in-event auf app_window auslöst (Fenstermanager-Fokus
+ hat zu dem Zeitpunkt das Ergebnisfenster), was denselben Zweifel auch für
+ das im #181-Nachtrag entfernte manuelle "cursor-changed"-Connect/Emit
+ (Label/Textview-Update) aufwirft.
+
+ Ein künstlich per g_signal_emit_by_name(treeview, "focus-in-event", ...)
+ erzeugtes Event würde zwar cb_treeview_focus_in() (app_window.c) ausführen,
+ aber GTKs eigene interne Fokus-Buchhaltung (focus_widget-Zeiger des
+ GtkWindow, HAS_FOCUS-Flag) bliebe unberührt, da diese normalerweise erst
+ durch das reale WM-Fokusereignis auf dem Top-Level-Fenster aktualisiert
+ wird - Risiko von späterem Auseinanderlaufen zwischen zond->baum_active/
+ baum_prev und GTKs tatsächlichem Fokuszustand bei einem nachfolgenden
+ echten Fokuswechsel.
+
+ Sauberer: die eigentlich benötigte Wirkung direkt aufrufen statt über ein
+ Fokus-Event umzuleiten. zond_treeview_cursor_changed(ZondTreeview*,
+ gpointer) (zond_treeview.c) ist bereits eine gewöhnliche öffentliche
+ Funktion (im Header deklariert, kein reines Callback-Interna) und bricht
+ bei bereits aktuellem Knoten selbst ab (node_id == zond->node_id_act) -
+ ein zusätzlicher Aufruf ist also auch dann harmlos, wenn "cursor-changed"
+ zufällig schon verbunden war und den Callback ohnehin ausgelöst hat.
+
+ In suchen_springe_zu_knoten() (suchen.c) direkt nach sond_treeview_set_
+ cursor() ergänzt: zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->
+ treeview[baum]), zond). Betrifft nur BAUM_INHALT/BAUM_AUSWERTUNG (BAUM_FS
+ nutzt diesen Mechanismus ohnehin nicht, s. Guard in cb_treeview_focus_in()
+ - "baum_active != BAUM_FS").
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */

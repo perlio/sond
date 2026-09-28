@@ -270,7 +270,7 @@ static char const* mime_type_to_icon_name_manual(const char *mime_type)
         // Text
         {"text/plain", "text-x-generic"},
         {"text/html", "text-html"},
-        {"text/xml", "text-xml"},
+        {"text/xml", "text-x-generic"}, //"text-xml" existiert nicht in jedem Icon-Theme (Nutzer-Fund 28.09.2026, Warnung sond_icon_util_load_pixbuf) - "text-x-generic" ist der bereits als Fallback genutzte, garantiert vorhandene Name
 
         // Code
         {"text/x-c", "text-x-script"},

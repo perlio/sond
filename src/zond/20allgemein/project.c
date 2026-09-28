@@ -25,6 +25,7 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_mime.h"
 #include "../../sond_treeviewfm.h"
+#include "../../sond_tvfm_item.h"
 #include "../../sond_seadrive.h"
 #include "../../sond_process_file.h"
 #include "../../misc.h"
@@ -32,6 +33,7 @@
 #include "../zond_init.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
+#include "../zond_treeviewfm.h"
 #include "../zond_pdf_document.h"
 
 #include "../10init/app_window.h"
@@ -1000,6 +1002,118 @@ static gint project_confirm_switch(Projekt *zond) {
 		return 1;  // Cancel
 
 	return 0;
+}
+
+/*
+ * filepart_oeffnen() (23.09.2026, Nutzer-Vorgabe im Zusammenhang mit
+ * XJustiz-Import): container-bewusste Alternative zu filename_oeffnen()
+ * (misc.c) - der normale GTK-Dateiauswahldialog (GtkFileChooserDialog)
+ * kann nicht in einen noch nicht entpackten Container (ZIP etc.)
+ * hinabsteigen.
+ *
+ * Ursprünglich vorgesehene Alternative ("vorher im Dateiverzeichnis
+ * markieren, dann im Bestandsverzeichnis die Zielposition markieren")
+ * war nicht praktikabel: die Selektion in BAUM_FS geht verloren, sobald
+ * anschließend im Bestandsverzeichnis die Zielposition markiert wird
+ * (Nutzer-Fund 23.09.2026) - wenig intuitiv, zwei Selektionen gleichzeitig
+ * "lebendig" zu halten.
+ *
+ * Löst das statt dessen mit einem eigenen modalen Dialog, der einen
+ * frischen ZondTreeviewFM einbettet - dieselbe Baum-Komponente wie das
+ * normale Dateiverzeichnis (BAUM_FS), kann also genauso in ZIP-Archive
+ * hinabsteigen (Aufklappen eines Knotens lädt dessen Kinder wie gewohnt
+ * per "row-expanded"-Signal, s. sond_treeviewfm.c) - unabhängig von der
+ * Selektion im Dateiverzeichnis des Hauptfensters. sond_treeviewfm_set_root()
+ * wird mit demselben zond->project_dir wie beim Hauptfenster-Baum
+ * aufgerufen - der klassenweite path_root (s. DESIGNFEHLER-Kommentar in
+ * sond_fileparts.h) bleibt dadurch unverändert derselbe, nur der neue
+ * Dialog-Baum bekommt seine eigene, frisch geladene Wurzelebene.
+ *
+ * Rückgabe: neue Referenz auf das ausgewählte SondFilePart (Aufrufer muss
+ * g_object_unref()en), oder NULL - dann bedeutet *error == NULL: Nutzer
+ * hat abgebrochen (Abbrechen-Knopf oder Fenster geschlossen); *error
+ * gesetzt: echter Fehler (z.B. Wurzel des Dateiverzeichnisses konnte
+ * nicht geladen werden, oder es war kein Verzeichnis, sondern eine Datei
+ * markiert).
+ */
+SondFilePart* filepart_oeffnen(Projekt *zond, GError **error) {
+	GtkWidget *dialog = NULL;
+	GtkWidget *scrolled = NULL;
+	ZondTreeviewFM *ztvfm = NULL;
+	SondFilePart *result = NULL;
+	gint response = 0;
+	gint rc = 0;
+
+	ztvfm = zond_treeviewfm_new(zond);
+
+	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(ztvfm), zond->project_dir,
+			error);
+	if (rc) {
+		gtk_widget_destroy(GTK_WIDGET(ztvfm));
+		return NULL;
+	}
+
+	dialog = gtk_dialog_new_with_buttons("Datei auswählen",
+			GTK_WINDOW(zond->app_window),
+			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
+			"Öffnen", GTK_RESPONSE_OK,
+			"Abbrechen", GTK_RESPONSE_CANCEL,
+			NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 600);
+
+	scrolled = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	/* Ohne min-content-height/-width fällt GtkScrolledWindow auf die
+	 * (sehr kleine) natürliche Größe des GtkTreeView zurück - Nutzer-Fund
+	 * 28.09.2026: "ScrolledWindow ist nur ca. zwei Zeilen hoch". Explizit
+	 * gesetzt statt sich auf gtk_window_set_default_size() allein zu
+	 * verlassen (setzt nur die Fenster-Startgröße, erzwingt aber keine
+	 * Mindestgröße des Scroll-Bereichs selbst). */
+	gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled),
+			500);
+	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled),
+			480);
+	gtk_widget_set_vexpand(scrolled, TRUE);
+	gtk_widget_set_hexpand(scrolled, TRUE);
+	gtk_container_add(GTK_CONTAINER(scrolled), GTK_WIDGET(ztvfm));
+	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(
+			GTK_DIALOG(dialog))), scrolled);
+
+	gtk_widget_show_all(dialog);
+	response = my_dialog_run(GTK_DIALOG(dialog));
+
+	if (response == GTK_RESPONSE_OK) {
+		GtkTreeIter iter = { 0 };
+
+		if (sond_treeview_get_cursor(SOND_TREEVIEW(ztvfm), &iter)) {
+			SondTVFMItem *stvfm_item = NULL;
+
+			gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
+					&iter, 0, &stvfm_item, -1);
+			g_object_unref(stvfm_item); //Modell hält eigene Referenz
+
+			if (sond_tvfm_item_get_item_type(stvfm_item)
+					!= SOND_TVFM_ITEM_TYPE_DIR) {
+				SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(
+						stvfm_item);
+
+				if (sfp)
+					result = g_object_ref(sfp);
+			}
+		}
+
+		if (!result)
+			g_set_error(error, ZOND_ERROR, 0,
+					"Bitte eine Datei (kein Verzeichnis) auswählen.");
+	}
+	//sonst: Abbruch (GTK_RESPONSE_CANCEL, Fenster geschlossen o.ä.) -
+	//result bleibt NULL, kein *error gesetzt
+
+	gtk_widget_destroy(dialog);
+
+	return result;
 }
 
 // ============================================================================
