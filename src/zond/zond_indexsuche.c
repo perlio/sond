@@ -93,32 +93,32 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
         char_pos_in_page = atoi(char_pos_str);
     g_free(char_pos_str);
 
-    /* FS-Ansicht einschalten falls nötig */
-    if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), TRUE);
-
+    /* SondFilePart direkt aus dem file_part-String aufbauen (Nutzer-
+     * Nachfrage 23.09.2026: "Warum nicht über sond_file_part_get_filepart()"
+     * - gemeint war vermutlich die Gegenrichtung, sond_file_part_from_
+     * filepart()) statt über einen Tree-Walk in BAUM_FS (sond_treeviewfm_
+     * file_part_visible()): letzteres brauchte zwingend ein sichtbares
+     * BAUM_FS, um den Baum überhaupt durchlaufen zu können, und schaltete
+     * dafür zond->fs_button zwangsweise ein - Nutzer-Fund: "es wird
+     * außerdem der BAUM_FS eingeblendet und das Verzeichnis ... geöffnet".
+     * sond_file_part_from_filepart() baut dieselbe Objekt-Kette direkt aus
+     * dem String auf; sond_file_part_create() darin prüft zuerst
+     * sond_file_part_is_open() (globale Registry), liefert also bei
+     * bereits offener Datei dasselbe Objekt wie der Tree-Walk - nur ganz
+     * ohne BAUM_FS anzufassen. g_autoptr, da die Funktion (anders als die
+     * vorher geliehene Referenz aus dem Tree-Modell) eine neue Referenz
+     * liefert. */
     {
-        GtkTreeIter iter_fm = { 0 };
+        g_autoptr(SondFilePart) sfp = sond_file_part_from_filepart(filename,
+                &error);
 
-        rc = sond_treeviewfm_file_part_visible(
-                SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-                NULL, filename, TRUE, &iter_fm, &error);
-        if (rc == -1) {
+        if (!sfp) {
             display_message(zond->app_window,
                     "Fehler\n\n",
                     error ? error->message : "?", NULL);
             g_clear_error(&error);
-        } else if (rc == 1) {
-            SondTVFMItem *stvfm_item = NULL;
-            SondFilePart *sfp        = NULL;
-
-            gtk_tree_model_get(
-                    gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
-                    &iter_fm, 0, &stvfm_item, -1);
-            sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-            g_object_unref(stvfm_item);
-
-            if (sfp && SOND_IS_FILE_PART_PDF(sfp) && page_nr >= 0) {
+        } else {
+            if (SOND_IS_FILE_PART_PDF(sfp) && page_nr >= 0) {
             	DisplayedDocument* dd = NULL;
             	ZondPdfDocument* zpdfd_open = NULL;
             	gint page_nr_akt = page_nr;
@@ -186,7 +186,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                     viewer_highlight_at_char_pos(pv, page_nr_akt,
                             char_pos_in_page, term);
                 }
-            } else if (sfp) {
+            } else {
                 /* Nicht-PDF → sond_renderer mit Highlighting */
                 GBytes *bytes = sond_file_part_get_bytes(sfp, &error);
                 if (!bytes) {

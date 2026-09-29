@@ -4604,3 +4604,38 @@
  Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
  ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
  */
+
+/*
+ #185 Bug (23.09.2026, Nutzer-Fund, Indexsuche statt Popup-Suche - erst auf
+ Nachfrage geklärt): "Wenn ich im Ergebnisfenster eine Zeile anklicke,
+ öffnet sich - wie gewünscht - die Datei mit dem Treffer. Dazu wird aber
+ außerdem der BAUM_FS eingeblendet und das Verzeichnis, in dem sich die
+ angezeigte Datei befindet, geöffnet."
+
+ zond_indexsuche_row_activated() (zond_indexsuche.c) schaltete zond->
+ fs_button zwangsweise ein und rief danach sond_treeviewfm_file_part_
+ visible(..., open=TRUE, ...) auf, nur um an das SondFilePart-Objekt der
+ Datei zu kommen (Baum-Walk in BAUM_FS) - dafür musste BAUM_FS sichtbar und
+ der Pfad darin aufgeklappt werden, obwohl das eigentliche Ziel nur "Viewer
+ mit Treffer öffnen" war, nicht "zeig mir das in BAUM_FS".
+
+ Nutzer-Nachfrage: "Warum nicht über sond_file_part_get_filepart()" -
+ gemeint war die Gegenrichtung, sond_file_part_from_filepart() (String ->
+ SondFilePart, sond_fileparts.h/.c), die dieselbe Objekt-Kette direkt aus
+ dem file_part-String aufbaut. sond_file_part_create() darin prüft zuerst
+ sond_file_part_is_open() (globale Registry bereits offener Objekte) und
+ liefert bei Treffer dasselbe Objekt wie der Baum-Walk - keine
+ "billigere Kopie", nur ganz ohne BAUM_FS anzufassen.
+
+ Fix: Block "FS-Ansicht einschalten falls nötig" + sond_treeviewfm_file_
+ part_visible()/SondTVFMItem-Umweg ersetzt durch direktes
+ sond_file_part_from_filepart(filename, &error) (g_autoptr, da die
+ Funktion anders als die vorherige geliehene Referenz eine neue Referenz
+ liefert - automatische Freigabe deckt auch die beiden vorhandenen
+ Early-Returns bei "Seite gelöscht" bzw. fehlgeschlagenem
+ DisplayedDocument ab). BAUM_FS/fs_button werden dadurch beim Öffnen eines
+ Indexsuche-Treffers nicht mehr angefasst.
+
+ Klammer-/Kommentarbalance in zond_indexsuche.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
