@@ -57,16 +57,17 @@
 #include "../99conv/test.h"
 
 #include "headerbar.h"
+#include "app_window.h"
 
 
 /* ============================================================================
  * HILFSFUNKTIONEN
  * ========================================================================== */
 static void activate_baum_action(Projekt *zond, const gchar *action_name) {
-	if (zond->baum_active == KEIN_BAUM)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM)
 		return;
 	GActionGroup *ag = gtk_widget_get_action_group(
-			GTK_WIDGET(zond->treeview[zond->baum_active]), "stv");
+			GTK_WIDGET(zond->treeview[zond_baum_aktuell(zond)]), "stv");
 	if (ag && g_action_group_has_action(ag, action_name))
 		g_action_group_activate_action(ag, action_name, NULL);
 }
@@ -273,25 +274,6 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	return zond_index_erstellen_ht_mit_modus(zond, ht_index, ocr_mode);
 }
 
-/* Welcher Baum hat gerade tatsächlich eine (nicht-leere) Auswahl?
- *
- * Vorher wurde hier zond->baum_prev ("zuletzt aktiver Baum", gesetzt in
- * cb_treeview_focus_out) herangezogen. Das ist aber unzuverlässig: beim
- * Klick durch die (mehrstufige) Menüleiste trifft die Focus-Out-
- * Benachrichtigung des zuvor aktiven Baums teils erst NACH der Menü-Aktion
- * ein (per Diagnose-Logs bestätigt - reine GTK-Ereignisreihenfolge, kein
- * Fokus-Sprung). zond->baum_prev war dadurch beim ersten Versuch noch der
- * alte/Default-Wert; erst danach stimmte er zufällig wieder. Robuster:
- * direkt bei allen Bäumen nachsehen, wer tatsächlich etwas ausgewählt hat -
- * unabhängig von jeglicher Fokus-Buchführung. */
-Baum zond_baum_mit_auswahl(Projekt *zond) {
-	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
-		if (gtk_tree_selection_count_selected_rows(zond->selection[baum]) > 0)
-			return baum;
-
-	return KEIN_BAUM;
-}
-
 /* Nutzer-Wunsch 16.09.2026 (Task #100): Verzeichnis-Kurzschluss analog
  * "Index durchsuchen" (scan_coverage_gaps_fs(), zond_indexsuche.c) auch
  * hier für "Gesamtes Projekt" - ein bereits vollständig indizierter
@@ -325,8 +307,8 @@ static void do_index_erstellen_gesamt(Projekt *zond) {
 
 /* Gemeinsame Logik fuer "Index erstellen (Auswahl)", aufgerufen aus den
  * Kontextmenues aller drei Baeume (dort ist "baum" instanzgebunden bekannt,
- * ueber zond->baum_active) sowie aus dem globalen Fenstermenue (dort wird
- * "baum" vorher per zond_baum_mit_auswahl() ermittelt) - Analogon zu
+ * ueber zond_baum_aktuell(zond)) sowie aus dem globalen Fenstermenue (dort wird
+ * "baum" vorher per zond_baum_aktuell() ermittelt) - Analogon zu
  * zond_indexsuche_activate_fuer_baum() in zond_indexsuche.c. */
 void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 	GError *error = NULL;
@@ -507,7 +489,7 @@ static void cb_app_index_loeschen(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_index_loeschen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
-	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
+	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -517,28 +499,21 @@ static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
-	zond_index_erstellen_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
+	zond_index_erstellen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
-	/* Auswahl im Baum ermitteln, der gerade tatsächlich etwas ausgewählt
-	 * hat (s. zond_baum_mit_auswahl() oben - robuster als das frühere
-	 * zond->baum_prev, das durch Menü-Ereignisreihenfolge veraltet sein
-	 * konnte). Vorher wurde hier immer NULL übergeben, "Ausgewählte
-	 * Punkte" filterte also nie und verhielt sich wie "Gesamtes
-	 * Projektverzeichnis". Nur hier per Scan ermittelt, weil das globale
-	 * Fenstermenü (anders als die Kontextmenüs) keinen eigenen
-	 * Baum-Kontext hat - s. zond_indexsuche_activate_fuer_baum(). */
-	zond_indexsuche_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
+	//Auswahl im aktuellen Baum (s. zond_baum_aktuell(), app_window.c)
+	zond_indexsuche_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 /* ============================================================================
  * CALLBACKS - SEADRIVE (Hauptmenü: "Gesamtes Projekt" UND "Auswahl", analog
  * zur Indexsuche direkt oberhalb - "Gesamtes Projekt" betrifft immer die
  * Projekt-Wurzel unabhängig von einer Auswahl, "Auswahl" braucht dagegen
- * wie bei cb_win_indexsuche_auswahl() zond_baum_mit_auswahl(), weil das
+ * wie bei cb_win_indexsuche_auswahl() zond_baum_aktuell(), weil das
  * globale Menü - anders als die Kontextmenüs der einzelnen Bäume - keinen
  * festen Baum-Kontext hat. Die Kontextmenüs selbst bieten seit 11.09.2026
  * nur noch "Auswahl" an, s. sond_treeviewfm.c/zond_treeview.c.
@@ -565,12 +540,12 @@ static void cb_win_seadrive_unpin_all(GSimpleAction *a, GVariant *p, gpointer d)
 }
 
 /* Gemeinsame Dispatch-Logik für "Auswahl" aus dem globalen Menü: ermittelt
- * den Baum mit einer aktuellen Selektion (zond_baum_mit_auswahl()) und
+ * den Baum mit einer aktuellen Selektion (zond_baum_aktuell()) und
  * ruft je nach Baumtyp die passende, schon für die Kontextmenüs gebaute
  * Funktion auf (BAUM_FS: SondTVFMItem-basiert; BAUM_INHALT/BAUM_AUSWERTUNG:
  * DB-Anbindungen-basiert, s. zond_treeview_seadrive_apply_to_selection()). */
 static void seadrive_pin_auswahl(Projekt *zond, guint pin_state) {
-	Baum baum = zond_baum_mit_auswahl(zond);
+	Baum baum = zond_baum_aktuell(zond);
 
 	if (baum == KEIN_BAUM) {
 		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
@@ -629,12 +604,12 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (zond->baum_active == KEIN_BAUM || !zond->dbase_zond)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM || !zond->dbase_zond)
 		return;
-	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+	if (!sond_treeview_get_cursor(zond->treeview[zond_baum_aktuell(zond)], &iter))
 		return;
 
-	if (zond->baum_active == BAUM_FS) {
+	if (zond_baum_aktuell(zond) == BAUM_FS) {
 		SondTVFMItem *stvfm_item = NULL;
 		SondTVFMItemType type = 0;
 
@@ -668,7 +643,7 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 		if (!node_id)
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
+							GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)])),
 					&iter, 2, &node_id, -1);
 
 		rc = verwendung_anzeigen(zond, node_id, NULL, NULL, &error);
@@ -693,7 +668,7 @@ static void cb_win_suchen(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM || zond_baum_aktuell(zond) == BAUM_FS)
 		return;
 	gint icon_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "icon-id"));
 	gchar *name = g_strdup_printf("icon-%d", icon_id);
@@ -708,10 +683,10 @@ static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 static GPtrArray* selection_abfragen_pdf(Projekt *zond, GError **error) {
 	GPtrArray *arr_sfp = g_ptr_array_new_with_free_func(
 			(GDestroyNotify) g_object_unref);
-	if (zond->baum_active == KEIN_BAUM)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM)
 		return NULL;
 	GList *selected = gtk_tree_selection_get_selected_rows(
-			zond->selection[zond->baum_active], NULL);
+			zond->selection[zond_baum_aktuell(zond)], NULL);
 	if (!selected)
 		return NULL;
 	for (GList *l = selected; l; l = l->next) {
@@ -721,7 +696,7 @@ static GPtrArray* selection_abfragen_pdf(Projekt *zond, GError **error) {
 		SondFilePart *sfp = NULL;
 		if (!gtk_tree_model_get_iter(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(
-						zond->treeview[zond->baum_active])),
+						zond->treeview[zond_baum_aktuell(zond)])),
 				&iter, l->data)) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 			g_ptr_array_unref(arr_sfp);
@@ -729,7 +704,7 @@ static GPtrArray* selection_abfragen_pdf(Projekt *zond, GError **error) {
 			return NULL;
 		}
 		gtk_tree_model_get(gtk_tree_view_get_model(
-				GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
+				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)])),
 				&iter, 2, &node_id, -1);
 		if (zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
 				NULL, NULL, &file_part, NULL, NULL, NULL, NULL, error)) {
@@ -846,27 +821,27 @@ static void cb_win_pdf_reparieren(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_win_alle_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	if (zond->baum_active == KEIN_BAUM) return;
-	gtk_tree_view_expand_all(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
+	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
+	gtk_tree_view_expand_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
 }
 
 static void cb_win_zweig_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	GtkTreePath *path = NULL;
-	if (zond->baum_active == KEIN_BAUM) return;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
+	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]),
 			&path, NULL);
 	if (path) {
 		gtk_tree_view_expand_row(
-				GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE);
+				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]), path, TRUE);
 		gtk_tree_path_free(path);
 	}
 }
 
 static void cb_win_reduzieren(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	if (zond->baum_active == KEIN_BAUM) return;
-	gtk_tree_view_collapse_all(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
+	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
+	gtk_tree_view_collapse_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
 }
 
 static void cb_win_refresh(GSimpleAction *a, GVariant *p, gpointer d) {

@@ -294,7 +294,7 @@ static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
 		GError **error) {
 	gint rc = 0;
 
-	if (zond->baum_prev == KEIN_BAUM) {
+	if (zond->baum_zuletzt == KEIN_BAUM) {
 		g_set_error(error, SOND_ERROR, 0, "Kein Baum ausgewählt");
 
 		return -1;
@@ -312,13 +312,13 @@ static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
 
 	switch (umfang) {
 	case 1:
-		rc = export_alles(zond, zond->baum_prev, stream, error);
+		rc = export_alles(zond, zond->baum_zuletzt, stream, error);
 		break;
 	case 2:
-		rc = export_selektierte_zweige(zond, zond->baum_prev, stream, error);
+		rc = export_selektierte_zweige(zond, zond->baum_zuletzt, stream, error);
 		break;
 	case 3:
-		rc = export_selektierte_punkte(zond, zond->baum_prev, stream, error);
+		rc = export_selektierte_punkte(zond, zond->baum_zuletzt, stream, error);
 		break;
 	}
 	if (rc)

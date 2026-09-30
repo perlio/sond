@@ -10,10 +10,6 @@ typedef struct _SondTreeviewFM SondTreeviewFM;
 
 void init_headerbar(Projekt*);
 
-/* Baum mit markierter Zeile (KEIN_BAUM, wenn keiner) - unabhängig vom
- * Fokus, der beim Wechsel in ein anderes Fenster verloren geht */
-Baum zond_baum_mit_auswahl(Projekt*);
-
 /**
  * zond_index_erstellen_ht:
  * @zond:     Projekt
@@ -43,9 +39,8 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index);
  *
  * Gemeinsame Logik für "Index erstellen (Auswahl)" - Analogon zu
  * zond_indexsuche_activate_fuer_baum() (zond_indexsuche.c), s. dort für die
- * Begründung des baum-Parameters (Kontextmenüs kennen ihn synchron über
- * zond->baum_active, das globale Fenstermenü ermittelt ihn per Scan über
- * zond_baum_mit_auswahl()).
+ * Begründung des baum-Parameters (Aufrufer übergeben
+ * zond_baum_aktuell()).
  */
 void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum);
 

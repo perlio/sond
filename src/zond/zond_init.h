@@ -166,8 +166,7 @@ typedef struct _Projekt {
 	SondTreeview *treeview[3];
 	GtkTreeSelection *selection[3];
 
-	Baum baum_active;
-	Baum baum_prev;
+	Baum baum_zuletzt; //zuletzt fokussierter Baum, s. zond_baum_aktuell()
 
 	gulong cursor_changed_signal;
 	gint node_id_act;

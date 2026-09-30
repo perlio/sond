@@ -1476,11 +1476,8 @@ static void zond_treeviewfm_action_indexsuche_auswahl(GSimpleAction *a,
 		GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
-	/* baum_active statt Scan: bei Rechtsklick im Dateiverzeichnis synchron
-	 * per focus-in gesetzt (s. cb_treeview_focus_in, app_window.c), also
-	 * hier zuverlässig BAUM_FS - anders als beim globalen Fenstermenü
-	 * (s. zond_indexsuche_activate_fuer_baum() in zond_indexsuche.c). */
-	zond_indexsuche_activate_fuer_baum(zond, zond->baum_active);
+	//Rechtsklick im Dateiverzeichnis: es hat den Fokus (s. zond_baum_aktuell())
+	zond_indexsuche_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 static void zond_treeviewfm_action_index_erstellen_auswahl(GSimpleAction *a,
@@ -1489,7 +1486,7 @@ static void zond_treeviewfm_action_index_erstellen_auswahl(GSimpleAction *a,
 
 	/* Analogon zu zond_treeviewfm_action_indexsuche_auswahl() oberhalb,
 	 * s. dortigen Kommentar. */
-	zond_index_erstellen_activate_fuer_baum(zond, zond->baum_active);
+	zond_index_erstellen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 static void zond_treeviewfm_action_index_loeschen_auswahl(GSimpleAction *a,
@@ -1498,7 +1495,7 @@ static void zond_treeviewfm_action_index_loeschen_auswahl(GSimpleAction *a,
 
 	/* Analogon zu zond_treeviewfm_action_indexsuche_auswahl() oberhalb,
 	 * s. dortigen Kommentar. */
-	zond_index_loeschen_activate_fuer_baum(zond, zond->baum_active);
+	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
 static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,

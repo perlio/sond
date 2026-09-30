@@ -33,6 +33,7 @@
 #include "../../misc.h"
 
 #include "../zond_init.h"
+#include "../10init/app_window.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
@@ -335,14 +336,14 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	if (arr_nicht_gefunden)
 		*arr_nicht_gefunden = NULL;
 
-	if (zond->baum_active != BAUM_INHALT) {
+	if (zond_baum_aktuell(zond) != BAUM_INHALT) {
 		g_set_error(error, ZOND_ERROR, 0,
 				"Bitte zuerst im Bestandsverzeichnis die Zielposition "
 				"markieren (wie beim normalen Einfügen).");
 		return -1;
 	}
 
-	rc = zond_treeview_get_anchor(zond, zond->baum_active, &child, &iter_cursor, &iter_anchor,
+	rc = zond_treeview_get_anchor(zond, zond_baum_aktuell(zond), &child, &iter_cursor, &iter_anchor,
 			&anchor_id, &in_link, error);
 	if (rc)
 		return -1;

@@ -1139,12 +1139,9 @@ zond_indexsuche_activate_with_selection(GtkMenuItem *item,
 }
 
 /* Gemeinsame Logik fuer "Indexsuche in Auswahl", aufgerufen aus den
- * Kontextmenues aller drei Baeume (dort ist "baum" instanzgebunden bekannt,
- * ueber zond->baum_active - zuverlaessig, da bei Rechtsklick synchron per
- * focus-in gesetzt) sowie aus dem globalen Fenstermenue (dort wird "baum"
- * vorher per zond_baum_mit_auswahl() ermittelt, weil dort kein fester
- * Baum-Kontext existiert). baum == KEIN_BAUM zeigt "Keine Punkte
- * ausgewaehlt" an. */
+ * Kontextmenues aller drei Baeume sowie aus dem globalen Fenstermenue;
+ * "baum" jeweils per zond_baum_aktuell() (app_window.c). baum == KEIN_BAUM
+ * zeigt "Keine Punkte ausgewaehlt" an. */
 void
 zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum) {
     GError *error = NULL;

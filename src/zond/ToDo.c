@@ -4778,4 +4778,33 @@
  Treffer" (vorher geschah nichts). Alter Listbox-Code entfernt (suchen.c
  von 1173 auf gut 600 Zeilen). result_listbox_new() (misc.c) hat damit
  keinen Aufrufer mehr.
+
+ #189 Fokus-Verwaltung der Bäume neu (01.10.2026). Vorher: baum_active
+ wurde bei focus-in gesetzt und bei focus-out auf KEIN_BAUM zurückgesetzt,
+ baum_prev bei focus-out gesetzt. KEIN_BAUM stand damit gleichzeitig für
+ "Fokus im Textfeld", "Fokus im Menü" und "anderes Fenster aktiv"; daher
+ der Behelf zond_baum_mit_auswahl() (Suche nach Markierungen) und
+ unzuverlässige Hauptmenü-Aktionen (focus-out kam je nach Reihenfolge vor
+ oder nach der Aktion). Zudem Zugriff auf treeview[-1] beim focus-out des
+ Textfelds (app_window.c).
+
+ Neu: zond_baum_aktuell() (app_window.c) fragt im Moment der Aktion
+ gtk_window_get_focus(app_window) - GtkWindow behält sein Fokus-Widget,
+ auch wenn ein anderes Fenster aktiv ist. Fokus auf einem Baum -> dieser
+ Baum; Fokus in einem Menü-Popover (nur GTK4-Menüleiste; die GTK3-
+ GtkMenuBar lässt den Fokus im Fenster unverändert) -> baum_zuletzt;
+ sonst (Textfeld, Suchfeld, Umbenennen im Baum) -> KEIN_BAUM. Einzige
+ Buchführung: baum_zuletzt, nur in cb_treeview_focus_in gesetzt.
+ focus-out schaltet nur noch Umbenennen und das cursor-changed-Signal ab.
+ baum_active, baum_prev und zond_baum_mit_auswahl() entfallen; export.c
+ und der Pin-Button nutzen baum_zuletzt. Kopieren aus der Baumsuche:
+ zond_baum_aktuell() == BAUM_AUSWERTUNG und dort eine Markierung.
+
+ Zu testen: Tastenkürzel in allen drei Bäumen (Strg+C/X/V, Strg+L,
+ Strg+J, Strg+Umschalt+J); Kontextmenüs; Hauptmenü-Punkte, die einen Baum
+ brauchen (Bearbeiten, Aufklappen/Zuklappen, Index Auswahl, SeaDrive
+ Auswahl, Export, XJustiz-Import); Strg+C/V im Textfeld und beim
+ Umbenennen im Baum (darf nicht den Baum betreffen); Wechsel zwischen
+ Bäumen hebt die Markierung des vorherigen auf; Kopieren aus dem
+ Ergebnisfenster der Suche.
  */

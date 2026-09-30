@@ -35,7 +35,7 @@
 #include "project.h"
 #include "suchen.h"
 #include "verwendung.h"
-#include "../10init/headerbar.h"
+#include "../10init/app_window.h"
 
 typedef struct _Node {
 	gint zond_suchen;
@@ -96,11 +96,13 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 		return;
 	}
 
-	/* Ziel: markierter Punkt in BAUM_AUSWERTUNG. Nach der Markierung, nicht
-	 * nach dem Fokus fragen - der liegt jetzt beim Ergebnisfenster. Bei
+	/* Ziel: markierter Punkt in BAUM_AUSWERTUNG, das den Fokus im App-Fenster
+	 * hat (bleibt beim Wechsel ins Ergebnisfenster erhalten). Bei
 	 * eingeblendetem BAUM_FS ist BAUM_AUSWERTUNG und damit die Markierung
 	 * nicht zu sehen. */
-	if (zond_baum_mit_auswahl(zond) != BAUM_AUSWERTUNG
+	if (zond_baum_aktuell(zond) != BAUM_AUSWERTUNG
+			|| !gtk_tree_selection_count_selected_rows(
+					zond->selection[BAUM_AUSWERTUNG])
 			|| gtk_toggle_button_get_active(
 					GTK_TOGGLE_BUTTON(zond->fs_button))) {
 		display_message(zond->app_window,

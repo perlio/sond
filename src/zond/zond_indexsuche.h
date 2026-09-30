@@ -22,9 +22,8 @@ void zond_indexsuche_activate_with_selection(GtkMenuItem *item,
  * Gemeinsame Logik fuer "Indexsuche in Auswahl" - baut die Filepart-Map
  * fuer den uebergebenen Baum auf (Dateiverzeichnis oder Bestands-/
  * Auswertungsverzeichnis) und startet die Suche. Wird sowohl von den
- * Kontextmenues der drei Baeume (baum instanzgebunden bekannt) als auch
- * vom globalen Fenstermenue (baum vorher per zond_baum_mit_auswahl()
- * ermittelt) verwendet.
+ * Kontextmenues der drei Baeume als auch vom globalen Fenstermenue
+ * verwendet (baum jeweils per zond_baum_aktuell()).
  */
 void zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum);
 

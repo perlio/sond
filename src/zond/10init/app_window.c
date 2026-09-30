@@ -33,6 +33,7 @@
 #include "../20allgemein/suchen.h"
 
 #include "headerbar.h"
+#include "app_window.h"
 
 /* =============================================================================
  * KONSTANTEN
@@ -142,7 +143,8 @@ static gboolean cb_textview_focus_out(GtkWidget *textview, GdkEvent *event,
 		zond->text_buffer_changed_signal = 0;
 	}
 
-	gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[zond->baum_active]));
+	if (zond->baum_zuletzt != KEIN_BAUM)
+		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[zond->baum_zuletzt]));
 
 	return FALSE;
 }
@@ -151,7 +153,7 @@ static void cb_pin_button_toggled(GtkToggleButton* toggle, gpointer user_data) {
 	Projekt* zond = (Projekt*) user_data;
 
 	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
-		if (zond->baum_prev == BAUM_FS)
+		if (zond->baum_zuletzt == BAUM_FS)
 			gtk_widget_set_sensitive(zond->textview, FALSE);
 		zond->node_id_textview = zond->node_id_act;
 
@@ -199,12 +201,32 @@ static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
  * CALLBACK-FUNKTIONEN - TREEVIEW
  * ========================================================================== */
 
+Baum zond_baum_aktuell(Projekt *zond) {
+	GtkWidget *focus = NULL;
+
+	if (!zond->app_window)
+		return KEIN_BAUM;
+
+	//GtkWindow behält sein Fokus-Widget, auch wenn ein anderes Fenster aktiv ist
+	focus = gtk_window_get_focus(GTK_WINDOW(zond->app_window));
+	if (!focus)
+		return KEIN_BAUM;
+
+	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
+		if (focus == GTK_WIDGET(zond->treeview[baum]))
+			return baum;
+
+	//Menü-Popover (GTK4-Menüleiste) hält den Fokus - gemeint ist der Baum davor
+	if (gtk_widget_get_ancestor(focus, GTK_TYPE_POPOVER_MENU))
+		return zond->baum_zuletzt;
+
+	return KEIN_BAUM;
+}
+
 static gboolean cb_treeview_focus_out(GtkWidget *treeview, GdkEvent *event,
 		gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 	Baum baum = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
-
-	zond->baum_active = KEIN_BAUM;
 
 	if (zond->cursor_changed_signal) {
 		g_signal_handler_disconnect(treeview, zond->cursor_changed_signal);
@@ -214,18 +236,15 @@ static gboolean cb_treeview_focus_out(GtkWidget *treeview, GdkEvent *event,
 	g_object_set(sond_treeview_get_cell_renderer_text(zond->treeview[baum]),
 			"editable", FALSE, NULL);
 
-	zond->baum_prev = baum;
-
 	return FALSE;
 }
 
 static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 		gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
+	Baum baum = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
 
-	zond->baum_active = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
-
-	if (zond->baum_active != BAUM_FS && !zond->cursor_changed_signal) {
+	if (baum != BAUM_FS && !zond->cursor_changed_signal) {
 		zond->cursor_changed_signal =
 				g_signal_connect(treeview, "cursor-changed",
 						G_CALLBACK(zond_treeview_cursor_changed), zond);
@@ -233,24 +252,29 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 		g_signal_emit_by_name(treeview, "cursor-changed", user_data, NULL);
 	}
 
-	if (zond->baum_active == BAUM_FS &&
+	if (baum == BAUM_FS &&
 			!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button)))
 		gtk_widget_set_sensitive(zond->textview, FALSE);
 
-	if (zond->baum_active != zond->baum_prev) {
-		gtk_tree_selection_unselect_all(zond->selection[zond->baum_prev]);
-
+	//Wechsel von einem anderen Baum: nur ein Baum trägt eine Markierung
+	if (baum != zond->baum_zuletzt) {
 		GtkTreePath *path = NULL;
+
+		if (zond->baum_zuletzt != KEIN_BAUM)
+			gtk_tree_selection_unselect_all(
+					zond->selection[zond->baum_zuletzt]);
+
 		gtk_tree_view_get_cursor(GTK_TREE_VIEW(treeview), &path, NULL);
 		if (path) {
-			gtk_tree_selection_select_path(
-					zond->selection[zond->baum_active], path);
+			gtk_tree_selection_select_path(zond->selection[baum], path);
 			gtk_tree_path_free(path);
 		}
 	}
 
+	zond->baum_zuletzt = baum;
+
 	g_object_set(
-			sond_treeview_get_cell_renderer_text(zond->treeview[zond->baum_active]),
+			sond_treeview_get_cell_renderer_text(zond->treeview[baum]),
 			"editable", TRUE, NULL);
 
 	return FALSE;
@@ -541,6 +565,8 @@ static void cb_seadrive_status_redraw_other_trees(SondTreeviewFM *stvfm,
 
 void init_app_window(Projekt *zond) {
 	GtkWidget *vbox = NULL;
+
+	zond->baum_zuletzt = KEIN_BAUM;
 
 	zond->app_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_default_size(GTK_WINDOW(zond->app_window),

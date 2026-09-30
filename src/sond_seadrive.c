@@ -1822,7 +1822,7 @@ void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
  * War früher nur inline in seadrive_action_activate(); seit 11.09.2026
  * öffentlich, da auch vom globalen Hauptmenü aus genutzt ("Projekt >
  * SeaDrive > .../Auswahl", win.sd-*-sel in headerbar.c), wenn BAUM_FS
- * gerade der Baum mit einer Selektion ist (s. zond_baum_mit_auswahl()). */
+ * der aktuelle Baum ist (s. zond_baum_aktuell(), app_window.c). */
 void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm,
         guint pin_state)
 {
