@@ -687,14 +687,14 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 	return 0;
 }
 
-gint zond_treeview_get_anchor(Projekt *zond, gboolean* child,
+gint zond_treeview_get_anchor(Projekt *zond, gint baum, gboolean* child,
 		GtkTreeIter *iter_cursor, GtkTreeIter *iter_anchor,
 		gint *anchor_id, gboolean* in_link, GError **error) {
 	GtkTreeIter iter_cursor_intern = { 0 };
 	GtkTreeIter iter_anchor_intern = { 0 };
 	gint head_nr = 0;
 
-	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active],
+	if (!sond_treeview_get_cursor(zond->treeview[baum],
 			&iter_cursor_intern)) {
 		//Trick, weil wir keinen gültigen iter übergeben können->
 		//setzten stamp auf stamp des "richtigen" tree_stores und
@@ -703,7 +703,7 @@ gint zond_treeview_get_anchor(Projekt *zond, gboolean* child,
 
 		store =
 				ZOND_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ));
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
 
 		if (iter_cursor) {
 			iter_cursor->stamp = zond_tree_store_get_stamp(store);
@@ -787,7 +787,7 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 			zond->baum_active == BAUM_INHALT
 					|| zond->baum_active == BAUM_AUSWERTUNG, -1);
 
-	rc = zond_treeview_get_anchor(zond, &child, &iter_cursor,
+	rc = zond_treeview_get_anchor(zond, zond->baum_active, &child, &iter_cursor,
 			&iter_anchor, &anchor_id, &in_link, error);
 	if (rc)
 		return -1;
@@ -1850,7 +1850,7 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 		}
 	}
 
-	rc = zond_treeview_get_anchor(zond, &child, &iter_cursor, &iter_anchor,
+	rc = zond_treeview_get_anchor(zond, zond->baum_active, &child, &iter_cursor, &iter_anchor,
 			&anchor_id, &in_link, error);
 	if (rc)
 		return -1;

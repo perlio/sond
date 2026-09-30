@@ -284,7 +284,7 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
  * alte/Default-Wert; erst danach stimmte er zufällig wieder. Robuster:
  * direkt bei allen Bäumen nachsehen, wer tatsächlich etwas ausgewählt hat -
  * unabhängig von jeglicher Fokus-Buchführung. */
-static Baum zond_baum_mit_auswahl(Projekt *zond) {
+Baum zond_baum_mit_auswahl(Projekt *zond) {
 	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
 		if (gtk_tree_selection_count_selected_rows(zond->selection[baum]) > 0)
 			return baum;

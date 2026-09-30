@@ -256,16 +256,33 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 	return FALSE;
 }
 
+/* Druckbares Zeichen im Baum: Suchfeld öffnen und das Zeichen dort als
+ * Anfang des Suchbegriffs eintragen (sonst ginge es verloren, weil das
+ * Suchfeld beim Tastendruck noch keinen Fokus hat) */
 static gboolean cb_treeview_key_press(GtkEventControllerKey *ctrl,
 		guint keyval, guint keycode, GdkModifierType state, gpointer data) {
 	Projekt *zond = (Projekt*) data;
+	GtkWidget *entry = NULL;
+	gunichar c = 0;
+	gchar zeichen[7] = { 0 };
 
-	if ((state & GDK_CONTROL_MASK) || (keyval < 0x21) || (keyval > 0x7e))
+	if (state & (GDK_CONTROL_MASK | GDK_MOD1_MASK))
+		return FALSE;
+
+	//auch Umlaute; Leerzeichen und Steuerzeichen bleiben beim Baum
+	c = gdk_keyval_to_unicode(keyval);
+	if (!c || !g_unichar_isprint(c) || g_unichar_isspace(c))
 		return FALSE;
 
 	gtk_popover_popup(GTK_POPOVER(zond->popover));
 
-	return FALSE;
+	entry = g_object_get_data(G_OBJECT(zond->popover), "entry");
+	g_unichar_to_utf8(c, zeichen);
+	gtk_entry_set_text(GTK_ENTRY(entry), zeichen);
+	gtk_entry_grab_focus_without_selecting(GTK_ENTRY(entry));
+	gtk_editable_set_position(GTK_EDITABLE(entry), -1);
+
+	return TRUE;
 }
 
 /* =============================================================================
@@ -349,6 +366,7 @@ static void init_search_popover(Projekt *zond) {
 	entry_search = gtk_entry_new();
 	gtk_widget_show(entry_search);
 	gtk_container_add(GTK_CONTAINER(zond->popover), entry_search);
+	g_object_set_data(G_OBJECT(zond->popover), "entry", entry_search);
 
 	g_signal_connect(entry_search, "activate",
 			G_CALLBACK(cb_entry_search), zond);

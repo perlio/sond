@@ -4731,4 +4731,51 @@
  echten aufklappen und umgekehrt; in Test_Zyklus tief verschachteln; neuen
  Punkt unter Beweisthema 1 anlegen - muß an jeder Spiegelstelle genau
  einmal erscheinen. Alle Tests vom Nutzer bestanden (30.09.2026).
+
+ #188 Ergebnisfenster der Baumsuche neu auf Basis von #186 (ersetzt die
+ Darstellung aus #164 samt der zurückgestellten Section-Aggregation).
+ Ziel: Liste der Ursprünge (Datei oder Strukturpunkt), je Ursprung der
+ vollständige Baum wie im Widget "Herkunft und Verwendung"; aufgeklappt
+ nur der Pfad bis zu den Treffern, Treffer fett. Reiner Treffer im
+ Dateipfad: nur die Wurzelzeile (zugeklappt, mit Zählung). Mehrere
+ Treffer im selben Ursprung: eine Wurzel. Nutzer-Entscheidungen: indirekte
+ Fundstellen mit anzeigen (zugeklappt); Baum sofort komplett aufbauen,
+ erst bei Bedarf auf Laden beim Aufklappen umstellen.
+
+ Schritte:
+ 1) erledigt: verwendung.c getrennt in Baumaufbau (Verwendung = Projekt +
+    Store) und Fenster (VerwendungFenster). Öffentlich:
+    verwendung_store_new(), verwendung_ursprung_ermitteln(),
+    verwendung_store_add_ursprung(), verwendung_store_zaehlen(),
+    verwendung_treeview_new() (Spalten, Tooltip, Sprung),
+    verwendung_hervorheben() mit Treffermenge und Trefferart
+    (VERWENDUNG_TREFFER_PFAD = Datei-/Section-Zeile, _TEXT = übrige
+    Zeilen, _ALLE), verwendung_zeile_knoten() (Knoten einer Zeile, für
+    "In Baum Auswertung kopieren").
+ 2) erledigt: suchen.c - Rohtreffer aus suchen_db() (zond_suchen 0 = file_part,
+    1 = node_text, 2 = text) per verwendung_ursprung_ermitteln() nach
+    Ursprung gruppieren; IDs 0-2 (Wurzeln, Versionsknoten mit node_text
+    "1") ausfiltern. Pfadtreffer auf Sections derselben Datei fallen in
+    die Wurzel.
+ 3) erledigt: Treffer hervorheben - zond_suchen 0 -> PFAD, sonst TEXT (bei
+    FILE_PART also die Anbindungszeile).
+ 4) erledigt: Ergebnisfenster in suchen.c ersetzen - ein Baum
+    (verwendung_treeview_new), oberste Zeilen = Ursprünge, Mehrfachauswahl;
+    Kontextmenü "In Baum Auswertung kopieren" (Gleiche Ebene/Unterpunkt)
+    beibehalten, über verwendung_zeile_knoten(). Danach ResultRow,
+    ResultCopy, SuchenItem, suchen_resolve_file_part_node(),
+    suchen_baue_row(), suchen_aggregieren(), suchen_fuellen_row_*() und
+    die Listbox-Variante entfernen.
+ Umsetzung 2-4 (01.10.2026): suchen_gruppieren() filtert IDs 0-2 und
+ Knoten ohne eigenen Text (Anker, Links), gruppiert per
+ verwendung_ursprung_ermitteln(); Pfadtreffer markieren die Wurzel-Datei,
+ doppelte Markierungen (Pfadtreffer auf allen Sections) werden
+ zusammengefasst. suchen_ergebnisfenster(): ein Baum mit Mehrfachauswahl,
+ Titel mit Suchbegriff, Untertitel mit Anzahl Fundstellen/Ursprünge;
+ Kontextmenü per Rechtsklick und am Button der Titelleiste. Kopieren nur
+ für Zeilen mit eigenem Knoten (Anbindung, Copy, Strukturpunkt), Datei-,
+ Section- und Link-Zeilen werden übersprungen. Neu: Meldung "Keine
+ Treffer" (vorher geschah nichts). Alter Listbox-Code entfernt (suchen.c
+ von 1173 auf gut 600 Zeilen). result_listbox_new() (misc.c) hat damit
+ keinen Aufrufer mehr.
  */

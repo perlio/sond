@@ -77,23 +77,29 @@ enum {
 	NUM_COLS
 };
 
+//Kontext für den Baumaufbau
 typedef struct {
 	Projekt *zond;
+	GtkTreeStore *store;
+} Verwendung;
+
+//Fenster "Herkunft und Verwendung"
+typedef struct {
+	Verwendung v;
 	GtkWidget *window;
 	GtkWidget *treeview;
-	GtkTreeStore *store;
 	gint node_id;
 	gchar *file_part;
 	gchar *section;
-} Verwendung;
+} VerwendungFenster;
 
-static void verwendung_free(gpointer data) {
-	Verwendung *v = data;
+static void verwendung_fenster_free(gpointer data) {
+	VerwendungFenster *f = data;
 
-	g_object_unref(v->store);
-	g_free(v->file_part);
-	g_free(v->section);
-	g_free(v);
+	g_object_unref(f->v.store);
+	g_free(f->file_part);
+	g_free(f->section);
+	g_free(f);
 
 	return;
 }
@@ -893,148 +899,151 @@ static void verwendung_zaehlen(GtkTreeStore *store, GtkTreeIter *parent,
 	return;
 }
 
+static gboolean verwendung_treffer_passt(VerwendungTreffer const *t,
+		gint key_id, gint kind) {
+	gboolean pfad_zeile = (kind == KIND_DATEI || kind == KIND_SECTION);
+
+	if (t->key_id != key_id)
+		return FALSE;
+
+	if (t->art == VERWENDUNG_TREFFER_PFAD)
+		return pfad_zeile;
+	if (t->art == VERWENDUNG_TREFFER_TEXT)
+		return !pfad_zeile;
+
+	return TRUE;
+}
+
 typedef struct {
-	gint key_id;
-	GtkTreePath *letzter;
+	VerwendungTreffer const *treffer;
+	guint n_treffer;
+	GPtrArray *pfade; //GtkTreePath* der hervorgehobenen Zeilen
 } Hervorheben;
 
 static gboolean verwendung_hervorheben_foreach(GtkTreeModel *model,
 		GtkTreePath *path, GtkTreeIter *iter, gpointer data) {
 	Hervorheben *h = data;
 	gint key_id = 0;
+	gint kind = 0;
 
-	gtk_tree_model_get(model, iter, COL_KEY_ID, &key_id, -1);
-	if (key_id != h->key_id)
+	gtk_tree_model_get(model, iter, COL_KEY_ID, &key_id, COL_KIND, &kind, -1);
+	if (!key_id)
 		return FALSE;
 
-	gtk_tree_store_set(GTK_TREE_STORE(model), iter, COL_WEIGHT,
-			PANGO_WEIGHT_BOLD, -1);
-
-	if (h->letzter)
-		gtk_tree_path_free(h->letzter);
-	h->letzter = gtk_tree_path_copy(path);
+	for (guint i = 0; i < h->n_treffer; i++)
+		if (verwendung_treffer_passt(&h->treffer[i], key_id, kind)) {
+			gtk_tree_store_set(GTK_TREE_STORE(model), iter, COL_WEIGHT,
+					PANGO_WEIGHT_BOLD, -1);
+			g_ptr_array_add(h->pfade, gtk_tree_path_copy(path));
+			break;
+		}
 
 	return FALSE;
 }
 
-//Ausgangsknoten fett, Pfad dorthin aufgeklappt und ausgewählt
-static void verwendung_hervorheben(Verwendung *v, gint key_id) {
-	Hervorheben h = { key_id, NULL };
+void verwendung_hervorheben(GtkTreeView *treeview,
+		VerwendungTreffer const *treffer, guint n_treffer, gboolean cursor) {
+	Hervorheben h = { treffer, n_treffer, NULL };
 
-	gtk_tree_model_foreach(GTK_TREE_MODEL(v->store),
+	h.pfade = g_ptr_array_new_with_free_func(
+			(GDestroyNotify) gtk_tree_path_free);
+
+	gtk_tree_model_foreach(gtk_tree_view_get_model(treeview),
 			verwendung_hervorheben_foreach, &h);
 
-	if (!h.letzter) {
-		//nichts gefunden: oberste Ebene aufklappen
-		GtkTreePath *path = gtk_tree_path_new_first();
+	//Nur bis zu den Treffern aufklappen - deren Kinder bleiben zu
+	for (guint i = 0; i < h.pfade->len; i++) {
+		GtkTreePath *path = g_ptr_array_index(h.pfade, i);
 
-		gtk_tree_view_expand_row(GTK_TREE_VIEW(v->treeview), path, FALSE);
-		gtk_tree_path_free(path);
+		if (gtk_tree_path_get_depth(path) > 1) {
+			GtkTreePath *parent = gtk_tree_path_copy(path);
 
-		return;
+			gtk_tree_path_up(parent);
+			gtk_tree_view_expand_to_path(treeview, parent);
+			gtk_tree_path_free(parent);
+		}
 	}
 
-	//Nur bis zum Ausgangsknoten aufklappen - seine Kinder bleiben zu
-	if (gtk_tree_path_get_depth(h.letzter) > 1) {
-		GtkTreePath *parent = gtk_tree_path_copy(h.letzter);
+	if (cursor) {
+		if (h.pfade->len) {
+			GtkTreePath *letzter = g_ptr_array_index(h.pfade,
+					h.pfade->len - 1);
 
-		gtk_tree_path_up(parent);
-		gtk_tree_view_expand_to_path(GTK_TREE_VIEW(v->treeview), parent);
-		gtk_tree_path_free(parent);
+			gtk_tree_view_set_cursor(treeview, letzter, NULL, FALSE);
+			gtk_tree_view_scroll_to_cell(treeview, letzter, NULL, TRUE, 0.3,
+					0.0);
+		} else {
+			//nichts gefunden: oberste Ebene aufklappen
+			GtkTreePath *path = gtk_tree_path_new_first();
+
+			gtk_tree_view_expand_row(treeview, path, FALSE);
+			gtk_tree_path_free(path);
+		}
 	}
-	gtk_tree_view_set_cursor(GTK_TREE_VIEW(v->treeview), h.letzter, NULL,
-			FALSE);
-	gtk_tree_view_scroll_to_cell(GTK_TREE_VIEW(v->treeview), h.letzter, NULL,
-			TRUE, 0.3, 0.0);
-	gtk_tree_path_free(h.letzter);
+
+	g_ptr_array_unref(h.pfade);
 
 	return;
 }
 
-static gint verwendung_aufbauen(Verwendung *v, GError **error) {
-	gint rc = 0;
-	gint start = v->node_id;
-	gint strukt_id = 0;
-	gint file_part_id = 0;
-	gint key_id = 0;
-	gint zaehler[KIND_NICHT_VERWENDET + 1] = { 0 };
+GtkTreeStore* verwendung_store_new(void) {
+	return gtk_tree_store_new(NUM_COLS, G_TYPE_INT, G_TYPE_STRING,
+			G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+			G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING,
+			G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT,
+			G_TYPE_INT, G_TYPE_STRING, G_TYPE_INT);
+}
 
-	gtk_tree_store_clear(v->store);
+gint verwendung_ursprung_ermitteln(Projekt *zond, gint node_id,
+		gint *strukt_id, gint *file_part_id, gint *key_id, GError **error) {
+	Verwendung v = { zond, NULL };
 
-	if (!start && v->file_part) {
-		rc = zond_dbase_get_section(verwendung_db(v), v->file_part,
-				v->section, &start, error);
-		if (rc)
-			return -1;
-	}
-
-	if (!start) {
-		//Aus BAUM_FS aufgerufen, Datei kommt in der Projektdatei nicht vor
-		gchar *label = v->section ?
-				g_strdup_printf("%s (%s)", v->file_part, v->section) :
-				g_strdup(v->file_part);
-
-		rc = verwendung_add_enthalten_in(v, v->file_part, error);
-		if (rc) {
-			g_free(label);
-			return -1;
-		}
-
-		verwendung_add_row(v, NULL, NULL, KIND_NICHT_VERWENDET,
-				"text-x-generic", "Datei", label, "nicht angebunden/verwendet",
-				BAUM_FS, 0, v->file_part, v->section, 0);
-		g_free(label);
-
-		return 0;
-	}
-
-	rc = verwendung_ursprung(v, start, &strukt_id, &file_part_id, &key_id,
+	return verwendung_ursprung(&v, node_id, strukt_id, file_part_id, key_id,
 			error);
-	if (rc)
-		return -1;
+}
+
+gint verwendung_store_add_ursprung(Projekt *zond, GtkTreeStore *store,
+		gint strukt_id, gint file_part_id, GError **error) {
+	Verwendung v = { zond, store };
+	gchar *file_part = NULL;
+	gint rc = 0;
 
 	if (strukt_id)
-		rc = verwendung_add_strukt(v, strukt_id, error);
-	else {
-		gchar *file_part = NULL;
+		return verwendung_add_strukt(&v, strukt_id, error);
 
-		rc = zond_dbase_get_node(verwendung_db(v), file_part_id, NULL, NULL,
-				&file_part, NULL, NULL, NULL, NULL, error);
-		if (!rc)
-			rc = verwendung_add_enthalten_in(v, file_part, error);
-		g_free(file_part);
+	rc = zond_dbase_get_node(verwendung_db(&v), file_part_id, NULL, NULL,
+			&file_part, NULL, NULL, NULL, NULL, error);
+	if (!rc)
+		rc = verwendung_add_enthalten_in(&v, file_part, error);
+	g_free(file_part);
 
-		if (!rc)
-			rc = verwendung_add_file_part(v, NULL, file_part_id, TRUE, FALSE,
-					0, error);
-	}
-	if (rc)
-		return -1;
+	if (!rc)
+		rc = verwendung_add_file_part(&v, NULL, file_part_id, TRUE, FALSE, 0,
+				error);
 
-	verwendung_zaehlen(v->store, NULL, zaehler);
-	verwendung_hervorheben(v, key_id);
-
-	return 0;
+	return rc ? -1 : 0;
 }
 
-static void verwendung_aktualisieren(Verwendung *v) {
-	GError *error = NULL;
-	gint rc = 0;
+void verwendung_store_zaehlen(GtkTreeStore *store) {
+	gint zaehler[KIND_NICHT_VERWENDET + 1] = { 0 };
 
-	rc = verwendung_aufbauen(v, &error);
-	if (rc) {
-		display_message(v->window, "Herkunft und Verwendung konnte nicht "
-				"ermittelt werden\n\n", error->message, NULL);
-		g_error_free(error);
-	}
+	verwendung_zaehlen(store, NULL, zaehler);
 
 	return;
 }
 
-static void cb_verwendung_aktualisieren(GtkButton *button, gpointer data) {
-	verwendung_aktualisieren((Verwendung*) data);
+gboolean verwendung_zeile_knoten(GtkTreeModel *model, GtkTreeIter *iter,
+		gint *baum, gint *node_id) {
+	gint kind = 0;
 
-	return;
+	gtk_tree_model_get(model, iter, COL_KIND, &kind, COL_BAUM, baum,
+			COL_NODE_ID, node_id, -1);
+
+	//Links und indirekte Fundstellen sind nur Verweise
+	if (kind == KIND_LINK || kind == KIND_INDIREKT)
+		return FALSE;
+
+	return (*baum == BAUM_INHALT || *baum == BAUM_AUSWERTUNG) && *node_id > 0;
 }
 
 /* Von der Kopfzeile eines Links durch die gespiegelten Zeilen abwärts
@@ -1075,7 +1084,8 @@ static void verwendung_abstieg(GtkTreeModel *model, GtkTreeIter *iter,
 
 static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 		GtkTreePath *path, GtkTreeViewColumn *column, gpointer data) {
-	Verwendung *v = data;
+	Projekt *zond = data;
+	GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
 	GtkTreeIter iter = { 0 };
 	gint baum = KEIN_BAUM;
 	gint node_id = 0;
@@ -1085,34 +1095,33 @@ static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 	gchar *file_part = NULL;
 	gchar *section = NULL;
 
-	if (!gtk_tree_model_get_iter(GTK_TREE_MODEL(v->store), &iter, path))
+	if (!gtk_tree_model_get_iter(model, &iter, path))
 		return;
 
-	gtk_tree_model_get(GTK_TREE_MODEL(v->store), &iter, COL_BAUM, &baum,
-			COL_NODE_ID, &node_id, COL_FILE_PART, &file_part, COL_SECTION,
-			&section, COL_LINK_ID, &link_id, COL_TARGET_ID, &target_id,
-			COL_TARGET_BAUM, &target_baum, -1);
+	gtk_tree_model_get(model, &iter, COL_BAUM, &baum, COL_NODE_ID, &node_id,
+			COL_FILE_PART, &file_part, COL_SECTION, &section, COL_LINK_ID,
+			&link_id, COL_TARGET_ID, &target_id, COL_TARGET_BAUM, &target_baum,
+			-1);
 
 	if (link_id && (target_baum == BAUM_INHALT
 			|| target_baum == BAUM_AUSWERTUNG)) {
 		GtkTreeIter *iter_link = zond_tree_store_get_iter_link(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(v->zond->treeview[target_baum]))),
+						GTK_TREE_VIEW(zond->treeview[target_baum]))),
 				target_id, link_id);
 
 		if (iter_link) {
 			gchar *abstieg = NULL;
 
-			gtk_tree_model_get(GTK_TREE_MODEL(v->store), &iter, COL_ABSTIEG,
-					&abstieg, -1);
+			gtk_tree_model_get(model, &iter, COL_ABSTIEG, &abstieg, -1);
 			if (abstieg)
 				verwendung_abstieg(
 						gtk_tree_view_get_model(
-								GTK_TREE_VIEW(v->zond->treeview[baum])),
+								GTK_TREE_VIEW(zond->treeview[baum])),
 						iter_link, abstieg);
 			g_free(abstieg);
 
-			suchen_springe_zu_iter(v->zond, baum, iter_link);
+			suchen_springe_zu_iter(zond, baum, iter_link);
 			gtk_tree_iter_free(iter_link);
 			g_free(file_part);
 			g_free(section);
@@ -1122,9 +1131,9 @@ static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 	}
 
 	if (baum == BAUM_FS)
-		suchen_springe_zu_baum_fs(v->zond, file_part, section);
+		suchen_springe_zu_baum_fs(zond, file_part, section);
 	else if (baum == BAUM_INHALT || baum == BAUM_AUSWERTUNG)
-		suchen_springe_zu_knoten(v->zond, baum, node_id);
+		suchen_springe_zu_knoten(zond, baum, node_id);
 
 	g_free(file_part);
 	g_free(section);
@@ -1132,8 +1141,10 @@ static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 	return;
 }
 
+/* width_chars > 0: Text wird mit "…" gekürzt, Startbreite in Zeichen;
+ * 0: nicht kürzen, Spalte so breit wie der Inhalt */
 static void verwendung_spalte(GtkWidget *treeview, gchar const *titel,
-		gint col_text, gboolean mit_icon, gboolean expand) {
+		gint col_text, gboolean mit_icon, gboolean expand, gint width_chars) {
 	GtkTreeViewColumn *column = gtk_tree_view_column_new();
 	GtkCellRenderer *renderer = NULL;
 
@@ -1149,7 +1160,9 @@ static void verwendung_spalte(GtkWidget *treeview, gchar const *titel,
 	}
 
 	renderer = gtk_cell_renderer_text_new();
-	g_object_set(renderer, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
+	if (width_chars > 0)
+		g_object_set(renderer, "ellipsize", PANGO_ELLIPSIZE_END, "width-chars",
+				width_chars, NULL);
 	gtk_tree_view_column_pack_start(column, renderer, TRUE);
 	gtk_tree_view_column_add_attribute(column, renderer, "text", col_text);
 	gtk_tree_view_column_add_attribute(column, renderer, "weight", COL_WEIGHT);
@@ -1162,9 +1175,91 @@ static void verwendung_spalte(GtkWidget *treeview, gchar const *titel,
 	return;
 }
 
+GtkWidget* verwendung_treeview_new(Projekt *zond, GtkTreeStore *store) {
+	GtkWidget *treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+
+	gtk_tree_view_set_tooltip_column(GTK_TREE_VIEW(treeview), COL_TOOLTIP);
+	verwendung_spalte(treeview, "Element", COL_ART, TRUE, FALSE, 0);
+	verwendung_spalte(treeview, "Bezeichnung", COL_LABEL, FALSE, TRUE, 30);
+	verwendung_spalte(treeview, "Text", COL_TEXT, FALSE, TRUE, 40);
+	verwendung_spalte(treeview, "Enthält", COL_INFO, FALSE, FALSE, 0);
+	g_signal_connect(treeview, "row-activated",
+			G_CALLBACK(cb_verwendung_row_activated), zond);
+
+	return treeview;
+}
+
+static gint verwendung_aufbauen(VerwendungFenster *f, GError **error) {
+	Verwendung *v = &f->v;
+	gint rc = 0;
+	gint start = f->node_id;
+	gint strukt_id = 0;
+	gint file_part_id = 0;
+	VerwendungTreffer treffer = { 0, VERWENDUNG_TREFFER_ALLE };
+
+	gtk_tree_store_clear(v->store);
+
+	if (!start && f->file_part) {
+		rc = zond_dbase_get_section(verwendung_db(v), f->file_part,
+				f->section, &start, error);
+		if (rc)
+			return -1;
+	}
+
+	if (!start) {
+		//Aus BAUM_FS aufgerufen, Datei kommt in der Projektdatei nicht vor
+		gchar *label = f->section ?
+				g_strdup_printf("%s (%s)", f->file_part, f->section) :
+				g_strdup(f->file_part);
+
+		rc = verwendung_add_enthalten_in(v, f->file_part, error);
+		if (rc) {
+			g_free(label);
+			return -1;
+		}
+
+		verwendung_add_row(v, NULL, NULL, KIND_NICHT_VERWENDET,
+				"text-x-generic", "Datei", label, "nicht angebunden/verwendet",
+				BAUM_FS, 0, f->file_part, f->section, 0);
+		g_free(label);
+
+		return 0;
+	}
+
+	rc = verwendung_ursprung(v, start, &strukt_id, &file_part_id,
+			&treffer.key_id, error);
+	if (rc)
+		return -1;
+
+	rc = verwendung_store_add_ursprung(v->zond, v->store, strukt_id,
+			file_part_id, error);
+	if (rc)
+		return -1;
+
+	verwendung_store_zaehlen(v->store);
+	verwendung_hervorheben(GTK_TREE_VIEW(f->treeview), &treffer, 1, TRUE);
+
+	return 0;
+}
+
+static void cb_verwendung_aktualisieren(GtkButton *button, gpointer data) {
+	VerwendungFenster *f = data;
+	GError *error = NULL;
+	gint rc = 0;
+
+	rc = verwendung_aufbauen(f, &error);
+	if (rc) {
+		display_message(f->window, "Herkunft und Verwendung konnte nicht "
+				"ermittelt werden\n\n", error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
+}
+
 gint verwendung_anzeigen(Projekt *zond, gint node_id, gchar const *file_part,
 		gchar const *section, GError **error) {
-	Verwendung *v = NULL;
+	VerwendungFenster *f = NULL;
 	GtkWidget *vbox = NULL;
 	GtkWidget *swindow = NULL;
 	GtkWidget *bbox = NULL;
@@ -1172,43 +1267,32 @@ gint verwendung_anzeigen(Projekt *zond, gint node_id, gchar const *file_part,
 	GtkWidget *button_schliessen = NULL;
 	gint rc = 0;
 
-	v = g_new0(Verwendung, 1);
-	v->zond = zond;
-	v->node_id = node_id;
-	v->file_part = g_strdup(file_part);
-	v->section = g_strdup(section);
-	v->store = gtk_tree_store_new(NUM_COLS, G_TYPE_INT, G_TYPE_STRING,
-			G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
-			G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_STRING,
-			G_TYPE_STRING, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT,
-			G_TYPE_INT, G_TYPE_STRING, G_TYPE_INT);
+	f = g_new0(VerwendungFenster, 1);
+	f->v.zond = zond;
+	f->v.store = verwendung_store_new();
+	f->node_id = node_id;
+	f->file_part = g_strdup(file_part);
+	f->section = g_strdup(section);
 
-	v->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_title(GTK_WINDOW(v->window), "Herkunft und Verwendung");
-	gtk_window_set_default_size(GTK_WINDOW(v->window), 900, 450);
-	gtk_window_set_transient_for(GTK_WINDOW(v->window),
+	f->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_title(GTK_WINDOW(f->window), "Herkunft und Verwendung");
+	gtk_window_set_default_size(GTK_WINDOW(f->window), 1000, 450);
+	gtk_window_set_transient_for(GTK_WINDOW(f->window),
 			GTK_WINDOW(zond->app_window));
-	g_object_set_data_full(G_OBJECT(v->window), "verwendung", v,
-			verwendung_free);
+	g_object_set_data_full(G_OBJECT(f->window), "verwendung", f,
+			verwendung_fenster_free);
 
-	v->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(v->store));
-	gtk_tree_view_set_tooltip_column(GTK_TREE_VIEW(v->treeview), COL_TOOLTIP);
-	verwendung_spalte(v->treeview, "Element", COL_ART, TRUE, FALSE);
-	verwendung_spalte(v->treeview, "Bezeichnung", COL_LABEL, FALSE, TRUE);
-	verwendung_spalte(v->treeview, "Text", COL_TEXT, FALSE, TRUE);
-	verwendung_spalte(v->treeview, "Enthält", COL_INFO, FALSE, FALSE);
-	g_signal_connect(v->treeview, "row-activated",
-			G_CALLBACK(cb_verwendung_row_activated), v);
+	f->treeview = verwendung_treeview_new(zond, f->v.store);
 
 	swindow = gtk_scrolled_window_new(NULL, NULL);
-	gtk_container_add(GTK_CONTAINER(swindow), v->treeview);
+	gtk_container_add(GTK_CONTAINER(swindow), f->treeview);
 
 	button_aktualisieren = gtk_button_new_with_label("Aktualisieren");
 	button_schliessen = gtk_button_new_with_label("Schließen");
 	g_signal_connect(button_aktualisieren, "clicked",
-			G_CALLBACK(cb_verwendung_aktualisieren), v);
+			G_CALLBACK(cb_verwendung_aktualisieren), f);
 	g_signal_connect_swapped(button_schliessen, "clicked",
-			G_CALLBACK(gtk_widget_destroy), v->window);
+			G_CALLBACK(gtk_widget_destroy), f->window);
 
 	bbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
@@ -1220,17 +1304,17 @@ gint verwendung_anzeigen(Projekt *zond, gint node_id, gchar const *file_part,
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), swindow, TRUE, TRUE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), bbox, FALSE, FALSE, 0);
-	gtk_container_add(GTK_CONTAINER(v->window), vbox);
+	gtk_container_add(GTK_CONTAINER(f->window), vbox);
 
-	rc = verwendung_aufbauen(v, error);
+	rc = verwendung_aufbauen(f, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
-		gtk_widget_destroy(v->window);
+		gtk_widget_destroy(f->window);
 
 		return -1;
 	}
 
-	gtk_widget_show_all(v->window);
+	gtk_widget_show_all(f->window);
 
 	return 0;
 }

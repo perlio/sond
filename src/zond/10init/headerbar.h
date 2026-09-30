@@ -10,6 +10,10 @@ typedef struct _SondTreeviewFM SondTreeviewFM;
 
 void init_headerbar(Projekt*);
 
+/* Baum mit markierter Zeile (KEIN_BAUM, wenn keiner) - unabhängig vom
+ * Fokus, der beim Wechsel in ein anderes Fenster verloren geht */
+Baum zond_baum_mit_auswahl(Projekt*);
+
 /**
  * zond_index_erstellen_ht:
  * @zond:     Projekt

@@ -28,7 +28,8 @@ void zond_treeview_load_textview(Projekt* zond);
 
 void zond_treeview_cursor_changed(ZondTreeview*, gpointer);
 
-gint zond_treeview_get_anchor(Projekt*, gboolean*, GtkTreeIter*,
+//Einfügepunkt am Cursor von Baum baum (BAUM_INHALT/BAUM_AUSWERTUNG)
+gint zond_treeview_get_anchor(Projekt*, gint, gboolean*, GtkTreeIter*,
 		GtkTreeIter*, gint*, gboolean*, GError**);
 
 gint zond_treeview_walk_tree(ZondTreeview*, gboolean, gint, GtkTreeIter*,

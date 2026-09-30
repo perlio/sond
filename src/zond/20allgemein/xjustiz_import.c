@@ -342,7 +342,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	rc = zond_treeview_get_anchor(zond, &child, &iter_cursor, &iter_anchor,
+	rc = zond_treeview_get_anchor(zond, zond->baum_active, &child, &iter_cursor, &iter_anchor,
 			&anchor_id, &in_link, error);
 	if (rc)
 		return -1;
