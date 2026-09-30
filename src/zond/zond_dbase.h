@@ -141,6 +141,11 @@ gint zond_dbase_get_baum_auswertung_copy(ZondDBase*, gint, gint*, GError**);
 gint zond_dbase_get_baum_auswertung_copies(ZondDBase*, gint, GArray**,
 		GError**);
 
+/* Alle Knoten vom Typ type, deren link auf node_id zeigt (Anker, Copies,
+ * Links). *arr_ids ist ein GArray aus gint - Aufrufer gibt es mit
+ * g_array_unref() frei. */
+gint zond_dbase_get_referrers(ZondDBase*, gint, gint, GArray**, GError**);
+
 gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase*, gint, gint*, gint*,
 		GError**);
 

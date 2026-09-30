@@ -4638,4 +4638,71 @@
 
  Klammer-/Kommentarbalance in zond_indexsuche.c programmatisch geprüft -
  ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+
+ #186 Widget "Herkunft und Verwendung" (29.09.2026): zu einem beliebigen
+ Knoten Ursprung und alle Ableitungen anzeigen. Grundlage für die spätere
+ Umstellung des #164-Ergebnisfensters (ersetzt dort Phase 7).
+
+ Modell: Ursprung ist ein STRUKT oder eine Wurzel-FILE_PART (parent_ID=0).
+ FILE_PART-Knoten bilden einen eigenen Baum (Datei -> Sections). Auf jeden
+ FILE_PART zeigen 0-1 Anker (Anbindung), 0-n Copies, 0-n Links; auf Copies
+ und STRUKTs 0-n Links. In BAUM_INHALT trägt die Anbindungszeile die
+ FILE_PART-ID, nicht die Anker-ID - Copies und Links zeigen daher auf den
+ FILE_PART (Altbestand evtl. auf den Anker, wird mitgelesen).
+
+ Anzeige: Baum vollständig, aufgeklappt nur bis zum Ausgangsknoten (fett).
+ Zeilen mit Kindern zeigen Zählung ("2 Sections · 3 Copies"). Angebundene
+ Container (x.zip bei x.zip//a.pdf) als "Enthalten in" oberhalb.
+ Doppelklick springt in den Baum (Links: zum Elternknoten des Links).
+ Später Treffer im Ergebnisfenster: Pfad bis zu den Treffern aufklappen,
+ reiner Dateinamen-Treffer = zugeklappte Wurzelzeile.
+
+ Stand:
+ 1) erledigt: zond_dbase_get_referrers() (zond_dbase.c).
+ 2) erledigt: 20allgemein/verwendung.c/.h, verwendung_anzeigen().
+ 3) erledigt: suchen_springe_zu_knoten()/_zu_baum_fs() öffentlich
+    (suchen.h), von verwendung.c mitbenutzt.
+ 4) erledigt: Menüpunkt "Herkunft und Verwendung" (Strg+Umschalt+J) nur
+    im Hauptmenü neben "Zu Ursprung springen" (Nutzer-Entscheidung, keine
+    Kontextmenüs), cb_win_verwendung() in headerbar.c. Wirkt auf den
+    Cursor im aktiven Baum; BAUM_FS übergibt file_part/section (node_id 0),
+    Verzeichnisse: Hinweis "nicht verfügbar".
+ 5) erledigt: Sprung direkt auf die Kopfzeile eines Links.
+    zond_tree_store_get_iter_link() sucht in der links-Liste der Zielzeile
+    den Eintrag mit head_nr == Link-ID (Kopfzeile eindeutig, gespiegelte
+    Zeilen haben head_nr 0). Link-Zeilen teilen sich die Daten mit dem Ziel
+    (Spalte 2 = Ziel-ID), ht_node_id kennt nur Ursprungsknoten - daher
+    findet get_iter_by_node_id() Links nicht. suchen_springe_zu_iter()
+    ausgelagert, suchen_springe_zu_knoten() nutzt es. Aufruf auf einer
+    Kopfzeile übergibt die Link-ID: Ursprung ist das Ziel, der Link wird
+    markiert.
+ 6) erledigt: indirekte Fundstellen, Stufe 1 - Knoten X ist mit sichtbar,
+    wo ein Link auf einen Vorfahren A von X steht (der Baum spiegelt den
+    Teilbaum von A unter dem Link). verwendung_vorfahren() liefert die
+    angezeigte Vorfahrenkette (Section: übergeordnete Sections bis zur
+    angebundenen, dann Eltern des Ankers; Anker als FILE_PART-ID plus
+    Anker-ID für Altbestand), je Vorfahr zond_dbase_get_referrers(LINK).
+    Anzeige als zugeklappte, kursive Gruppe "indirekt sichtbar" unter
+    Anbindung/Copy/Strukturpunkt. Sprung: Kopfzeile des Links, dann per
+    verwendung_abstieg() durch die gespiegelten Zeilen (nachladen,
+    Spalte 2 vergleichen) bis zu X. Zyklenfrei, da keine Rekursion in
+    Link-Ziele.
+    Nachtrag: bei Sections wird für eine angebundene übergeordnete Section
+    zusätzlich die Anker-ID abgefragt (Altbestand).
+    Punkte 1-6 vom Nutzer mit Test.ZND getestet (30.09.2026).
+ 7) offen: indirekte Fundstellen, Stufe 2 - X ist auch dort sichtbar, wo
+    die Stelle eines Links L (aus Stufe 1) ihrerseits über einen Link L2
+    auf einen Vorfahren von L gespiegelt wird (L2 -> B -> ... -> L -> A ->
+    ... -> X). Breitensuche: Warteschlange der Positionen (Start X), für
+    jede Position deren Vorfahren und die Links darauf sammeln, jeden Link
+    genau einmal weiterverfolgen (Menge "besucht") - sonst Endlosschleife,
+    wenn ein Link auf einen eigenen Vorfahren zeigt (Baum spiegelt dann
+    endlos, nur durch lazy loading nicht sichtbar). Anzeige als Kette
+    "über L2 auf B > L auf A"; Sprung: verwendung_abstieg() je Glied der
+    Kette hintereinander (Kopfzeile L2, abwärts bis zur Spiegelung von L,
+    weiter abwärts bis X). Erst angehen, wenn Stufe 1 im Alltag nicht
+    reicht. Testdaten: C:\Users\nc-kr\laufende Akten\Test\Test.ZND
+    (Anlagenband -> Link Schriftsatz -> Link Gliederung -> Link
+    Beweisthema 1 -> Zeuge Müller) und Test_Zyklus.ZND (zusätzlich Link
+    von Beweisthema 1 auf Gliederung).
  */

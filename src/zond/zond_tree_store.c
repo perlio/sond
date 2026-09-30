@@ -1574,6 +1574,36 @@ GtkTreeIter* zond_tree_store_get_iter_by_node_id(ZondTreeStore *tree_store,
 	return gtk_tree_iter_copy(&iter);
 }
 
+//Kopfzeile (eindeutig über head_nr) aus der links-Liste der Zielzeile
+GtkTreeIter* zond_tree_store_get_iter_link(ZondTreeStore *tree_store,
+		gint target_id, gint head_nr) {
+	GNode *node_target = NULL;
+
+	if (!tree_store || !target_id || head_nr <= 0)
+		return NULL;
+
+	node_target = g_hash_table_lookup(tree_store->priv->ht_node_id,
+			GINT_TO_POINTER(target_id));
+	if (!node_target)
+		return NULL;
+
+	for (GList *list = ((RowData*) node_target->data)->links; list;
+			list = list->next) {
+		RowData *row_data = ((GNode*) list->data)->data;
+
+		if (row_data->head_nr == head_nr) {
+			GtkTreeIter iter = { 0 };
+
+			iter.stamp = row_data->tree_store->priv->stamp;
+			iter.user_data = list->data;
+
+			return gtk_tree_iter_copy(&iter);
+		}
+	}
+
+	return NULL;
+}
+
 //Funktion entfernt nicht etwa parent von iter, sondern iter, und setzt dessen Kinder an Stelle
 void zond_tree_store_kill_parent(GtkTreeIter *iter) {
 	GtkTreeIter child = { 0 };

@@ -33,6 +33,7 @@
 #include "../20allgemein/ziele.h"
 
 #include "project.h"
+#include "suchen.h"
 
 typedef struct _Node {
 	gint zond_suchen;
@@ -254,24 +255,9 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
  * Code. Das ist derselbe offizielle Mechanismus, den auch der neue
  * BAUM_FS-Sprung (suchen_springe_zu_baum_fs()) und praktisch jeder andere
  * programmatische Tree-Sprung im Code nutzt. */
-static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
-	GtkTreeIter *iter = NULL;
-
-	if (!node_id)
+void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
+	if (!iter || (baum != BAUM_INHALT && baum != BAUM_AUSWERTUNG))
 		return;
-
-	/* baum==BAUM_FS kann aus dieser Suche strukturell nie ein gültiges
-	 * Sprungziel sein - node_id ist immer eine "knoten"-Tabellen-ID
-	 * (suchen_db()), BAUM_FS hat aber ein eigenes, dateisystembasiertes
-	 * Baummodell ohne solche IDs. Tritt das trotzdem auf, ist es ein
-	 * Verdrahtungsfehler beim Befüllen der Ergebniszeile (s. #164-Nachtrag
-	 * in ToDo.c) - kein normaler Aufruf. */
-	if (baum == BAUM_FS) {
-		g_warning("suchen_springe_zu_knoten: BAUM_FS als Sprungziel "
-				"angefordert (node_id=%d) - kein gültiges Sprungziel aus "
-				"der Suche, wird ignoriert.", node_id);
-		return;
-	}
 
 	//BAUM_AUSWERTUNG teilt sich die Fläche mit BAUM_FS (zond->hpaned) - ggf.
 	//umschalten; BAUM_INHALT ist immer sichtbar, BAUM_FS an dieser Stelle
@@ -297,15 +283,6 @@ static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
 
-	iter = zond_tree_store_get_iter_by_node_id(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]))),
-			node_id);
-	if (!iter) {
-		g_warning("suchen_springe_zu_knoten: Knoten (node_id=%d) nicht "
-				"(mehr) in Baum %d gefunden.", node_id, baum);
-		return;
-	}
-
 	sond_treeview_expand_to_row(zond->treeview[baum], iter);
 	sond_treeview_set_cursor(zond->treeview[baum], iter);
 
@@ -320,6 +297,39 @@ static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
 	 * also auch dann nicht, wenn "cursor-changed" zufällig schon verbunden
 	 * ist und den Callback ohnehin ausgelöst hat. */
 	zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->treeview[baum]), zond);
+
+	return;
+}
+
+void suchen_springe_zu_knoten(Projekt *zond, gint baum, gint node_id) {
+	GtkTreeIter *iter = NULL;
+
+	if (!node_id)
+		return;
+
+	/* baum==BAUM_FS kann aus dieser Suche strukturell nie ein gültiges
+	 * Sprungziel sein - node_id ist immer eine "knoten"-Tabellen-ID
+	 * (suchen_db()), BAUM_FS hat aber ein eigenes, dateisystembasiertes
+	 * Baummodell ohne solche IDs. Tritt das trotzdem auf, ist es ein
+	 * Verdrahtungsfehler beim Befüllen der Ergebniszeile (s. #164-Nachtrag
+	 * in ToDo.c) - kein normaler Aufruf. */
+	if (baum == BAUM_FS) {
+		g_warning("suchen_springe_zu_knoten: BAUM_FS als Sprungziel "
+				"angefordert (node_id=%d) - kein gültiges Sprungziel aus "
+				"der Suche, wird ignoriert.", node_id);
+		return;
+	}
+
+	iter = zond_tree_store_get_iter_by_node_id(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]))),
+			node_id);
+	if (!iter) {
+		g_warning("suchen_springe_zu_knoten: Knoten (node_id=%d) nicht "
+				"(mehr) in Baum %d gefunden.", node_id, baum);
+		return;
+	}
+
+	suchen_springe_zu_iter(zond, baum, iter);
 
 	gtk_tree_iter_free(iter);
 
@@ -363,7 +373,7 @@ static void cb_lb_row_activated(GtkWidget *listbox, GtkWidget *row,
  * BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst wird. Testweise entfernt
  * (Nachtrag #182) und vom Nutzer per "Kein unselect" widerlegt - wieder
  * eingebaut. */
-static void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
+void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
 		gchar const *section) {
 	GError *error = NULL;
 	gint rc = 0;

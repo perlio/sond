@@ -131,5 +131,12 @@ void zond_tree_store_kill_parent(GtkTreeIter*);
 GtkTreeIter* zond_tree_store_get_iter_by_node_id(ZondTreeStore *tree_store,
 		gint node_id);
 
+/* Kopfzeile des Links head_nr (knoten-ID des Links), der auf target_id in
+ tree_store zeigt. Die Kopfzeile kann in einem anderen Store liegen
+ (zond_tree_store_get_tree_store()). Rückgabe wie oben (gtk_tree_iter_free())
+ oder NULL. */
+GtkTreeIter* zond_tree_store_get_iter_link(ZondTreeStore *tree_store,
+		gint target_id, gint head_nr);
+
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

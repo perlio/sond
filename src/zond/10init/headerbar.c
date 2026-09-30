@@ -47,6 +47,7 @@
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/suchen.h"
+#include "../20allgemein/verwendung.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
 #include "../20allgemein/xjustiz_import.h"
@@ -621,6 +622,65 @@ static void cb_win_anb_entf(GSimpleAction *a, GVariant *p, gpointer d) {
 	activate_baum_action((Projekt*) d, "anb-entf"); }
 static void cb_win_jump(GSimpleAction *a, GVariant *p, gpointer d) {
 	activate_baum_action((Projekt*) d, "jump"); }
+//Herkunft und Verwendung des Knotens unter dem Cursor im aktiven Baum (#186)
+static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+
+	if (zond->baum_active == KEIN_BAUM || !zond->dbase_zond)
+		return;
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+		return;
+
+	if (zond->baum_active == BAUM_FS) {
+		SondTVFMItem *stvfm_item = NULL;
+		SondTVFMItemType type = 0;
+
+		gtk_tree_model_get(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+				&iter, 0, &stvfm_item, -1);
+		if (!stvfm_item)
+			return;
+
+		type = sond_tvfm_item_get_item_type(stvfm_item);
+		if (type == SOND_TVFM_ITEM_TYPE_DIR)
+			display_message(zond->app_window,
+					"Für Verzeichnisse nicht verfügbar", NULL);
+		else {
+			g_autofree gchar *file_part = sond_file_part_get_filepart(
+					sond_tvfm_item_get_sond_file_part(stvfm_item));
+
+			rc = verwendung_anzeigen(zond, 0, file_part,
+					(type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) ?
+							sond_tvfm_item_get_path_or_section(stvfm_item) :
+							NULL, &error);
+		}
+
+		g_object_unref(stvfm_item);
+	} else {
+		gint node_id = 0;
+
+		//Kopfzeile eines Links: Link selbst (Ursprung = Ziel, Link markiert);
+		//sonst liefert Spalte 2 auch bei gespiegelten Zeilen die Ziel-ID
+		node_id = zond_tree_store_get_link_head_nr(&iter);
+		if (!node_id)
+			gtk_tree_model_get(
+					gtk_tree_view_get_model(
+							GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
+					&iter, 2, &node_id, -1);
+
+		rc = verwendung_anzeigen(zond, node_id, NULL, NULL, &error);
+	}
+
+	if (rc) {
+		display_message(zond->app_window,
+				"Herkunft und Verwendung nicht verfügbar\n\n", error->message,
+				NULL);
+		g_error_free(error);
+	}
+}
 static void cb_win_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
 	activate_baum_action((Projekt*) d, "oeffnen"); }
 static void cb_win_oeffnen_mit(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -1081,6 +1141,7 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("loeschen",      cb_win_loeschen);
 	WIN_ACT("anb-entf",      cb_win_anb_entf);
 	WIN_ACT("jump",          cb_win_jump);
+	WIN_ACT("verwendung",    cb_win_verwendung);
 	WIN_ACT("oeffnen",       cb_win_oeffnen);
 	WIN_ACT("oeffnen-mit",   cb_win_oeffnen_mit);
 	WIN_ACT("suchen",        cb_win_suchen);
@@ -1135,6 +1196,7 @@ static void init_win_actions(Projekt *zond) {
 		{ "win.paste-link-up",  "<Control><Shift>l"  },
 		{ "win.loeschen",       "<Control>Delete"    },
 		{ "win.jump",           "<Control>j"         },
+		{ "win.verwendung",     "<Control><Shift>j"  },
 		{ "win.oeffnen",        "<Control>o"         },
 	};
 	for (guint i = 0; i < G_N_ELEMENTS(accels); i++) {
@@ -1265,6 +1327,7 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append(sec_edit, "Löschen",              "win.loeschen");
 	g_menu_append(sec_edit, "Anbindung entfernen",  "win.anb-entf");
 	g_menu_append(sec_edit, "Zu Ursprung springen", "win.jump");
+	g_menu_append(sec_edit, "Herkunft und Verwendung", "win.verwendung");
 	g_menu_append_section(m_bear, NULL, G_MENU_MODEL(sec_edit));
 	g_object_unref(sec_edit);
 

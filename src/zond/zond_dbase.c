@@ -1828,6 +1828,50 @@ gint zond_dbase_get_baum_auswertung_copies(ZondDBase *zond_dbase, gint node_id,
 	return 0;
 }
 
+//Alle Knoten vom Typ type, deren link auf node_id zeigt (nutzt idx_knoten_type_link)
+gint zond_dbase_get_referrers(ZondDBase *zond_dbase, gint node_id, gint type,
+		GArray **arr_ids, GError **error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] = { "SELECT ID FROM knoten WHERE type=?1 AND link=?2 "
+			"ORDER BY ID;" };
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc)
+		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
+	rc = sqlite3_bind_int(stmt[0], 1, type);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_bind_int(stmt[0], 2, node_id);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	*arr_ids = g_array_new(FALSE, FALSE, sizeof(gint));
+
+	do {
+		gint id = 0;
+
+		rc = sqlite3_step(stmt[0]);
+		if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+			g_array_unref(*arr_ids);
+			*arr_ids = NULL;
+			ERROR_Z_DBASE
+		} else if (rc == SQLITE_DONE)
+			break;
+
+		id = sqlite3_column_int(stmt[0], 0);
+		g_array_append_val(*arr_ids, id);
+	} while (rc == SQLITE_ROW);
+
+	return 0;
+}
+
 /*	Diese Funktion prüft, ob der Knoten ID oder einer seiner Kinder
  * 	im BAUM_INHALT als BAUM_INHALT_FILE angeknüpft ist.
  * 	Falls ja, wird die ID des BAUM_INHALT_FILE-Knotens und des FILE_PART-Knoten,
