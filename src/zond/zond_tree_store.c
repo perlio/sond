@@ -709,6 +709,30 @@ static void zond_tree_store_insert_dummy(GNode *parent_node) {
 	return;
 }
 
+//Kinder noch nicht geladen: einziges Kind ist der Dummy (head_nr -1)
+static gboolean zond_tree_store_node_is_unloaded(GNode *node) {
+	return node->children
+			&& ((RowData*) node->children->data)->head_nr == -1;
+}
+
+/* Ist node eine noch nicht geladene Link-Zeile (auch gespiegelt), wird sie
+ * geladen. Nötig, bevor ihre Kinder gespiegelt werden können - sonst gäbe es
+ * dort nur den Dummy. */
+static void zond_tree_store_ensure_loaded(GNode *node) {
+	GtkTreeIter iter = { 0 };
+
+	if (!((RowData*) node->data)->target
+			|| !zond_tree_store_node_is_unloaded(node))
+		return;
+
+	iter.stamp = ((RowData*) node->data)->tree_store->priv->stamp;
+	iter.user_data = node;
+
+	zond_tree_store_load_link(&iter);
+
+	return;
+}
+
 static void zond_tree_store_insert_linked_nodes(GNode *node_parent, gint pos,
 		GNode *orig_new) {
 	GList *list = NULL;
@@ -724,6 +748,11 @@ static void zond_tree_store_insert_linked_nodes(GNode *node_parent, gint pos,
 		//wenn link-head und noch kein Kind: dummy einf�gen
 		if (((RowData*) parent_link->data)->head_nr && !parent_link->children)
 			zond_tree_store_insert_dummy(parent_link);
+		//noch nicht geladen (nur Dummy): wird beim Aufklappen vollständig
+		//geladen - jetzt einfügen hieße, der Dummy bliebe neben echten Kindern
+		//stehen und die Zeile gälte als geladen
+		else if (zond_tree_store_node_is_unloaded(parent_link))
+			;
 		//oder link-head, aber schon geladen, oder kein link-head: volles programm
 		else if ((((RowData*) parent_link->data)->head_nr
 				&& parent_link->children
@@ -924,29 +953,21 @@ static void zond_tree_store_load_node(GNode *node_parent,
 					((RowData*) node_target_child->data)->target, 0,
 					node_parent, pos, NULL, FALSE);
 		else if (((RowData*) node_target_child->data)->head_nr == -1) //Kind ist dummy
-				{ /* kommt vor, wenn link auf Knoten, der Kind hat, das auf Knoten
-				 verweist (node_parent_target ist selbst noch ein unaufgelöster
-				 Link - sein einziges Kind ist der Dummy, der beim ersten
-				 Anlegen dieses Links eingefügt wurde, weil sein eigenes Ziel
-				 Kinder hat). Es muss dann das ZIEL von node_parent_target
-				 gespiegelt werden, nicht node_parent_target selbst - sonst
-				 entsteht ein Link auf sich selbst (node_parent_target bleibt
-				 für immer "Kind ist dummy"), der beim nächsten Aufklappen
-				 exakt denselben Dummy-Fall erneut auslöst: endlose
-				 Selbst-Verschachtelung (Bug, s. ToDo.c). */
-			GNode *node_target_resolved = node_parent_target;
-			GNode *node_next = NULL;
-
-			while ((node_next =
-					((RowData*) node_target_resolved->data)->target))
-				node_target_resolved = node_next;
-
-			zond_tree_store_insert_link_at_pos(node_target_resolved, 0,
-					node_parent, pos, NULL, FALSE);
-		} else //Kind ist kein link
+			/* Darf nicht vorkommen: node_parent_target wird vor dem Spiegeln
+			 geladen (zond_tree_store_ensure_loaded() in load_link bzw. vor
+			 der Rekursion unten). Früher wurde hier ein Link auf das
+			 aufgelöste Ziel selbst eingefügt - das ergab das Ziel als
+			 eigenes Kind (s. ToDo.c #187). */
+			g_warning("zond_tree_store_load_node: Dummy in noch nicht "
+					"geladenem Ziel - übersprungen");
+		else //Kind ist kein link
 		{
 			GtkTreeIter iter_new = { 0 };
 			RowData *row_data = NULL;
+
+			//Vor dem Anlegen der Spiegelzeile laden - sonst würden die dabei
+			//weitergereichten Kinder in der neuen Zeile doppelt landen
+			zond_tree_store_ensure_loaded(node_target_child);
 
 			//Hauptknoten erzeugen
 			_do_zond_tree_store_insert(node_parent, pos, &iter_new);
@@ -991,6 +1012,11 @@ void zond_tree_store_load_link(GtkTreeIter *iter_head) {
 
 	//Ziel ist ziel des link-heads
 	node_target = ((RowData*) G_NODE(iter_head->user_data)->data)->target;
+
+	//Ziel ist selbst eine noch nicht geladene Link-Zeile (gespiegelter Link):
+	//erst sie laden, sonst gibt es nichts zu spiegeln. Die weitergereichten
+	//Kinder übergehen iter_head, da es noch nur den Dummy hat.
+	zond_tree_store_ensure_loaded(node_target);
 	//Falls zu �ffnender link auf Head-link zeigt, und nicht unmittelbar auf Knoten:
 //    if ( ((RowData*) node_target->data)->head_nr ) node_target = ((RowData*) node_target->data)->target;
 

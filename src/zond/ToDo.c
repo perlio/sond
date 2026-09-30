@@ -4705,4 +4705,30 @@
     (Anlagenband -> Link Schriftsatz -> Link Gliederung -> Link
     Beweisthema 1 -> Zeuge Müller) und Test_Zyklus.ZND (zusätzlich Link
     von Beweisthema 1 auf Gliederung).
+
+ #187 Bug (30.09.2026, Nutzer-Fund mit Test.ZND): Schriftsatz -> Link
+ Gliederung -> gespiegelter Link Beweisthema 1 zeigte als Kinder Zeuge
+ Müller, a.pdf (Kopie) UND noch einmal Beweisthema 1.
+
+ Ursache (zond_tree_store.c): Ein gespiegelter Link M zeigt auf die
+ Kopfzeile L des Links, nicht auf den Ursprung. Wurde M aufgeklappt,
+ solange L selbst noch nicht geladen war (nur Dummy), fügte der
+ Dummy-Zweig in zond_tree_store_load_node() einen Link auf das aufgelöste
+ Ziel als einziges Kind ein - das Ziel erschien als eigenes Kind. Beim
+ späteren Laden von L wurden dessen Kinder zusätzlich an M weitergereicht.
+ Zweiter Fehler: zond_tree_store_insert_linked_nodes() reichte neue Kinder
+ auch an gespiegelte Zeilen weiter, die noch nicht geladen waren - danach
+ standen echte Kinder neben dem Dummy, die Zeile galt als geladen und
+ wurde nie vollständig geladen (Links darunter fehlten, Dummy sichtbar).
+
+ Fix: zond_tree_store_ensure_loaded() lädt eine noch nicht geladene
+ Link-Zeile, bevor ihre Kinder gespiegelt werden (in load_link für das
+ Ziel, in load_node vor der Rekursion in ein Kind). insert_linked_nodes()
+ überspringt noch nicht geladene Zeilen. Der Dummy-Zweig in load_node ist
+ damit unerreichbar und gibt nur noch eine Warnung aus.
+
+ Testen mit Test.ZND/Test_Zyklus.ZND: gespiegelten Link zuerst, dann den
+ echten aufklappen und umgekehrt; in Test_Zyklus tief verschachteln; neuen
+ Punkt unter Beweisthema 1 anlegen - muß an jeder Spiegelstelle genau
+ einmal erscheinen. Alle Tests vom Nutzer bestanden (30.09.2026).
  */
