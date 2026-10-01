@@ -4690,7 +4690,7 @@
     Nachtrag: bei Sections wird für eine angebundene übergeordnete Section
     zusätzlich die Anker-ID abgefragt (Altbestand).
     Punkte 1-6 vom Nutzer mit Test.ZND getestet (30.09.2026).
- 7) offen: indirekte Fundstellen, Stufe 2 - X ist auch dort sichtbar, wo
+ 7) erledigt (01.10.2026): indirekte Fundstellen, Stufe 2 - X ist auch dort sichtbar, wo
     die Stelle eines Links L (aus Stufe 1) ihrerseits über einen Link L2
     auf einen Vorfahren von L gespiegelt wird (L2 -> B -> ... -> L -> A ->
     ... -> X). Breitensuche: Warteschlange der Positionen (Start X), für
@@ -4705,6 +4705,14 @@
     (Anlagenband -> Link Schriftsatz -> Link Gliederung -> Link
     Beweisthema 1 -> Zeuge Müller) und Test_Zyklus.ZND (zusätzlich Link
     von Beweisthema 1 auf Gliederung).
+    Umsetzung: verwendung_add_indirekt() als Breitensuche über Positionen
+    (IndirektPos: Knoten oder Link, Abstiegsrest, Beschriftung, Links des
+    Weges). Zyklenschutz je Weg (jeder Link nur einmal), dazu Grenzen
+    VERWENDUNG_MAX_KETTE (8 Links je Weg) und VERWENDUNG_MAX_INDIREKT (200
+    Fundstellen, danach Hinweiszeile). Eine gespiegelte Link-Zeile trägt in
+    Spalte 2 die ID ihres Ziels - der Abstieg setzt sich daher aus den
+    Teilwegen der Glieder zusammen (verwendung_link_anzeige_id()).
+    Beschriftung von außen nach innen, Glieder mit " › " getrennt.
 
  #187 Bug (30.09.2026, Nutzer-Fund mit Test.ZND): Schriftsatz -> Link
  Gliederung -> gespiegelter Link Beweisthema 1 zeigte als Kinder Zeuge
@@ -4807,4 +4815,43 @@
  Umbenennen im Baum (darf nicht den Baum betreffen); Wechsel zwischen
  Bäumen hebt die Markierung des vorherigen auf; Kopieren aus dem
  Ergebnisfenster der Suche.
+
+ #190 Bug (01.10.2026, Nutzer-Fund): Copy auf oberster Ebene von
+ BAUM_AUSWERTUNG öffnet nicht (keine Meldung). Ursache:
+ zond_treeview_determine_iter_parent() liefert bei einer Copy deren
+ Elternknoten als Grundlage des Auszugs - auf oberster Ebene gibt es
+ keinen (Wurzel unsichtbar), dann den Klick-Knoten selbst
+ ("Notlösung"); open_auszug() sammelt dessen Kinder, der Auszug ist leer.
+ Gleiches gilt, wenn die Link-Kette im "else"-Zweig bis ganz oben
+ klettert. Fix in zond_treeview_open_node(): ist iter_parent der
+ Klick-Knoten selbst und trägt das Ziel eigenen Inhalt (file_part),
+ Einzelansicht wie bei Strg (single_view) - inkl. Einzeldatei-
+ Hydrierungscheck. Ein direkt angeklickter Strukturpunkt (kein
+ file_part) läuft unverändert über den Auszug seiner Kinder.
+ Vom Nutzer getestet (01.10.2026).
+
+ #191 offen (zurückgestellt, 01.10.2026): Index erstellen (Auswahl) für
+ einen PDF-Filepart aus BAUM_INHALT/BAUM_AUSWERTUNG indiziert die ganze
+ Datei samt eingebetteter Dateien - gemeint ist nur der Pagetree
+ (Einbettungen sind eigene Fileparts "x.pdf//anhang.pdf"). Ursache:
+ process_pdf_for_ocr() (sond_process_file.c) durchläuft per
+ pdf_walk_embedded_files() IMMER alle Einbettungen, auch bei
+ Seitenbereich. Gleicher Fehler beim "PageTree"-Knoten in BAUM_FS
+ (zond_treeviewfm_item_get_fileparts(): range NULL = ganze Datei).
+ Coverage: "x.pdf" bedeutet derzeit "Seiten und alle Einbettungen"
+ (Ahnen-Walk in coverage_get()), darf also bei reinem Seitenlauf nicht
+ gesetzt werden. Plan: Flag pdf_pagetree_only in SondPageRange (analog
+ gmessage_header_only), Einbettungen nur bei ganzer Datei verarbeiten,
+ eigener Coverage-Schlüssel "x.pdf//pagetree" (Chunks/pages bleiben
+ unter "x.pdf"; ohne Einbettungen gleich "x.pdf" markieren),
+ clean_hashtable() Kinder dann nicht entfernen, Index löschen und
+ Badges/check_coverage_one() anpassen. Später ggf. Collapse
+ pagetree + alle Einbettungen -> "x.pdf".
+
+ #192 offen (01.10.2026): GLib-GIO-CRITICAL "GFileInfo created without
+ standard::type" (g_file_info_get_file_type) tritt häufig in einem
+ Projekt mit angebundener Section auf. Kein eigener Aufruf von
+ g_file_info_get_file_type() im Code - Auslöser in GLib/GTK. Nächster
+ Schritt: Stacktrace per G_DEBUG=fatal-criticals (Eclipse-Debug-
+ Konfiguration, Environment).
  */

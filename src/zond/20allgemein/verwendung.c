@@ -402,107 +402,218 @@ static gint verwendung_anzeige_baum(Verwendung *v, gint id, gint *baum,
 	return 0;
 }
 
-/* Indirekte Fundstellen (Stufe 1): node_id ist mit sichtbar, wo ein Link
- * auf einen seiner Vorfahren steht. Als zugeklappte Gruppe unter parent. */
+//Grenzen für indirekte Fundstellen: Links je Weg, Fundstellen insgesamt
+#define VERWENDUNG_MAX_KETTE 8
+#define VERWENDUNG_MAX_INDIREKT 200
+
+/* Position der Breitensuche: der Knoten selbst oder ein Link, über den er
+ * sichtbar ist */
+typedef struct {
+	gint node_id;
+	gint anzeige_id; //Spalte 2 der Baumzeile (Link: sein Ziel)
+	gchar *rest; //IDs unterhalb dieser Zeile bis zum Knoten ("" = Knoten selbst)
+	gchar *kette; //Beschriftung des Weges ab hier (NULL = Knoten selbst)
+	GArray *links; //Links dieses Weges (jeder nur einmal - gegen Zyklen)
+} IndirektPos;
+
+static void indirekt_pos_free(gpointer data) {
+	IndirektPos *pos = data;
+
+	g_free(pos->rest);
+	g_free(pos->kette);
+	g_array_unref(pos->links);
+	g_free(pos);
+
+	return;
+}
+
+static gboolean indirekt_pos_hat_link(IndirektPos *pos, gint link_id) {
+	for (guint i = 0; i < pos->links->len; i++)
+		if (g_array_index(pos->links, gint, i) == link_id)
+			return TRUE;
+
+	return FALSE;
+}
+
+//ID, die die Baumzeile eines Links in Spalte 2 trägt: sein Ziel
+static gint verwendung_link_anzeige_id(Verwendung *v, gint link_id,
+		gint *anzeige_id, GError **error) {
+	gint rc = 0;
+	gint ziel = 0;
+	gint type = 0;
+	gint link = 0;
+
+	rc = zond_dbase_get_type_and_link(verwendung_db(v), link_id, NULL, &ziel,
+			error);
+	if (rc)
+		return -1;
+
+	rc = zond_dbase_get_type_and_link(verwendung_db(v), ziel, &type, &link,
+			error);
+	if (rc)
+		return -1;
+
+	//Altbestand: Link auf den Anker - angezeigt wird der FILE_PART
+	*anzeige_id = (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) ? link : ziel;
+
+	return 0;
+}
+
+/* Indirekte Fundstellen: node_id ist mit sichtbar, wo ein Link auf einen
+ * seiner Vorfahren steht (Stufe 1) - und weiter überall, wo die Stelle eines
+ * solchen Links wiederum über einen Link auf einen ihrer Vorfahren
+ * gespiegelt wird (Stufe 2, Breitensuche). Als zugeklappte Gruppe unter
+ * parent. */
 static gint verwendung_add_indirekt(Verwendung *v, GtkTreeIter *parent,
 		gint node_id, GError **error) {
-	GArray *arr_anzeige = NULL;
-	GArray *arr_alt = NULL;
+	GQueue queue = G_QUEUE_INIT;
+	IndirektPos *start = g_new0(IndirektPos, 1);
+	IndirektPos *pos = NULL;
 	GtkTreeIter iter_gruppe = { 0 };
 	gboolean gruppe = FALSE;
+	gboolean gekappt = FALSE;
+	gint anzahl = 0;
 	gint rc = 0;
 
-	rc = verwendung_vorfahren(v, node_id, &arr_anzeige, &arr_alt, error);
-	if (rc)
-		goto end;
+	start->node_id = node_id;
+	start->anzeige_id = node_id;
+	start->rest = g_strdup("");
+	start->links = g_array_new(FALSE, FALSE, sizeof(gint));
+	g_queue_push_tail(&queue, start);
 
-	for (guint i = 0; i < arr_anzeige->len && !rc; i++) {
-		gint vorfahr = g_array_index(arr_anzeige, gint, i);
-		gint ziele[2] = { vorfahr, g_array_index(arr_alt, gint, i) };
-		gint target_baum = KEIN_BAUM;
-		gchar *name_vorfahr = NULL;
-		GString *abstieg = g_string_new(NULL);
+	while (!rc && !gekappt && (pos = g_queue_pop_head(&queue))) {
+		GArray *arr_anzeige = NULL;
+		GArray *arr_alt = NULL;
 
-		//IDs unterhalb des Vorfahren bis node_id
-		for (gint k = (gint) i - 1; k >= 0; k--)
-			g_string_append_printf(abstieg, "%d,",
-					g_array_index(arr_anzeige, gint, k));
-		g_string_append_printf(abstieg, "%d", node_id);
+		rc = verwendung_vorfahren(v, pos->node_id, &arr_anzeige, &arr_alt,
+				error);
 
-		rc = verwendung_node_text(v, vorfahr, &name_vorfahr, error);
-		if (!rc)
-			rc = verwendung_anzeige_baum(v, vorfahr, &target_baum, error);
+		for (guint i = 0; !rc && i < arr_anzeige->len; i++) {
+			gint vorfahr = g_array_index(arr_anzeige, gint, i);
+			gint ziele[2] = { vorfahr, g_array_index(arr_alt, gint, i) };
+			gint target_baum = KEIN_BAUM;
+			gchar *name_vorfahr = NULL;
+			GString *abstieg = g_string_new(NULL);
 
-		for (gint z = 0; z < 2 && !rc; z++) {
-			GArray *arr_links = NULL;
+			//IDs unterhalb des Vorfahren bis zur Position, dann weiter bis node_id
+			for (gint k = (gint) i - 1; k >= 0; k--)
+				g_string_append_printf(abstieg, "%d,",
+						g_array_index(arr_anzeige, gint, k));
+			g_string_append_printf(abstieg, "%d", pos->anzeige_id);
+			if (*pos->rest)
+				g_string_append_printf(abstieg, ",%s", pos->rest);
 
-			if (!ziele[z])
-				continue;
+			rc = verwendung_node_text(v, vorfahr, &name_vorfahr, error);
+			if (!rc)
+				rc = verwendung_anzeige_baum(v, vorfahr, &target_baum, error);
 
-			rc = zond_dbase_get_referrers(verwendung_db(v), ziele[z],
-					ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, &arr_links, error);
-			if (rc)
-				break;
+			for (gint z = 0; z < 2 && !rc; z++) {
+				GArray *arr_links = NULL;
 
-			for (guint j = 0; j < arr_links->len && !rc; j++) {
-				gint link_id = g_array_index(arr_links, gint, j);
-				gint link_parent = 0;
-				gint root = 0;
-				gchar *pfad = NULL;
-				gchar *label = NULL;
-				GtkTreeIter iter = { 0 };
+				if (!ziele[z])
+					continue;
 
-				rc = zond_dbase_get_parent(verwendung_db(v), link_id,
-						&link_parent, error);
-				if (!rc)
-					rc = zond_dbase_get_tree_root(verwendung_db(v), link_id,
-							&root, error);
-				if (!rc && link_parent > BAUM_AUSWERTUNG)
-					rc = verwendung_pfad(v, link_parent, &pfad, error);
+				rc = zond_dbase_get_referrers(verwendung_db(v), ziele[z],
+						ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, &arr_links, error);
 				if (rc)
 					break;
 
-				if (!gruppe) {
-					verwendung_add_row(v, parent, &iter_gruppe,
-							KIND_INDIREKT_GRUPPE, "emblem-symbolic-link",
-							"indirekt sichtbar", NULL, NULL, KEIN_BAUM, 0, NULL,
-							NULL, 0);
-					gtk_tree_store_set(v->store, &iter_gruppe, COL_STYLE,
-							PANGO_STYLE_ITALIC, -1);
-					gruppe = TRUE;
+				for (guint j = 0; j < arr_links->len && !rc; j++) {
+					gint link_id = g_array_index(arr_links, gint, j);
+					gint link_parent = 0;
+					gint root = 0;
+					gchar *pfad = NULL;
+					gchar *label = NULL;
+					gchar *tooltip = NULL;
+					GtkTreeIter iter = { 0 };
+
+					if (indirekt_pos_hat_link(pos, link_id))
+						continue; //Zyklus: Link schon in diesem Weg
+
+					if (anzahl >= VERWENDUNG_MAX_INDIREKT) {
+						gekappt = TRUE;
+						break;
+					}
+
+					rc = zond_dbase_get_parent(verwendung_db(v), link_id,
+							&link_parent, error);
+					if (!rc)
+						rc = zond_dbase_get_tree_root(verwendung_db(v), link_id,
+								&root, error);
+					if (!rc && link_parent > BAUM_AUSWERTUNG)
+						rc = verwendung_pfad(v, link_parent, &pfad, error);
+					if (rc)
+						break;
+
+					if (!gruppe) {
+						verwendung_add_row(v, parent, &iter_gruppe,
+								KIND_INDIREKT_GRUPPE, "emblem-symbolic-link",
+								"indirekt sichtbar", NULL, NULL, KEIN_BAUM, 0,
+								NULL, NULL, 0);
+						gtk_tree_store_set(v->store, &iter_gruppe, COL_STYLE,
+								PANGO_STYLE_ITALIC, -1);
+						gruppe = TRUE;
+					}
+
+					label = g_strdup_printf("über Link auf „%s“ – %s%s%s",
+							name_vorfahr ? name_vorfahr : "?",
+							pfad ? pfad : "oberste Ebene",
+							pos->kette ? "  ›  " : "",
+							pos->kette ? pos->kette : "");
+					tooltip = g_markup_escape_text(label, -1);
+
+					verwendung_add_row(v, &iter_gruppe, &iter, KIND_INDIREKT,
+							"emblem-symbolic-link", "indirekt", label, NULL,
+							(root == BAUM_INHALT || root == BAUM_AUSWERTUNG) ?
+									root : KEIN_BAUM,
+							(link_parent > BAUM_AUSWERTUNG) ? link_parent : 0,
+							NULL, NULL, 0);
+					gtk_tree_store_set(v->store, &iter, COL_LINK_ID, link_id,
+							COL_TARGET_ID, vorfahr, COL_TARGET_BAUM,
+							target_baum, COL_ABSTIEG, abstieg->str,
+							COL_STYLE, PANGO_STYLE_ITALIC, COL_TOOLTIP,
+							tooltip, -1);
+					anzahl++;
+
+					//Stelle dieses Links ist selbst eine Position (Stufe 2)
+					if (pos->links->len + 1 < VERWENDUNG_MAX_KETTE) {
+						IndirektPos *neu = g_new0(IndirektPos, 1);
+
+						neu->node_id = link_id;
+						rc = verwendung_link_anzeige_id(v, link_id,
+								&neu->anzeige_id, error);
+						neu->rest = g_strdup(abstieg->str);
+						neu->kette = g_strdup(label);
+						neu->links = g_array_copy(pos->links);
+						g_array_append_val(neu->links, link_id);
+						g_queue_push_tail(&queue, neu);
+					}
+
+					g_free(pfad);
+					g_free(label);
+					g_free(tooltip);
 				}
 
-				label = g_strdup_printf("über Link auf „%s“ – %s",
-						name_vorfahr ? name_vorfahr : "?",
-						pfad ? pfad : "oberste Ebene");
-
-				verwendung_add_row(v, &iter_gruppe, &iter, KIND_INDIREKT,
-						"emblem-symbolic-link", "indirekt", label, NULL,
-						(root == BAUM_INHALT || root == BAUM_AUSWERTUNG) ?
-								root : KEIN_BAUM,
-						(link_parent > BAUM_AUSWERTUNG) ? link_parent : 0,
-						NULL, NULL, 0);
-				gtk_tree_store_set(v->store, &iter, COL_LINK_ID, link_id,
-						COL_TARGET_ID, vorfahr, COL_TARGET_BAUM, target_baum,
-						COL_ABSTIEG, abstieg->str, COL_STYLE,
-						PANGO_STYLE_ITALIC, -1);
-
-				g_free(pfad);
-				g_free(label);
+				g_array_unref(arr_links);
 			}
 
-			g_array_unref(arr_links);
+			g_free(name_vorfahr);
+			g_string_free(abstieg, TRUE);
 		}
 
-		g_free(name_vorfahr);
-		g_string_free(abstieg, TRUE);
+		if (arr_anzeige)
+			g_array_unref(arr_anzeige);
+		if (arr_alt)
+			g_array_unref(arr_alt);
+		indirekt_pos_free(pos);
 	}
 
-	end:
-	if (arr_anzeige)
-		g_array_unref(arr_anzeige);
-	if (arr_alt)
-		g_array_unref(arr_alt);
+	g_queue_clear_full(&queue, indirekt_pos_free);
+
+	if (!rc && gekappt)
+		verwendung_add_row(v, &iter_gruppe, NULL, KIND_INDIREKT_GRUPPE, NULL,
+				"…", "weitere Fundstellen nicht angezeigt (Grenze erreicht)",
+				NULL, KEIN_BAUM, 0, NULL, NULL, 0);
 
 	return rc ? -1 : 0;
 }

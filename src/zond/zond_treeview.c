@@ -3048,6 +3048,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	Baum baum_click = KEIN_BAUM;
 	GtkTreeIter iter_parent = { 0 };
 	gboolean have_iter_parent = FALSE;
+	gboolean single_view = FALSE;
 	gchar *file_part_target = NULL;
 
 	//Baum der KLICKPOSITION (unaufgelöst) - entscheidet, ob überhaupt
@@ -3087,6 +3088,16 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 				return -1;
 			}
 			have_iter_parent = TRUE;
+
+			/* Kein echter Elternknoten (z.B. Copy auf oberster Ebene von
+			 * BAUM_AUSWERTUNG): determine_iter_parent() liefert dann den
+			 * Klick-Knoten selbst, dessen Kinder-Auszug leer wäre. Trägt
+			 * das Ziel eigenen Inhalt, stattdessen Einzelansicht wie bei
+			 * Strg - auch für den Hydrierungscheck unten (Einzeldatei). */
+			if (file_part_target && iter_parent.user_data == iter->user_data) {
+				have_iter_parent = FALSE;
+				single_view = TRUE;
+			}
 		}
 	}
 
@@ -3186,13 +3197,14 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		if (rc)
 			return -1;
 	}
-	else if (sfp && (zond->state & GDK_CONTROL_MASK)) {
+	else if (sfp && ((zond->state & GDK_CONTROL_MASK) || single_view)) {
 		/* Strg gedrückt UND Ziel trägt selbst Inhalt: genereller "nur diese
 		 * eine Anbindung"-Override, unabhängig von iter_parent -
 		 * Einzelansicht wie Klick im Bestandsverzeichnis. (Ein Klick ohne
 		 * eigenen Inhalt - reiner Strukturpunkt - kennt kein "nur diese
 		 * eine Anbindung" und läuft deshalb immer über den Auszug-Zweig
-		 * unten, auch bei gedrücktem Strg.) */
+		 * unten, auch bei gedrücktem Strg.) single_view: kein Elternknoten
+		 * für einen Auszug vorhanden, s. Ermittlung von iter_parent oben. */
 		rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
 				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
 		if (rc)
