@@ -28,6 +28,8 @@ typedef struct {
 	gboolean is_seadrive_path;
 	SondTreeviewFMIndexCtxFunc index_ctx_func;
 	gpointer index_ctx_func_data;
+	GFileMonitor *root_monitor; //Zugänge von außen auf Root-Ebene
+	guint root_monitor_timer;   //Entprellung
 #ifdef _WIN32
 	GThread *seadrive_watcher_thread;
 	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */

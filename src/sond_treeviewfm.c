@@ -205,11 +205,163 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_
 	return 0;
 }
 
+/* Fügt Einträge, die auf Root-Ebene von außen hinzugekommen sind, in den
+ * Baum ein. Idempotent: vorhandene Zeilen (auch von zond selbst angelegte)
+ * bleiben unberührt. Löschen/Umbenennen von außen wird bewusst nicht
+ * nachgeführt. */
+static void sond_treeviewfm_root_add_new(SondTreeviewFM *stvfm) {
+	GPtrArray *arr_children = NULL;
+	GError *error = NULL;
+	GHashTable *ht_known = NULL;
+	GtkTreeIter iter = { 0 };
+	gboolean valid = FALSE;
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	g_autoptr(SondTVFMItem) item_root = NULL;
+
+	if (!stvfm_priv->root)
+		return;
+
+	item_root = sond_tvfm_item_create(stvfm, NULL, NULL);
+	if (sond_tvfm_item_load_children(item_root, &arr_children, NULL, &error)) {
+		LOG_WARN("Root-Verzeichnis konnte nicht neu gelesen werden: %s",
+				error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	ht_known = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	for (valid = gtk_tree_model_get_iter_first(model, &iter); valid;
+			valid = gtk_tree_model_iter_next(model, &iter)) {
+		SondTVFMItem *item = NULL;
+		gchar const *name = NULL;
+
+		gtk_tree_model_get(model, &iter, 0, &item, -1);
+		if (!item)
+			continue;
+
+		name = sond_tvfm_item_get_basename(item);
+		if (name)
+			g_hash_table_add(ht_known, g_strdup(name));
+		g_object_unref(item);
+	}
+
+	for (guint i = 0; i < arr_children->len; i++) {
+		SondTVFMItem *child = g_ptr_array_index(arr_children, i);
+		SondTVFMItemPrivate *child_priv = sond_tvfm_item_get_priv(child);
+		GtkTreeIter iter_new = { 0 };
+		gchar const *name = sond_tvfm_item_get_basename(child);
+		gint n_rows = 0;
+
+		if (!name || g_hash_table_contains(ht_known, name))
+			continue;
+
+		n_rows = gtk_tree_model_iter_n_children(model, NULL);
+		gtk_tree_store_insert(GTK_TREE_STORE(model), &iter_new, NULL,
+				((gint) i < n_rows) ? (gint) i : -1);
+		gtk_tree_store_set(GTK_TREE_STORE(model), &iter_new, 0,
+				G_OBJECT(child), -1);
+
+		if (child_priv->has_children) { //Dummy für den Expander
+			GtkTreeIter iter_dummy = { 0 };
+
+			gtk_tree_store_insert(GTK_TREE_STORE(model), &iter_dummy,
+					&iter_new, -1);
+		}
+	}
+
+	g_hash_table_unref(ht_known);
+	g_ptr_array_unref(arr_children);
+
+	return;
+}
+
+static gboolean sond_treeviewfm_root_monitor_timeout(gpointer data) {
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+
+	stvfm_priv->root_monitor_timer = 0;
+	sond_treeviewfm_root_add_new(stvfm);
+
+	return G_SOURCE_REMOVE;
+}
+
+static void sond_treeviewfm_root_monitor_changed(GFileMonitor *monitor,
+		GFile *file, GFile *other, GFileMonitorEvent event, gpointer data) {
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+
+	switch (event) {
+	case G_FILE_MONITOR_EVENT_CREATED:
+	case G_FILE_MONITOR_EVENT_MOVED_IN:
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+		break;
+	case G_FILE_MONITOR_EVENT_CHANGED:
+		//Datei wird noch geschrieben: nur weiter warten, wenn etwas ansteht
+		if (!stvfm_priv->root_monitor_timer)
+			return;
+		break;
+	default:
+		return;
+	}
+
+	if (stvfm_priv->root_monitor_timer)
+		g_source_remove(stvfm_priv->root_monitor_timer);
+	stvfm_priv->root_monitor_timer = g_timeout_add(500,
+			sond_treeviewfm_root_monitor_timeout, stvfm);
+
+	return;
+}
+
+static void sond_treeviewfm_root_monitor_stop(SondTreeviewFMPrivate *stvfm_priv) {
+	if (stvfm_priv->root_monitor_timer) {
+		g_source_remove(stvfm_priv->root_monitor_timer);
+		stvfm_priv->root_monitor_timer = 0;
+	}
+
+	if (stvfm_priv->root_monitor) {
+		g_file_monitor_cancel(stvfm_priv->root_monitor);
+		g_object_unref(stvfm_priv->root_monitor);
+		stvfm_priv->root_monitor = NULL;
+	}
+
+	return;
+}
+
+static void sond_treeviewfm_root_monitor_start(SondTreeviewFM *stvfm) {
+	GFile *file_root = NULL;
+	GError *error = NULL;
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+
+	file_root = g_file_new_for_path(stvfm_priv->root);
+	stvfm_priv->root_monitor = g_file_monitor_directory(file_root,
+			G_FILE_MONITOR_WATCH_MOVES, NULL, &error);
+	g_object_unref(file_root);
+
+	if (!stvfm_priv->root_monitor) {
+		LOG_WARN("Root-Verzeichnis kann nicht überwacht werden: %s",
+				error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	g_signal_connect(stvfm_priv->root_monitor, "changed",
+			G_CALLBACK(sond_treeviewfm_root_monitor_changed), stvfm);
+
+	return;
+}
+
 static void sond_treeviewfm_finalize(GObject *g_object) {
 	Clipboard *clipboard = NULL;
 
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
 			SOND_TREEVIEWFM(g_object));
+
+	sond_treeviewfm_root_monitor_stop(stvfm_priv);
 
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher(SOND_TREEVIEWFM(g_object));
@@ -2667,6 +2819,8 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
 			stvfm);
 
+	sond_treeviewfm_root_monitor_stop(stvfm_priv);
+
 	g_free(stvfm_priv->root);
 	g_free(sfp_class->path_root);
 
@@ -2727,6 +2881,8 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 
 		return -1;
 	}
+
+	sond_treeviewfm_root_monitor_start(stvfm);
 
 	return 0;
 }

@@ -385,23 +385,11 @@ Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
    sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
 ```
 
-## Ideen #166-#170
+## Ideen #167-#170
 
 Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
 
 ```text
- #166 sond_treeviewfm bekommt Dateien, die "von außen" (außerhalb der
- App) auf Root-Ebene eingefügt werden, nicht mit - Baum aktualisiert sich
- nicht automatisch. Zwei Ansätze: (a) Dateisystem-Watcher (GFileMonitor)
- auf das Root-Verzeichnis, analog zum bereits vorhandenen SeaDrive-
- Watcher-Mechanismus, der bei Änderungen die Kinder-Liste des
- betroffenen DIR-Knotens invalidiert/neu lädt; (b) einfacher manueller
- "Aktualisieren"-Menüpunkt, der für den aktuell selektierten (oder den
- Root-)Knoten die Kinder neu einliest, ohne Hintergrundprozess. (b) ist
- deutlich einfacher umzusetzen, verlangt aber eine bewusste Nutzeraktion;
- (a) ist komfortabler, aber mehr Aufwand und Fehlerfläche (Symmetrie zu
- den bekannten SeaDrive-Watcher-Bugs dieser Session zu bedenken).
-
  #167 Import fremder Projekte in ein bestehendes Projekt: ein "Projekt"
  ist eine eigene zond_dbase (SQLite) mit eigenem knoten-Baum und
  Datei-Referenzen relativ zu einem Root-Verzeichnis. Import hieße:

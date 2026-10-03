@@ -4681,3 +4681,25 @@ Ersetzt den Stichpunkt "verbotene Sonderzeichen beim Kopieren aus Containern esc
  Sanitizer und lehnt zusätzlich Steuerzeichen, reservierte Namen,
  führenden Punkt und Punkt/Leerzeichen am Ende ab.
 ```
+
+## #166 BAUM_FS: Dateien von außen im Root (03.10.2026)
+
+Vom Nutzer getestet.
+
+```text
+ #166 Dateien und Verzeichnisse, die von außen (nicht durch zond) auf
+ Root-Ebene hinzukommen, erscheinen automatisch in BAUM_FS. Konvention:
+ Änderungen von außen bestehen nur im Hinzufügen im Root; in anderen
+ Verzeichnissen genügt Zu- und Aufklappen. Umsetzung in sond_treeviewfm.c:
+ ein nicht rekursiver GFileMonitor auf dem Root (Start am Ende von
+ sond_treeviewfm_set_root(), Abbau bei Root-Wechsel und in finalize()).
+ CREATED, MOVED_IN und CHANGES_DONE_HINT starten einen Timer (500 ms,
+ CHANGED verschiebt einen laufenden Timer, damit eine noch geschriebene
+ Datei nicht zu früh gelesen wird). sond_treeviewfm_root_add_new() liest
+ das Root neu und fügt nur Einträge ein, deren Basisname noch nicht im
+ Baum steht - idempotent, von zond selbst angelegte Zeilen werden nicht
+ doppelt. Löschen/Umbenennen von außen wird bewusst nicht nachgeführt.
+ Bei Lesefehler (z.B. gesperrte Datei) nur Log, nächster Event versucht
+ es erneut. Felder root_monitor/root_monitor_timer in
+ SondTreeviewFMPrivate.
+```
