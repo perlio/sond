@@ -4926,7 +4926,7 @@
  ersten, sond_file_part_is_open() liefert für beide dasselbe Objekt,
  Indizierung legt beide unter demselben Pfad ab, Coverage und
  Anbindungen unterscheiden sie nicht.
- Schritt 1 (erledigt, zu testen): zond erzeugt keine Duplikate mehr.
+ Schritt 1 (erledigt, vom Nutzer getestet): zond erzeugt keine Duplikate mehr.
  - sond_file_part_pdf_insert_embedded_file(): Name vorhanden ->
    G_IO_ERROR_EXISTS, die Suffix-Logik beim Einfügen/Verschieben
    (sond_treeviewfm.c) versucht dann "name (1)" usw.
@@ -4938,7 +4938,7 @@
    Dateiname als Schlüssel schon belegt sein).
  Zu testen: dieselbe Datei zweimal in eine PDF bzw. ein ZIP einfügen ->
  "name (1).ext"; Datei in PDF umbenennen, dann gleichnamige neue einfügen.
- Schritt 2 (umgesetzt 02.10.2026, zu testen) - Adressierung über den
+ Schritt 2 (umgesetzt 02.10.2026, vom Nutzer getestet) - Adressierung über den
  Namensbaum, Nutzerentscheidung "Schlüssel folgt dem Dateinamen":
  - Adresse (sond_pdf_helper.c, pdf_emb_addresses_new()): der Dateiname,
    wenn kein anderer Eintrag denselben Dateinamen hat und keiner ihn als
@@ -4961,7 +4961,7 @@
    Index-DB: keine Migration, Testphase).
  - Umlaut-Verdacht (rohes UTF-8 in /F) widerlegt: MuPDF liest gültiges
    UTF-8 ohne BOM korrekt.
- Geschwister nachführen (umgesetzt 02.10.2026, zu testen): Löschen,
+ Geschwister nachführen (umgesetzt 02.10.2026, vom Nutzer getestet): Löschen,
  Umbenennen oder Herausverschieben eines von zwei gleichnamigen Anhängen
  macht den Namen des anderen eindeutig - dessen Adresse wechselt vom
  Schlüssel zum Dateinamen. pdf_emb_address_changes() (sond_pdf_helper.c)
