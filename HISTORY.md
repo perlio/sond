@@ -4703,3 +4703,28 @@ Vom Nutzer getestet.
  es erneut. Felder root_monitor/root_monitor_timer in
  SondTreeviewFMPrivate.
 ```
+
+## #201 BAUM_FS: Dateisuche (03.10.2026)
+
+Vom Nutzer getestet.
+
+```text
+ #201 Die Dateisuche im Dateisystembaum hat jetzt einen Dialog und eine
+ öffentliche API. Ein Menüpunkt "Dateisuche ..." im Kontextmenü von BAUM_FS
+ und im Hauptmenü (Projekt, win.dateisuche); beide rufen
+ sond_treeviewfm_search_activate() auf. Dialog: Suchtext, Vergleich (Name
+ enthält / ganzer Name / Muster mit * und ?), Groß-/Kleinschreibung
+ (g_utf8_casefold), Suchen in Dateien und/oder Verzeichnissen, Container
+ (ZIP, PDF-Anhänge, E-Mails; Standard aus), Umfang (gesamtes Verzeichnis /
+ nur markierte Punkte). Die Einstellungen bleiben pro Instanz erhalten
+ (search_text, search_opts in SondTreeviewFMPrivate).
+ Der Suchlauf ist als sond_treeviewfm_search() öffentlich (liefert die
+ Fileparts der Treffer, Fortschrittsfenster mit Abbrechen); die Darstellung
+ bleibt show_hits() mit results_row_activated. Container zählen als Datei und
+ werden über ihren eigenen Namen gefunden, die Pseudo-Kinder PageTree/Message
+ werden übersprungen. Behoben: Hang des Suchthreads bei Lesefehler (atom_ready
+ wurde nicht gesetzt), Abbruch der ganzen Suche bei einem unlesbaren
+ Unterverzeichnis (jetzt übersprungen und gezählt), doppelte Freigabe der
+ Kind-Items samt Leck des Arrays in der alten Rekursion.
+ Filter nach Dateiendung, Größe, Datum: zurückgestellt (#202).
+```
