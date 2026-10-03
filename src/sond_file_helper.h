@@ -33,6 +33,23 @@ wchar_t* prepare_long_path(const gchar *path, GError **error);
 #endif
 
 /**
+ * Macht aus einem einzelnen Namensteil (kein Pfad) einen unter Windows/SeaDrive
+ * zulässigen Dateinamen: < > : " / \ | ? * und Steuerzeichen werden zu '_',
+ * ein führender Punkt wird zu '_', Punkte/Leerzeichen am Ende entfallen,
+ * ein leerer Name wird zu "_", ein reservierter Gerätename (CON, PRN, AUX,
+ * NUL, COM1-9, LPT1-9, auch mit Endung) bekommt '_' hinter dem Stamm.
+ * Ein bereits zulässiger Name bleibt unverändert. Rückgabe mit g_free().
+ */
+gchar* sond_sanitize_filename(const gchar *name);
+
+/**
+ * Hängt " (counter)" an den Namen an, bei split_ext vor der letzten Endung
+ * (ein Punkt am Namensanfang zählt nicht als Endung). Rückgabe mit g_free().
+ */
+gchar* sond_filename_add_counter(const gchar *name, guint counter,
+		gboolean split_ext);
+
+/**
  * Erstellt ein Verzeichnis (Windows: mit Long-Path-Support)
  */
 gboolean sond_mkdir(const gchar *path, GError **error);

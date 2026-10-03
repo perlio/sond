@@ -13,8 +13,6 @@ Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stan
 - Rows mit Text Farbe
 - Copy_Auswertung wenn root dann Verweis auf root?
 - Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
-- Beim Kopieren von ZIP-Dateien (und anderen Containern) ins Filesystem:
-  verbotene Sonderzeichen im Dateinamen escapen
 - Durchsuchen des Dateisystems (BAUM_FS) - Anforderungen noch offen
 
  - Abschnitte neu organisieren
@@ -358,6 +356,8 @@ Aus "Regressions-Fund (18.09.2026): Doppelklick auf unhydrierte Datei" (HISTORY.
  Dateisystem gar nicht erst anlegbar wären (z.B. bei "Verzeichnis aus ZIP
  kopieren" ins Dateisystem, s. 16.09.2026 oben) - dafür ggf. eigene,
  separate Betrachtung nötig.
+
+ Umgesetzt als #200 (s. unten, Ende der Datei).
 ```
 
 ## Busy-/Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
@@ -504,4 +504,24 @@ Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).
 
  #193 Eingebettete Dateien mit gleichem Namen (02.10.2026, Nutzer-Hinweis).
  Eingebettete Dateien werden über ihren Dateinamen (/UF, sonst /F, s.
+```
+
+## #200 Unzulässige Zeichen beim Kopieren aus Containern (umgesetzt, wartet auf Test)
+
+```text
+ #200 Beim Kopieren aus ZIP/PDF-Anhängen/E-Mail ins Dateisystem werden
+ Dateinamen bereinigt (03.10.2026): sond_sanitize_filename() in
+ sond_file_helper.c ersetzt < > : " / \ | ? * und Steuerzeichen durch "_",
+ einen führenden Punkt durch "_" (SeaDrive), entfernt Punkte/Leerzeichen am
+ Ende und hängt bei reservierten Namen (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+ "_" an den Stamm. Angewendet in process_stvfm_item_move_or_copy()
+ (sond_treeviewfm.c, nur Quelle im Container UND Ziel im Dateisystem) und
+ in copy_container_dir_to_fs() (sond_tvfm_item.c). Kollisionen im selben
+ Ordner (auch nur durch Groß-/Kleinschreibung) werden mit " (n)" vor der
+ Endung aufgelöst (sond_filename_add_counter()). is_valid_filename() beim
+ Umbenennen nutzt jetzt denselben Sanitizer: lehnt zusätzlich Steuerzeichen,
+ reservierte Namen, führenden Punkt und Punkt/Leerzeichen am Ende ab.
+ Zu testen: ZIP mit "a?b.txt", ".hidden", "CON.txt", "x.", Namen die nur
+ in Groß-/Kleinschreibung differieren, verschachtelte Ordner; Umbenennen
+ per Zelle auf ".x" und "con".
 ```

@@ -1039,6 +1039,7 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 			sond_treeviewfm_get_priv(stvfm_item_src_priv->stvfm);
 	gchar* path_dst_real = NULL;
 	GPtrArray* arr_children = NULL;
+	GHashTable* used_names = NULL;
 	gint rc = 0;
 
 	path_dst_real = g_strconcat(stvfm_priv->root, "/", path_dst_rel, NULL);
@@ -1051,12 +1052,17 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 	if (rc)
 		return -1;
 
+	//bereits vergebene Namen in diesem Ordner (klein geschrieben)
+	used_names = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
 	for (guint i = 0; i < arr_children->len; i++) {
 		SondTVFMItem* child = g_ptr_array_index(arr_children, i);
 		SondTVFMItemPrivate* child_priv =
 				sond_tvfm_item_get_instance_private(child);
 		gchar const* child_base = sond_tvfm_item_get_display_name(child);
 		gchar* child_path_dst_rel = NULL;
+		gchar* child_base_clean = NULL;
+		gchar* child_name = NULL;
 		gboolean is_real_subdir = FALSE;
 
 		/* Sonderfall PDF/"PageTree" bzw. GMessage/"Message": dieser
@@ -1084,7 +1090,25 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 		is_real_subdir = (child_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
 				&& (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part);
 
-		child_path_dst_rel = g_strconcat(path_dst_rel, "/", child_base, NULL);
+		//Zielname: Sonderzeichen ersetzen, Kollisionen (auch nur durch
+		//Groß-/Kleinschreibung) mit " (n)" auflösen
+		child_base_clean = sond_sanitize_filename(child_base);
+		child_name = g_strdup(child_base_clean);
+		for (guint n = 1; ; n++) {
+			gchar* key = g_utf8_strdown(child_name, -1);
+
+			//Schlüssel gehört danach der Hashtabelle (auch bei FALSE freigegeben)
+			if (g_hash_table_add(used_names, key))
+				break;
+
+			g_free(child_name);
+			child_name = sond_filename_add_counter(child_base_clean, n,
+					!is_real_subdir);
+		}
+		g_free(child_base_clean);
+
+		child_path_dst_rel = g_strconcat(path_dst_rel, "/", child_name, NULL);
+		g_free(child_name);
 
 		if (is_real_subdir)
 			rc = copy_container_dir_to_fs(child, child_path_dst_rel, error);
@@ -1098,6 +1122,7 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 			break;
 	}
 
+	g_hash_table_unref(used_names);
 	g_ptr_array_unref(arr_children);
 
 	return rc;

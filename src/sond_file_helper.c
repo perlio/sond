@@ -1063,3 +1063,64 @@ sond_open(const gchar *path, gboolean open_with, GError **error)
                          NULL, NULL, NULL, error);
 #endif
 }
+
+gchar*
+sond_sanitize_filename(const gchar *name)
+{
+    g_return_val_if_fail(name != NULL, NULL);
+
+    GString *s = g_string_new(NULL);
+
+    for (const guchar *p = (const guchar*) name; *p; p++) {
+        if (*p < 0x20 || *p == 0x7f || strchr("<>:\"/\\|?*", *p))
+            g_string_append_c(s, '_');
+        else
+            g_string_append_c(s, (gchar) *p);
+    }
+
+    if (s->len > 0 && s->str[0] == '.')
+        s->str[0] = '_';
+
+    while (s->len > 0 && (s->str[s->len - 1] == '.' || s->str[s->len - 1] == ' '))
+        g_string_truncate(s, s->len - 1);
+
+    if (s->len == 0)
+        g_string_append_c(s, '_');
+
+    //Stamm = Teil vor dem ersten Punkt; Windows ignoriert Leerzeichen dahinter
+    const gchar *dot = strchr(s->str, '.');
+    gsize stem_end = dot ? (gsize) (dot - s->str) : s->len;
+    gsize stem_len = stem_end;
+    while (stem_len > 0 && s->str[stem_len - 1] == ' ')
+        stem_len--;
+
+    gboolean reserved = FALSE;
+    if (stem_len == 3)
+        reserved = !g_ascii_strncasecmp(s->str, "CON", 3) ||
+                !g_ascii_strncasecmp(s->str, "PRN", 3) ||
+                !g_ascii_strncasecmp(s->str, "AUX", 3) ||
+                !g_ascii_strncasecmp(s->str, "NUL", 3);
+    else if (stem_len == 4 && s->str[3] >= '1' && s->str[3] <= '9')
+        reserved = !g_ascii_strncasecmp(s->str, "COM", 3) ||
+                !g_ascii_strncasecmp(s->str, "LPT", 3);
+
+    if (reserved)
+        g_string_insert_c(s, (gssize) stem_end, '_');
+
+    return g_string_free(s, FALSE);
+}
+
+gchar*
+sond_filename_add_counter(const gchar *name, guint counter, gboolean split_ext)
+{
+    g_return_val_if_fail(name != NULL, NULL);
+
+    const gchar *dot = split_ext ? strrchr(name, '.') : NULL;
+    if (dot == name)
+        dot = NULL;
+
+    gsize stem_len = dot ? (gsize) (dot - name) : strlen(name);
+
+    return g_strdup_printf("%.*s (%u)%s", (int) stem_len, name, counter,
+            dot ? dot : "");
+}

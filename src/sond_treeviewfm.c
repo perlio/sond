@@ -278,31 +278,15 @@ static void sond_treeviewfm_constructed(GObject *self) {
 
 
 static gboolean is_valid_filename(const gchar *filename) {
-    if (filename == NULL || *filename == '\0')
-        return FALSE;
+	g_autofree gchar *sanitized = NULL;
 
-    // Prüfe auf ungültige Zeichen (für Unix/Linux)
-    if (strchr(filename, '/') != NULL)
-        return FALSE;
+	if (filename == NULL || *filename == '\0')
+		return FALSE;
 
-    // Prüfe auf reservierte Namen
-    if (g_strcmp0(filename, ".") == 0 || g_strcmp0(filename, "..") == 0)
-        return FALSE;
+	//zulässig ist nur, was sond_sanitize_filename() unverändert lässt
+	sanitized = sond_sanitize_filename(filename);
 
-#ifdef _WIN32
-    // Erweiterte Prüfung für Windows
-    if (strchr(filename, '\\') != NULL ||
-        strchr(filename, ':') != NULL ||
-        strchr(filename, '*') != NULL ||
-        strchr(filename, '?') != NULL ||
-        strchr(filename, '"') != NULL ||
-        strchr(filename, '<') != NULL ||
-        strchr(filename, '>') != NULL ||
-        strchr(filename, '|') != NULL)
-        return FALSE;
-#endif
-
-    return TRUE;
+	return !g_strcmp0(sanitized, filename);
 }
 
 static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
@@ -759,6 +743,18 @@ typedef struct _S_FM_Paste_Selection {
 	gint index_to;
 } SFMPasteSelection;
 
+//TRUE, wenn der Eintrag Inhalt eines Containers (ZIP/PDF/E-Mail) ist
+static gboolean item_is_in_container(SondTVFMItemPrivate* stvfm_item_priv) {
+	if (!stvfm_item_priv->sond_file_part)
+		return FALSE;
+
+	//Verzeichnis im Container trägt den sfp des Containers selbst
+	if (stvfm_item_priv->path_or_section)
+		return TRUE;
+
+	return sond_file_part_get_parent(stvfm_item_priv->sond_file_part) != NULL;
+}
+
 static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 		SFMPasteSelection* s_paste_sel, gboolean move, GError** error) {
 	gint rc = 0;
@@ -766,10 +762,8 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	guint max_tries = 100;
 	const gchar *dot = NULL;
 	gboolean has_ext = FALSE;
-	const gchar *ext = NULL;
 	gint i = 0;
 
-	g_autofree gchar *name = NULL;
 	g_autofree gchar *base = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
@@ -793,16 +787,23 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 		}
 	}
 
+	//Namen aus Containern dürfen im Dateisystem nicht verbotene Zeichen tragen
+	if (!stvfm_item_parent_priv->sond_file_part &&
+			item_is_in_container(stvfm_item_priv)) {
+		gchar *base_sanitized = sond_sanitize_filename(base);
+
+		g_free(base);
+		base = base_sanitized;
+	}
+
 	dot = strrchr(base, '.');
 	has_ext = (!stvfm_item_priv->path_or_section) && dot && dot != base;
-	name = has_ext ? g_strndup(base, (gsize)(dot - base)) : g_strdup(base);
-	ext = has_ext ? dot : "";
 
 	do {
 		g_autofree gchar *trial_base = NULL;
 
 		trial_base = (i == 0) ? g_strdup(base) :
-				g_strconcat(name, g_strdup_printf(" (%u)", i), ext, NULL);
+				sond_filename_add_counter(base, (guint) i, has_ext);
 
 		if (move)
 			rc = sond_tvfm_item_move(stvfm_item,
