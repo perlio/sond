@@ -4660,3 +4660,24 @@ Unverändert aus src/zond/ToDo.c übernommen (Stand 03.10.2026); aus dem Text he
  kann zusammengefasst werden; Anhang einfügen -> PDF-Knoten "gemischt",
  nach Indizieren des neuen Anhangs wieder grün.
 ```
+
+## #200 Unzulässige Zeichen beim Kopieren aus Containern (03.10.2026)
+
+Ersetzt den Stichpunkt "verbotene Sonderzeichen beim Kopieren aus Containern escapen" der Allgemeinen Liste sowie den zurückgestellten Abschnitt "ZIP-Dateinamen mit unter Windows unzulässigen Zeichen" (TODO.md). Vom Nutzer getestet (problematisch.zip, alle Fälle in Ordnung).
+
+```text
+ #200 Beim Kopieren aus ZIP/PDF-Anhängen/E-Mail ins Dateisystem werden
+ Dateinamen bereinigt: sond_sanitize_filename() in sond_file_helper.c
+ ersetzt < > : " / \ | ? * und Steuerzeichen durch "_", einen führenden
+ Punkt durch "_" (SeaDrive), entfernt Punkte/Leerzeichen am Ende und hängt
+ bei reservierten Namen (CON, PRN, AUX, NUL, COM1-9, LPT1-9) "_" an den
+ Stamm. Angewendet in process_stvfm_item_move_or_copy() (sond_treeviewfm.c,
+ nur Quelle im Container UND Ziel im Dateisystem) und in
+ copy_container_dir_to_fs() (sond_tvfm_item.c). Kollisionen im selben
+ Ordner (auch nur durch Groß-/Kleinschreibung) werden mit " (n)" vor der
+ Endung aufgelöst (sond_filename_add_counter()); die frühere Neustart-
+ Schleife auf oberster Ebene hinterließ bei Kind-Kollisionen halb
+ kopierte Ordner. is_valid_filename() beim Umbenennen nutzt denselben
+ Sanitizer und lehnt zusätzlich Steuerzeichen, reservierte Namen,
+ führenden Punkt und Punkt/Leerzeichen am Ende ab.
+```

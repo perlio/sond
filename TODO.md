@@ -340,26 +340,6 @@ Aus dem Abschnitt "BAUM_FS: hängenbleibende Dummy-Zeile nach fehlgeschlagenem E
  durch Kompilieren/Testen verifiziert.
 ```
 
-## ZIP-Dateinamen mit unter Windows unzulässigen Zeichen (zurückgestellt)
-
-Aus "Regressions-Fund (18.09.2026): Doppelklick auf unhydrierte Datei" (HISTORY.md); zweimal notiert, beide Fassungen übernommen.
-
-```text
- Zurückgestellt (Nutzer-Entscheidung 18.09.2026): Sonderfall ZIP-
- Archivinhalte - ZIP erlaubt Dateinamen/Zeichen, die im Windows-
- Dateisystem gar nicht erst anlegbar wären (z.B. bei "Verzeichnis aus ZIP
- kopieren" ins Dateisystem, s. 16.09.2026 oben) - dafür ggf. eigene,
- separate Betrachtung nötig, wenn das konkret auftritt.
-
- Später (vom Nutzer explizit zurückgestellt): Sonderfall ZIP-
- Archivinhalte - Zip erlaubt Dateinamen/Zeichen, die im Windows-
- Dateisystem gar nicht erst anlegbar wären (z.B. bei "Verzeichnis aus ZIP
- kopieren" ins Dateisystem, s. 16.09.2026 oben) - dafür ggf. eigene,
- separate Betrachtung nötig.
-
- Umgesetzt als #200 (s. unten, Ende der Datei).
-```
-
 ## Busy-/Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
 
 Aus "Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke" (HISTORY.md, 16.09.2026).
@@ -504,24 +484,4 @@ Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).
 
  #193 Eingebettete Dateien mit gleichem Namen (02.10.2026, Nutzer-Hinweis).
  Eingebettete Dateien werden über ihren Dateinamen (/UF, sonst /F, s.
-```
-
-## #200 Unzulässige Zeichen beim Kopieren aus Containern (umgesetzt, wartet auf Test)
-
-```text
- #200 Beim Kopieren aus ZIP/PDF-Anhängen/E-Mail ins Dateisystem werden
- Dateinamen bereinigt (03.10.2026): sond_sanitize_filename() in
- sond_file_helper.c ersetzt < > : " / \ | ? * und Steuerzeichen durch "_",
- einen führenden Punkt durch "_" (SeaDrive), entfernt Punkte/Leerzeichen am
- Ende und hängt bei reservierten Namen (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
- "_" an den Stamm. Angewendet in process_stvfm_item_move_or_copy()
- (sond_treeviewfm.c, nur Quelle im Container UND Ziel im Dateisystem) und
- in copy_container_dir_to_fs() (sond_tvfm_item.c). Kollisionen im selben
- Ordner (auch nur durch Groß-/Kleinschreibung) werden mit " (n)" vor der
- Endung aufgelöst (sond_filename_add_counter()). is_valid_filename() beim
- Umbenennen nutzt jetzt denselben Sanitizer: lehnt zusätzlich Steuerzeichen,
- reservierte Namen, führenden Punkt und Punkt/Leerzeichen am Ende ab.
- Zu testen: ZIP mit "a?b.txt", ".hidden", "CON.txt", "x.", Namen die nur
- in Groß-/Kleinschreibung differieren, verschachtelte Ordner; Umbenennen
- per Zelle auf ".x" und "con".
 ```
