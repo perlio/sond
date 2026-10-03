@@ -319,7 +319,9 @@ static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
 		sfp_child = g_ptr_array_index(arr_opened_children, i);
 		path_child = sond_file_part_get_path(sfp_child);
 
-		if (g_str_has_prefix(path_child, path_old)) { //Treffer
+		//Treffer nur unterhalb von path_old ("sub" nicht für "sub38/...")
+		if (g_str_has_prefix(path_child, path_old) &&
+				path_child[strlen(path_old)] == '/') {
 			//ggf. neues Eltern-sfp
 			if (sfp_dir != sfp_dst)
 				sond_file_part_set_parent(sfp_child, sfp_dst);
@@ -348,6 +350,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	gint res = 0;
 	gpointer ctx = NULL;
+	g_autofree gchar* path_old = NULL;
 
 	if (!is_valid_filename(text_new))
 		return 0;
@@ -362,14 +365,21 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
+	/* index_to -1: Umbenennen an Ort und Stelle, kein Verschieben (s.
+	 * zond_treeviewfm_before_move() - bei Mimeparts ändert sich dann nur der
+	 * Anzeigename, nicht der Pfad). */
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move,
-			0, stvfm_item, stvfm_item_parent, text_new, 0, error, &ctx, &res);
+			0, stvfm_item, stvfm_item_parent, text_new, -1, error, &ctx, &res);
 
 	if (res) {
 		g_object_unref(stvfm_item_parent);
 		return -1;
 	}
+
+	/* Verzeichnis: alten Pfad sichern - sond_tvfm_item_rename() setzt
+	 * path_or_section auf den neuen (vollen) Pfad */
+	path_old = g_strdup(stvfm_item_priv->path_or_section);
 
 	rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, text_new, error);
 	g_object_unref(stvfm_item_parent);
@@ -379,10 +389,13 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	if (rc)
 		return -1;
 
-	//sfp-Pfade ändern, soweit erforderlich
-	if (stvfm_item_priv->path_or_section)
+	/* Pfade bereits geöffneter Dateien darin nachführen - vorher wurde
+	 * der schon neue Pfad als alter und nur der Name als neuer übergeben,
+	 * die Objekte blieben auf dem alten Pfad (ToDo.c #196) */
+	if (path_old && stvfm_item_priv->path_or_section)
 		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
-				stvfm_item_priv->sond_file_part, stvfm_item_priv->path_or_section, text_new);
+				stvfm_item_priv->sond_file_part, path_old,
+				stvfm_item_priv->path_or_section);
 
 	//nur display-name - etwaig erforderliche Pfadanpassungen in rename_stvfm_item bzw.
 	//den spezialisierten Unterfunktionen

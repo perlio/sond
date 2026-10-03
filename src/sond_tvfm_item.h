@@ -57,6 +57,10 @@ gchar const* sond_tvfm_item_get_display_name(SondTVFMItem*);
  * Rückgabe ist immer neu alloziert - Aufrufer muss g_free()en. */
 gchar* sond_tvfm_item_get_anbinden_label(SondTVFMItem*);
 
+/* TRUE für die synthetischen Marker-Knoten "PageTree" (PDF) und "Message"
+ * (E-Mail) - Inhalt der Datei ohne Einbettungen bzw. Mimeparts. */
+gboolean sond_tvfm_item_is_content_root_marker(SondTVFMItem*);
+
 SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
 
 SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);

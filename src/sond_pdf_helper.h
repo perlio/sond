@@ -59,6 +59,37 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		fz_buffer* buf, gchar const* filename,
 		gchar const* mime_type, GError** error);
 
+/* Adressierung eingebetteter Dateien (ToDo.c #193), als UTF-8 mit "%" ->
+ * "%25" und "/" -> "%2F" kodiert: der Dateiname (/UF bzw. /F), wenn kein
+ * anderer Eintrag denselben Dateinamen hat und keiner ihn als Schlüssel im
+ * EmbeddedFiles-Namensbaum trägt; sonst der (eindeutige) Schlüssel.
+ * Angezeigt wird immer der Dateiname. pdf_emb_normalize_keys() setzt nach
+ * derselben Regel den Schlüssel auf den Dateinamen - die Adresse ändert
+ * sich dadurch nicht. */
+gchar* pdf_emb_escape(gchar const* name);
+
+/* Adressen aller Einträge: Schlüssel ist das Wert-Objekt (val) aus dem
+ * Namensbaum (gültig, solange doc offen ist), Wert die Adresse. Leere
+ * Tabelle ohne Namensbaum, NULL bei Fehler. */
+typedef struct _GHashTable GHashTable;
+GHashTable* pdf_emb_addresses_new(fz_context* ctx, pdf_document* doc,
+		GError** error);
+
+/* Welche Adressen der übrigen Einträge ändern sich, wenn der Eintrag mit
+ * address_target entfernt (filename_new NULL) bzw. in filename_new
+ * umbenannt wird? Kann passieren, weil dadurch ein Dateiname eindeutig wird
+ * (Adresse dann Dateiname statt Schlüssel). Ergebnis: parallele Listen alt
+ * -> neu (ohne das Ziel selbst), leer wenn nichts betroffen ist. */
+typedef struct _GPtrArray GPtrArray;
+gint pdf_emb_address_changes(fz_context* ctx, pdf_document* doc,
+		gchar const* address_target, gchar const* filename_new,
+		GPtrArray** addresses_old, GPtrArray** addresses_new, GError** error);
+
+/* Setzt den Schlüssel auf den Dateinamen, wo dieser die Adresse ist (s.o.),
+ * und baut den Namensbaum dann flach und sortiert neu auf. Wird von
+ * pdf_doc_to_buf() bei jedem Schreiben aufgerufen. */
+gint pdf_emb_normalize_keys(fz_context* ctx, pdf_document* doc, GError** error);
+
 fz_pixmap* pdf_render_pixmap(fz_context *ctx, pdf_page* page,
 		float scale, GError** error);
 

@@ -265,6 +265,23 @@ sond_index_coverage_gap_free(gpointer p) {
     g_free(gap);
 }
 
+/* Index-Pfade der Bestandteile einer E-Mail-Auswahl: angebundene Mail
+ * (gmessage_message) -> Header + Inline-Teile, "Message"-Knoten in BAUM_FS
+ * (gmessage_header_only) -> nur Header. ToDo.c #197. */
+static GPtrArray*
+gmessage_parts(SondIndexCtx *index_ctx, gchar const *fp,
+        SondPageRange const *range) {
+    GPtrArray *parts = NULL;
+
+    if (range->gmessage_message)
+        return sond_index_ctx_gmessage_message_parts(index_ctx, fp, NULL);
+
+    parts = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(parts, g_strdup_printf("%s//header", fp));
+
+    return parts;
+}
+
 /* Ermittelt für einen einzelnen ausgewählten Punkt (sfp, range), wie viele
  * der erwarteten Seiten noch nicht indiziert sind. Nicht-PDF-Fileparts
  * gelten als ein einziger "virtueller" Eintrag (page_nr = -1 in der
@@ -351,6 +368,25 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
     is_pdf = SOND_IS_FILE_PART_PDF(sfp) ||
             !g_strcmp0(mime_from_extension(fp), "application/pdf");
 
+    /* Angebundene E-Mail (ToDo.c #197): Header + Inline-Teile, jeder
+     * Bestandteil zählt als ein Eintrag. "Message"-Knoten in BAUM_FS
+     * (gmessage_header_only): nur der Header unter "fp//header". */
+    if (range && (range->gmessage_message || range->gmessage_header_only)) {
+        GPtrArray *parts = gmessage_parts(index_ctx, fp, range);
+
+        for (guint i = 0; i < parts->len; i++)
+            if (sond_index_ctx_get_file_status(index_ctx,
+                    g_ptr_array_index(parts, i), -1, -1) != SOND_INDEX_STATUS_FULL)
+                missing++;
+
+        *out_missing = missing;
+        *out_total   = (gint) parts->len;
+        g_ptr_array_unref(parts);
+        g_free(fp);
+
+        return TRUE;
+    }
+
     /* Schneller Vorab-Check über die coalescierte coverage-Tabelle: ist fp
      * (oder ein Vorfahre) komplett abgedeckt, brauchen wir die
      * pages-Tabelle für diesen Punkt gar nicht erst anzufassen - spart bei
@@ -362,6 +398,21 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         *out_missing = 0;
         *out_total   = 1;
         return TRUE;
+    }
+
+    /* Nur Seiten bzw. Seitenbereich einer PDF: auch der Seiten-Eintrag
+     * "fp//" genügt (ToDo.c #191). */
+    if (is_pdf && range && !range->gmessage_header_only) {
+        gchar *pages_key = g_strdup_printf("%s//", fp);
+        gint mode = sond_index_ctx_coverage_get(index_ctx, pages_key);
+
+        g_free(pages_key);
+        if (mode >= 0) {
+            g_free(fp);
+            *out_missing = 0;
+            *out_total   = 1;
+            return TRUE;
+        }
     }
 
     /* Dateien, die ohnehin nie indiziert werden (.db, .znd, Bilder, ...),
@@ -678,10 +729,20 @@ format_gap_line(SondIndexCoverageGap *gap) {
     if (!gap->total_known)
         return g_strdup_printf("%s (nur %d Seite%s indiziert)",
                 gap->display_name, gap->indexed, gap->indexed == 1 ? "" : "n");
-    return (gap->total == 1)
-            ? g_strdup_printf("%s (nicht indiziert)", gap->display_name)
-            : g_strdup_printf("%s (%d/%d Seiten fehlen)",
-                    gap->display_name, gap->missing, gap->total);
+    if (gap->total == 1)
+        return g_strdup_printf("%s (nicht indiziert)", gap->display_name);
+
+    /* Einheit: angebundene E-Mail zählt Header + Inline-Teile (ToDo.c
+     * #197), ZIP-Archiv Einträge, sonst Seiten */
+    if (gap->range && gap->range->gmessage_message)
+        return g_strdup_printf("%s (%d von %d Teilen fehlen - Header und "
+                "Inline-Teile)", gap->display_name, gap->missing, gap->total);
+    if (!g_strcmp0(mime_from_extension(gap->display_name), "application/zip"))
+        return g_strdup_printf("%s (%d von %d Einträgen fehlen)",
+                gap->display_name, gap->missing, gap->total);
+
+    return g_strdup_printf("%s (%d/%d Seiten fehlen)",
+            gap->display_name, gap->missing, gap->total);
 }
 
 #define SOND_INDEXSUCHE_COVERAGE_SHOW_MAX 10
@@ -823,9 +884,7 @@ handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
                     ok = FALSE;
                 }
             } else {
-                SondPageRange *range_copy = gap->range
-                        ? sond_page_range_new(gap->range->von, gap->range->bis)
-                        : NULL;
+                SondPageRange *range_copy = sond_page_range_copy(gap->range);
                 g_hash_table_insert(ht_reindex, g_object_ref(gap->sfp), range_copy);
             }
         }
@@ -975,17 +1034,40 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
                          * Trenner, wie in sond_index_ctx_clear_file). Ein
                          * reiner Prefix-Vergleich würde z.B. "a/b" auch
                          * für "a/bc" fälschlich matchen. */
-                        if (fp) {
+                        /* Angebundene E-Mail (ToDo.c #197) bzw. "Message"-
+                         * Knoten in BAUM_FS: nur Treffer aus der Mail selbst
+                         * (Indizierung als Ganzes) und ihren Bestandteilen
+                         * (Header, ggf. Inline-Teile) */
+                        if (fp && range && (range->gmessage_message ||
+                                range->gmessage_header_only)) {
+                            GPtrArray *parts = gmessage_parts(
+                                    zond->wctx->index_ctx, fp, range);
+
+                            keep = !g_strcmp0(hit->filename, fp);
+                            for (guint p = 0; !keep && p < parts->len; p++)
+                                keep = !g_strcmp0(hit->filename,
+                                        g_ptr_array_index(parts, p));
+                            g_ptr_array_unref(parts);
+                        }
+                        else if (fp) {
                             gsize fp_len = strlen(fp);
+                            /* Nur Seiten bzw. Seitenbereich einer PDF:
+                             * Treffer nur aus der PDF selbst, nicht aus
+                             * eingebetteten Dateien (ToDo.c #191). */
+                            gboolean nur_seiten = range &&
+                                    (range->pdf_pagetree_only || range->von >= 0);
+
                             if (g_str_has_prefix(hit->filename, fp) &&
                                     (hit->filename[fp_len] == '\0' ||
-                                     (hit->filename[fp_len] == '/' &&
+                                     (!nur_seiten &&
+                                      hit->filename[fp_len] == '/' &&
                                       hit->filename[fp_len + 1] == '/'))) {
                                 /* Datei passt - bei Anbindung (range) auf
                                  * deren Seitenbereich einschränken (nur
-                                 * ganze Seiten, s. Absprache). Ohne range:
-                                 * ganze Datei, jede Seite zählt. */
-                                if (!range || (hit->page_nr >= range->von &&
+                                 * ganze Seiten, s. Absprache). Ohne range
+                                 * bzw. bei "nur Seiten": jede Seite zählt. */
+                                if (!range || range->pdf_pagetree_only ||
+                                        (hit->page_nr >= range->von &&
                                         hit->page_nr <= range->bis))
                                     keep = TRUE;
                             }

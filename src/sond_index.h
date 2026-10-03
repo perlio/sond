@@ -434,6 +434,29 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
                                                 gint          bis_seite);
 
 /**
+ * sond_index_ctx_gmessage_message_parts:
+ *
+ * Bestandteile einer angebundenen E-Mail (BAUM_INHALT/_AUSWERTUNG: Header +
+ * Inline-Teile, ToDo.c #197) als Index-Pfade: "@filename//header" und je
+ * Inline-Teil "@filename//N". Die Inline-Teile kennt die Index-DB, sobald
+ * die Mail einmal indiziert wurde (gmessage_inline); vorher nur der Header,
+ * *known (darf NULL sein) ist dann FALSE. Ohne Dateizugriff.
+ *
+ * Returns: (transfer full) GPtrArray von gchar*.
+ */
+GPtrArray* sond_index_ctx_gmessage_message_parts(SondIndexCtx *ctx,
+        gchar const *filename, gboolean *known);
+
+/**
+ * sond_index_ctx_get_gmessage_message_status:
+ *
+ * Status aus den Bestandteilen (s.o.): alle vollständig -> FULL, einige ->
+ * PARTIAL, keiner -> NONE.
+ */
+SondIndexStatus sond_index_ctx_get_gmessage_message_status(SondIndexCtx *ctx,
+        gchar const *filename);
+
+/**
  * sond_index_ctx_get_dir_status:
  * @ctx:  SondIndexCtx
  * @path: Verzeichnispfad (filepart-Konvention)
@@ -801,6 +824,12 @@ GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
  *             unabhängig vom (möglicherweise unvollständigen) Rest der
  *             Mail als abgedeckt gilt. S. ToDo.c, 17.09.2026,
  *             E-Mail-Coverage-Redesign (Schritt 3/6).
+ * @pdf_pagetree_only: nur für mime_type "application/pdf" relevant. TRUE:
+ *             es wurden nur die Seiten verarbeitet, nicht die eingebetteten
+ *             Dateien. Chunks/pages bleiben unter @filename, abgedeckt wird
+ *             aber nur "@filename//" (Coverage-Schlüssel der Seiten) statt
+ *             @filename selbst - ein Eintrag @filename hieße "Seiten und
+ *             alle Einbettungen". S. ToDo.c #191.
  *
  * Indiziert wird für:
  *   application/pdf   – Text aus OCR-tem PDF (MuPDF stext)
@@ -820,7 +849,8 @@ void sond_index(fz_context* ctx,
                         gint           seite_bis,
                         gint           ocr_mode,
                         gint const    *cancel,
-                        gboolean       gmessage_header_only);
+                        gboolean       gmessage_header_only,
+                        gboolean       pdf_pagetree_only);
 
 /**
  * sond_index_mime_type_supported:

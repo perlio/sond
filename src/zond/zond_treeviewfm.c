@@ -12,6 +12,7 @@
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
 #include "../sond_mime.h"
+#include "../sond_pdf_helper.h"
 #include "zond_indexsuche.h"
 
 #include "zond_dbase.h"
@@ -66,6 +67,14 @@ typedef struct {
 	gchar *pending_move_path_old;
 	gchar *pending_move_path_new;
 	gboolean pending_move_is_physical;
+
+	/* Übergabe before_delete()/before_move() -> after(): Adressänderungen
+	 * der übrigen Anhänge einer PDF (s. emb_sibling_changes()). Nach
+	 * erfolgreichem Commit werden damit die Pfade bereits geöffneter
+	 * SondFilePart-Objekte nachgeführt. */
+	SondFilePart *pending_sibling_pdf;
+	GPtrArray *pending_sibling_old;
+	GPtrArray *pending_sibling_new;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -147,6 +156,119 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 	return FALSE;
 }
 
+static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
+	g_clear_object(&priv->pending_sibling_pdf);
+	g_clear_pointer(&priv->pending_sibling_old, g_ptr_array_unref);
+	g_clear_pointer(&priv->pending_sibling_new, g_ptr_array_unref);
+}
+
+/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen
+ * bzw. Herausverschieben (filename_new NULL) oder Umbenennen ggf. die
+ * Adressen der übrigen Anhänge: wird ein doppelter Dateiname eindeutig,
+ * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen (ToDo.c
+ * #193). Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
+ * sie in priv->pending_sibling_* ab; nichts zu tun -> alles NULL. */
+/* Eingebettete Datei einer PDF (nicht PageTree, keine Section)? Ohne
+ * Dateizugriff. */
+static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+
+	if (!sfp || sond_tvfm_item_get_path_or_section(stvfm_item) ||
+			sond_tvfm_item_is_content_root_marker(stvfm_item))
+		return FALSE;
+
+	return SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(sfp));
+}
+
+static gint emb_sibling_changes(ZondTreeviewFMPrivate *priv,
+		SondTVFMItem *stvfm_item, gchar const *filename_new, GError **error) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	SondFilePart *sfp_pdf = NULL;
+	GPtrArray *old = NULL;
+	GPtrArray *new = NULL;
+
+	emb_sibling_pending_clear(priv);
+
+	if (!is_pdf_emb(stvfm_item))
+		return 0;
+
+	sfp_pdf = sond_file_part_get_parent(sfp);
+
+	if (sond_file_part_pdf_emb_address_changes(SOND_FILE_PART_PDF(sfp_pdf),
+			sond_file_part_get_path(sfp), filename_new, &old, &new, error))
+		return -1;
+
+	if (old->len == 0) {
+		g_ptr_array_unref(old);
+		g_ptr_array_unref(new);
+		return 0;
+	}
+
+	priv->pending_sibling_pdf = g_object_ref(sfp_pdf);
+	priv->pending_sibling_old = old;
+	priv->pending_sibling_new = new;
+
+	return 0;
+}
+
+/* Gespeicherte Fileparts (zond-DB main/work) und Index-Pfade der Anhänge
+ * aus priv->pending_sibling_* umschreiben - innerhalb der offenen
+ * Transaktionen */
+static gint emb_sibling_apply(ZondTreeviewFMPrivate *priv, GError **error) {
+	g_autofree gchar *filepart_pdf = NULL;
+
+	if (!priv->pending_sibling_pdf)
+		return 0;
+
+	filepart_pdf = sond_file_part_get_filepart(priv->pending_sibling_pdf);
+
+	for (guint i = 0; i < priv->pending_sibling_old->len; i++) {
+		g_autofree gchar *path_old = g_strconcat(filepart_pdf, "//",
+				g_ptr_array_index(priv->pending_sibling_old, i), NULL);
+		g_autofree gchar *path_new = g_strconcat(filepart_pdf, "//",
+				g_ptr_array_index(priv->pending_sibling_new, i), NULL);
+		GError *idx_err = NULL;
+
+		if (dbase_zond_update_path(priv->zond->dbase_zond, path_old, path_new,
+				error))
+			return -1;
+
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx &&
+				!sond_index_ctx_rename_file(priv->zond->wctx->index_ctx,
+						path_old, path_new, &idx_err)) {
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: sond_index_ctx_rename_file: %s", __func__,
+					idx_err ? idx_err->message : "?");
+			g_clear_error(&idx_err);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+/* Nach erfolgreichem Commit: bereits geöffnete SondFilePart-Objekte der
+ * betroffenen Anhänge auf ihre neue Adresse setzen */
+static void emb_sibling_adjust_opened(ZondTreeviewFMPrivate *priv) {
+	GPtrArray *opened = NULL;
+
+	if (!priv->pending_sibling_pdf)
+		return;
+
+	opened = sond_file_part_get_arr_opened_files(priv->pending_sibling_pdf);
+	for (guint i = 0; opened && i < opened->len; i++) {
+		SondFilePart *child = g_ptr_array_index(opened, i);
+
+		for (guint j = 0; j < priv->pending_sibling_old->len; j++)
+			if (!g_strcmp0(sond_file_part_get_path(child),
+					g_ptr_array_index(priv->pending_sibling_old, j))) {
+				sond_file_part_set_path(child,
+						g_ptr_array_index(priv->pending_sibling_new, j));
+				break;
+			}
+	}
+}
+
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		SondTVFMItem *stvfm_item, GError **error, gpointer *ctx,
 		gpointer user_data) {
@@ -156,6 +278,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	gchar const* section = NULL;
 	SondTVFMItemType type;
 	gboolean from_gmessage = FALSE;
+	gboolean dual = FALSE;
 	g_autofree gchar* prefix = NULL;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
@@ -276,12 +399,17 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		}
 	}
 
+	/* Anhang einer PDF: ggf. Adressen der übrigen Anhänge nachführen
+	 * (emb_sibling_apply() unten) - schreibt wie bei GMessage in beide
+	 * Datenbanken */
+	dual = from_gmessage || is_pdf_emb(stvfm_item);
+
 	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
 	*ctx = GINT_TO_POINTER(
-			(from_gmessage ? 1 : 0) |
+			(dual ? 1 : 0) |
 			(priv->zond->dbase_zond->changed ? 2 : 0));
 
-	rc = from_gmessage ?
+	rc = dual ?
 			dbase_zond_begin(priv->zond->dbase_zond, error) :
 			zond_dbase_begin(priv->zond->dbase_zond->zond_dbase_work, error);
 	if (rc) {
@@ -302,6 +430,16 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			return -1;
 		}
+	}
+
+	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen (ToDo.c #193)
+	if (emb_sibling_changes(priv, stvfm_item, NULL, error) ||
+			emb_sibling_apply(priv, error)) {
+		emb_sibling_pending_clear(priv);
+		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		return -1;
 	}
 
 	/* Erst jetzt, unmittelbar vor dem garantiert erfolgreichen return, für
@@ -368,6 +506,9 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 
 	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
 		prefix_new = add_string(prefix_new, g_strdup("alpha"));
+	else if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
+		//Adresse in einer PDF: kodierter Dateiname (ToDo.c #193)
+		prefix_new = add_string(prefix_new, pdf_emb_escape(base_new));
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
@@ -390,6 +531,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	g_autofree gchar* prefix_new = NULL;
 	gboolean from_gmessage = FALSE;
 	gint index_from = 0;
+	gboolean rename_in_gmessage = FALSE;
 
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
@@ -400,15 +542,34 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Falls aus GMessage verschoben wird - welchen Index hatte Eintrag?
 	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
 
-	if (*prefix_new != '\0') { //wenn nicht root-Verzeichnis
+	/* Umbenennen (index_to -1, s. sond_treeviewfm_text_edited()) eines
+	 * Mimeparts: ändert nur den Anzeigenamen, der Pfad (Mimepart-Index)
+	 * bleibt. Keine Pfad- oder Index-Änderung in den Datenbanken - vorher
+	 * wurde der Teil wie beim Verschieben an Index 0 umnummeriert (ToDo.c
+	 * #195). Transaktionen und Kontext bleiben wie sonst, s.
+	 * zond_treeviewfm_after(). */
+	rename_in_gmessage = index_to == -1 && from_gmessage &&
+			SOND_IS_FILE_PART_GMESSAGE(
+					sond_tvfm_item_get_sond_file_part(stvfm_item_parent));
+
+	if (rename_in_gmessage) {
+		g_free(prefix_new);
+		prefix_new = g_strdup(prefix_old);
+	}
+	else if (*prefix_new != '\0') { //wenn nicht root-Verzeichnis
 		if (!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
 			prefix_new = add_string(prefix_new, g_strdup("//"));
 		else
 			prefix_new = add_string(prefix_new, g_strdup("/"));
 	}
 
-	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
+	if (rename_in_gmessage)
+		; //Pfad bleibt
+	else if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
 		prefix_new = add_string(prefix_new, g_strdup("alpha")); //irgendwas alphanumerisches
+	else if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
+		//Adresse in einer PDF: kodierter Dateiname (ToDo.c #193)
+		prefix_new = add_string(prefix_new, pdf_emb_escape(base_new));
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
@@ -434,7 +595,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
 		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
 		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht. */
-		if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
+		if (!rename_in_gmessage &&
+				!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
 				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -444,7 +606,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			return -1;
 		}
 
-		if (!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
+		if (!rename_in_gmessage &&
+				!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
 				prefix_old, prefix_new, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -464,7 +627,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
 		//-> umbenennen
-	rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
+	rc = rename_in_gmessage ? 0 :
+			dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
 		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
@@ -473,7 +637,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	}
 
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen (-1)
-	if (from_gmessage) {
+	if (from_gmessage && !rename_in_gmessage) {
 		gint rc = 0;
 		gchar* prefix_gmessage = NULL;
 
@@ -492,7 +656,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	}
 
 	//wenn in GMESSAGE
-	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent))) {
+	if (!rename_in_gmessage &&
+			SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent))) {
 		gint rc = 0;
 		gchar* prefix_gmessage = NULL;
 
@@ -519,6 +684,26 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			return -1;
+		}
+	}
+
+	/* Anhang einer PDF: Adressen der übrigen Anhänge nachführen (ToDo.c
+	 * #193) - nach dem Element selbst, damit sich alte und neue Pfade nicht
+	 * überschneiden. Bleibt der Anhang in derselben PDF, ist es ein
+	 * Umbenennen, sonst verlässt er sie (wie Löschen). */
+	{
+		SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+		gboolean same_pdf = sfp && sond_file_part_get_parent(sfp) ==
+				sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
+
+		if (emb_sibling_changes(ztvfm_priv, stvfm_item,
+				same_pdf ? base_new : NULL, error) ||
+				emb_sibling_apply(ztvfm_priv, error)) {
+			emb_sibling_pending_clear(ztvfm_priv);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			return -1;
@@ -725,6 +910,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+
+		//geöffnete Anhänge auf ihre nachgeführte Adresse setzen
+		emb_sibling_adjust_opened(priv);
 	}
 	else {
 		if (dual_write)
@@ -743,6 +931,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 	g_clear_pointer(&priv->pending_move_path_old, g_free);
 	g_clear_pointer(&priv->pending_move_path_new, g_free);
 	priv->pending_move_is_physical = FALSE;
+	emb_sibling_pending_clear(priv);
 
 	return;
 }
@@ -1251,6 +1440,14 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			 * ganzen Mail wird für diesen Eintrag nur der Header indiziert. */
 			range = sond_page_range_new_gmessage_header();
 		}
+		else if (type == SOND_TVFM_ITEM_TYPE_LEAF &&
+				SOND_IS_FILE_PART_PDF(sond_file_part) &&
+				sond_tvfm_item_is_content_root_marker(stvfm_item)) {
+			/* "PageTree"-Knoten einer PDF mit Einbettungen: nur die Seiten,
+			 * die Einbettungen sind eigene Kind-Knoten (ToDo.c #191). Die
+			 * PDF selbst (DIR) bleibt "ganze Datei". */
+			range = sond_page_range_new_pdf_pagetree();
+		}
 
 		g_hash_table_insert(ht, g_object_ref(sond_file_part), range);
 	}
@@ -1374,6 +1571,7 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	g_clear_pointer(&priv->pending_delete_path, g_free);
 	g_clear_pointer(&priv->pending_move_path_old, g_free);
 	g_clear_pointer(&priv->pending_move_path_new, g_free);
+	emb_sibling_pending_clear(priv);
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }

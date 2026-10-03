@@ -1138,7 +1138,10 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 	//bei E-Mail nicht - da wird ja nur der Anzeigename geändert
 	if (!SOND_IS_FILE_PART_GMESSAGE(sfp_priv->parent)) {
 		g_free(sfp_priv->path);
-		sfp_priv->path = g_strdup(path_new);
+		/* PDF: Adresse ist der (kodierte) Schlüssel, der beim Schreiben an
+		 * den neuen Dateinamen angeglichen wurde (ToDo.c #193) */
+		sfp_priv->path = SOND_IS_FILE_PART_PDF(sfp_priv->parent) ?
+				pdf_emb_escape(path_new) : g_strdup(path_new);
 	}
 	
 	return 0;
@@ -1762,7 +1765,7 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 	if (zip_name_locate(archive, path_new, 0) >= 0) {
 		zip_source_free(src);
 		zip_discard(archive);
-		g_set_error(error, SOND_ERROR, 0,
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
 				"%s\nDatei '%s' existiert bereits im ZIP-Archiv", __func__, path_new);
 		return -1;
 	}
@@ -1817,7 +1820,8 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 	if (zip_name_locate(archive, filename, 0) >= 0) {
 		zip_source_free(arch_src);
 		zip_discard(archive);
-		g_set_error(error, SOND_ERROR, SOND_ERROR_EXISTS,
+		/* G_IO_ERROR_EXISTS: s. sond_file_part_pdf_insert_embedded_file() */
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
 				"%s\nDatei '%s' existiert bereits im ZIP-Archiv", __func__, filename);
 		return -1;
 	}
@@ -2051,12 +2055,15 @@ gint sond_file_part_pdf_save_and_close(fz_context *ctx, pdf_document *pdf_doc,
 typedef struct {
 	SondFilePartPDF* sfp_pdf;
 	GPtrArray* arr_embedded_files;
+	GPtrArray* arr_display_names;
+	GHashTable* addresses;
 }Load;
 
 static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
+	gchar const* address = NULL;
 	SondFilePart* sfp_embedded_file = NULL;
 	Load* load = (Load*) data;
 
@@ -2064,18 +2071,29 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		return -1;
 
+	//Adresse s. pdf_emb_addresses_new(), angezeigt mit Dateinamen (ToDo.c #193)
+	address = g_hash_table_lookup(load->addresses, val);
+	if (!address) {
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nEingebettete Datei ohne Schlüssel und Namen", __func__);
+		return -1;
+	}
+
 	sfp_embedded_file = sond_file_part_create(SOND_FILE_PART(load->sfp_pdf),
-			path_embedded, error);
+			address, error);
 	if (!sfp_embedded_file)
 		return -1;
 
 	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
+	g_ptr_array_add(load->arr_display_names,
+			g_strdup(path_embedded ? path_embedded : address));
 
 	return 0;
 }
 
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
-		GPtrArray** arr_children, GError **error) {
+		GPtrArray** arr_children, GPtrArray** arr_display_names,
+		GError **error) {
 	gint rc = 0;
 	fz_context* ctx = NULL;
 	pdf_document* doc = NULL;
@@ -2099,16 +2117,23 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 
 	load.sfp_pdf = SOND_FILE_PART_PDF(sfp_pdf);
 	load.arr_embedded_files = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-	rc = pdf_walk_embedded_files(ctx, doc, load_embedded_files, &load, error);
+	load.arr_display_names = g_ptr_array_new_with_free_func(g_free);
+	load.addresses = pdf_emb_addresses_new(ctx, doc, error);
+	rc = load.addresses ?
+			pdf_walk_embedded_files(ctx, doc, load_embedded_files, &load, error) : -1;
+	if (load.addresses)
+		g_hash_table_destroy(load.addresses);
 	pdf_drop_document(ctx, doc);
 	fz_drop_context(ctx);
 	if (rc) {
 		g_ptr_array_unref(load.arr_embedded_files);
+		g_ptr_array_unref(load.arr_display_names);
 		return -1;
 	}
 
 	if (load.arr_embedded_files->len == 0) { //darf ja nicht sein
 		g_ptr_array_unref(load.arr_embedded_files);
+		g_ptr_array_unref(load.arr_display_names);
 		g_set_error(error, g_quark_from_static_string("sond"),
 				0, "%s\nKein embedded file gefunden", __func__);
 
@@ -2116,8 +2141,40 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 	}
 
 	*arr_children = load.arr_embedded_files;
+	if (arr_display_names)
+		*arr_display_names = load.arr_display_names;
+	else
+		g_ptr_array_unref(load.arr_display_names);
 
 	return 0;
+}
+
+gint sond_file_part_pdf_emb_address_changes(SondFilePartPDF* sfp_pdf,
+		gchar const* address, gchar const* filename_new,
+		GPtrArray** addresses_old, GPtrArray** addresses_new, GError** error) {
+	gint rc = 0;
+	fz_context* ctx = NULL;
+	pdf_document* doc = NULL;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return -1;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	if (!doc) {
+		fz_drop_context(ctx);
+		return -1;
+	}
+
+	rc = pdf_emb_address_changes(ctx, doc, address, filename_new,
+			addresses_old, addresses_new, error);
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
+
+	return rc;
 }
 
 static void sond_file_part_pdf_finalize(GObject *self) {
@@ -2192,9 +2249,23 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 	return;
 }
 
+/* Trifft der Eintrag val die Adresse path (addresses aus
+ * pdf_emb_addresses_new())? by_filename: Ersatzsuche über den Dateinamen
+ * (/UF bzw. /F) für gespeicherte Adressen, die keine mehr sind - erster
+ * Treffer wie früher (ToDo.c #193). */
+static gboolean emb_matches(GHashTable* addresses, pdf_obj* val,
+		gchar const* path_embedded, gchar const* path, gboolean by_filename) {
+	if (by_filename)
+		return !g_strcmp0(path_embedded, path);
+
+	return !g_strcmp0(g_hash_table_lookup(addresses, val), path);
+}
+
 typedef struct {
 	gchar const* path_search;
 	fz_stream* stream;
+	gboolean by_filename;
+	GHashTable* addresses;
 } Lookup;
 
 static gint lookup_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
@@ -2207,7 +2278,8 @@ static gint lookup_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		return -1;
 
-	if (g_strcmp0(path_embedded, lookup->path_search) == 0) {
+	if (emb_matches(lookup->addresses, val, path_embedded, lookup->path_search,
+			lookup->by_filename)) {
 		fz_stream* stream = NULL;
 
 		fz_try(ctx)
@@ -2239,7 +2311,17 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		return NULL;
 
 	lookup.path_search = path;
+	lookup.addresses = pdf_emb_addresses_new(ctx, doc, error);
+	if (!lookup.addresses) {
+		pdf_drop_document(ctx, doc);
+		return NULL;
+	}
 	rc = pdf_walk_embedded_files(ctx, doc, lookup_embedded_file, &lookup, error);
+	if (!rc && !lookup.stream) { //Ersatzsuche über den Dateinamen
+		lookup.by_filename = TRUE;
+		rc = pdf_walk_embedded_files(ctx, doc, lookup_embedded_file, &lookup, error);
+	}
+	g_hash_table_destroy(lookup.addresses);
 	pdf_drop_document(ctx, doc);
 	if (rc)
 		return NULL;
@@ -2258,6 +2340,8 @@ typedef struct {
 	gchar const* path;
 	fz_buffer* buf;
 	gboolean found;
+	gboolean by_filename;
+	GHashTable* addresses;
 } Modify;
 
 static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
@@ -2270,7 +2354,8 @@ static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
 	if (!EF_F)
 		return -1;
 
-	if (g_strcmp0(path_embedded, modify->path) == 0) {
+	if (emb_matches(modify->addresses, val, path_embedded, modify->path,
+			modify->by_filename)) {
 		gint index = 0;
 
 		fz_try(ctx)
@@ -2310,7 +2395,8 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		return -1;
 
-	if (g_strcmp0(path_embedded, modify->path) == 0) {
+	if (emb_matches(modify->addresses, val, path_embedded, modify->path,
+			modify->by_filename)) {
 		pdf_document* doc = NULL;
 
 		doc = pdf_pin_document(ctx, EF_F);
@@ -2346,15 +2432,27 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	pdf_document* doc = NULL;
 	gint rc = 0;
 	fz_buffer* buf_out = NULL;
-	Modify modify = { path, buf, FALSE };
+	Modify modify = { path, buf, FALSE, FALSE, NULL };
 
 	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc)
 		return NULL;
 
-	//mod embedded file
+	modify.addresses = pdf_emb_addresses_new(ctx, doc, error);
+	if (!modify.addresses) {
+		pdf_drop_document(ctx, doc);
+		return NULL;
+	}
+
+	//mod embedded file - erst über die Adresse, sonst über den Dateinamen
 	rc = pdf_walk_embedded_files(ctx, doc,
 			(buf) ? modify_embedded_file : delete_embedded_file, &modify, error);
+	if (!rc && !modify.found) {
+		modify.by_filename = TRUE;
+		rc = pdf_walk_embedded_files(ctx, doc,
+				(buf) ? modify_embedded_file : delete_embedded_file, &modify, error);
+	}
+	g_hash_table_destroy(modify.addresses);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		return NULL;
@@ -2399,23 +2497,41 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	return buf_out;
 }
 
+/* path_old: Adresse des umzubenennenden Eintrags (NULL beim Einfügen),
+ * path_new: neuer Dateiname */
 typedef struct {
 	gchar const* path_old;
 	gchar const* path_new;
 	gboolean found;
+	gboolean by_filename;
+	GHashTable* addresses;
 } Rename;
 
+/* Ist path_new als Dateiname oder als Schlüssel schon vergeben (außer beim
+ * Eintrag path_old selbst)? Beides muss frei sein, damit Schlüssel =
+ * Dateiname gelten kann (ToDo.c #193). */
 static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
+	gchar const* key_text = NULL;
 	Rename* rename = (Rename*) data;
 
 	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		return -1;
 
-	if (g_strcmp0(path_embedded, rename->path_new) == 0) {
+	if (rename->path_old && (!g_strcmp0(path_embedded, rename->path_old) ||
+			emb_matches(rename->addresses, val, path_embedded, rename->path_old, FALSE)))
+		return 0; //der Eintrag selbst
+
+	fz_try(ctx)
+		key_text = pdf_to_text_string(ctx, key);
+	fz_catch(ctx)
+		key_text = NULL;
+
+	if (!g_strcmp0(path_embedded, rename->path_new) ||
+			!g_strcmp0(key_text, rename->path_new)) {
 		rename->found = TRUE;
 		return 1;
 	}
@@ -2459,9 +2575,12 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		return -1;
 	}
 
-	if (g_strcmp0(path_tmp, rename->path_old) != 0)
+	if (!emb_matches(rename->addresses, val, path_tmp, rename->path_old,
+			rename->by_filename))
 		return 0; //nächstes
 
+	/* Nur /F und /UF - den Schlüssel gleicht pdf_doc_to_buf() beim
+	 * Schreiben an den neuen Dateinamen an (pdf_emb_normalize_keys()) */
 	fz_try(ctx) {
 		pdf_dict_put_text_string(ctx, val, PDF_NAME(F), rename->path_new);
 		pdf_dict_put_text_string(ctx, val, PDF_NAME(UF), rename->path_new);
@@ -2474,6 +2593,8 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		return -1;
 	}
 
+	rename->found = TRUE;
+
 	return 1;
 }
 
@@ -2482,7 +2603,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 	gint rc = 0;
 	fz_context* ctx = NULL;
 	pdf_document* doc = NULL;
-	Rename rename = {path_old, path_new, FALSE};
+	Rename rename = { path_old, path_new, FALSE, FALSE, NULL };
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
@@ -2497,10 +2618,18 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
+	rename.addresses = pdf_emb_addresses_new(ctx, doc, error);
+	if (!rename.addresses) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		return -1;
+	}
+
 	//erster Durchgang: gibt's schon embFile mit Namen, in den umgenannt werden soll?
 	rc = pdf_walk_embedded_files(ctx, doc, look_for_embedded_file,
 			&rename, error);
 	if (rc) {
+		g_hash_table_destroy(rename.addresses);
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
 
@@ -2508,17 +2637,30 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 	}
 
 	if (rename.found) { //Ziel-Datei existiert schon!
+		g_hash_table_destroy(rename.addresses);
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
-		g_set_error(error, g_quark_from_static_string("sond"),
-				0, "%s\nDatei '%s' existiert bereits als embedded file",
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+				"%s\nDatei '%s' existiert bereits als embedded file",
 				__func__, rename.path_new);
 
 		return -1;
 	}
 
+	//erst über die Adresse, sonst über den Dateinamen
 	rc = pdf_walk_embedded_files(ctx, doc, rename_embedded_file,
 			&rename, error);
+	if (!rc && !rename.found) {
+		rename.by_filename = TRUE;
+		rc = pdf_walk_embedded_files(ctx, doc, rename_embedded_file,
+				&rename, error);
+	}
+	if (!rc && !rename.found) {
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nembedded file '%s' nicht gefunden", __func__, path_old);
+		rc = -1;
+	}
+	g_hash_table_destroy(rename.addresses);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
@@ -2538,10 +2680,29 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 		gchar const* mime_type, GError** error) {
 	gint rc = 0;
 	pdf_document* doc = NULL;
+	Rename look = { NULL, filename, FALSE, FALSE, NULL };
 
 	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc)
 		return -1;
+
+	/* Name muss als Dateiname und als Schlüssel frei sein, damit Adresse =
+	 * Dateiname gilt (ToDo.c #193). G_IO_ERROR_EXISTS lässt die
+	 * Suffix-Logik beim Einfügen (sond_treeviewfm.c) einen neuen Namen
+	 * versuchen. look.path_old ist NULL, die Adresstabelle wird nicht
+	 * gebraucht. */
+	rc = pdf_walk_embedded_files(ctx, doc, look_for_embedded_file, &look, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		return -1;
+	}
+	if (look.found) {
+		pdf_drop_document(ctx, doc);
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+				"%s\nDatei '%s' existiert bereits als embedded file",
+				__func__, filename);
+		return -1;
+	}
 
 	rc = pdf_insert_emb_file(ctx, doc, buf, filename, mime_type, error);
 	if (rc) {

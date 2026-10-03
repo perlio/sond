@@ -170,6 +170,19 @@ static const gchar *SQL_CREATE_ENTRYCOUNT =
            * Tabelle statt gemeinsam mit file_pagecount: unterschiedliche
            * Einheit (Seiten vs. Einträge), eigenständig erweiterbar. */
 
+static const gchar *SQL_CREATE_GMSG_INLINE =
+    "CREATE TABLE IF NOT EXISTS gmessage_inline ("
+    "  filename TEXT PRIMARY KEY,"
+    "  parts    TEXT NOT NULL"
+    ");"; /* Inline-Teile einer E-Mail (alle Mimeparts ohne Content-
+           * Disposition "attachment", die sich indizieren lassen), als
+           * "\n"-getrennte Pfade relativ zur Mail ("0", "0/1"). Leerer
+           * String: keine. Eine angebundene Mail (BAUM_INHALT/_AUSWERTUNG)
+           * steht für Header + diese Teile (ToDo.c #197) - Badge und
+           * Index durchsuchen brauchen die Liste, ohne die Mail zu öffnen.
+           * Befüllt bei jeder Indizierung einer Mail (sond_index()),
+           * gelöscht mit container_entrycount. */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -253,6 +266,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE container_entrycount: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_GMSG_INLINE, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE gmessage_inline: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -768,7 +789,163 @@ gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
     sqlite3_finalize(stmt);
     g_free(pattern);
 
+    //Inline-Teile einer Mail: gleiche Lebensdauer wie container_entrycount
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM gmessage_inline WHERE filename = ?1 OR "
+            "SUBSTR(filename, 1, LENGTH(?1) + 1) = ?1 || '/'",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare gmessage_inline: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step gmessage_inline: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
     return TRUE;
+}
+
+/* =======================================================================
+ * Inline-Teile einer E-Mail (ToDo.c #197)
+ * ======================================================================= */
+
+static gboolean gmessage_inline_set(SondIndexCtx *ctx, gchar const *filename,
+        GPtrArray *parts, GError **error) {
+    sqlite3_stmt *stmt   = NULL;
+    GString      *joined = g_string_new(NULL);
+
+    for (guint i = 0; i < parts->len; i++) {
+        if (i)
+            g_string_append_c(joined, '\n');
+        g_string_append(joined, g_ptr_array_index(parts, i));
+    }
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO gmessage_inline(filename, parts) VALUES(?, ?)"
+            " ON CONFLICT(filename) DO UPDATE SET parts = excluded.parts",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        g_string_free(joined, TRUE);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, joined->str, -1, SQLITE_TRANSIENT);
+    g_string_free(joined, TRUE);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
+    return TRUE;
+}
+
+GPtrArray* sond_index_ctx_gmessage_message_parts(SondIndexCtx *ctx,
+        gchar const *filename, gboolean *known) {
+    sqlite3_stmt *stmt  = NULL;
+    GPtrArray    *parts = g_ptr_array_new_with_free_func(g_free);
+
+    if (known)
+        *known = FALSE;
+
+    g_ptr_array_add(parts, g_strdup_printf("%s//header", filename));
+
+    if (!ctx || sqlite3_prepare_v2(ctx->db,
+            "SELECT parts FROM gmessage_inline WHERE filename = ?",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return parts;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        gchar const *joined = (gchar const *) sqlite3_column_text(stmt, 0);
+
+        if (known)
+            *known = TRUE;
+
+        if (joined && *joined) {
+            gchar **v = g_strsplit(joined, "\n", -1);
+
+            for (gchar **p = v; *p; p++)
+                g_ptr_array_add(parts, g_strdup_printf("%s//%s", filename, *p));
+            g_strfreev(v);
+        }
+    }
+    sqlite3_finalize(stmt);
+
+    return parts;
+}
+
+SondIndexStatus sond_index_ctx_get_gmessage_message_status(SondIndexCtx *ctx,
+        gchar const *filename) {
+    GPtrArray *parts = sond_index_ctx_gmessage_message_parts(ctx, filename, NULL);
+    guint      full  = 0;
+    gboolean   any   = FALSE;
+
+    for (guint i = 0; i < parts->len; i++) {
+        SondIndexStatus st = sond_index_ctx_get_file_status(ctx,
+                g_ptr_array_index(parts, i), -1, -1);
+
+        if (st == SOND_INDEX_STATUS_FULL)
+            full++;
+        if (st != SOND_INDEX_STATUS_NONE)
+            any = TRUE;
+    }
+
+    {
+        guint n = parts->len;
+
+        g_ptr_array_unref(parts);
+
+        if (full == n)
+            return SOND_INDEX_STATUS_FULL;
+        return any ? SOND_INDEX_STATUS_PARTIAL : SOND_INDEX_STATUS_NONE;
+    }
+}
+
+/* Inline-Teile (s. SQL_CREATE_GMSG_INLINE) rekursiv sammeln - Pfade nach
+ * derselben Konvention wie gmessage_process_part() (sond_process_file.c):
+ * Kinder eines Multiparts "i" bzw. "eltern/i", ein Nicht-Multipart als
+ * Wurzel "0" */
+static void gmessage_collect_inline(GMimeObject *object,
+        gchar const *internal_path, GPtrArray *out) {
+    if (GMIME_IS_MULTIPART(object)) {
+        GMimeMultipart *mp = GMIME_MULTIPART(object);
+
+        for (gint i = 0; i < g_mime_multipart_get_count(mp); i++) {
+            gchar *child = internal_path ?
+                    g_strdup_printf("%s/%d", internal_path, i) :
+                    g_strdup_printf("%d", i);
+
+            gmessage_collect_inline(g_mime_multipart_get_part(mp, i), child, out);
+            g_free(child);
+        }
+    }
+    else {
+        GMimeContentDisposition *disp =
+                g_mime_object_get_content_disposition(object);
+        gchar const *dval = disp ?
+                g_mime_content_disposition_get_disposition(disp) : NULL;
+        gchar *mime = NULL;
+
+        if (dval && !g_ascii_strcasecmp(dval, "attachment"))
+            return;
+
+        mime = g_mime_content_type_get_mime_type(
+                g_mime_object_get_content_type(object));
+        if (sond_index_mime_type_supported(mime))
+            g_ptr_array_add(out, g_strdup(internal_path ? internal_path : "0"));
+        g_free(mime);
+    }
 }
 
 /* =======================================================================
@@ -1222,6 +1399,17 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
     if (sond_index_ctx_coverage_get(ctx, filename) >= 0)
         return SOND_INDEX_STATUS_FULL;
 
+    /* Seiten-Eintrag "filename//" (PDF, nur Seiten - s. sond_index()):
+     * Status der Seiten bzw. eines Seitenbereichs, nicht der Einbettungen. */
+    {
+        gchar *pages_path = g_strdup_printf("%s//", filename);
+        gint mode = coverage_get_exact(ctx, pages_path);
+
+        g_free(pages_path);
+        if (mode >= 0)
+            return SOND_INDEX_STATUS_FULL;
+    }
+
     if (von_seite < 0) {
         /* Ganze Datei (auch Nicht-PDF, dort page_nr immer -1): ohne die
          * Datei zu öffnen reicht hier die Existenzfrage, um NONE von
@@ -1466,6 +1654,18 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) == SQLITE_ROW)
         mode = sqlite3_column_int(stmt, 0);
+
+    /* Sonst ggf. der Seiten-Eintrag "filename//" (PDF, nur Seiten - s.
+     * sond_index()): auch er steht für "alle Seiten abgedeckt". */
+    if (mode < 0) {
+        gchar *pages_path = g_strdup_printf("%s//", filename);
+
+        sqlite3_reset(stmt);
+        sqlite3_bind_text(stmt, 1, pages_path, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            mode = sqlite3_column_int(stmt, 0);
+        g_free(pages_path);
+    }
     sqlite3_finalize(stmt);
     stmt = NULL;
 
@@ -1537,6 +1737,13 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
  * Behandlung bei der eigentlichen Anbindung an die Edit/Löschen-Stellen
  * gebraucht.
  */
+/* Endung ".pdf" (ohne sond_mime.c, das der Server nicht linkt) */
+static gboolean path_is_pdf(gchar const *path) {
+    gsize len = path ? strlen(path) : 0;
+
+    return len >= 4 && !g_ascii_strcasecmp(path + len - 4, ".pdf");
+}
+
 gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         gchar const *path, gchar const *root_dir, GError **error) {
     sqlite3_stmt *stmt     = NULL;
@@ -1547,6 +1754,23 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: ctx/path fehlt", __func__);
         return FALSE;
+    }
+
+    /* Der Seiten-Eintrag "path//" (PDF, nur Seiten - s. sond_index())
+     * gehört zu path und wird mit entwertet. Für andere Pfade gibt es ihn
+     * nicht. */
+    {
+        gchar *pages_path = g_strdup_printf("%s//", path);
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "DELETE FROM coverage WHERE path = ?", -1, &stmt, NULL)
+                == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, pages_path, -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        stmt = NULL;
+        g_free(pages_path);
     }
 
     /* Abdeckenden Vorfahren (oder path selbst) suchen - wie
@@ -1681,6 +1905,21 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                     g_free(expected_this);
                 }
                 g_ptr_array_unref(child_keys);
+
+                next_dir = g_strdup_printf("%s//%s", current_dir, segment);
+            } else if (is_container && path_is_pdf(current_dir)) {
+                /* In eine PDF hinein (eingebettete Datei oder - bei leerem
+                 * segment - ihr Seiten-Eintrag selbst): die Seiten bleiben
+                 * gültig, sofern nicht sie selbst entwertet werden. Die
+                 * übrigen Einbettungen lassen sich ohne Dateizugriff nicht
+                 * aufzählen und verlieren ihre Abdeckung (Einschränkung, s.
+                 * ToDo.c #191). */
+                if (*segment) {
+                    gchar *pages_path = g_strdup_printf("%s//", current_dir);
+
+                    sond_index_ctx_coverage_mark(ctx, pages_path, mode, NULL);
+                    g_free(pages_path);
+                }
 
                 next_dir = g_strdup_printf("%s//%s", current_dir, segment);
             } else {
@@ -2153,6 +2392,14 @@ gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error) {
         return FALSE;
     }
 
+    if (sqlite3_exec(ctx->db, "DELETE FROM gmessage_inline;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE gmessage_inline: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -2164,86 +2411,47 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
                                      gchar const  *prefix_old,
                                      gchar const  *prefix_new,
                                      GError      **error) {
-    /* SQL:
-     * UPDATE <table> SET filename =
-     *   ?2 || SUBSTR(filename, LENGTH(?1) + 1)
-     * WHERE filename = ?1 OR filename LIKE ?1 || '//%'
-     *
-     * Das ersetzt den Anfang (prefix_old) durch prefix_new,
-     * der Rest (nach dem Präfix) bleibt unverandert.
-     */
-    const gchar *tables[] = { "chunks", "pages", "file_pagecount",
-            "container_entrycount" };
-    gchar       *pattern  = g_strdup_printf("%s//%%", prefix_old);
+    /* prefix_old selbst und alles darunter - "/" (Unterverzeichnis, Datei
+     * in umbenanntem Ordner) wie "//" (eingebetteter Inhalt) - bekommt
+     * prefix_new als Anfang. Vorher erfassten chunks/pages/... nur "//":
+     * beim Umbenennen eines Ordners blieben die Einträge der Dateien darin
+     * unter dem alten Pfad. SUBSTR statt LIKE, weil "%" und "_" in Pfaden
+     * vorkommen (Adressen eingebetteter Dateien, ToDo.c #193). */
+    static const struct {
+        gchar const *table;
+        gchar const *column;
+    } targets[] = {
+        { "chunks", "filename" }, { "pages", "filename" },
+        { "file_pagecount", "filename" }, { "container_entrycount", "filename" },
+        { "gmessage_inline", "filename" }, { "coverage", "path" }
+    };
 
-    for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {
+    for (guint t = 0; t < G_N_ELEMENTS(targets); t++) {
         sqlite3_stmt *stmt = NULL;
         gchar *sql = g_strdup_printf(
-                "UPDATE %s SET filename = ?2 || SUBSTR(filename, LENGTH(?1) + 1) "
-                "WHERE filename = ?1 OR filename LIKE ?3",
-                tables[t]);
+                "UPDATE %s SET %s = ?2 || SUBSTR(%s, LENGTH(?1) + 1) "
+                "WHERE %s = ?1 OR SUBSTR(%s, 1, LENGTH(?1) + 1) = ?1 || '/'",
+                targets[t].table, targets[t].column, targets[t].column,
+                targets[t].column, targets[t].column);
 
         gint rc = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
         g_free(sql);
         if (rc != SQLITE_OK) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                         "sond_index_ctx_rename_file: prepare %s: %s",
-                        tables[t], sqlite3_errmsg(ctx->db));
-            g_free(pattern);
+                        targets[t].table, sqlite3_errmsg(ctx->db));
             return FALSE;
         }
 
         sqlite3_bind_text(stmt, 1, prefix_old, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, prefix_new, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, pattern,    -1, SQLITE_TRANSIENT);
         rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
 
         if (rc != SQLITE_DONE) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                         "sond_index_ctx_rename_file: step %s: %s",
-                        tables[t], sqlite3_errmsg(ctx->db));
-            g_free(pattern);
-            return FALSE;
-        }
-    }
-
-    g_free(pattern);
-
-    /* coverage: eigener Durchgang, eigenes LIKE-Muster - anders als
-     * chunks/pages (deren "//"-Konvention nur eingebettete Inhalte
-     * markiert) folgen coverage-Pfade der normalen Verzeichnis-Hierarchie
-     * mit einfachem "/" (s. coverage_mark/_try_collapse). Ein einzelnes
-     * "/%"-Muster deckt dabei sowohl echte Unterpfade ("prefix/kind") als
-     * auch eingebettete ("prefix//teil") ab, ohne dabei unbeabsichtigt
-     * andere Pfade mit gemeinsamem Präfix zu treffen (z.B. "prefix_bak"). */
-    {
-        sqlite3_stmt *stmt          = NULL;
-        gchar        *pattern_slash = g_strdup_printf("%s/%%", prefix_old);
-        gint          rc            = sqlite3_prepare_v2(ctx->db,
-                "UPDATE coverage SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1) "
-                "WHERE path = ?1 OR path LIKE ?3",
-                -1, &stmt, NULL);
-
-        if (rc != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                        "sond_index_ctx_rename_file: prepare coverage: %s",
-                        sqlite3_errmsg(ctx->db));
-            g_free(pattern_slash);
-            return FALSE;
-        }
-
-        sqlite3_bind_text(stmt, 1, prefix_old,    -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, prefix_new,    -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, pattern_slash, -1, SQLITE_TRANSIENT);
-        rc = sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        g_free(pattern_slash);
-
-        if (rc != SQLITE_DONE) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                        "sond_index_ctx_rename_file: step coverage: %s",
-                        sqlite3_errmsg(ctx->db));
+                        targets[t].table, sqlite3_errmsg(ctx->db));
             return FALSE;
         }
     }
@@ -3126,7 +3334,7 @@ void sond_index(fz_context* ctx,
 		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
 		gsize size, gchar const *mime_type,
 		gint seite_von, gint seite_bis, gint ocr_mode, gint const *cancel,
-		gboolean gmessage_header_only) {
+		gboolean gmessage_header_only, gboolean pdf_pagetree_only) {
     if (!sond_index_ctx) return;
     if (!mime_type) return;
 
@@ -3142,6 +3350,14 @@ void sond_index(fz_context* ctx,
     g_autofree gchar *header_path = is_header_only ?
             g_strdup_printf("%s//header", filename) : NULL;
     gchar const *idx_filename = is_header_only ? header_path : filename;
+
+    /* Nur die Seiten einer PDF: Chunks/pages unter idx_filename (die
+     * Seiten werden überall über "x.pdf" + Seitennummer angesprochen),
+     * abgedeckt aber nur "x.pdf//" - s. Doku in sond_index.h. */
+    g_autofree gchar *pagetree_path =
+            (pdf_pagetree_only && !g_strcmp0(mime_type, "application/pdf")) ?
+            g_strdup_printf("%s//", filename) : NULL;
+    gchar const *coverage_path = pagetree_path ? pagetree_path : idx_filename;
 
     /* container_entrycount für die GANZE Mail (filename, nicht
      * idx_filename) auffrischen - unabhängig von gmessage_header_only,
@@ -3163,6 +3379,32 @@ void sond_index(fz_context* ctx,
                             "sond_index: set_entry_count '%s': %s", filename,
                             entrycount_error ? entrycount_error->message : "?");
                 g_clear_error(&entrycount_error);
+            }
+        }
+
+        //Inline-Teile für die angebundene Mail (Header + Inline, #197)
+        {
+            GMimeMessage *message = gmessage_open(buf, size);
+
+            if (message) {
+                GMimeObject *root = g_mime_message_get_mime_part(message);
+                GPtrArray *inline_parts = g_ptr_array_new_with_free_func(g_free);
+                GError *inline_error = NULL;
+
+                if (root)
+                    gmessage_collect_inline(root, NULL, inline_parts);
+
+                if (!gmessage_inline_set(sond_index_ctx, filename, inline_parts,
+                        &inline_error)) {
+                    if (log_func)
+                        log_func(log_func_data,
+                                "sond_index: gmessage_inline '%s': %s", filename,
+                                inline_error ? inline_error->message : "?");
+                    g_clear_error(&inline_error);
+                }
+
+                g_ptr_array_unref(inline_parts);
+                g_object_unref(message);
             }
         }
     }
@@ -3335,11 +3577,11 @@ void sond_index(fz_context* ctx,
     if (!cancelled && seite_von == -1 && seite_bis == -1) {
         GError *coverage_error = NULL;
 
-        if (!sond_index_ctx_coverage_mark(sond_index_ctx, idx_filename, ocr_mode,
+        if (!sond_index_ctx_coverage_mark(sond_index_ctx, coverage_path, ocr_mode,
                 &coverage_error)) {
             if (log_func)
                 log_func(log_func_data, "sond_index: coverage_mark '%s': %s",
-                        idx_filename,
+                        coverage_path,
                         coverage_error ? coverage_error->message : "?");
             g_clear_error(&coverage_error);
         }
@@ -3383,7 +3625,7 @@ void sond_index(fz_context* ctx,
         if (!is_header_only && !g_strcmp0(mime_type, "message/rfc822"))
             sond_index(ctx, log_func, log_func_data, sond_index_ctx, filename,
                     buf, size, mime_type, seite_von, seite_bis, ocr_mode,
-                    cancel, TRUE);
+                    cancel, TRUE, FALSE);
     }
 
     g_ptr_array_unref(segs);

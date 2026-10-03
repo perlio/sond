@@ -72,16 +72,29 @@ typedef struct _SondProcessFileCtx {
  *         (Von/An/CC/BCC/Betreff/Datum) indiziert werden. von/bis sind in
  *         diesem Fall irrelevant (-1/-1). S. ToDo.c, 17.09.2026,
  *         E-Mail-Coverage-Redesign (Schritt 2/6).
+ * @pdf_pagetree_only: TRUE, wenn nur die Seiten (PageTree) einer PDF
+ *         gemeint sind, ohne die eingebetteten Dateien (die sind eigene
+ *         Fileparts "x.pdf//anhang.pdf"). von/bis = -1/-1. Abgedeckt wird
+ *         unter dem Coverage-Schlüssel "x.pdf//", Chunks/pages bleiben
+ *         unter "x.pdf". S. ToDo.c #191.
  *
  * Seitenbereich, auf den Indizierung/OCR für eine Datei beschränkt werden
  * soll (z.B. weil nur eine an einen Baum-Punkt angebundene Teilstrecke
  * einer großen PDF interessiert). Wird als Wert in der GHashTable an
- * sond_process_fileparts() übergeben - ein NULL-Wert bedeutet "ganze Datei".
+ * sond_process_fileparts() übergeben - ein NULL-Wert bedeutet "ganze Datei"
+ * (bei PDF: Seiten und alle eingebetteten Dateien). Ein Seitenbereich
+ * (von >= 0) umfasst nie eingebettete Dateien.
  */
 typedef struct _SondPageRange {
     gint von;
     gint bis;
     gboolean gmessage_header_only;
+    gboolean pdf_pagetree_only;
+    /* angebundene Mail in BAUM_INHALT/_AUSWERTUNG: Header + Inline-Teile
+     * (Mimeparts ohne Content-Disposition "attachment"), von/bis -1/-1.
+     * Kein eigener Coverage-Schlüssel - Header ("x.eml//header") und
+     * Inline-Teile ("x.eml//N") werden einzeln abgedeckt. S. ToDo.c #197. */
+    gboolean gmessage_message;
 } SondPageRange;
 
 SondPageRange* sond_page_range_new(gint von, gint bis);
@@ -90,12 +103,22 @@ SondPageRange* sond_page_range_new(gint von, gint bis);
  * einen Range-Eintrag mit von=bis=-1 und gmessage_header_only=TRUE. */
 SondPageRange* sond_page_range_new_gmessage_header(void);
 
+/* Nur die Seiten einer PDF (s.o.) - von=bis=-1, pdf_pagetree_only=TRUE. */
+SondPageRange* sond_page_range_new_pdf_pagetree(void);
+
+/* Angebundene Mail, Header + Inline-Teile (s.o.) - gmessage_message=TRUE. */
+SondPageRange* sond_page_range_new_gmessage_message(void);
+
+/* Kopie inkl. aller Flags; NULL bleibt NULL. */
+SondPageRange* sond_page_range_copy(SondPageRange const *range);
+
 void sond_page_range_free(gpointer p);
 
+/* range: NULL = ganze Datei, sonst Seitenbereich bzw. Teil wie oben */
 void sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
-		gint seite_von, gint seite_bis, gboolean gmessage_header_only);
+		SondPageRange const* range);
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 

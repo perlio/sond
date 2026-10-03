@@ -265,9 +265,15 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 		sqlite3_stmt *stmt = NULL;
 		gint rc = 0;
 
+		/* Nur prefix_old selbst und was darunter liegt ("/" bzw. "//") -
+		 * ohne WHERE traf das Ersetzen auch Pfade, die nur zufällig mit
+		 * prefix_old beginnen ("Akte" -> auch "Akte_alt"). SUBSTR statt
+		 * LIKE, weil "%" und "_" in Pfaden vorkommen (ToDo.c #193). */
 		sql = g_strdup_printf("UPDATE %s.knoten SET file_part = "
-				"REPLACE( SUBSTR( file_part, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
-				"SUBSTR( file_part, LENGTH( ?1 ) + 1 );", schemas[i]);
+				"?2 || SUBSTR( file_part, LENGTH( ?1 ) + 1 ) "
+				"WHERE file_part = ?1 OR "
+				"SUBSTR( file_part, 1, LENGTH( ?1 ) + 1 ) = ?1 || '/';",
+				schemas[i]);
 		rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 		g_free(sql);
 		if (rc != SQLITE_OK) {

@@ -372,6 +372,18 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 		return NULL;
 	}
 
+	/* Schlüssel eingebetteter Dateien an ihre Dateinamen angleichen (ToDo.c
+	 * #193) - ein Fehler verhindert das Schreiben nicht */
+	{
+		GError* error_norm = NULL;
+
+		if (pdf_emb_normalize_keys(ctx, doc, &error_norm)) {
+			LOG_WARN("%s: %s", __func__,
+					error_norm ? error_norm->message : "?");
+			g_clear_error(&error_norm);
+		}
+	}
+
 	//do_appereance wird in pdf_write_document ignoriert. deshalb muß es hier gemacht werden
 	if (doc->resynth_required) {
 		gint i = 0;
@@ -411,6 +423,21 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 	}
 
 	return buf;
+}
+
+gchar* pdf_emb_escape(gchar const* name) {
+	GString* s = g_string_new(NULL);
+
+	for (gchar const* p = name; p && *p; p++) {
+		if (*p == '%')
+			g_string_append(s, "%25");
+		else if (*p == '/')
+			g_string_append(s, "%2F");
+		else
+			g_string_append_c(s, *p);
+	}
+
+	return g_string_free(s, FALSE);
 }
 
 pdf_obj* pdf_get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error) {
@@ -701,6 +728,52 @@ static gint pdf_insert_into_name_tree(fz_context *ctx, pdf_document *doc,
 	return 0;
 }
 
+typedef struct {
+	gchar const* key;
+	gboolean found;
+} KeySearch;
+
+static gint pdf_emb_key_search(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
+	KeySearch* ks = (KeySearch*) data;
+	gchar const* text = NULL;
+
+	fz_try(ctx)
+		text = pdf_to_text_string(ctx, key);
+	fz_catch(ctx)
+		text = NULL;
+
+	if (!g_strcmp0(text, ks->key)) {
+		ks->found = TRUE;
+		return 1;
+	}
+
+	return 0;
+}
+
+/* Schlüssel im Namensbaum müssen eindeutig sein (PDF-Norm). Der Dateiname
+ * genügt dafür nicht: nach einer Umbenennung (ändert nur /F und /UF) kann
+ * ein alter Schlüssel noch belegt sein. Dann " (n)" anhängen. Rückgabe
+ * neu alloziert, NULL bei Fehler. */
+static gchar* pdf_emb_unique_key(fz_context* ctx, pdf_obj* emb,
+		gchar const* filename, GError** error) {
+	gchar* candidate = g_strdup(filename);
+
+	for (guint i = 1; ; i++) {
+		KeySearch ks = { candidate, FALSE };
+
+		if (pdf_walk_names_dict(ctx, emb, NULL, pdf_emb_key_search, &ks, error)) {
+			g_free(candidate);
+			return NULL;
+		}
+		if (!ks.found)
+			return candidate;
+
+		g_free(candidate);
+		candidate = g_strdup_printf("%s (%u)", filename, i);
+	}
+}
+
 gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		fz_buffer* buf, gchar const* filename,
 		gchar const* mime_type, GError** error) {
@@ -712,6 +785,7 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 	pdf_obj* ef = NULL;
 	pdf_obj* filespec = NULL;
 	pdf_obj* key = NULL;
+	gchar* key_str = NULL;
 	gint rc = 0;
 
 	fz_try(ctx)
@@ -773,6 +847,10 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 			ERROR_PDF
 	}
 
+	key_str = pdf_emb_unique_key(ctx, emb, filename, error);
+	if (!key_str)
+		return -1;
+
     /* ---------- Datei-Stream ---------- */
 	fz_var(file_stream);
 	fz_var(params);
@@ -794,8 +872,10 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		/* ---------- FileSpec ---------- */
 		filespec = pdf_new_dict(ctx, doc, 5);
 		pdf_dict_put_drop(ctx, filespec, PDF_NAME(Type), pdf_new_name(ctx, "Filespec"));
-		pdf_dict_put_drop(ctx, filespec, PDF_NAME(F),
-					 pdf_new_string(ctx, filename, strlen(filename)));
+		/* Dateiname als Textstring in /F und /UF (PDF-Norm), Schlüssel =
+		 * Dateiname (s. pdf_emb_normalize_keys()) */
+		pdf_dict_put_text_string(ctx, filespec, PDF_NAME(F), filename);
+		pdf_dict_put_text_string(ctx, filespec, PDF_NAME(UF), filename);
 		pdf_dict_put(ctx, filespec, PDF_NAME(EF), ef);
 		pdf_dict_put(ctx, filespec, PDF_NAME(Params), params);
 
@@ -806,12 +886,13 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		}
 
 		/* ---------- Key für Namen ---------- */
-		key = pdf_new_string(ctx, filename, strlen(filename));
+		key = pdf_new_text_string(ctx, key_str);
 	}
 	fz_always(ctx) {
 		pdf_drop_obj(ctx, file_stream);
 		pdf_drop_obj(ctx, params);
 		pdf_drop_obj(ctx, ef);
+		g_free(key_str);
 	}
 	fz_catch(ctx) {
 		pdf_drop_obj(ctx, filespec);
@@ -827,6 +908,303 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		return -1;
 
 	return 0;
+}
+
+typedef struct {
+	pdf_obj* key;      //eigene Ref
+	pdf_obj* val;      //eigene Ref
+	gchar* key_text;   //UTF-8
+	gchar* filename;   //UTF-8 (/UF, sonst /F), NULL wenn keiner
+	pdf_obj* key_new;  //eigene Ref, NULL = Schlüssel bleibt
+} EmbEntry;
+
+static void emb_entry_clear(fz_context* ctx, EmbEntry* e) {
+	pdf_drop_obj(ctx, e->key);
+	pdf_drop_obj(ctx, e->val);
+	pdf_drop_obj(ctx, e->key_new);
+	g_free(e->key_text);
+	g_free(e->filename);
+}
+
+static gint emb_collect(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
+	GArray* entries = (GArray*) data;
+	EmbEntry e = { 0 };
+	gchar const* key_text = NULL;
+	gchar const* filename = NULL;
+
+	fz_try(ctx) {
+		key_text = pdf_to_text_string(ctx, key);
+		if (pdf_is_string(ctx, pdf_dict_get(ctx, val, PDF_NAME(UF))))
+			filename = pdf_to_text_string(ctx, pdf_dict_get(ctx, val, PDF_NAME(UF)));
+		else if (pdf_is_string(ctx, pdf_dict_get(ctx, val, PDF_NAME(F))))
+			filename = pdf_to_text_string(ctx, pdf_dict_get(ctx, val, PDF_NAME(F)));
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	e.key = pdf_keep_obj(ctx, key);
+	e.val = pdf_keep_obj(ctx, val);
+	e.key_text = g_strdup(key_text);
+	e.filename = (filename && *filename) ? g_strdup(filename) : NULL;
+	g_array_append_val(entries, e);
+
+	return 0;
+}
+
+/* Alle Einträge des EmbeddedFiles-Namensbaums; *entries bleibt NULL, wenn
+ * es keinen Namensbaum gibt */
+static gint emb_collect_all(fz_context* ctx, pdf_document* doc,
+		pdf_obj** emb_out, GArray** entries, GError** error) {
+	pdf_obj* emb = NULL;
+	gint rc = 0;
+
+	*entries = NULL;
+
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles), &emb, error);
+	if (rc)
+		return -1;
+	if (!emb)
+		return 0;
+
+	*entries = g_array_new(FALSE, TRUE, sizeof(EmbEntry));
+	rc = pdf_walk_names_dict(ctx, emb, NULL, emb_collect, *entries, error);
+	if (rc) {
+		for (guint i = 0; i < (*entries)->len; i++)
+			emb_entry_clear(ctx, &g_array_index(*entries, EmbEntry, i));
+		g_array_unref(*entries);
+		*entries = NULL;
+
+		return -1;
+	}
+
+	if (emb_out)
+		*emb_out = emb;
+
+	return 0;
+}
+
+static void emb_entries_free(fz_context* ctx, GArray* entries) {
+	if (!entries)
+		return;
+
+	for (guint i = 0; i < entries->len; i++)
+		emb_entry_clear(ctx, &g_array_index(entries, EmbEntry, i));
+	g_array_unref(entries);
+}
+
+/* Gemeinsame Regel für Adresse und Angleichung: der Dateiname von Eintrag i
+ * dient als Adresse (und Schlüssel), wenn kein anderer Eintrag denselben
+ * Dateinamen hat und keiner ihn als Schlüssel trägt. Sonst bleibt der
+ * Schlüssel maßgeblich - so ändert die Angleichung die Adresse nie. */
+static gboolean emb_filename_is_address(GArray* entries, guint i) {
+	EmbEntry* e = &g_array_index(entries, EmbEntry, i);
+
+	if (!e->filename)
+		return FALSE;
+
+	for (guint j = 0; j < entries->len; j++) {
+		EmbEntry* o = &g_array_index(entries, EmbEntry, j);
+
+		if (j == i)
+			continue;
+		if (!g_strcmp0(o->filename, e->filename) ||
+				!g_strcmp0(o->key_text, e->filename))
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+/* Adresse von Eintrag i (neu alloziert, NULL ohne Schlüssel und Namen) */
+static gchar* emb_address(GArray* entries, guint i) {
+	EmbEntry* e = &g_array_index(entries, EmbEntry, i);
+	gchar const* text = NULL;
+
+	if (emb_filename_is_address(entries, i))
+		text = e->filename;
+	else if (e->key_text && *e->key_text)
+		text = e->key_text;
+	else
+		text = e->filename;
+
+	return text ? pdf_emb_escape(text) : NULL;
+}
+
+GHashTable* pdf_emb_addresses_new(fz_context* ctx, pdf_document* doc,
+		GError** error) {
+	GArray* entries = NULL;
+	GHashTable* addresses = NULL;
+
+	if (emb_collect_all(ctx, doc, NULL, &entries, error))
+		return NULL;
+
+	addresses = g_hash_table_new_full(NULL, NULL, NULL, g_free);
+	if (!entries)
+		return addresses;
+
+	for (guint i = 0; i < entries->len; i++) {
+		gchar* address = emb_address(entries, i);
+
+		if (address)
+			g_hash_table_insert(addresses,
+					g_array_index(entries, EmbEntry, i).val, address);
+	}
+
+	emb_entries_free(ctx, entries);
+
+	return addresses;
+}
+
+gint pdf_emb_address_changes(fz_context* ctx, pdf_document* doc,
+		gchar const* address_target, gchar const* filename_new,
+		GPtrArray** addresses_old, GPtrArray** addresses_new, GError** error) {
+	GArray* entries = NULL;
+	GArray* sim = NULL;
+	GPtrArray* before = NULL;
+	gint target = -1;
+
+	*addresses_old = g_ptr_array_new_with_free_func(g_free);
+	*addresses_new = g_ptr_array_new_with_free_func(g_free);
+
+	if (emb_collect_all(ctx, doc, NULL, &entries, error)) {
+		g_clear_pointer(addresses_old, g_ptr_array_unref);
+		g_clear_pointer(addresses_new, g_ptr_array_unref);
+		return -1;
+	}
+	if (!entries)
+		return 0;
+
+	before = g_ptr_array_new_with_free_func(g_free);
+	for (guint i = 0; i < entries->len; i++) {
+		gchar* address = emb_address(entries, i);
+
+		if (target < 0 && !g_strcmp0(address, address_target))
+			target = (gint) i;
+		g_ptr_array_add(before, address);
+	}
+	//gespeicherte Adresse aus der Zeit vor #193: Ersatzsuche über den Namen
+	for (guint i = 0; target < 0 && i < entries->len; i++)
+		if (!g_strcmp0(g_array_index(entries, EmbEntry, i).filename,
+				address_target))
+			target = (gint) i;
+
+	if (target < 0) //Ziel unbekannt - keine Änderungen ableitbar
+		goto out;
+
+	/* Zustand danach simulieren: Ziel entfernt bzw. mit neuem Namen (Schlüssel
+	 * = Dateiname, s. pdf_emb_normalize_keys()) - nur key_text/filename
+	 * werden für die Regel gebraucht */
+	sim = g_array_new(FALSE, TRUE, sizeof(EmbEntry));
+	for (guint i = 0; i < entries->len; i++) {
+		EmbEntry* e = &g_array_index(entries, EmbEntry, i);
+		EmbEntry s = { 0 };
+
+		if ((gint) i == target && !filename_new)
+			continue;
+
+		s.key_text = g_strdup((gint) i == target ? filename_new : e->key_text);
+		s.filename = g_strdup((gint) i == target ? filename_new : e->filename);
+		g_array_append_val(sim, s);
+	}
+
+	for (guint i = 0, j = 0; i < entries->len; i++) {
+		gchar* address_after = NULL;
+
+		if ((gint) i == target && !filename_new)
+			continue; //entfernt, kein Gegenstück in sim
+
+		address_after = emb_address(sim, j++);
+		if ((gint) i != target && address_after &&
+				g_strcmp0(g_ptr_array_index(before, i), address_after)) {
+			g_ptr_array_add(*addresses_old,
+					g_strdup(g_ptr_array_index(before, i)));
+			g_ptr_array_add(*addresses_new, address_after);
+		}
+		else
+			g_free(address_after);
+	}
+
+out:
+	g_ptr_array_unref(before);
+	emb_entries_free(ctx, sim);
+	emb_entries_free(ctx, entries);
+
+	return 0;
+}
+
+static gint emb_entry_cmp(gconstpointer a, gconstpointer b, gpointer data) {
+	EmbEntry const* ea = a;
+	EmbEntry const* eb = b;
+
+	return pdf_compare_strings((fz_context*) data,
+			ea->key_new ? ea->key_new : ea->key,
+			eb->key_new ? eb->key_new : eb->key);
+}
+
+gint pdf_emb_normalize_keys(fz_context* ctx, pdf_document* doc, GError** error) {
+	pdf_obj* emb = NULL;
+	GArray* entries = NULL;
+	gboolean changed = FALSE;
+	gint rc = 0;
+
+	rc = emb_collect_all(ctx, doc, &emb, &entries, error);
+	if (rc)
+		return -1;
+	if (!entries)
+		return 0;
+
+	/* Schlüssel auf den Dateinamen setzen, wo der Dateiname die Adresse ist
+	 * (emb_filename_is_address()) - bei doppelten Dateinamen bleiben die
+	 * Schlüssel (eindeutige Adressen) */
+	for (guint i = 0; i < entries->len; i++) {
+		EmbEntry* e = &g_array_index(entries, EmbEntry, i);
+
+		if (!g_strcmp0(e->key_text, e->filename) ||
+				!emb_filename_is_address(entries, i))
+			continue;
+
+		fz_try(ctx)
+			e->key_new = pdf_new_text_string(ctx, e->filename);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+			rc = -1;
+			goto out;
+		}
+		changed = TRUE;
+	}
+
+	if (!changed)
+		goto out;
+
+	/* Namensbaum flach und sortiert neu aufbauen; alte Zwischenknoten
+	 * entfallen beim Schreiben (garbage collection) */
+	g_array_sort_with_data(entries, emb_entry_cmp, ctx);
+
+	fz_try(ctx) {
+		pdf_obj* arr = pdf_new_array(ctx, doc, 2 * entries->len);
+
+		for (guint i = 0; i < entries->len; i++) {
+			EmbEntry* e = &g_array_index(entries, EmbEntry, i);
+
+			pdf_array_push(ctx, arr, e->key_new ? e->key_new : e->key);
+			pdf_array_push(ctx, arr, e->val);
+		}
+		pdf_dict_del(ctx, emb, PDF_NAME(Kids));
+		pdf_dict_del(ctx, emb, PDF_NAME(Limits));
+		pdf_dict_put_drop(ctx, emb, PDF_NAME(Names), arr);
+	}
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+		rc = -1;
+	}
+
+out:
+	emb_entries_free(ctx, entries);
+
+	return rc;
 }
 
 static gint pdf_run_pixmap(fz_context* ctx, pdf_page* page,

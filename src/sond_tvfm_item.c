@@ -111,6 +111,13 @@ gchar const* sond_tvfm_item_get_display_name(SondTVFMItem *stvfm_item) {
 	return stvfm_item_priv->display_name;
 }
 
+gboolean sond_tvfm_item_is_content_root_marker(SondTVFMItem *stvfm_item) {
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	return stvfm_item_priv->is_content_root_marker;
+}
+
 SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem *stvfm_item) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
@@ -645,13 +652,14 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 		SondTVFMProgress* progress, GError** error) {
 	gint rc = 0;
 	GPtrArray* arr_emb_files = NULL;
+	GPtrArray* arr_display_names = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	SondTVFMItem* stvfm_item_pdf_page_tree = NULL;
 
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
 	rc = sond_file_part_pdf_load_embedded_files(SOND_FILE_PART_PDF(stvfm_item_priv->sond_file_part),
-			&arr_emb_files, error);
+			&arr_emb_files, &arr_display_names, error);
 	if (rc)
 		return -1;
 
@@ -671,10 +679,22 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 		stvfm_item_child =
 				sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp, NULL);
 
+		/* Pfad des Kindes ist die Adresse (ggf. der Schlüssel im
+		 * Namensbaum), angezeigt wird der Dateiname (ToDo.c #193) */
+		{
+			SondTVFMItemPrivate* child_priv =
+					sond_tvfm_item_get_instance_private(stvfm_item_child);
+
+			g_free(child_priv->display_name);
+			child_priv->display_name =
+					g_strdup(g_ptr_array_index(arr_display_names, i));
+		}
+
 		g_ptr_array_add(*arr_children, stvfm_item_child);
 	}
 
 	g_ptr_array_unref(arr_emb_files);
+	g_ptr_array_unref(arr_display_names);
 
 	return 0;
 }

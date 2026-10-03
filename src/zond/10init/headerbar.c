@@ -407,6 +407,30 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		SondFilePart *sfp = SOND_FILE_PART(key);
 		SondPageRange *range = (SondPageRange*) value; /* NULL = ganze Datei */
 		gchar *file_part_raw = sond_file_part_get_filepart(sfp);
+
+		/* Angebundene E-Mail (ToDo.c #197): Header und Inline-Teile einzeln
+		 * löschen, Anhänge bleiben */
+		if (range && range->gmessage_message) {
+			GPtrArray *parts = sond_index_ctx_gmessage_message_parts(
+					zond->wctx->index_ctx, file_part_raw, NULL);
+
+			for (guint i = 0; i < parts->len; i++) {
+				GError *error = NULL;
+
+				if (!sond_index_ctx_delete_index(zond->wctx->index_ctx,
+						g_ptr_array_index(parts, i), -1, -1,
+						zond->project_dir, &error)) {
+					LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
+							(gchar const*) g_ptr_array_index(parts, i),
+							error ? error->message : "?");
+					g_clear_error(&error);
+				}
+			}
+			g_ptr_array_unref(parts);
+			g_free(file_part_raw);
+
+			continue;
+		}
 		/* Der "Message"-Knoten einer E-Mail teilt sich denselben SondFilePart
 		 * mit der ganzen .eml-Datei (s. zond_treeviewfm_item_get_fileparts(),
 		 * Schritt 2/6, ToDo.c 17.09.2026) - sond_file_part_get_filepart()
@@ -427,10 +451,23 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		gchar *file_part = (range && range->gmessage_header_only) ?
 				g_strdup_printf("%s//header", file_part_raw) : file_part_raw;
 		GError *error = NULL;
+		gint von = range ? range->von : -1;
+		gint bis = range ? range->bis : -1;
+
+		/* Nur die Seiten einer PDF (ToDo.c #191): als Seitenbereich über
+		 * alle Seiten löschen - "ganze Datei" träfe auch die eingebetteten
+		 * Dateien (x.pdf//...). Der Seiten-Eintrag "x.pdf//" wird dabei von
+		 * coverage_invalidate() mit entfernt. */
+		if (range && range->pdf_pagetree_only) {
+			gint n_pages = sond_index_ctx_get_page_count(
+					zond->wctx->index_ctx, file_part);
+
+			von = 0;
+			bis = (n_pages > 0) ? n_pages - 1 : G_MAXINT;
+		}
 
 		if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
-				range ? range->von : -1, range ? range->bis : -1,
-				zond->project_dir, &error)) {
+				von, bis, zond->project_dir, &error)) {
 			LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
 					file_part, error ? error->message : "?");
 			g_clear_error(&error);

@@ -490,6 +490,10 @@ static SondIndexStatus zond_treeview_get_index_status_for_filepart(
 	if (!sond_index_mime_type_supported(mime_from_extension(file_part)))
 		return SOND_INDEX_STATUS_NONE;
 
+	/* angebundene E-Mail: Header + Inline-Teile (ToDo.c #197) */
+	if (!section && !g_strcmp0(mime_from_extension(file_part), "message/rfc822"))
+		return sond_index_ctx_get_gmessage_message_status(index_ctx, file_part);
+
 	if (section) {
 		Anbindung anbindung = { 0 };
 
@@ -4007,12 +4011,25 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 
 			range = sond_page_range_new(von, bis);
 		}
-		/* sonst range == NULL -> ganze Datei */
+		/* Eine angebundene PDF steht hier für ihre Seiten (PageTree) -
+		 * eingebettete Dateien sind eigene Fileparts "x.pdf//anhang.pdf"
+		 * und werden eigens angebunden (ToDo.c #191). Sonst range == NULL
+		 * -> ganze Datei. */
+		else if (SOND_IS_FILE_PART_PDF(sfp) || (SOND_IS_FILE_PART_LEAF(sfp) &&
+				!g_strcmp0(sond_file_part_leaf_get_mime_type(
+						SOND_FILE_PART_LEAF(sfp)), "application/pdf")))
+			range = sond_page_range_new_pdf_pagetree();
+		/* Eine angebundene E-Mail steht für Header + Inline-Teile, Anhänge
+		 * sind eigene Fileparts (ToDo.c #197) */
+		else if (SOND_IS_FILE_PART_GMESSAGE(sfp) || (SOND_IS_FILE_PART_LEAF(sfp) &&
+				!g_strcmp0(sond_file_part_leaf_get_mime_type(
+						SOND_FILE_PART_LEAF(sfp)), "message/rfc822")))
+			range = sond_page_range_new_gmessage_message();
 
 		/* Mehrere ausgewählte Punkte können dieselbe Datei referenzieren
 		 * (gleiches SondFilePart, per Identität interniert) - dann
-		 * Vereinigung der Seitenbereiche bilden. Ganze Datei (range == NULL)
-		 * dominiert. */
+		 * Vereinigung bilden: ganze Datei (range == NULL) vor "nur Seiten"
+		 * vor Seitenbereich. */
 		if (g_hash_table_contains(ht_fileparts, sfp)) {
 			SondPageRange *existing = g_hash_table_lookup(ht_fileparts, sfp);
 
@@ -4020,6 +4037,12 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 				/* einer von beiden will die ganze Datei -> ganze Datei */
 				sond_page_range_free(range);
 				g_hash_table_insert(ht_fileparts, sfp, NULL);
+			} else if (existing->pdf_pagetree_only || range->pdf_pagetree_only) {
+				existing->pdf_pagetree_only = TRUE;
+				existing->von = -1;
+				existing->bis = -1;
+				sond_page_range_free(range);
+				g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
 			} else {
 				existing->von = MIN(existing->von, range->von);
 				existing->bis = MAX(existing->bis, range->bis);

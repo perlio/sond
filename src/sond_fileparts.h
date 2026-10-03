@@ -173,7 +173,18 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
 
 gint sond_file_part_pdf_save_and_close(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 
-gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
+/* arr_display_names (darf NULL sein): Anzeigenamen (Dateinamen) parallel zu
+ * arr_children; die Pfade der Kinder sind Adressen (Schlüssel im
+ * Namensbaum, s. pdf_emb_get_address()). */
+gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**,
+		GPtrArray**, GError**);
+
+/* Adressänderungen der übrigen eingebetteten Dateien, wenn die Datei mit
+ * address gelöscht/herausverschoben (filename_new NULL) oder in
+ * filename_new umbenannt wird - s. pdf_emb_address_changes(). Öffnet die
+ * PDF nur lesend. */
+gint sond_file_part_pdf_emb_address_changes(SondFilePartPDF*, gchar const*,
+		gchar const*, GPtrArray**, GPtrArray**, GError**);
 
 //Sond_File_Part_GMessage definieren
 #define SOND_TYPE_FILE_PART_GMESSAGE sond_file_part_gmessage_get_type( )

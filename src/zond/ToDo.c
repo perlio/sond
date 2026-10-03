@@ -4830,7 +4830,7 @@
  file_part) läuft unverändert über den Auszug seiner Kinder.
  Vom Nutzer getestet (01.10.2026).
 
- #191 offen (zurückgestellt, 01.10.2026): Index erstellen (Auswahl) für
+ #191 umgesetzt (01.10.2026), zu testen. Index erstellen (Auswahl) für
  einen PDF-Filepart aus BAUM_INHALT/BAUM_AUSWERTUNG indiziert die ganze
  Datei samt eingebetteter Dateien - gemeint ist nur der Pagetree
  (Einbettungen sind eigene Fileparts "x.pdf//anhang.pdf"). Ursache:
@@ -4842,11 +4842,62 @@
  (Ahnen-Walk in coverage_get()), darf also bei reinem Seitenlauf nicht
  gesetzt werden. Plan: Flag pdf_pagetree_only in SondPageRange (analog
  gmessage_header_only), Einbettungen nur bei ganzer Datei verarbeiten,
- eigener Coverage-Schlüssel "x.pdf//pagetree" (Chunks/pages bleiben
+ eigener Coverage-Schlüssel (umgesetzt als "x.pdf//", s.u.; Chunks/pages bleiben
  unter "x.pdf"; ohne Einbettungen gleich "x.pdf" markieren),
  clean_hashtable() Kinder dann nicht entfernen, Index löschen und
  Badges/check_coverage_one() anpassen. Später ggf. Collapse
  pagetree + alle Einbettungen -> "x.pdf".
+
+ Semantik von "x.pdf" bei Indizierung/Coverage (Nutzerentscheidung):
+ BAUM_FS DIR (PDF mit Einbettungen), Ordner, "Gesamtes Projekt": Seiten
+ und alle Einbettungen. BAUM_FS LEAF "PageTree": nur Seiten. BAUM_FS LEAF
+ ohne Einbettungen: beides dasselbe. BAUM_INHALT/_AUSWERTUNG: Anbindung
+ "x.pdf" = nur Seiten (ein DIR wird beim Anbinden zum Strukturpunkt mit
+ einzeln angebundenen Kindern), mit Section = Seitenbereich. Öffnen/
+ "Öffnen mit" unverändert (ganze Datei). Schlüssel "x.pdf//" statt
+ "x.pdf//pagetree" (keine Kollision möglich, entspricht dem PageTree-
+ Marker "//" in BAUM_FS); E-Mail behält "y.eml//header".
+
+ Umsetzung:
+ - SondPageRange.pdf_pagetree_only, sond_page_range_new_pdf_pagetree(),
+   sond_page_range_copy() (sond_process_file.c/.h). Die Kopie behebt
+   nebenbei, dass "Fehlende nachindizieren" (zond_indexsuche.c) das Flag
+   gmessage_header_only verlor.
+ - Sammeln: zond_treeviewfm_item_get_fileparts() (PageTree-Marker, neuer
+   Getter sond_tvfm_item_is_content_root_marker()) und
+   zond_treeview_get_selected_fileparts_foreach() (PDF ohne Section).
+   Vereinigung: ganze Datei vor "nur Seiten" vor Seitenbereich.
+ - sond_process_file_do_rec()/process_pdf_for_ocr(): Einbettungen nur bei
+   ganzer Datei verarbeiten, sonst nur zählen; ohne Einbettungen gilt
+   "nur Seiten" als ganze Datei (dann "x.pdf" markiert).
+ - sond_index(): neuer Parameter pdf_pagetree_only - Chunks/pages/
+   file_pagecount unter "x.pdf", coverage_mark auf "x.pdf//". Die
+   pages-Zeilen bleiben dabei stehen.
+ - sond_process_fileparts(): coverage_key "x.pdf//" für "nur Seiten" und
+   Seitenbereich (Vorab-Check findet über den Ahnen-Walk auch "x.pdf");
+   Zusammenfassen nach oben von "x.pdf" aus. clean_hashtable() entfernt
+   Kinder nur noch bei "ganze Datei" (betraf vorher auch "nur Header").
+ - sond_index_ctx_coverage_invalidate(): entwertet "path//" mit; beim
+   Auflösen einer ganz abgedeckten PDF wegen einer Einbettung wird "x.pdf//"
+   neu eingetragen (Seiten bleiben gültig). Einschränkung: die übrigen
+   Einbettungen verlieren ihre Abdeckung (ohne Dateizugriff nicht
+   aufzählbar), ebenso beim Löschen nur der Seiten einer ganz abgedeckten
+   PDF.
+ - coverage_expand_to_pages() und get_file_status() berücksichtigen
+   "x.pdf//" (Badges BAUM_FS/BAUM_INHALT).
+ - Index löschen (headerbar.c): "nur Seiten" als Seitenbereich 0 bis
+   Seitenzahl-1 (unbekannt: G_MAXINT) statt ganzer Datei.
+ - Index durchsuchen (zond_indexsuche.c): check_coverage_one() akzeptiert
+   "x.pdf//"; Trefferfilter lässt bei "nur Seiten"/Seitenbereich keine
+   Treffer aus "x.pdf//..." mehr durch.
+ - sond_server_repo_worker.c: nur zusätzliches FALSE beim Aufruf.
+
+ Zu testen (PDF mit eingebetteter Datei nötig): Index erstellen für
+ Anbindung x.pdf in BAUM_INHALT (Anhang darf nicht indiziert werden,
+ Coverage "x.pdf//"), für PageTree in BAUM_FS, für die PDF selbst (DIR,
+ alles); Anhang danach eigens indizieren; Badges; Index löschen für
+ x.pdf/PageTree (Anhang bleibt); Index durchsuchen mit Auswahl x.pdf
+ (keine Treffer aus dem Anhang); PDF ohne Einbettungen weiterhin "x.pdf".
 
  #192 offen (01.10.2026): GLib-GIO-CRITICAL "GFileInfo created without
  standard::type" (g_file_info_get_file_type) tritt häufig in einem
@@ -4854,4 +4905,177 @@
  g_file_info_get_file_type() im Code - Auslöser in GLib/GTK. Nächster
  Schritt: Stacktrace per G_DEBUG=fatal-criticals (Eclipse-Debug-
  Konfiguration, Environment).
+ Seit 1.1.3 nicht mehr beobachtet, Ursache unklar. Zusammenhang mit #190
+ (leerer Auszug) unwahrscheinlich - der leere Auszug griff auf nichts zu.
+ Bei erneutem Auftreten im Debug-Build mit Konsole prüfen (Release-Build
+ mit -mwindows zeigt keine Konsole).
+ Vermutung (unbelegt): GtkFileChooserDialog (choose_file(), misc.c) beim
+ Einlesen eines SeaDrive-Ordners - GTK3 liest dort intern den Dateityp,
+ der bei nicht hydrierten Platzhaltern fehlen kann. Passt zum
+ gleichzeitigen Auftreten (gleicher Zeitstempel), nicht aber zu "ganz
+ oft" ohne offenen Dialog.
+ Nebenbei behoben: choose_file() las bei NULL von
+ gtk_file_chooser_get_filename() (nicht lokale Auswahl) in der
+ "\"->"/"-Schleife einen NULL-Zeiger.
+
+ #193 Eingebettete Dateien mit gleichem Namen (02.10.2026, Nutzer-Hinweis).
+ Eingebettete Dateien werden über ihren Dateinamen (/UF, sonst /F, s.
+ pdf_get_EF_F()) adressiert - der ist nicht eindeutig, nur der Schlüssel
+ im EmbeddedFiles-Namensbaum ist es (PDF-Norm). Bei doppeltem Namen
+ treffen load/lookup/modify/delete/rename (sond_fileparts.c) immer den
+ ersten, sond_file_part_is_open() liefert für beide dasselbe Objekt,
+ Indizierung legt beide unter demselben Pfad ab, Coverage und
+ Anbindungen unterscheiden sie nicht.
+ Schritt 1 (erledigt, zu testen): zond erzeugt keine Duplikate mehr.
+ - sond_file_part_pdf_insert_embedded_file(): Name vorhanden ->
+   G_IO_ERROR_EXISTS, die Suffix-Logik beim Einfügen/Verschieben
+   (sond_treeviewfm.c) versucht dann "name (1)" usw.
+ - Einfügen/Umbenennen in ZIP und Umbenennen in PDF melden ebenfalls
+   G_IO_ERROR_EXISTS statt SOND_ERROR (ZIP-Einfügen lief vorher trotz
+   Prüfung nicht in die Suffix-Logik, sondern brach mit Fehler ab).
+ - pdf_insert_emb_file() (sond_pdf_helper.c): eindeutiger Schlüssel im
+   Namensbaum (nach Umbenennung - ändert nur /F und /UF - konnte der
+   Dateiname als Schlüssel schon belegt sein).
+ Zu testen: dieselbe Datei zweimal in eine PDF bzw. ein ZIP einfügen ->
+ "name (1).ext"; Datei in PDF umbenennen, dann gleichnamige neue einfügen.
+ Schritt 2 (umgesetzt 02.10.2026, zu testen) - Adressierung über den
+ Namensbaum, Nutzerentscheidung "Schlüssel folgt dem Dateinamen":
+ - Adresse (sond_pdf_helper.c, pdf_emb_addresses_new()): der Dateiname,
+   wenn kein anderer Eintrag denselben Dateinamen hat und keiner ihn als
+   Schlüssel trägt, sonst der Schlüssel; UTF-8, "%" -> "%25", "/" -> "%2F"
+   (pdf_emb_escape()). Für eindeutige Namen also wie bisher -> keine
+   Migration. Angezeigt wird in BAUM_FS immer der Dateiname.
+ - pdf_emb_normalize_keys(), aufgerufen in pdf_doc_to_buf() bei jedem
+   Schreiben: setzt nach derselben Regel den Schlüssel auf den Dateinamen
+   und baut den Namensbaum flach/sortiert neu. Die Adresse ändert sich
+   dadurch nicht.
+ - Einfügen: /F und /UF als Textstrings, Schlüssel = Dateiname; Name muss
+   als Dateiname und als Schlüssel frei sein (sonst G_IO_ERROR_EXISTS).
+ - Umbenennen: setzt /F, /UF; den Schlüssel gleicht das Schreiben an. Die
+   Adresse folgt dem Namen wie bisher (before_move schreibt die
+   gespeicherten Fileparts um, jetzt mit pdf_emb_escape()).
+ - load/lookup/modify/delete/rename (sond_fileparts.c) und
+   process_emb_file() (Index-Pfad) arbeiten mit der Adresse; Ersatzsuche
+   über den Dateinamen (erster Treffer), wenn eine gespeicherte Adresse
+   nicht gefunden wird (Projekt-DB ohne Migration, Nutzerentscheidung;
+   Index-DB: keine Migration, Testphase).
+ - Umlaut-Verdacht (rohes UTF-8 in /F) widerlegt: MuPDF liest gültiges
+   UTF-8 ohne BOM korrekt.
+ Geschwister nachführen (umgesetzt 02.10.2026, zu testen): Löschen,
+ Umbenennen oder Herausverschieben eines von zwei gleichnamigen Anhängen
+ macht den Namen des anderen eindeutig - dessen Adresse wechselt vom
+ Schlüssel zum Dateinamen. pdf_emb_address_changes() (sond_pdf_helper.c)
+ simuliert den Zustand danach über dieselbe Regel und liefert die
+ geänderten Adressen; zond_treeviewfm_before_delete()/_before_move()
+ schreiben damit (emb_sibling_apply()) Projekt-DB (main/work) und
+ Index-DB um, in den offenen Transaktionen, nach dem Element selbst.
+ before_delete schreibt für Anhänge deshalb immer in beide Datenbanken.
+ Nach erfolgreichem Commit setzt after() geöffnete SondFilePart-Objekte
+ auf die neue Adresse (emb_sibling_adjust_opened()). Logik mit
+ emb_test.pdf (Testordner) außerhalb von zond geprüft.
+ Dabei behoben: dbase_zond_update_path() (project.c) hatte kein WHERE und
+ traf jeden Pfad, der nur mit dem alten beginnt ("Akte" -> auch
+ "Akte_alt"); sond_index_ctx_rename_file() benutzte LIKE ("%" und "_" in
+ Pfaden sind dort Platzhalter) und erfasste in chunks/pages/... nur "//",
+ nicht "/" - beim Umbenennen eines Ordners blieben die Index-Einträge der
+ Dateien darin unter dem alten Pfad. Beide jetzt: Pfad gleich oder
+ beginnt mit alt + "/" (per SUBSTR).
+ Test-PDF: Testordner/emb_test.pdf - Schlüssel anhang_1/anhang_2 (beide
+ bild.txt), a/b%c und notiz-2 (beide notiz.txt), fremder_schluessel
+ (einzeln.txt); Suchwörter Bildeins, Bildzwei, Notizalpha, Notizbeta,
+ Einzeln, Seitentext.
+ Zu testen: fremde PDF mit zwei gleichnamigen Anhängen (beide in BAUM_FS
+ öffnen, anbinden, indizieren); Anhang umbenennen und die Anbindung
+ öffnen; Anhang mit "%" oder "/" im Schlüssel; bestehende Anbindungen auf
+ Anhänge weiterhin öffnen; OCR einer PDF mit Anhängen.
+
+ #194 offen (02.10.2026): Mimepart-Nummern einer E-Mail werden in der
+ Index-DB nicht nachgeführt. Beim Löschen/Verschieben eines Mimeparts
+ zählt dbase_zond_update_gmessage_index() (project.c) die gespeicherten
+ Fileparts in der zond-DB (main/work) um, die Index-DB (.sond_index.db:
+ chunks, pages, coverage, file_pagecount, container_entrycount) aber
+ nicht - zond_treeviewfm_before_delete()/_before_move() rufen dort nur
+ clear_file/coverage_clear bzw. rename_file für den betroffenen Pfad
+ selbst auf. Nach Löschen von "x.eml//2" stehen Chunks/Coverage des
+ bisherigen "//3" weiter unter "//3", obwohl der Teil jetzt "//2" ist:
+ Suchtreffer zeigen auf den falschen Mimepart, Badges stimmen nicht,
+ container_entrycount ist veraltet. Fix: Gegenstück zu
+ dbase_zond_update_gmessage_index() für die Index-DB (alle Tabellen mit
+ Pfad), in derselben Transaktion aufrufen.
+
+ #195 Bug (02.10.2026, bei #193 gefunden), behoben, zu testen: Umbenennen
+ (F2) eines Mimeparts verschob ihn in den Datenbanken an Index 0.
+ sond_treeviewfm_text_edited() sandte before_move mit index_to = 0;
+ zond_treeviewfm_before_move() behandelte das wie ein Verschieben in die
+ E-Mail: "//2" -> "//alpha", nachfolgende Indizes -1, dann ab 0 +1,
+ "//alpha" -> "//0". Physisch ändert Umbenennen aber nur den Anzeigenamen
+ (sond_file_part_gmessage_rename_file()). Folge: Anbindungen der Teile 0
+ bis 2 zeigten auf falsche Teile, in der Index-DB blieb der Teil unter
+ "x.eml//alpha" stehen.
+ Fix: text_edited sendet index_to = -1 (Umbenennen an Ort und Stelle);
+ before_move ändert dann bei Mimeparts (rename_in_gmessage) keine Pfade,
+ Indizes oder Coverage, Transaktionen/Kontext für after bleiben gleich.
+ Zu testen: Mimepart einer E-Mail mit mehreren Anhängen umbenennen,
+ Anbindungen der Anhänge danach öffnen; Verschieben innerhalb der E-Mail
+ weiterhin korrekt.
+
+ #196 Bug (02.10.2026, Nutzer-Fund), behoben, vom Nutzer getestet: Nach Umbenennen
+ eines Ordners in BAUM_FS ließen sich darin bereits geöffnete Dateien
+ bis zum Neustart nicht mehr öffnen (die Datenbanken waren korrekt
+ umgeschrieben). sond_treeviewfm_text_edited() rief adjust_sfps_in_dir()
+ nach sond_tvfm_item_rename() mit path_or_section als altem Pfad auf - der
+ war da schon der neue - und mit dem bloßen Namen als neuem Pfad. Die
+ interned SondFilePart-Objekte blieben auf dem alten Pfad. Fix: alten Pfad
+ vorher sichern, danach mit altem und neuem vollem Pfad nachführen.
+ adjust_sfps_in_dir() trifft jetzt nur Pfade unterhalb ("alt/..."): vorher
+ auch "sub38/..." für "sub" bzw. "0/10/..." für Mimepart-Verzeichnis
+ "0/1".
+
+ #197 umgesetzt (03.10.2026), zu testen: E-Mail in BAUM_INHALT/
+ _AUSWERTUNG - Gegenstück zu #191. Indizieren einer Anbindung "x.eml"
+ verarbeitete die ganze Mail samt Anhängen.
+ Semantik (Nutzerentscheidung, Variante (i)): in jedem Baum steht ein
+ Knoten für das, was er dort darstellt.
+ - BAUM_FS "Message": nur Header ("x.eml//header"); die Mimeparts sind
+   dort eigene Knoten mit eigenem Badge. Unverändert.
+ - BAUM_INHALT/_AUSWERTUNG "x.eml" (angebundener "Message"-Knoten):
+   Header + Inline-Teile = das, was der Renderer zeigt. Inline = jeder
+   Mimepart ohne Content-Disposition "attachment" (auch verschachtelt);
+   nicht indizierbare (Bilder) zählen nicht mit. Badge: alle Bestandteile
+   indiziert -> grün, einige -> gemischt.
+ Praktisch jede Mail hat in BAUM_FS den "Message"-Knoten (has_children =
+ Mail hat überhaupt einen Mimepart), "x.eml" in BAUM_INHALT ist also
+ immer dieser Knoten.
+ Umsetzung:
+ - Index-DB: neue Tabelle gmessage_inline (Mail -> Pfade ihrer
+   Inline-Teile), befüllt bei jeder Indizierung einer Mail (sond_index()),
+   gelöscht mit container_entrycount, umbenannt in rename_file(). So
+   kommen Badge und Index durchsuchen ohne Öffnen der Mail aus.
+   sond_index_ctx_gmessage_message_parts()/_get_gmessage_message_status().
+ - SondPageRange.gmessage_message, sond_page_range_new_gmessage_message();
+   sond_process_file()/_do_rec() bekommen jetzt den SondPageRange selbst
+   (NULL = ganze Datei) statt einzelner Schalter.
+ - Verarbeitung: Header wie gmessage_header_only, dazu
+   process_gmessage_for_ocr(inline_only) - Anhänge übersprungen. Kein
+   eigener Coverage-Schlüssel; Vorab-Prüfung über alle Bestandteile.
+ - Sammeln (zond_treeview.c), Index löschen (headerbar.c: Header +
+   Inline-Teile einzeln), Index durchsuchen (zond_indexsuche.c:
+   Abdeckung je Bestandteil, Trefferfilter nur Mail/Header/Inline),
+   Badge BAUM_INHALT.
+ - Lückenanzeige bei Index durchsuchen (format_gap_line()): Einheit
+   "Teile - Header und Inline-Teile" statt "Seiten"; ZIP-Archive jetzt
+   "Einträge" (zählten schon immer Einträge, hießen aber "Seiten").
+ - Nebenbei: "Message"-Knoten in BAUM_FS (nur Header) wurde bei Index
+   durchsuchen unter "x.eml" statt "x.eml//header" geprüft und ließ im
+   Trefferfilter auch Anhang-Treffer durch - behoben.
+ Einschränkungen: Bestandteile einer noch nie indizierten Mail sind
+ unbekannt (Badge dann nur nach Header). Chunks einer Indizierung der
+ ganzen Mail unter "x.eml" (Header + Textteile) bleiben bei Index löschen
+ der Anbindung stehen. Angehängte Mails innerhalb einer Mail ("x.eml//2")
+ werden mangels Endung nicht als Mail erkannt.
+ Zu testen: Mail mit Text, HTML-Alternative, Inline-Bild und Anhang
+ anbinden, in BAUM_INHALT indizieren -> in BAUM_FS Message + Text + HTML
+ grün, Anhang nicht; einen Inline-Teil in BAUM_FS de-indizieren ->
+ Anbindung "gemischt"; Index löschen der Anbindung; Index durchsuchen mit
+ Auswahl der Anbindung (keine Treffer aus dem Anhang).
  */
