@@ -2305,6 +2305,12 @@ static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
 	return;
 }
 
+void sond_treeviewfm_search_activate(SondTreeviewFM *stvfm) {
+	sond_treeviewfm_action_search(NULL, NULL, stvfm);
+
+	return;
+}
+
 static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	/* Instanzspezifische Aktionen in die ActionGroup eintragen.
 	 * Die GMenu-Sections wurden bereits einmalig in class_init aufgebaut. */

@@ -533,6 +533,12 @@ static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
 	zond_indexsuche_activate(NULL, d);
 }
 
+static void cb_win_dateisuche(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	sond_treeviewfm_search_activate(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+}
+
 static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
@@ -1115,6 +1121,7 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("index-erstellen", cb_app_index_erstellen);
 	WIN_ACT("index-loeschen",  cb_app_index_loeschen);
 	WIN_ACT("indexsuche",      cb_app_indexsuche);
+	WIN_ACT("dateisuche",      cb_win_dateisuche);
 	WIN_ACT("beenden",         cb_app_beenden);
 	WIN_ACT("ueber",           cb_app_ueber);
 	WIN_ACT("update",          cb_app_update);
@@ -1247,6 +1254,11 @@ static GMenuModel* build_menu(Projekt *zond) {
 	 * Projektverzeichnis, unabhängig vom Rechtsklick-Ziel, und gehörte
 	 * deshalb eigentlich nie in ein Kontextmenü (Nutzer-Feedback, s.
 	 * ToDo.c). */
+	GMenu *sec_dateisuche = g_menu_new();
+	g_menu_append(sec_dateisuche, "Dateisuche …", "win.dateisuche");
+	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_dateisuche));
+	g_object_unref(sec_dateisuche);
+
 	GMenu *sec_index = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
 	GMenu *sub_idx_erst = g_menu_new();

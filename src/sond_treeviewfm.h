@@ -108,6 +108,9 @@ typedef struct {
 GPtrArray* sond_treeviewfm_search(SondTreeviewFM*, SondTVFMSearchOpts const*,
 		gboolean selected_only, guint *n_skipped, GError**);
 
+/* Dateisuche mit Dialog und Ergebnisfenster, wie im Kontextmenü. */
+void sond_treeviewfm_search_activate(SondTreeviewFM*);
+
 GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stv, gboolean selected_only,
 		GError **error);
 

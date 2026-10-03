@@ -16,6 +16,7 @@ Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stan
 - #201 Dateisuche im BAUM_FS (sond_treeviewfm.c): umgesetzt, Test steht aus. Ein Menüpunkt
   "Dateisuche ...", Dialog mit Vergleich (enthält/ganzer Name/Muster), Groß-/Kleinschreibung,
   Dateien/Verzeichnisse, Container (Standard aus), Umfang (ganz/markiert).
+  Auch im Hauptmenü (Projekt) und im Kontextmenü.
   API sond_treeviewfm_search(); Hang bei Lesefehler und Abbruch bei unlesbarem
   Unterverzeichnis behoben.
 - #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt, bei Bedarf als
