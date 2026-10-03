@@ -5027,7 +5027,7 @@
  löschen -> Suchtreffer/Badges der folgenden Teile stimmen; Teil an
  Position 0 verschieben -> Anbindungen öffnen den richtigen Teil.
 
- #195 Bug (02.10.2026, bei #193 gefunden), behoben, zu testen: Umbenennen
+ #195 Bug (02.10.2026, bei #193 gefunden), behoben, vom Nutzer getestet: Umbenennen
  (F2) eines Mimeparts verschob ihn in den Datenbanken an Index 0.
  sond_treeviewfm_text_edited() sandte before_move mit index_to = 0;
  zond_treeviewfm_before_move() behandelte das wie ein Verschieben in die
@@ -5055,7 +5055,7 @@
  auch "sub38/..." für "sub" bzw. "0/10/..." für Mimepart-Verzeichnis
  "0/1".
 
- #197 umgesetzt (03.10.2026), zu testen: E-Mail in BAUM_INHALT/
+ #197 umgesetzt (03.10.2026), vom Nutzer getestet: E-Mail in BAUM_INHALT/
  _AUSWERTUNG - Gegenstück zu #191. Indizieren einer Anbindung "x.eml"
  verarbeitete die ganze Mail samt Anhängen.
  Semantik (Nutzerentscheidung, Variante (i)): in jedem Baum steht ein
