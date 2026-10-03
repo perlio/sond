@@ -557,6 +557,12 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_BOOLEAN,
 			G_TYPE_POINTER);  /* der von before-* gelieferte Kontext */
 
+	/* Gegenstück zu before-insert beim Kopieren: before-insert öffnet keine
+	 * Transaktion, "after" passt deshalb nicht (ToDo.c #199) */
+	klass->signal_after_insert = g_signal_new("after-insert",
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1,
+			G_TYPE_BOOLEAN);
+
 	klass->text_from_section = NULL;
 	klass->deter_background = NULL;
 	klass->text_edited = sond_treeviewfm_text_edited;
@@ -820,10 +826,15 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 
 			if (res)
 				rc = -1;
-			else
+			else {
 				rc = sond_tvfm_item_copy(stvfm_item,
 						s_paste_sel->stvfm_item_parent, trial_base,
 						s_paste_sel->index_to, error);
+
+				g_signal_emit(stvfm_item_parent_priv->stvfm,
+						SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_after_insert, 0,
+						(rc == 0) ? TRUE : FALSE);
+			}
 		}
 
 		if (rc == -1) {

@@ -607,16 +607,8 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	return 0;
 }
 
-static gint count_emb_file(fz_context* ctx, pdf_obj* dict,
-		pdf_obj* key, pdf_obj* val, gpointer data,
-		GError** error) {
-	(*(gint*) data)++;
-
-	return 0;
-}
-
 /* with_embedded: eingebettete Dateien mitverarbeiten (nur bei ganzer
- * Datei). Sonst werden sie nur gezählt (out_n_emb), damit der Aufrufer
+ * Datei). Gezählt werden sie immer (out_n_emb), damit der Aufrufer
  * erkennt, ob "nur Seiten" hier zugleich die ganze Datei ist. */
 static gint process_pdf_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondProcessFileCtx* wctx,
@@ -652,18 +644,39 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 		return -1;
 	}
 
-	//Alle embedded files durchgehen - verarbeiten oder nur zählen
-	if (with_embedded) {
-		process_data.addresses = pdf_emb_addresses_new(wctx->ctx, doc, error);
-		rc = process_data.addresses ?
-				pdf_walk_embedded_files(wctx->ctx, doc, process_emb_file,
-						&process_data, error) : -1;
-		if (process_data.addresses)
-			g_hash_table_destroy(process_data.addresses);
+	/* Adressen der Anhänge: zählen, in der Index-DB festhalten (pdf_embedded,
+	 * ToDo.c #199 - bei jedem Lauf, auch nur Seiten/Seitenbereich) und bei
+	 * ganzer Datei die Anhänge verarbeiten */
+	process_data.addresses = pdf_emb_addresses_new(wctx->ctx, doc, error);
+	if (!process_data.addresses) {
+		pdf_drop_document(wctx->ctx, doc);
+		return -1;
 	}
-	else
-		rc = pdf_walk_embedded_files(wctx->ctx, doc, count_emb_file,
-				out_n_emb, error);
+	*out_n_emb = (gint) g_hash_table_size(process_data.addresses);
+
+	if (wctx->index_ctx) {
+		GPtrArray* list = g_ptr_array_new();
+		GHashTableIter iter = { 0 };
+		gpointer value = NULL;
+		GError* error_emb = NULL;
+
+		g_hash_table_iter_init(&iter, process_data.addresses);
+		while (g_hash_table_iter_next(&iter, NULL, &value))
+			g_ptr_array_add(list, value);
+		if (!sond_index_ctx_set_pdf_embedded(wctx->index_ctx, filename, list,
+				&error_emb)) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data, "pdf_embedded '%s': %s",
+						filename, error_emb ? error_emb->message : "?");
+			g_clear_error(&error_emb);
+		}
+		g_ptr_array_unref(list);
+	}
+
+	if (with_embedded)
+		rc = pdf_walk_embedded_files(wctx->ctx, doc, process_emb_file,
+				&process_data, error);
+	g_hash_table_destroy(process_data.addresses);
 	if (rc) {
 		pdf_drop_document(wctx->ctx, doc);
 		return -1;
@@ -859,6 +872,50 @@ static void clean_hashtable(GHashTable* files) {
 	g_slist_free(to_remove);
 }
 
+gint sond_process_file_record_structure(SondIndexCtx* index_ctx,
+		SondFilePart* container, GError** error) {
+	g_autofree gchar* filepart = NULL;
+
+	if (!index_ctx || !container)
+		return 0;
+
+	filepart = sond_file_part_get_filepart(container);
+
+	if (SOND_IS_FILE_PART_PDF(container)) {
+		GPtrArray* addresses = sond_file_part_pdf_get_emb_addresses(
+				SOND_FILE_PART_PDF(container), error);
+		gboolean ok = FALSE;
+
+		if (!addresses)
+			return -1;
+
+		ok = sond_index_ctx_set_pdf_embedded(index_ctx, filepart, addresses,
+				error);
+		g_ptr_array_unref(addresses);
+
+		return ok ? 0 : -1;
+	}
+
+	if (SOND_IS_FILE_PART_GMESSAGE(container)) {
+		GBytes* bytes = sond_file_part_get_bytes(container, error);
+		gsize size = 0;
+		gconstpointer data = NULL;
+		gboolean ok = FALSE;
+
+		if (!bytes)
+			return -1;
+
+		data = g_bytes_get_data(bytes, &size);
+		ok = sond_index_ctx_record_gmessage_structure(index_ctx, filepart,
+				data, size, error);
+		g_bytes_unref(bytes);
+
+		return ok ? 0 : -1;
+	}
+
+	return 0;
+}
+
 /* Sind Header und alle Inline-Teile der Mail schon mindestens mit dem
  * angeforderten Modus abgedeckt? Unbekannte Inline-Teile (Mail noch nie
  * indiziert) -> nein. */
@@ -990,6 +1047,27 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			}
 		}
 
+		/* Teil einer PDF oder Mail: deren Struktur (Anhänge bzw. Mimeparts)
+		 * festhalten - die Eltern-Datei wurde zum Lesen des Teils ohnehin
+		 * geöffnet. Grundlage fürs Auflösen/Zusammenfassen der Coverage
+		 * (ToDo.c #199). */
+		if (!g_atomic_int_get(&wctx->cancel) && wctx->index_ctx) {
+			SondFilePart* parent = sond_file_part_get_parent(sfp);
+
+			if (SOND_IS_FILE_PART_PDF(parent) || SOND_IS_FILE_PART_GMESSAGE(parent)) {
+				GError* error_struct = NULL;
+
+				if (sond_process_file_record_structure(wctx->index_ctx, parent,
+						&error_struct)) {
+					if (wctx->log_func)
+						wctx->log_func(wctx->log_func_data,
+								"sond_process_fileparts: Struktur '%s': %s",
+								file_part, error_struct ? error_struct->message : "?");
+					g_clear_error(&error_struct);
+				}
+			}
+		}
+
 		/* Coverage-Hochprüfen (Coalescing mit den Geschwistern): das
 		 * eigentliche Markieren der Datei als vollständig abgedeckt
 		 * passiert bereits zuverlässig in sond_index() selbst (dort ist
@@ -1004,10 +1082,11 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		 * als E-Mail-internes Kind (container_entrycount statt
 		 * sond_dir_open()) - keine Berührung mehr mit dem alten
 		 * "//"-Ahnen-Walk-Bug.
-		 * Bei pages_key wird von der Datei selbst aus zusammengefasst: "x.pdf//"
-		 * allein lässt sich nicht weiter zusammenfassen, wohl aber "x.pdf",
-		 * wenn es (PDF ohne Einbettungen) als Ganzes markiert wurde. */
-		collapse_key = pages_key ? file_part : coverage_key;
+		 * Bei pages_key vom Seiten-Eintrag "x.pdf//" aus: try_collapse() fasst
+		 * Seiten und Anhänge (pdf_embedded) zu "x.pdf" zusammen bzw. geht
+		 * gleich von "x.pdf" weiter, wenn das schon abgedeckt ist (ToDo.c
+		 * #199). */
+		collapse_key = coverage_key;
 
 		if (!g_atomic_int_get(&wctx->cancel) &&
 				wctx->index_ctx && wctx->project_dir &&

@@ -75,6 +75,11 @@ typedef struct {
 	SondFilePart *pending_sibling_pdf;
 	GPtrArray *pending_sibling_old;
 	GPtrArray *pending_sibling_new;
+
+	/* PDFs/Mails, deren Anhänge bzw. Mimeparts sich durch die laufende
+	 * Aktion ändern - nach Erfolg wird ihre Struktur in der Index-DB neu
+	 * eingelesen (ToDo.c #199). Eigene Refs. */
+	GPtrArray *pending_structure;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -189,6 +194,69 @@ err:
 	g_clear_error(&idx_err);
 
 	return -1;
+}
+
+/* PDF bzw. Mail, deren Inhalt das Element ist (Anhang, Mimepart, Multipart-
+ * Verzeichnis einer Mail); NULL sonst (auch PageTree/Message, Sections) */
+static SondFilePart* structure_container_of_item(SondTVFMItem *stvfm_item) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	SondFilePart *parent = NULL;
+
+	if (!sfp || sond_tvfm_item_is_content_root_marker(stvfm_item))
+		return NULL;
+
+	if (sond_tvfm_item_get_path_or_section(stvfm_item)) //Multipart in Mail
+		return SOND_IS_FILE_PART_GMESSAGE(sfp) ? sfp : NULL;
+
+	parent = sond_file_part_get_parent(sfp);
+
+	return (SOND_IS_FILE_PART_PDF(parent) || SOND_IS_FILE_PART_GMESSAGE(parent)) ?
+			parent : NULL;
+}
+
+/* Ziel eines Einfügens/Verschiebens: das Eltern-Element selbst, wenn es
+ * eine PDF oder Mail (bzw. ein Verzeichnis darin) ist */
+static SondFilePart* structure_container_of_target(SondTVFMItem *parent_item) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(parent_item);
+
+	return (SOND_IS_FILE_PART_PDF(sfp) || SOND_IS_FILE_PART_GMESSAGE(sfp)) ?
+			sfp : NULL;
+}
+
+static void structure_pending_add(ZondTreeviewFMPrivate *priv,
+		SondFilePart *container) {
+	if (!container)
+		return;
+
+	if (!priv->pending_structure)
+		priv->pending_structure =
+				g_ptr_array_new_with_free_func(g_object_unref);
+	else if (g_ptr_array_find(priv->pending_structure, container, NULL))
+		return;
+
+	g_ptr_array_add(priv->pending_structure, g_object_ref(container));
+}
+
+static void structure_pending_clear(ZondTreeviewFMPrivate *priv) {
+	g_clear_pointer(&priv->pending_structure, g_ptr_array_unref);
+}
+
+/* Nach erfolgreicher Aktion: Struktur der vorgemerkten PDFs/Mails neu in
+ * die Index-DB einlesen (Anhang-Adressen bzw. Mimeparts) */
+static void structure_refresh(ZondTreeviewFMPrivate *priv) {
+	if (!priv->pending_structure || !priv->zond->wctx ||
+			!priv->zond->wctx->index_ctx)
+		return;
+
+	for (guint i = 0; i < priv->pending_structure->len; i++) {
+		GError *error = NULL;
+
+		if (sond_process_file_record_structure(priv->zond->wctx->index_ctx,
+				g_ptr_array_index(priv->pending_structure, i), &error)) {
+			LOG_WARN("%s: %s", __func__, error ? error->message : "?");
+			g_clear_error(&error);
+		}
+	}
 }
 
 static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
@@ -491,6 +559,10 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		priv->pending_delete_path = g_strdup(path);
 	}
 
+	//Struktur der PDF/Mail nach dem Löschen neu einlesen (ToDo.c #199)
+	structure_pending_clear(priv);
+	structure_pending_add(priv, structure_container_of_item(stvfm_item));
+
 	/* Diese Löschung (nicht zond_treeviewfm_before_move()) hat die
 	 * folgende "after"-Emission ausgelöst - ein hier evtl. dual_write=1
 	 * (from_gmessage, s.o.) gesetzter Kontext betrifft eine rein
@@ -556,7 +628,23 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 		g_clear_error(&idx_err);
 	}
 
+	//Struktur der Ziel-PDF/Mail nach dem Kopieren neu einlesen (ToDo.c #199)
+	structure_pending_clear(ztvfm_priv);
+	structure_pending_add(ztvfm_priv,
+			structure_container_of_target(stvfm_item_parent));
+
 	return 0;
+}
+
+/* Gegenstück zu before-insert (Kopieren): Struktur neu einlesen */
+static void zond_treeviewfm_after_insert(SondTreeviewFM* stvfm,
+		gboolean suc, gpointer user_data) {
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (suc)
+		structure_refresh(ztvfm_priv);
+	structure_pending_clear(ztvfm_priv);
 }
 
 static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
@@ -785,6 +873,12 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
 			!sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
 
+	//Struktur von Quell- und Ziel-PDF/Mail danach neu einlesen (ToDo.c #199)
+	structure_pending_clear(ztvfm_priv);
+	structure_pending_add(ztvfm_priv, structure_container_of_item(stvfm_item));
+	structure_pending_add(ztvfm_priv,
+			structure_container_of_target(stvfm_item_parent));
+
 	return 0;
 }
 
@@ -972,6 +1066,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 
 		//geöffnete Anhänge auf ihre nachgeführte Adresse setzen
 		emb_sibling_adjust_opened(priv);
+
+		//Struktur geänderter PDFs/Mails neu einlesen (ToDo.c #199)
+		structure_refresh(priv);
 	}
 	else {
 		if (dual_write)
@@ -991,6 +1088,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 	g_clear_pointer(&priv->pending_move_path_new, g_free);
 	priv->pending_move_is_physical = FALSE;
 	emb_sibling_pending_clear(priv);
+	structure_pending_clear(priv);
 
 	return;
 }
@@ -1631,6 +1729,7 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	g_clear_pointer(&priv->pending_move_path_old, g_free);
 	g_clear_pointer(&priv->pending_move_path_new, g_free);
 	emb_sibling_pending_clear(priv);
+	structure_pending_clear(priv);
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }
@@ -1821,6 +1920,8 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 			G_CALLBACK(zond_treeviewfm_before_insert), NULL);
 	g_signal_connect(ztvfm, "after",
 			G_CALLBACK(zond_treeviewfm_after), NULL);
+	g_signal_connect(ztvfm, "after-insert",
+			G_CALLBACK(zond_treeviewfm_after_insert), NULL);
 
 	return ztvfm;
 }

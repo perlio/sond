@@ -2149,6 +2149,43 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 	return 0;
 }
 
+GPtrArray* sond_file_part_pdf_get_emb_addresses(SondFilePartPDF* sfp_pdf,
+		GError** error) {
+	fz_context* ctx = NULL;
+	pdf_document* doc = NULL;
+	GHashTable* addresses = NULL;
+	GPtrArray* list = NULL;
+	GHashTableIter iter = { 0 };
+	gpointer value = NULL;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return NULL;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	if (!doc) {
+		fz_drop_context(ctx);
+		return NULL;
+	}
+
+	addresses = pdf_emb_addresses_new(ctx, doc, error);
+	if (addresses) {
+		list = g_ptr_array_new_with_free_func(g_free);
+		g_hash_table_iter_init(&iter, addresses);
+		while (g_hash_table_iter_next(&iter, NULL, &value))
+			g_ptr_array_add(list, g_strdup(value));
+		g_hash_table_destroy(addresses);
+	}
+
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
+
+	return list;
+}
+
 gint sond_file_part_pdf_emb_address_changes(SondFilePartPDF* sfp_pdf,
 		gchar const* address, gchar const* filename_new,
 		GPtrArray** addresses_old, GPtrArray** addresses_new, GError** error) {

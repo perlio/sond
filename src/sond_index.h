@@ -434,6 +434,27 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
                                                 gint          bis_seite);
 
 /**
+ * sond_index_ctx_record_gmessage_structure:
+ *
+ * Hält die Struktur einer Mail fest (container_entrycount, gmessage_inline),
+ * aus ihren Rohdaten @buf. Aufgerufen, sobald eine Mail oder ein Teil davon
+ * verarbeitet wird, und nach Änderungen an ihren Mimeparts (ToDo.c #199).
+ */
+gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
+        gchar const *filename, guchar const *buf, gsize size, GError **error);
+
+/**
+ * sond_index_ctx_set_pdf_embedded:
+ *
+ * Hält die Adressen der eingebetteten Dateien einer PDF fest (s.
+ * pdf_emb_addresses_new()) - Grundlage, um ihre Coverage ohne Öffnen der
+ * PDF in Seiten und Anhänge aufzulösen bzw. wieder zusammenzufassen
+ * (ToDo.c #199).
+ */
+gboolean sond_index_ctx_set_pdf_embedded(SondIndexCtx *ctx,
+        gchar const *filename, GPtrArray *addresses, GError **error);
+
+/**
  * sond_index_ctx_update_gmessage_index:
  *
  * Gegenstück zu dbase_zond_update_gmessage_index() (project.c) für die

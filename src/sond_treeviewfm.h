@@ -33,6 +33,7 @@ struct _SondTreeviewFMClass {
 	guint signal_before_insert;
 	guint signal_before_delete;
 	guint signal_after;
+	guint signal_after_insert; //nach Kopieren (zu before-insert), Erfolg als gboolean
 
 	gint (*deter_background)(SondTVFMItem*, GError**);
 	gint (*text_from_section)(SondTVFMItem*, gchar**, GError**);

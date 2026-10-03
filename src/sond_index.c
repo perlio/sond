@@ -183,6 +183,17 @@ static const gchar *SQL_CREATE_GMSG_INLINE =
            * Befüllt bei jeder Indizierung einer Mail (sond_index()),
            * gelöscht mit container_entrycount. */
 
+static const gchar *SQL_CREATE_PDF_EMBEDDED =
+    "CREATE TABLE IF NOT EXISTS pdf_embedded ("
+    "  filename  TEXT PRIMARY KEY,"
+    "  addresses TEXT NOT NULL"
+    ");"; /* Adressen der eingebetteten Dateien einer PDF ("\n"-getrennt, s.
+           * pdf_emb_addresses_new()), leerer String: keine. Damit kann die
+           * Coverage einer PDF in Seiten ("x.pdf//") und Anhänge aufgelöst
+           * und wieder zu "x.pdf" zusammengefasst werden, ohne die PDF zu
+           * öffnen (ToDo.c #199). Befüllt, sobald irgendein Teil der PDF
+           * verarbeitet wird, und nach jeder Änderung an ihren Anhängen. */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -274,6 +285,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE gmessage_inline: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_PDF_EMBEDDED, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE pdf_embedded: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -789,27 +808,104 @@ gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
     sqlite3_finalize(stmt);
     g_free(pattern);
 
-    //Inline-Teile einer Mail: gleiche Lebensdauer wie container_entrycount
-    if (sqlite3_prepare_v2(ctx->db,
+    //Inline-Teile einer Mail, Anhänge einer PDF: gleiche Lebensdauer wie
+    //container_entrycount
+    {
+        static gchar const *sql[] = {
             "DELETE FROM gmessage_inline WHERE filename = ?1 OR "
             "SUBSTR(filename, 1, LENGTH(?1) + 1) = ?1 || '/'",
+            "DELETE FROM pdf_embedded WHERE filename = ?1 OR "
+            "SUBSTR(filename, 1, LENGTH(?1) + 1) = ?1 || '/'"
+        };
+
+        for (guint i = 0; i < G_N_ELEMENTS(sql); i++) {
+            if (sqlite3_prepare_v2(ctx->db, sql[i], -1, &stmt, NULL)
+                    != SQLITE_OK) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+                return FALSE;
+            }
+            sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) != SQLITE_DONE) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+                sqlite3_finalize(stmt);
+                return FALSE;
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    return TRUE;
+}
+
+/* =======================================================================
+ * Anhänge einer PDF (ToDo.c #199)
+ * ======================================================================= */
+
+gboolean sond_index_ctx_set_pdf_embedded(SondIndexCtx *ctx,
+        gchar const *filename, GPtrArray *addresses, GError **error) {
+    sqlite3_stmt *stmt   = NULL;
+    GString      *joined = g_string_new(NULL);
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    for (guint i = 0; addresses && i < addresses->len; i++) {
+        if (i)
+            g_string_append_c(joined, '\n');
+        g_string_append(joined, g_ptr_array_index(addresses, i));
+    }
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO pdf_embedded(filename, addresses) VALUES(?, ?)"
+            " ON CONFLICT(filename) DO UPDATE SET addresses = excluded.addresses",
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                "%s: prepare gmessage_inline: %s", __func__,
-                sqlite3_errmsg(ctx->db));
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        g_string_free(joined, TRUE);
         return FALSE;
     }
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, joined->str, -1, SQLITE_TRANSIENT);
+    g_string_free(joined, TRUE);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                "%s: step gmessage_inline: %s", __func__,
-                sqlite3_errmsg(ctx->db));
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
         sqlite3_finalize(stmt);
         return FALSE;
     }
     sqlite3_finalize(stmt);
 
     return TRUE;
+}
+
+/* Adressen der Anhänge von filename, NULL wenn unbekannt */
+static GPtrArray* pdf_embedded_get(SondIndexCtx *ctx, gchar const *filename) {
+    sqlite3_stmt *stmt      = NULL;
+    GPtrArray    *addresses = NULL;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT addresses FROM pdf_embedded WHERE filename = ?",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return NULL;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        gchar const *joined = (gchar const *) sqlite3_column_text(stmt, 0);
+
+        addresses = g_ptr_array_new_with_free_func(g_free);
+        if (joined && *joined) {
+            gchar **v = g_strsplit(joined, "\n", -1);
+
+            for (gchar **p = v; *p; p++)
+                g_ptr_array_add(addresses, g_strdup(*p));
+            g_strfreev(v);
+        }
+    }
+    sqlite3_finalize(stmt);
+
+    return addresses;
 }
 
 /* =======================================================================
@@ -1909,17 +2005,32 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                 next_dir = g_strdup_printf("%s//%s", current_dir, segment);
             } else if (is_container && path_is_pdf(current_dir)) {
                 /* In eine PDF hinein (eingebettete Datei oder - bei leerem
-                 * segment - ihr Seiten-Eintrag selbst): die Seiten bleiben
-                 * gültig, sofern nicht sie selbst entwertet werden. Die
-                 * übrigen Einbettungen lassen sich ohne Dateizugriff nicht
-                 * aufzählen und verlieren ihre Abdeckung (Einschränkung, s.
-                 * ToDo.c #191). */
+                 * segment - ihr Seiten-Eintrag selbst): Seiten und übrige
+                 * Anhänge bleiben gültig, ausgenommen der, in dessen Richtung
+                 * entwertet wird. Die Anhänge kennt pdf_embedded (ToDo.c
+                 * #199); fehlt die Liste, verlieren sie ihre Abdeckung. */
+                GPtrArray *addresses = pdf_embedded_get(ctx, current_dir);
+
                 if (*segment) {
                     gchar *pages_path = g_strdup_printf("%s//", current_dir);
 
                     sond_index_ctx_coverage_mark(ctx, pages_path, mode, NULL);
                     g_free(pages_path);
                 }
+
+                for (guint k = 0; addresses && k < addresses->len; k++) {
+                    gchar const *address = g_ptr_array_index(addresses, k);
+                    gchar *emb_path = NULL;
+
+                    if (!g_strcmp0(address, segment))
+                        continue;
+
+                    emb_path = g_strdup_printf("%s//%s", current_dir, address);
+                    sond_index_ctx_coverage_mark(ctx, emb_path, mode, NULL);
+                    g_free(emb_path);
+                }
+                if (addresses)
+                    g_ptr_array_unref(addresses);
 
                 next_dir = g_strdup_printf("%s//%s", current_dir, segment);
             } else {
@@ -2076,6 +2187,71 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
          * E-Mail selbst ist - kein echtes Verzeichnis, das sond_dir_open()
          * lesen könnte. S. ToDo.c, 17.09.2026, Schritt 4/6. */
         boundary = gmessage_find_last_boundary(current);
+
+        /* Innerhalb einer PDF (Seiten "x.pdf//" oder Anhang "x.pdf//adr"):
+         * sind die Seiten und alle Anhänge laut pdf_embedded einzeln
+         * abgedeckt, wird daraus "x.pdf" (Mindestmodus), danach weiter mit
+         * der PDF in ihrem Verzeichnis. Ist "x.pdf" schon selbst abgedeckt
+         * (PDF ohne Anhänge), gleich dort weiter. ToDo.c #199. */
+        if (boundary) {
+            gchar *container = g_strndup(current, boundary - current);
+
+            if (path_is_pdf(container)) {
+                GPtrArray *addresses = NULL;
+                gchar *pages_path = NULL;
+                gint entry_mode = 0;
+
+                if (coverage_get_exact(ctx, container) >= 0) {
+                    g_free(current);
+                    current = container;
+                    continue;
+                }
+
+                addresses = pdf_embedded_get(ctx, container);
+                if (!addresses) { //Anhänge unbekannt - nicht zusammenfassbar
+                    g_free(container);
+                    break;
+                }
+
+                pages_path = g_strdup_printf("%s//", container);
+                entry_mode = coverage_get_exact(ctx, pages_path);
+                g_free(pages_path);
+                if (entry_mode < 0)
+                    all_covered = FALSE;
+                else
+                    min_mode = entry_mode;
+
+                for (guint i = 0; all_covered && i < addresses->len; i++) {
+                    gchar *emb_path = g_strdup_printf("%s//%s", container,
+                            (gchar const*) g_ptr_array_index(addresses, i));
+
+                    entry_mode = coverage_get_exact(ctx, emb_path);
+                    g_free(emb_path);
+                    if (entry_mode < 0)
+                        all_covered = FALSE;
+                    else if (entry_mode < min_mode)
+                        min_mode = entry_mode;
+                }
+                g_ptr_array_unref(addresses);
+
+                if (!all_covered) {
+                    g_free(container);
+                    break;
+                }
+
+                if (!sond_index_ctx_coverage_mark(ctx, container, min_mode, error)) {
+                    g_free(container);
+                    g_free(current);
+                    return FALSE;
+                }
+
+                g_free(current);
+                current = container;
+                continue;
+            }
+            g_free(container);
+        }
+
         if (boundary && is_gmessage_child_segment(boundary + 2)) {
             gchar *container = g_strndup(current, boundary - current);
             GPtrArray *child_keys = gmessage_container_child_keys(ctx, container);
@@ -2400,6 +2576,14 @@ gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error) {
         return FALSE;
     }
 
+    if (sqlite3_exec(ctx->db, "DELETE FROM pdf_embedded;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE pdf_embedded: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -2423,7 +2607,8 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
     } targets[] = {
         { "chunks", "filename" }, { "pages", "filename" },
         { "file_pagecount", "filename" }, { "container_entrycount", "filename" },
-        { "gmessage_inline", "filename" }, { "coverage", "path" }
+        { "gmessage_inline", "filename" }, { "pdf_embedded", "filename" },
+        { "coverage", "path" }
     };
 
     for (guint t = 0; t < G_N_ELEMENTS(targets); t++) {
@@ -3421,26 +3606,43 @@ gboolean sond_index_mime_type_supported(gchar const *mime_type) {
  * GMessage-bewusstes Collapse/Invalidate (Schritt 4) gezählt werden
  * müssen, ohne die Mail dafür zu öffnen.
  */
-static gint gmessage_count_root_entries(guchar const *buf, gsize size) {
-    GMimeMessage *message = NULL;
-    GMimeObject  *root    = NULL;
-    gint          count   = -1;
+gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
+        gchar const *filename, guchar const *buf, gsize size, GError **error) {
+    GMimeMessage *message      = NULL;
+    GMimeObject  *root         = NULL;
+    GPtrArray    *inline_parts = NULL;
+    gboolean      ok           = TRUE;
+
+    if (!ctx || !filename)
+        return TRUE;
 
     message = gmessage_open(buf, size);
     if (!message)
-        return -1;
+        return TRUE; //nicht lesbar - nichts festzuhalten
 
     root = g_mime_message_get_mime_part(message);
-    if (!root) {
-        g_object_unref(message);
-        return -1;
+
+    /* Zahl der direkten Mimeparts +1 für den virtuellen "header"-Slot, der
+     * beim GMessage-bewussten Collapse/Invalidate neben den nummerierten
+     * Mimeparts mitgezählt wird */
+    if (root)
+        ok = sond_index_ctx_set_entry_count(ctx, filename,
+                (GMIME_IS_MULTIPART(root) ?
+                        g_mime_multipart_get_count(GMIME_MULTIPART(root)) : 1) + 1,
+                error);
+
+    //Inline-Teile für die angebundene Mail (Header + Inline, #197)
+    if (ok) {
+        inline_parts = g_ptr_array_new_with_free_func(g_free);
+        if (root)
+            gmessage_collect_inline(root, NULL, inline_parts);
+        ok = gmessage_inline_set(ctx, filename, inline_parts, error);
+        g_ptr_array_unref(inline_parts);
     }
 
-    count = GMIME_IS_MULTIPART(root) ?
-            g_mime_multipart_get_count(GMIME_MULTIPART(root)) : 1;
-
     g_object_unref(message);
-    return count;
+
+    return ok;
 }
 
 void sond_index(fz_context* ctx,
@@ -3481,45 +3683,15 @@ void sond_index(fz_context* ctx,
      * coverage_try_collapse()/_invalidate(), 17.09.2026) neben den
      * nummerierten Mimeparts mitgezählt wird. */
     if (!g_strcmp0(mime_type, "message/rfc822")) {
-        gint n_mimeparts = gmessage_count_root_entries(buf, size);
+        GError *structure_error = NULL;
 
-        if (n_mimeparts >= 0) {
-            GError *entrycount_error = NULL;
-
-            if (!sond_index_ctx_set_entry_count(sond_index_ctx, filename,
-                    n_mimeparts + 1, &entrycount_error)) {
-                if (log_func)
-                    log_func(log_func_data,
-                            "sond_index: set_entry_count '%s': %s", filename,
-                            entrycount_error ? entrycount_error->message : "?");
-                g_clear_error(&entrycount_error);
-            }
-        }
-
-        //Inline-Teile für die angebundene Mail (Header + Inline, #197)
-        {
-            GMimeMessage *message = gmessage_open(buf, size);
-
-            if (message) {
-                GMimeObject *root = g_mime_message_get_mime_part(message);
-                GPtrArray *inline_parts = g_ptr_array_new_with_free_func(g_free);
-                GError *inline_error = NULL;
-
-                if (root)
-                    gmessage_collect_inline(root, NULL, inline_parts);
-
-                if (!gmessage_inline_set(sond_index_ctx, filename, inline_parts,
-                        &inline_error)) {
-                    if (log_func)
-                        log_func(log_func_data,
-                                "sond_index: gmessage_inline '%s': %s", filename,
-                                inline_error ? inline_error->message : "?");
-                    g_clear_error(&inline_error);
-                }
-
-                g_ptr_array_unref(inline_parts);
-                g_object_unref(message);
-            }
+        if (!sond_index_ctx_record_gmessage_structure(sond_index_ctx, filename,
+                buf, size, &structure_error)) {
+            if (log_func)
+                log_func(log_func_data,
+                        "sond_index: Struktur '%s': %s", filename,
+                        structure_error ? structure_error->message : "?");
+            g_clear_error(&structure_error);
         }
     }
 

@@ -122,6 +122,14 @@ void sond_process_file(SondProcessFileCtx* wctx,
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 
+/* Struktur eines Containers in der Index-DB festhalten: Anhänge einer PDF
+ * (pdf_embedded) bzw. Mimeparts einer Mail (container_entrycount,
+ * gmessage_inline). Andere Typen: nichts zu tun. Liest die Datei. ToDo.c
+ * #199. */
+typedef struct _SondFilePart SondFilePart;
+gint sond_process_file_record_structure(SondIndexCtx* index_ctx,
+		SondFilePart* container, GError** error);
+
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,

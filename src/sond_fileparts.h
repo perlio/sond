@@ -179,6 +179,10 @@ gint sond_file_part_pdf_save_and_close(fz_context*, pdf_document*, SondFilePartP
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**,
 		GPtrArray**, GError**);
 
+/* Adressen aller eingebetteten Dateien (s. pdf_emb_addresses_new()), neu
+ * alloziert; NULL bei Fehler. Öffnet die PDF nur lesend. */
+GPtrArray* sond_file_part_pdf_get_emb_addresses(SondFilePartPDF*, GError**);
+
 /* Adressänderungen der übrigen eingebetteten Dateien, wenn die Datei mit
  * address gelöscht/herausverschoben (filename_new NULL) oder in
  * filename_new umbenannt wird - s. pdf_emb_address_changes(). Öffnet die

@@ -4830,7 +4830,7 @@
  file_part) läuft unverändert über den Auszug seiner Kinder.
  Vom Nutzer getestet (01.10.2026).
 
- #191 umgesetzt (01.10.2026), zu testen. Index erstellen (Auswahl) für
+ #191 umgesetzt (01.10.2026), vom Nutzer getestet (03.10.2026). Index erstellen (Auswahl) für
  einen PDF-Filepart aus BAUM_INHALT/BAUM_AUSWERTUNG indiziert die ganze
  Datei samt eingebetteter Dateien - gemeint ist nur der Pagetree
  (Einbettungen sind eigene Fileparts "x.pdf//anhang.pdf"). Ursache:
@@ -5115,4 +5115,37 @@
  "filename" in der Content-Disposition nur, wenn es eine gibt - deren Art
  bleibt. Mit GMime geprüft. Bereits so umbenannte Teile bleiben
  "attachment" (steht in der Datei).
+
+ #199 umgesetzt (03.10.2026), vom Nutzer getestet: Coverage einer PDF auflösen und
+ wieder zusammenfassen (Einschränkungen aus #191). Ist "x.pdf" als Ganzes
+ abgedeckt und wird nur ein Teil entwertet (nur Seiten löschen, ein Anhang
+ gelöscht/ersetzt), verloren die übrigen Anhänge ihre Abdeckung - ohne
+ Öffnen der PDF waren sie nicht aufzählbar. Seiten und alle Anhänge
+ einzeln indiziert wurden nie wieder zu "x.pdf" zusammengefasst.
+ Umsetzung:
+ - Index-DB: Tabelle pdf_embedded (PDF -> Adressen der Anhänge, "\n"-
+   getrennt; pdf_emb_escape() kodiert jetzt auch Zeilenumbrüche). Gelöscht
+   mit container_entrycount, umbenannt in rename_file().
+ - Erfasst, sobald irgendein Teil verarbeitet wird (Nutzerwunsch, keine
+   Grenze "erst nach Indizierung der ganzen PDF"): process_pdf_for_ocr()
+   bei jedem Lauf auf die PDF (auch nur Seiten/Seitenbereich);
+   sond_process_fileparts() für die Eltern-PDF/-Mail eines verarbeiteten
+   Teils (sond_process_file_record_structure()). Für Mails ebenso
+   container_entrycount/gmessage_inline (vorher nur bei Verarbeitung der
+   Mail selbst) - sond_index_ctx_record_gmessage_structure().
+ - Sofortiges Neueinlesen nach Änderungen durch zond (Nutzerentscheidung):
+   before_delete/before_move/before_insert merken die betroffene PDF/Mail
+   vor, after() bzw. das neue Signal "after-insert" (Kopieren, sond_
+   treeviewfm.c - before-insert öffnet keine Transaktion, "after" passte
+   nicht) lesen ihre Struktur nach Erfolg neu ein.
+ - coverage_invalidate(): beim Auflösen von "x.pdf" werden Seiten und alle
+   übrigen Anhänge aus pdf_embedded wieder eingetragen.
+ - coverage_try_collapse(): Seiten ("x.pdf//") und alle Anhänge abgedeckt
+   -> "x.pdf" (Mindestmodus); sond_process_fileparts() fasst bei "nur
+   Seiten" jetzt vom Seiten-Eintrag aus zusammen.
+ Zu testen (emb_test.pdf): ganze PDF indizieren, dann nur Seiten löschen ->
+ Anhänge bleiben grün; einen Anhang löschen -> übrige bleiben grün; Seiten
+ und alle Anhänge einzeln indizieren -> PDF-Knoten grün, Ordner darüber
+ kann zusammengefasst werden; Anhang einfügen -> PDF-Knoten "gemischt",
+ nach Indizieren des neuen Anhangs wieder grün.
  */

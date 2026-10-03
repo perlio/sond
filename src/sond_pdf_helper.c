@@ -433,6 +433,10 @@ gchar* pdf_emb_escape(gchar const* name) {
 			g_string_append(s, "%25");
 		else if (*p == '/')
 			g_string_append(s, "%2F");
+		else if (*p == '\n') //Adresslisten sind zeilenweise gespeichert
+			g_string_append(s, "%0A");
+		else if (*p == '\r')
+			g_string_append(s, "%0D");
 		else
 			g_string_append_c(s, *p);
 	}
