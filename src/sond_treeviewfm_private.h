@@ -30,6 +30,9 @@ typedef struct {
 	gpointer index_ctx_func_data;
 	GFileMonitor *root_monitor; //Zugänge von außen auf Root-Ebene
 	guint root_monitor_timer;   //Entprellung
+	gchar *search_text;         //Einstellungen der letzten Dateisuche
+	SondTVFMSearchOpts search_opts;
+	gboolean search_settings_valid;
 #ifdef _WIN32
 	GThread *seadrive_watcher_thread;
 	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */

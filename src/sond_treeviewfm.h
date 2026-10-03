@@ -84,6 +84,30 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu);
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);
 
+typedef enum {
+	SOND_TVFM_SEARCH_CONTAINS, //Name enthält Text
+	SOND_TVFM_SEARCH_WHOLE_NAME, //Name ist gleich Text
+	SOND_TVFM_SEARCH_WILDCARD //Text ist Muster mit * und ?
+} SondTVFMSearchMode;
+
+typedef struct {
+	gchar const *text;
+	SondTVFMSearchMode mode;
+	gboolean case_sensitive;
+	gboolean match_files; //Dateien (auch Container) als Treffer
+	gboolean match_dirs; //Verzeichnisse als Treffer
+	gboolean in_containers; //ZIP, PDF-Anhänge, E-Mails durchsuchen
+} SondTVFMSearchOpts;
+
+/* Sucht im Dateisystembaum nach Namen. Liefert die Fileparts der Treffer
+ * (GPtrArray mit g_free) in der Form, die sond_treeviewfm_file_part_visible()
+ * erwartet, oder NULL und error. Läuft mit Fortschrittsfenster und
+ * Abbrechen; bei Abbruch kommen die bis dahin gefundenen Treffer zurück.
+ * selected_only: nur unterhalb der markierten Punkte, sonst ab Wurzel.
+ * n_skipped (optional): Zahl nicht lesbarer, übersprungener Verzeichnisse. */
+GPtrArray* sond_treeviewfm_search(SondTreeviewFM*, SondTVFMSearchOpts const*,
+		gboolean selected_only, guint *n_skipped, GError**);
+
 GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stv, gboolean selected_only,
 		GError **error);
 

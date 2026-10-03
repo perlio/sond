@@ -376,6 +376,7 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 #endif
 
 	g_free(stvfm_priv->root);
+	g_free(stvfm_priv->search_text);
 
 	clipboard =
 			((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW))->clipboard;
@@ -625,12 +626,7 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 	g_object_unref(sec_oeffnen);
 
 	GMenu *sec_search = g_menu_new();
-	GMenu *sub_search = g_menu_new();
-	g_menu_append(sub_search, "Gesamtes Verzeichnis", "stv.dateisuche");
-	g_menu_append(sub_search, "Nur markierte Punkte", "stv.dateisuche-sel");
-	g_menu_append_submenu(sec_search, "Dateisuche",
-			G_MENU_MODEL(sub_search));
-	g_object_unref(sub_search);
+	g_menu_append(sec_search, "Dateisuche …", "stv.dateisuche");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_search));
 	g_object_unref(sec_search);
 
@@ -1706,132 +1702,253 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 }
 
 typedef struct {
-	gchar *needle;
-	gboolean exact_match;
-	gboolean case_sens;
+	SondTVFMSearchOpts opts;
+	gchar *needle; //bei !case_sensitive bereits gefaltet
+	GPatternSpec *pspec; //nur bei SOND_TVFM_SEARCH_WILDCARD
 	GPtrArray *arr_hits;
-	InfoWindow *info_window;
-	volatile gint *atom_ready;
-	volatile gint *atom_cancelled;
-} SearchFS;
+	GHashTable *ht_seen; //Trefferstrings (gehören arr_hits), gegen Doppelte
+	guint n_skipped;
+	gint ready;
+	gint cancelled;
+} SearchCtx;
 
-static gint sond_treeviewfm_search_needle(SondTVFMItem* stvfm_item,
-		gpointer data, GError **error) {
+static gboolean sond_treeviewfm_search_name_matches(SearchCtx *ctx,
+		gchar const *name) {
 	gboolean found = FALSE;
+	gchar *folded = NULL;
+	gchar const *cmp = name;
 
-	SearchFS *search_fs = (SearchFS*) data;
-
-	if (g_atomic_int_get(search_fs->atom_cancelled))
-		g_atomic_int_set(search_fs->atom_ready, 1);
-	else {
-		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
-
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-			gchar* basename = NULL;
-
-			if (!search_fs->case_sens)
-				basename = g_ascii_strdown(sond_tvfm_item_get_basename(stvfm_item), -1);
-			else
-				basename = g_strdup(sond_tvfm_item_get_basename(stvfm_item));
-
-			if (search_fs->exact_match == TRUE) {
-				if (!g_strcmp0(basename, search_fs->needle))
-					found = TRUE;
-			} else if (strstr(basename, search_fs->needle))
-				found = TRUE;
-			g_free(basename);
-
-			if (found) {
-				gchar* filepart = NULL;
-
-				filepart = sond_file_part_get_filepart(stvfm_item_priv->sond_file_part);
-				g_ptr_array_add(search_fs->arr_hits, filepart);
-			}
-		}
-		else if (stvfm_item_priv->has_children) { //Muß ja DIR sein
-			GPtrArray *arr_children = NULL;
-			gint rc = 0;
-
-			rc = sond_tvfm_item_load_children(stvfm_item,
-					&arr_children, NULL, error);
-			if (rc)
-				return -1;
-
-			for (guint i = 0; i < arr_children->len; i++) {
-				SondTVFMItem *child_item = (SondTVFMItem*) g_ptr_array_index(arr_children, i);
-
-				rc = sond_treeviewfm_search_needle(child_item, data, error);
-				if (rc)
-					return -1;
-
-				g_object_unref(child_item);
-			}
-		}
+	if (!ctx->opts.case_sensitive) {
+		folded = g_utf8_casefold(name, -1);
+		cmp = folded;
 	}
+
+	switch (ctx->opts.mode) {
+	case SOND_TVFM_SEARCH_WHOLE_NAME:
+		found = !g_strcmp0(cmp, ctx->needle);
+		break;
+	case SOND_TVFM_SEARCH_WILDCARD:
+		found = g_pattern_spec_match_string(ctx->pspec, cmp);
+		break;
+	default:
+		found = (strstr(cmp, ctx->needle) != NULL);
+	}
+
+	g_free(folded);
+
+	return found;
+}
+
+static void sond_treeviewfm_search_add_hit(SearchCtx *ctx,
+		SondTVFMItemPrivate *priv) {
+	gchar *filepart = NULL;
+	gchar *filepart_sfp = NULL;
+
+	if (priv->sond_file_part)
+		filepart_sfp = sond_file_part_get_filepart(priv->sond_file_part);
+
+	if (filepart_sfp && priv->path_or_section)
+		filepart = g_strconcat(filepart_sfp, "//", priv->path_or_section, NULL);
+	else if (filepart_sfp) {
+		filepart = filepart_sfp;
+		filepart_sfp = NULL;
+	} else if (priv->path_or_section)
+		filepart = g_strdup(priv->path_or_section);
+	g_free(filepart_sfp);
+
+	if (!filepart)
+		return;
+
+	if (g_hash_table_contains(ctx->ht_seen, filepart)) {
+		g_free(filepart);
+
+		return;
+	}
+
+	g_hash_table_add(ctx->ht_seen, filepart);
+	g_ptr_array_add(ctx->arr_hits, filepart);
+
+	return;
+}
+
+/* Prüft das Item und durchsucht (bei Verzeichnissen und, wenn erlaubt,
+ * Containern) rekursiv seine Kinder. Nur für das oberste Item (top) wird ein
+ * Lesefehler als Fehler gemeldet, tiefer liegende nicht lesbare Verzeichnisse
+ * werden übersprungen und gezählt. */
+static gint sond_treeviewfm_search_item(SearchCtx *ctx, SondTVFMItem *item,
+		gboolean top, GError **error) {
+	GPtrArray *arr_children = NULL;
+	GError *error_load = NULL;
+	gboolean container_root = FALSE;
+	gboolean check = FALSE;
+
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(item);
+
+	if (g_atomic_int_get(&ctx->cancelled))
+		return 0;
+
+	if (priv->type != SOND_TVFM_ITEM_TYPE_DIR
+			&& priv->type != SOND_TVFM_ITEM_TYPE_LEAF)
+		return 0;
+
+	//Pseudo-Kinder PageTree/Message stehen für den Container selbst
+	if (priv->is_content_root_marker)
+		return 0;
+
+	//Container (ZIP, PDF mit Anhängen, E-Mail mit Teilen) zählt als Datei
+	container_root = (priv->type == SOND_TVFM_ITEM_TYPE_DIR
+			&& priv->sond_file_part && !priv->path_or_section);
+	check = (priv->type == SOND_TVFM_ITEM_TYPE_LEAF || container_root) ?
+			ctx->opts.match_files : ctx->opts.match_dirs;
+
+	if (check) {
+		gchar const *name = sond_tvfm_item_get_display_name(item);
+
+		if (!name)
+			name = sond_tvfm_item_get_basename(item);
+		if (name && sond_treeviewfm_search_name_matches(ctx, name))
+			sond_treeviewfm_search_add_hit(ctx, priv);
+	}
+
+	if (priv->type != SOND_TVFM_ITEM_TYPE_DIR || !priv->has_children)
+		return 0;
+	if (container_root && !ctx->opts.in_containers)
+		return 0;
+
+	if (sond_tvfm_item_load_children(item, &arr_children, NULL, &error_load)) {
+		if (top) {
+			g_propagate_error(error, error_load);
+
+			return -1;
+		}
+
+		LOG_WARN("Dateisuche: Verzeichnis übersprungen: %s",
+				error_load ? error_load->message : "?");
+		g_clear_error(&error_load);
+		ctx->n_skipped++;
+
+		return 0;
+	}
+
+	for (guint i = 0; i < arr_children->len; i++)
+		sond_treeviewfm_search_item(ctx,
+				(SondTVFMItem*) g_ptr_array_index(arr_children, i), FALSE, NULL);
+
+	g_ptr_array_unref(arr_children);
 
 	return 0;
 }
 
 typedef struct {
-	SearchFS *search_fs;
-	SondTVFMItem* stvfm_item;
-	GError **error;
-} DataThread;
+	SearchCtx *ctx;
+	GPtrArray *arr_start;
+	GError *error;
+	gint rc;
+} SearchThreadData;
 
 static gpointer sond_treeviewfm_thread_search(gpointer data) {
-	DataThread *data_thread = (DataThread*) data;
-	gint rc = 0;
+	SearchThreadData *data_thread = (SearchThreadData*) data;
 
-	rc = sond_treeviewfm_search_needle(data_thread->stvfm_item,
-			data_thread->search_fs, data_thread->error);
-	if (rc)
-		return GINT_TO_POINTER(-1);
+	for (guint i = 0; i < data_thread->arr_start->len; i++) {
+		if (sond_treeviewfm_search_item(data_thread->ctx,
+				g_ptr_array_index(data_thread->arr_start, i), TRUE,
+				&data_thread->error)) {
+			data_thread->rc = -1;
+			break;
+		}
+	}
 
-	g_atomic_int_set(data_thread->search_fs->atom_ready, 1);
+	//in jedem Fall, sonst wartet der Hauptthread endlos
+	g_atomic_int_set(&data_thread->ctx->ready, 1);
 
 	return NULL;
 }
 
-static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
-		gpointer data, GError **error) {
+static gint sond_treeviewfm_search_collect_start(SondTreeview *stv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	SondTVFMItem *item = NULL;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
+			&item, -1);
+	if (item) //Referenz geht ans Array; Dummy-Zeilen haben kein Item
+		g_ptr_array_add((GPtrArray*) data, item);
+
+	return 0;
+}
+
+GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
+		SondTVFMSearchOpts const *opts, gboolean selected_only,
+		guint *n_skipped, GError **error) {
+	SearchCtx ctx = { 0 };
+	SearchThreadData data_thread = { 0 };
+	GPtrArray *arr_start = NULL;
+	GPtrArray *arr_hits = NULL;
 	GThread *thread_search = NULL;
-	gpointer res_thread = NULL;
-	SondTVFMItem *stvfm_item = NULL;
+	InfoWindow *info_window = NULL;
+	gint cancelled = 0;
 
-	SearchFS *search_fs = (SearchFS*) data;
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(stvfm), NULL);
+	g_return_val_if_fail(opts && opts->text && *opts->text, NULL);
 
-	if (iter) //nur bei Auswahl
-		gtk_tree_model_get(gtk_tree_view_get_model(
-				GTK_TREE_VIEW(stv)), iter, 0, &stvfm_item, -1);
-	else //bei kompletter Suche
-		stvfm_item =
-				sond_tvfm_item_create(SOND_TREEVIEWFM(stv), NULL, NULL);
+	if (n_skipped)
+		*n_skipped = 0;
 
-	DataThread data_thread = { search_fs, stvfm_item, error };
-	thread_search = g_thread_new( NULL, sond_treeviewfm_thread_search,
+	arr_start = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
+	if (selected_only) {
+		if (sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+				sond_treeviewfm_search_collect_start, arr_start, error) == -1) {
+			g_ptr_array_unref(arr_start);
+
+			return NULL;
+		}
+	} else
+		g_ptr_array_add(arr_start, sond_tvfm_item_create(stvfm, NULL, NULL));
+
+	ctx.opts = *opts;
+	ctx.needle = opts->case_sensitive ? g_strdup(opts->text) :
+			g_utf8_casefold(opts->text, -1);
+	if (opts->mode == SOND_TVFM_SEARCH_WILDCARD)
+		ctx.pspec = g_pattern_spec_new(ctx.needle);
+	ctx.arr_hits = g_ptr_array_new_with_free_func(g_free);
+	ctx.ht_seen = g_hash_table_new(g_str_hash, g_str_equal);
+
+	data_thread.ctx = &ctx;
+	data_thread.arr_start = arr_start;
+	info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm), &cancelled,
+			opts->text);
+	thread_search = g_thread_new(NULL, sond_treeviewfm_thread_search,
 			&data_thread);
 
-	/* NICHT als reine Busy-Loop ohne jede Pause - das friert die UI (und
-	 * damit auch den eigenen Abbrechen-Button im info_window) komplett ein
-	 * und beansprucht einen ganzen CPU-Kern nur fürs Pollen. Analog zur
-	 * Wartschleife von zond_index_erstellen_ht() (headerbar.c): anstehende
-	 * Events abarbeiten, damit Fortschrittsfenster/Abbrechen reagieren,
-	 * danach kurz schlafen statt sofort erneut zu pollen. */
-	while (!g_atomic_int_get(search_fs->atom_ready)) {
-		if (*(search_fs->info_window->cancel))
-			g_atomic_int_set(search_fs->atom_cancelled, 1);
+	/* Keine reine Busy-Loop: anstehende Events abarbeiten, damit
+	 * Fortschrittsfenster und Abbrechen reagieren, danach kurz schlafen. */
+	while (!g_atomic_int_get(&ctx.ready)) {
+		if (*(info_window->cancel))
+			g_atomic_int_set(&ctx.cancelled, 1);
 
 		while (gtk_events_pending())
 			gtk_main_iteration_do(FALSE);
 		g_usleep(20000);
 	}
 
-	res_thread = g_thread_join(thread_search);
-	g_object_unref(stvfm_item);
-	if (GPOINTER_TO_INT(res_thread) == -1)
-		return -1;
+	g_thread_join(thread_search);
+	info_window_kill(info_window);
 
-	return 0;
+	if (data_thread.rc == -1) {
+		g_propagate_error(error, data_thread.error);
+		g_ptr_array_unref(ctx.arr_hits);
+	} else {
+		arr_hits = ctx.arr_hits;
+		if (n_skipped)
+			*n_skipped = ctx.n_skipped;
+	}
+
+	g_hash_table_destroy(ctx.ht_seen);
+	if (ctx.pspec)
+		g_pattern_spec_free(ctx.pspec);
+	g_free(ctx.needle);
+	g_ptr_array_unref(arr_start);
+
+	return arr_hits;
 }
 
 
@@ -1965,97 +2082,227 @@ static void sond_treeviewfm_action_oeffnen_mit(GSimpleAction *a, GVariant *p,
 	open_item(GTK_TREE_VIEW(d), TRUE);
 }
 
-static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
-		gpointer d) {
-	gint rc = 0;
-	gchar *search_text = NULL;
-	SearchFS search_fs = { 0 };
-	gint ready = 0;
-	gint cancelled = 0;
-	GError *error = NULL;
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
-	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
-			"Bitte Suchtext eingeben", &search_text);
-	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
-		g_free(search_text);
-		return;
-	}
-	search_fs.arr_hits = g_ptr_array_new_with_free_func(g_free);
-	search_fs.exact_match = FALSE;
-	search_fs.case_sens = FALSE;
-	search_fs.atom_ready = &ready;
-	search_fs.atom_cancelled = &cancelled;
-	search_fs.needle = g_utf8_strdown(search_text, -1);
-	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
-			&cancelled, search_text);
-	g_free(search_text);
-	rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs, &error);
-	info_window_kill(search_fs.info_window);
-	g_free(search_fs.needle);
-	if (rc == -1) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Fehler bei Dateisuche\n\n", error->message, NULL);
-		g_error_free(error);
-		g_ptr_array_unref(search_fs.arr_hits);
-		return;
-	}
-	if (search_fs.arr_hits->len == 0) {
-		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden", NULL);
-		g_ptr_array_unref(search_fs.arr_hits);
-		return;
-	}
-	sond_treeviewfm_show_hits(stvfm, search_fs.arr_hits);
-	g_ptr_array_unref(search_fs.arr_hits);
+typedef struct {
+	GtkWidget *dialog;
+	GtkWidget *entry_text;
+	GtkWidget *radio_contains;
+	GtkWidget *radio_whole;
+	GtkWidget *radio_wildcard;
+	GtkWidget *check_case;
+	GtkWidget *check_files;
+	GtkWidget *check_dirs;
+	GtkWidget *check_containers;
+	GtkWidget *radio_all;
+	GtkWidget *radio_sel;
+} SearchDialog;
+
+static void sond_treeviewfm_search_dialog_update(GtkWidget *widget,
+		gpointer data) {
+	SearchDialog *sd = (SearchDialog*) data;
+	gchar const *text = gtk_entry_get_text(GTK_ENTRY(sd->entry_text));
+
+	gtk_dialog_set_response_sensitive(GTK_DIALOG(sd->dialog), GTK_RESPONSE_OK,
+			(text && *text
+					&& (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(sd->check_files))
+					|| gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(sd->check_dirs)))));
+
+	return;
 }
 
-static void sond_treeviewfm_action_search_sel(GSimpleAction *a, GVariant *p,
+static GtkWidget* sond_treeviewfm_search_dialog_label(gchar const *text) {
+	GtkWidget *label = gtk_label_new(text);
+
+	gtk_widget_set_halign(label, GTK_ALIGN_END);
+	gtk_widget_set_valign(label, GTK_ALIGN_START);
+
+	return label;
+}
+
+/* Fragt Suchtext und Optionen ab; die Einstellungen bleiben in der Instanz
+ * für die nächste Suche erhalten. Liefert FALSE bei Abbruch. */
+static gboolean sond_treeviewfm_search_dialog(SondTreeviewFM *stvfm,
+		gboolean *selected_only) {
+	SearchDialog sd = { 0 };
+	GtkWidget *grid = NULL;
+	GtkWidget *box = NULL;
+	gint response = 0;
+	gint n_selected = gtk_tree_selection_count_selected_rows(
+			gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)));
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+	SondTVFMSearchOpts *opts = &stvfm_priv->search_opts;
+
+	if (!stvfm_priv->search_settings_valid) {
+		opts->mode = SOND_TVFM_SEARCH_CONTAINS;
+		opts->case_sensitive = FALSE;
+		opts->match_files = TRUE;
+		opts->match_dirs = FALSE;
+		opts->in_containers = FALSE;
+		stvfm_priv->search_settings_valid = TRUE;
+	}
+
+	sd.dialog = gtk_dialog_new_with_buttons("Dateisuche",
+			GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)),
+			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
+			"Suchen", GTK_RESPONSE_OK, "Abbrechen", GTK_RESPONSE_CANCEL, NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(sd.dialog), GTK_RESPONSE_OK);
+
+	grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+	gtk_container_set_border_width(GTK_CONTAINER(grid), 12);
+
+	sd.entry_text = gtk_entry_new();
+	gtk_entry_set_activates_default(GTK_ENTRY(sd.entry_text), TRUE);
+	gtk_widget_set_hexpand(sd.entry_text, TRUE);
+	if (stvfm_priv->search_text)
+		gtk_entry_set_text(GTK_ENTRY(sd.entry_text), stvfm_priv->search_text);
+	gtk_grid_attach(GTK_GRID(grid),
+			sond_treeviewfm_search_dialog_label("Suchtext:"), 0, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), sd.entry_text, 1, 0, 1, 1);
+
+	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+	sd.radio_contains = gtk_radio_button_new_with_label(NULL,
+			"Name enthält Text");
+	sd.radio_whole = gtk_radio_button_new_with_label_from_widget(
+			GTK_RADIO_BUTTON(sd.radio_contains), "Ganzer Name");
+	sd.radio_wildcard = gtk_radio_button_new_with_label_from_widget(
+			GTK_RADIO_BUTTON(sd.radio_contains), "Muster mit * und ?");
+	gtk_box_pack_start(GTK_BOX(box), sd.radio_contains, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), sd.radio_whole, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), sd.radio_wildcard, FALSE, FALSE, 0);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(
+			(opts->mode == SOND_TVFM_SEARCH_WHOLE_NAME) ? sd.radio_whole :
+			(opts->mode == SOND_TVFM_SEARCH_WILDCARD) ? sd.radio_wildcard :
+					sd.radio_contains), TRUE);
+	gtk_grid_attach(GTK_GRID(grid),
+			sond_treeviewfm_search_dialog_label("Vergleich:"), 0, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), box, 1, 1, 1, 1);
+
+	sd.check_case = gtk_check_button_new_with_label(
+			"Groß-/Kleinschreibung beachten");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(sd.check_case),
+			opts->case_sensitive);
+	gtk_grid_attach(GTK_GRID(grid), sd.check_case, 1, 2, 1, 1);
+
+	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+	sd.check_files = gtk_check_button_new_with_label("Dateien");
+	sd.check_dirs = gtk_check_button_new_with_label("Verzeichnissen");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(sd.check_files),
+			opts->match_files);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(sd.check_dirs),
+			opts->match_dirs);
+	gtk_box_pack_start(GTK_BOX(box), sd.check_files, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), sd.check_dirs, FALSE, FALSE, 0);
+	gtk_grid_attach(GTK_GRID(grid),
+			sond_treeviewfm_search_dialog_label("Suchen in:"), 0, 3, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), box, 1, 3, 1, 1);
+
+	sd.check_containers = gtk_check_button_new_with_label(
+			"Auch in Containern (ZIP, PDF-Anhänge, E-Mails)");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(sd.check_containers),
+			opts->in_containers);
+	gtk_grid_attach(GTK_GRID(grid), sd.check_containers, 1, 4, 1, 1);
+
+	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+	sd.radio_all = gtk_radio_button_new_with_label(NULL,
+			"Gesamtes Verzeichnis");
+	sd.radio_sel = gtk_radio_button_new_with_label_from_widget(
+			GTK_RADIO_BUTTON(sd.radio_all), "Nur markierte Punkte");
+	gtk_widget_set_sensitive(sd.radio_sel, n_selected > 0);
+	gtk_box_pack_start(GTK_BOX(box), sd.radio_all, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), sd.radio_sel, FALSE, FALSE, 0);
+	gtk_grid_attach(GTK_GRID(grid),
+			sond_treeviewfm_search_dialog_label("Umfang:"), 0, 5, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), box, 1, 5, 1, 1);
+
+	g_signal_connect(sd.entry_text, "changed",
+			G_CALLBACK(sond_treeviewfm_search_dialog_update), &sd);
+	g_signal_connect(sd.check_files, "toggled",
+			G_CALLBACK(sond_treeviewfm_search_dialog_update), &sd);
+	g_signal_connect(sd.check_dirs, "toggled",
+			G_CALLBACK(sond_treeviewfm_search_dialog_update), &sd);
+	sond_treeviewfm_search_dialog_update(NULL, &sd);
+
+	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(
+			GTK_DIALOG(sd.dialog))), grid);
+	gtk_widget_show_all(sd.dialog);
+
+	response = my_dialog_run(GTK_DIALOG(sd.dialog));
+
+	if (response == GTK_RESPONSE_OK) {
+		g_free(stvfm_priv->search_text);
+		stvfm_priv->search_text = g_strdup(
+				gtk_entry_get_text(GTK_ENTRY(sd.entry_text)));
+		opts->mode = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.radio_whole)) ?
+						SOND_TVFM_SEARCH_WHOLE_NAME :
+				gtk_toggle_button_get_active(
+						GTK_TOGGLE_BUTTON(sd.radio_wildcard)) ?
+						SOND_TVFM_SEARCH_WILDCARD : SOND_TVFM_SEARCH_CONTAINS;
+		opts->case_sensitive = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.check_case));
+		opts->match_files = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.check_files));
+		opts->match_dirs = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.check_dirs));
+		opts->in_containers = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.check_containers));
+		*selected_only = gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(sd.radio_sel));
+	}
+
+	gtk_widget_destroy(sd.dialog);
+
+	return (response == GTK_RESPONSE_OK);
+}
+
+static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
 		gpointer d) {
-	gint rc = 0;
-	gchar *search_text = NULL;
-	SearchFS search_fs = { 0 };
-	gint ready = 0;
-	gint cancelled = 0;
+	GPtrArray *arr_hits = NULL;
+	gchar *msg_skipped = NULL;
+	guint n_skipped = 0;
+	gboolean selected_only = FALSE;
 	GError *error = NULL;
+	SondTVFMSearchOpts opts = { 0 };
+
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
-	if (!gtk_tree_selection_count_selected_rows(
-			gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Keine Punkte ausgew\u00e4hlt", NULL);
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (!sond_treeviewfm_search_dialog(stvfm, &selected_only))
 		return;
-	}
-	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
-			"Bitte Suchtext eingeben", &search_text);
-	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
-		g_free(search_text);
-		return;
-	}
-	search_fs.arr_hits = g_ptr_array_new_with_free_func(g_free);
-	search_fs.exact_match = FALSE;
-	search_fs.case_sens = FALSE;
-	search_fs.atom_ready = &ready;
-	search_fs.atom_cancelled = &cancelled;
-	search_fs.needle = g_utf8_strdown(search_text, -1);
-	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
-			&cancelled, search_text);
-	g_free(search_text);
-	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-			sond_treeviewfm_search, &search_fs, &error);
-	info_window_kill(search_fs.info_window);
-	g_free(search_fs.needle);
-	if (rc == -1) {
+
+	opts = stvfm_priv->search_opts;
+	opts.text = stvfm_priv->search_text;
+
+	arr_hits = sond_treeviewfm_search(stvfm, &opts, selected_only, &n_skipped,
+			&error);
+	if (!arr_hits) {
 		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Fehler bei Dateisuche\n\n", error->message, NULL);
 		g_error_free(error);
-		g_ptr_array_unref(search_fs.arr_hits);
+
 		return;
 	}
-	if (search_fs.arr_hits->len == 0) {
-		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden", NULL);
-		g_ptr_array_unref(search_fs.arr_hits);
-		return;
+
+	if (n_skipped)
+		msg_skipped = g_strdup_printf("\n\n%u Verzeichnis(se) konnten nicht "
+				"gelesen werden und wurden übersprungen", n_skipped);
+
+	if (arr_hits->len == 0)
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden",
+				msg_skipped, NULL);
+	else {
+		if (msg_skipped)
+			display_message(SOND_GET_TOPLEVEL(stvfm),
+					"Suche unvollständig", msg_skipped, NULL);
+		sond_treeviewfm_show_hits(stvfm, arr_hits);
 	}
-	sond_treeviewfm_show_hits(stvfm, search_fs.arr_hits);
-	g_ptr_array_unref(search_fs.arr_hits);
+
+	g_free(msg_skipped);
+	g_ptr_array_unref(arr_hits);
+
+	return;
 }
 
 static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
@@ -2110,12 +2357,6 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 			G_CALLBACK(sond_treeviewfm_action_search), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search));
 	g_object_unref(act_search);
-
-	GSimpleAction *act_search_sel = g_simple_action_new("dateisuche-sel", NULL);
-	g_signal_connect(act_search_sel, "activate",
-			G_CALLBACK(sond_treeviewfm_action_search_sel), stvfm);
-	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search_sel));
-	g_object_unref(act_search_sel);
 
 	/* SeaDrive-Aktionen */
 	sond_treeviewfm_seadrive_init_contextmenu(stvfm);
