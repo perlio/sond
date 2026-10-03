@@ -268,24 +268,19 @@ gint gmessage_set_filename(GMimeMessage* message, gchar const* path,
 	}
 
 	object = lookup_path(root, path, error);
-    if (!object)
-    	return -1;
+	if (!object)
+		return -1;
 
-    if (GMIME_IS_PART(object)) {
-    	g_mime_part_set_filename(GMIME_PART(object), filename);
-    }
+	/* Name im Content-Type ("name") und, nur falls vorhanden, in der
+	 * Content-Disposition ("filename"). Keine Content-Disposition anlegen:
+	 * g_mime_part_set_filename() bzw. eine neue Disposition wären
+	 * "attachment" - ein umbenannter Inline-Teil wurde so zum Anhang (ToDo.c
+	 * #198). Ohne Disposition gilt ein Teil als inline. */
+	g_mime_object_set_content_type_parameter(object, "name", filename);
 
-	// Für jedes GMimeObject: Setze den Filename in der Content-Disposition
 	disposition = g_mime_object_get_content_disposition(object);
-
-	if (!disposition) {
-		// Erstelle eine neue Content-Disposition, falls keine existiert
-		disposition = g_mime_content_disposition_new();
-		g_mime_object_set_content_disposition(object, disposition);
-		g_object_unref(disposition);
-	}
-
-	g_mime_content_disposition_set_parameter(disposition, "filename", filename);
+	if (disposition)
+		g_mime_content_disposition_set_parameter(disposition, "filename", filename);
 
 	return 0;
 }

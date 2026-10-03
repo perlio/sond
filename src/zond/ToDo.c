@@ -5102,4 +5102,17 @@
  grün, Anhang nicht; einen Inline-Teil in BAUM_FS de-indizieren ->
  Anbindung "gemischt"; Index löschen der Anbindung; Index durchsuchen mit
  Auswahl der Anbindung (keine Treffer aus dem Anhang).
+
+ #198 Bug (03.10.2026, Nutzer-Fund bei #197), behoben, vom Nutzer getestet:
+ Umbenennen (F2) eines Mimeparts machte einen Inline-Teil zum Anhang.
+ gmessage_set_filename() (sond_gmessage_helper.c) rief
+ g_mime_part_set_filename() auf, das eine fehlende Content-Disposition als
+ "attachment" anlegt, und legte sonst selbst eine neue (ebenfalls
+ "attachment") an. Folge: Der Teil fiel aus "Header + Inline" (#197)
+ heraus - nach Index löschen des Headers zeigte die Anbindung gar keinen
+ Badge mehr; Mailprogramme zeigen ihn ggf. als Anhang statt im Text.
+ Fix (Nutzerentscheidung: nichts anlegen): Name in "name" des Content-Type,
+ "filename" in der Content-Disposition nur, wenn es eine gibt - deren Art
+ bleibt. Mit GMime geprüft. Bereits so umbenannte Teile bleiben
+ "attachment" (steht in der Datei).
  */
