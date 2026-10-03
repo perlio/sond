@@ -2460,6 +2460,120 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
 }
 
 /* =======================================================================
+ * sond_index_ctx_update_gmessage_index / _clear_gmessage_structure
+ * ======================================================================= */
+
+/* Segment direkt hinter ?1 (bis zum nächsten "/") bzw. der Rest danach */
+#define GMSG_AFTER "SUBSTR(%s, LENGTH(?1) + 1)"
+#define GMSG_SEG   "SUBSTR(" GMSG_AFTER ", 1, INSTR(" GMSG_AFTER " || '/', '/') - 1)"
+#define GMSG_REST  "SUBSTR(" GMSG_AFTER ", INSTR(" GMSG_AFTER " || '/', '/'))"
+
+gboolean sond_index_ctx_update_gmessage_index(SondIndexCtx *ctx,
+        gchar const *prefix, gint index, gboolean into, GError **error) {
+    static const struct {
+        gchar const *table;
+        gchar const *column;
+    } targets[] = {
+        { "chunks", "filename" }, { "pages", "filename" },
+        { "file_pagecount", "filename" }, { "container_entrycount", "filename" },
+        { "gmessage_inline", "filename" }, { "coverage", "path" }
+    };
+
+    if (!ctx || !prefix)
+        return TRUE;
+
+    /* Zwei Durchgänge: erst auf "-N" (kann nicht belegt sein), dann zurück
+     * auf "N" - beim Hochzählen wäre das Ziel sonst noch belegt und die
+     * eindeutigen Schlüssel der Tabellen würden verletzt. Nur rein
+     * numerische Segmente, "header" bleibt (s. ToDo.c #194). */
+    for (guint t = 0; t < G_N_ELEMENTS(targets); t++) {
+        gchar const *c = targets[t].column;
+        gchar *seg = g_strdup_printf(GMSG_SEG, c, c);
+        gchar *rest = g_strdup_printf(GMSG_REST, c, c);
+        gchar *sql[2] = { NULL, NULL };
+
+        sql[0] = g_strdup_printf(
+                "UPDATE %s SET %s = ?1 || '-' || (CAST(%s AS INTEGER) + ?2) || %s "
+                "WHERE SUBSTR(%s, 1, LENGTH(?1)) = ?1 AND %s <> '' "
+                "AND %s NOT GLOB '*[^0-9]*' AND CAST(%s AS INTEGER) >= ?3",
+                targets[t].table, c, seg, rest, c, seg, seg, seg);
+        sql[1] = g_strdup_printf(
+                "UPDATE %s SET %s = ?1 || SUBSTR(%s, 2) || %s "
+                "WHERE SUBSTR(%s, 1, LENGTH(?1)) = ?1 AND %s GLOB '-[0-9]*' "
+                "AND SUBSTR(%s, 2) NOT GLOB '*[^0-9]*'",
+                targets[t].table, c, seg, rest, c, seg, seg);
+        g_free(seg);
+        g_free(rest);
+
+        for (guint s = 0; s < 2; s++) {
+            sqlite3_stmt *stmt = NULL;
+            gint rc = sqlite3_prepare_v2(ctx->db, sql[s], -1, &stmt, NULL);
+
+            if (rc != SQLITE_OK) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: prepare %s: %s", __func__, targets[t].table,
+                        sqlite3_errmsg(ctx->db));
+                g_free(sql[0]);
+                g_free(sql[1]);
+                return FALSE;
+            }
+
+            sqlite3_bind_text(stmt, 1, prefix, -1, SQLITE_STATIC);
+            if (s == 0) {
+                sqlite3_bind_int(stmt, 2, into ? 1 : -1);
+                sqlite3_bind_int(stmt, 3, index);
+            }
+            rc = sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+
+            if (rc != SQLITE_DONE) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: step %s: %s", __func__, targets[t].table,
+                        sqlite3_errmsg(ctx->db));
+                g_free(sql[0]);
+                g_free(sql[1]);
+                return FALSE;
+            }
+        }
+        g_free(sql[0]);
+        g_free(sql[1]);
+    }
+
+    return TRUE;
+}
+
+gboolean sond_index_ctx_clear_gmessage_structure(SondIndexCtx *ctx,
+        gchar const *filename, GError **error) {
+    static gchar const *sql[] = {
+        "DELETE FROM container_entrycount WHERE filename = ?",
+        "DELETE FROM gmessage_inline WHERE filename = ?"
+    };
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    for (guint i = 0; i < G_N_ELEMENTS(sql); i++) {
+        sqlite3_stmt *stmt = NULL;
+
+        if (sqlite3_prepare_v2(ctx->db, sql[i], -1, &stmt, NULL) != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+        sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+            sqlite3_finalize(stmt);
+            return FALSE;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    return TRUE;
+}
+
+/* =======================================================================
  * Chunking
  * ======================================================================= */
 

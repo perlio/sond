@@ -4989,7 +4989,7 @@
  öffnen; Anhang mit "%" oder "/" im Schlüssel; bestehende Anbindungen auf
  Anhänge weiterhin öffnen; OCR einer PDF mit Anhängen.
 
- #194 offen (02.10.2026): Mimepart-Nummern einer E-Mail werden in der
+ #194 umgesetzt (03.10.2026), vom Nutzer getestet - Befund: Mimepart-Nummern einer E-Mail werden in der
  Index-DB nicht nachgeführt. Beim Löschen/Verschieben eines Mimeparts
  zählt dbase_zond_update_gmessage_index() (project.c) die gespeicherten
  Fileparts in der zond-DB (main/work) um, die Index-DB (.sond_index.db:
@@ -5002,6 +5002,30 @@
  container_entrycount ist veraltet. Fix: Gegenstück zu
  dbase_zond_update_gmessage_index() für die Index-DB (alle Tabellen mit
  Pfad), in derselben Transaktion aufrufen.
+ Umsetzung:
+ - sond_index_ctx_update_gmessage_index() (sond_index.c): chunks, pages,
+   file_pagecount, container_entrycount, gmessage_inline, coverage. Zwei
+   Durchgänge über vorläufige Werte ("-N"), sonst verletzt das Hochzählen
+   die eindeutigen Schlüssel. Nur rein numerische Segmente ("header"
+   bleibt), SUBSTR statt LIKE. Per sqlite3 an einer Testtabelle geprüft.
+ - sond_index_ctx_clear_gmessage_structure(): container_entrycount und
+   gmessage_inline der Mail werden nach jeder Änderung an ihren Mimeparts
+   verworfen und bei der nächsten Indizierung neu ermittelt (Art eines
+   hineinverschobenen Teils - inline/Anhang - ist ohne die Mail nicht
+   bekannt). Bis dahin: Badge der angebundenen Mail nur nach Header,
+   GMessage-bewusstes Zusammenfassen der Coverage setzt aus.
+ - zond_treeviewfm_before_delete()/_before_move(): Aufruf neben
+   dbase_zond_update_gmessage_index() (gmessage_index_renumber()); beim
+   Hineinverschieben zusätzlich "x.eml//alpha" -> Zielindex in der
+   Index-DB (blieb vorher dauerhaft "alpha").
+ - Dabei behoben: dbase_zond_update_gmessage_index() (project.c) zählte
+   per CAST auch den Platzhalter "alpha" als 0 - beim Verschieben an
+   Position 0 wurde er zu "//1", das anschließende "alpha" -> "0" fand
+   nichts, zwei Anbindungen zeigten auf "//1". Jetzt nur numerische
+   Segmente, SUBSTR statt LIKE.
+ Zu testen: Mail mit mehreren Teilen ganz indizieren, mittleren Teil
+ löschen -> Suchtreffer/Badges der folgenden Teile stimmen; Teil an
+ Position 0 verschieben -> Anbindungen öffnen den richtigen Teil.
 
  #195 Bug (02.10.2026, bei #193 gefunden), behoben, zu testen: Umbenennen
  (F2) eines Mimeparts verschob ihn in den Datenbanken an Index 0.

@@ -434,6 +434,28 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
                                                 gint          bis_seite);
 
 /**
+ * sond_index_ctx_update_gmessage_index:
+ *
+ * Gegenstück zu dbase_zond_update_gmessage_index() (project.c) für die
+ * Index-DB: in allen Pfad-Tabellen wird die Mimepart-Nummer direkt hinter
+ * @prefix (z.B. "x.eml//" oder "x.eml//0/") um 1 erhöht (@into) bzw.
+ * verringert, sofern sie >= @index ist. Nur rein numerische Segmente
+ * ("header" bleibt). S. ToDo.c #194.
+ */
+gboolean sond_index_ctx_update_gmessage_index(SondIndexCtx *ctx,
+        gchar const *prefix, gint index, gboolean into, GError **error);
+
+/**
+ * sond_index_ctx_clear_gmessage_structure:
+ *
+ * Verwirft die Strukturangaben einer Mail (container_entrycount,
+ * gmessage_inline) nach Änderungen an ihren Mimeparts - sie werden bei der
+ * nächsten Indizierung neu ermittelt.
+ */
+gboolean sond_index_ctx_clear_gmessage_structure(SondIndexCtx *ctx,
+        gchar const *filename, GError **error);
+
+/**
  * sond_index_ctx_gmessage_message_parts:
  *
  * Bestandteile einer angebundenen E-Mail (BAUM_INHALT/_AUSWERTUNG: Header +

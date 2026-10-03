@@ -309,6 +309,11 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 		sqlite3_stmt *stmt = NULL;
 		gint rc = 0;
 
+		/* Nur rein numerische Segmente: CAST macht aus "alpha" (Platzhalter
+		 * beim Verschieben in die Mail) 0 - beim Einfügen an Position 0 wurde
+		 * der Platzhalter sonst mitgezählt und das anschließende
+		 * "alpha" -> "0" fand nichts mehr. SUBSTR statt LIKE ("_" und "%"
+		 * im Namen). S. ToDo.c #194. */
 		sql = g_strdup_printf(
 				"UPDATE %s.knoten "
 				"SET file_part = ?1 || " //?1 ist prefix
@@ -317,7 +322,12 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 				"AS INTEGER) + ?2) || " //?2 ist Zahl, die hinzugesetzt/abgezogen wird
 				"SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), "
 				"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/')) "
-				"WHERE file_part LIKE ?1 || '%%' "
+				"WHERE SUBSTR(file_part, 1, LENGTH(?1)) = ?1 "
+				"AND SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+						"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) <> '' "
+				"AND SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+						"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
+						"NOT GLOB '*[^0-9]*' "
 				"AND CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
 						"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
 						"AS INTEGER) >= ?3; ", //?3 ist Schwellenwert

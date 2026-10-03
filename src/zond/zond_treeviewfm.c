@@ -156,6 +156,41 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 	return FALSE;
 }
 
+/* Index-DB-Gegenstück zu dbase_zond_update_gmessage_index(): Mimepart-
+ * Nummern hinter prefix ("x.eml//", "x.eml//0/") umzählen und die
+ * Strukturangaben der Mail (Teilezahl, Inline-Teile) verwerfen - sie werden
+ * bei der nächsten Indizierung neu ermittelt (ToDo.c #194) */
+static gint gmessage_index_renumber(ZondTreeviewFMPrivate *priv,
+		gchar const *prefix, gint index, gboolean into, GError **error) {
+	SondIndexCtx *index_ctx = NULL;
+	gchar const *boundary = NULL;
+	g_autofree gchar *mail = NULL;
+	GError *idx_err = NULL;
+
+	if (!priv->zond->wctx || !priv->zond->wctx->index_ctx)
+		return 0;
+	index_ctx = priv->zond->wctx->index_ctx;
+
+	if (!sond_index_ctx_update_gmessage_index(index_ctx, prefix, index, into,
+			&idx_err))
+		goto err;
+
+	//Mail = alles vor dem letzten "//"
+	boundary = g_strrstr(prefix, "//");
+	mail = boundary ? g_strndup(prefix, boundary - prefix) : g_strdup(prefix);
+	if (!sond_index_ctx_clear_gmessage_structure(index_ctx, mail, &idx_err))
+		goto err;
+
+	return 0;
+
+err:
+	if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+			"%s: %s", __func__, idx_err ? idx_err->message : "?");
+	g_clear_error(&idx_err);
+
+	return -1;
+}
+
 static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
 	g_clear_object(&priv->pending_sibling_pdf);
 	g_clear_pointer(&priv->pending_sibling_old, g_ptr_array_unref);
@@ -424,8 +459,10 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 
 		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
 				prefix, index_from, FALSE, error);
+		if (!rc && !section) //Index-DB ebenso (ToDo.c #194)
+			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
 		if (rc) {
-			dbase_zond_rollback(priv->zond->dbase_zond, error);
+			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
 			if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
 				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			return -1;
@@ -646,9 +683,12 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
 				prefix_gmessage, index_from, FALSE, error);
+		if (!rc) //Index-DB ebenso (ToDo.c #194)
+			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
+					index_from, FALSE, error);
 		g_free(prefix_gmessage);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			return -1;
@@ -667,8 +707,11 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		//indizes ab index_to +1
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
 				prefix_gmessage, index_to, TRUE, error);
+		if (!rc) //Index-DB ebenso (ToDo.c #194)
+			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
+					index_to, TRUE, error);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			g_free(prefix_gmessage);
@@ -681,9 +724,25 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 		rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_new,
 				prefix_gmessage, error);
+
+		/* Index-DB: Platzhalter "alpha" (s. rename_file() oben) auf den
+		 * Zielindex - vorher blieb der Teil dort dauerhaft "x.eml//alpha"
+		 * (ToDo.c #194) */
+		if (!rc && ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
+			GError *idx_err = NULL;
+
+			if (!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
+					prefix_new, prefix_gmessage, &idx_err)) {
+				if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+						"%s: sond_index_ctx_rename_file: %s", __func__,
+						idx_err ? idx_err->message : "?");
+				g_clear_error(&idx_err);
+				rc = -1;
+			}
+		}
 		g_free(prefix_gmessage);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			return -1;
