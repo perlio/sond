@@ -237,7 +237,8 @@ choose_file(const GtkWidget *window, const gchar *path,
 	rc = my_dialog_run(GTK_DIALOG(dialog));
 	if (rc == GTK_RESPONSE_ACCEPT) {
 		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-		for (gchar *p = filename; *p; p++) {
+		//NULL z.B. bei nicht lokaler Auswahl
+		for (gchar *p = filename; p && *p; p++) {
 		    if (*p == '\\') *p = '/';
 		}
 	}
