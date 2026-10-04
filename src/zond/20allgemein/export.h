@@ -1,8 +1,11 @@
 #ifndef EXPORT_H_INCLUDED
 #define EXPORT_H_INCLUDED
 
-typedef void *gpointer;
+#include <glib.h>
 
-gint export_activate(Projekt* zond, gint umfang, GError** error);
+typedef struct _Projekt Projekt;
+
+//Export-Dialog, Auswahl und Schreiben; 0 auch bei Abbruch durch den Nutzer
+gint export_activate(Projekt* zond, GError** error);
 
 #endif // EXPORT_H_INCLUDED

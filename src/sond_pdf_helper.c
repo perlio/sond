@@ -292,6 +292,122 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 	return 0;
 }
 
+//Annotation, die beim Seitenkopieren nicht mitgenommen wird
+static gboolean pdf_annot_nicht_kopieren(fz_context *ctx, pdf_obj *annot) {
+	pdf_obj *subtype = NULL;
+	gint flags = 0;
+
+	if (!pdf_is_dict(ctx, annot))
+		return TRUE;
+
+	subtype = pdf_dict_get(ctx, annot, PDF_NAME(Subtype));
+	if (pdf_name_eq(ctx, subtype, PDF_NAME(Link))
+			|| pdf_name_eq(ctx, subtype, PDF_NAME(Widget))
+			|| pdf_name_eq(ctx, subtype, PDF_NAME(Popup)))
+		return TRUE;
+
+	//Hidden (2) und NoView (32)
+	flags = pdf_dict_get_int(ctx, annot, PDF_NAME(F));
+
+	return (flags & (2 | 32)) != 0;
+}
+
+//Annotation in doc_dest neu anlegen, ohne Verweise auf die Quellseite
+static pdf_obj* pdf_annot_kopieren(fz_context *ctx, pdf_graft_map *map,
+		pdf_document *doc_dest, pdf_obj *annot) {
+	pdf_obj *copy = NULL;
+	pdf_obj *ref = NULL;
+
+	fz_var(copy);
+
+	fz_try(ctx) {
+		gint n = pdf_dict_len(ctx, annot);
+
+		copy = pdf_new_dict(ctx, doc_dest, n);
+
+		for (gint i = 0; i < n; i++) {
+			pdf_obj *key = pdf_dict_get_key(ctx, annot, i);
+			pdf_obj *val = NULL;
+
+			if (pdf_name_eq(ctx, key, PDF_NAME(P))
+					|| pdf_name_eq(ctx, key, PDF_NAME(Parent))
+					|| pdf_name_eq(ctx, key, PDF_NAME(Popup))
+					|| pdf_name_eq(ctx, key, PDF_NAME(IRT)))
+				continue;
+
+			val = pdf_graft_mapped_object(ctx, map,
+					pdf_dict_get_val(ctx, annot, i));
+			fz_try(ctx)
+				pdf_dict_put(ctx, copy, key, val);
+			fz_always(ctx)
+				pdf_drop_obj(ctx, val);
+			fz_catch(ctx)
+				fz_rethrow(ctx);
+		}
+
+		ref = pdf_add_object(ctx, doc_dest, copy);
+	}
+	fz_always(ctx)
+		pdf_drop_obj(ctx, copy);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+
+	return ref;
+}
+
+gint pdf_graft_page_mit_annots(fz_context *ctx, pdf_graft_map *map,
+		pdf_document *doc_dest, pdf_document *doc_src, gint page_src,
+		GError **error) {
+	pdf_obj *annots_dest = NULL;
+
+	fz_var(annots_dest);
+
+	fz_try(ctx) {
+		pdf_obj *obj_src = NULL;
+		pdf_obj *annots_src = NULL;
+		gint n = 0;
+
+		pdf_graft_mapped_page(ctx, map, -1, doc_src, page_src);
+
+		obj_src = pdf_lookup_page_obj(ctx, doc_src, page_src);
+		annots_src = pdf_dict_get(ctx, obj_src, PDF_NAME(Annots));
+		n = pdf_array_len(ctx, annots_src);
+
+		for (gint i = 0; i < n; i++) {
+			pdf_obj *annot = pdf_array_get(ctx, annots_src, i);
+			pdf_obj *ref = NULL;
+
+			if (pdf_annot_nicht_kopieren(ctx, annot))
+				continue;
+
+			ref = pdf_annot_kopieren(ctx, map, doc_dest, annot);
+			fz_try(ctx) {
+				if (!annots_dest)
+					annots_dest = pdf_new_array(ctx, doc_dest, n);
+				pdf_array_push(ctx, annots_dest, ref);
+			}
+			fz_always(ctx)
+				pdf_drop_obj(ctx, ref);
+			fz_catch(ctx)
+				fz_rethrow(ctx);
+		}
+
+		if (annots_dest) {
+			//die eben angehängte Seite
+			pdf_obj *obj_dest = pdf_lookup_page_obj(ctx, doc_dest,
+					pdf_count_pages(ctx, doc_dest) - 1);
+
+			pdf_dict_put(ctx, obj_dest, PDF_NAME(Annots), annots_dest);
+		}
+	}
+	fz_always(ctx)
+		pdf_drop_obj(ctx, annots_dest);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	return 0;
+}
+
 static gint pdf_page_get_rotate(fz_context *ctx, pdf_obj *page_obj, GError** error) {
 	pdf_obj *rotate_obj = NULL;
 	gint rotate = 0;

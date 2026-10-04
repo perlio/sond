@@ -45,6 +45,15 @@ fz_buffer* pdf_text_filter_page(fz_context*, pdf_page*, gint, GError**);
 gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
 		GError**);
 
+/* Hängt Seite page_src von doc_src ans Ende von doc_dest an und nimmt ihre
+ * Annotationen mit - pdf_graft_mapped_page() und damit pdf_copy_page()
+ * lassen /Annots weg. Nicht übernommen werden Verweise auf die Quelle (P,
+ * Parent, IRT), Popups, Links, Formularfelder und versteckte Annotationen
+ * (im Viewer gelöschte Anmerkungen bleiben als "versteckt" im Dokument).
+ * map gehört zu doc_dest und doc_src. */
+gint pdf_graft_page_mit_annots(fz_context*, pdf_graft_map*, pdf_document*,
+		pdf_document*, gint, GError**);
+
 gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
 fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);

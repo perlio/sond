@@ -15,6 +15,13 @@ Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stan
 - Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
 - #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt, bei Bedarf als
   weiteres Feld in SondTVFMSearchOpts)
+- #203 Seitenkopie im Viewer ohne Annotationen: pdf_copy_page() (sond_pdf_helper.c)
+  nutzt pdf_graft_mapped_page(), das /Annots weglaesst - betrifft Seiten kopieren/
+  einfuegen (seiten.c, zond_pdf_document_insert_pages), Speichern eingefuegter
+  Seiten (viewer_save.c) und OCR-Hilfsdokument (pdf_ocr.c). Der Export nutzt
+  seit #168 pdf_graft_page_mit_annots(). Zu klaeren: sollen Anmerkungen beim
+  Kopieren/Einfuegen von Seiten mitkommen? Haengt an Journal und arr_annots
+  des Viewers (sonst doppelte Annotationen beim Speichern).
 
  - Abschnitte neu organisieren
 
@@ -386,7 +393,7 @@ Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
    sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
 ```
 
-## Ideen #167-#170
+## Ideen #167, #169, #204
 
 Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
 
@@ -403,9 +410,12 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  verwandt mit der bestehenden zond_dbase_backup(), die aber komplette
  1:1-Kopien macht statt selektiver Teilmengen.
 
- #168 Exportfunktion: aktueller Zustand laut Nutzer unbefriedigend -
- noch nicht untersucht, welche Datei/Funktion das konkret betrifft; das
- wäre der erste Schritt vor einem Redesign.
+ #204 Export: renderbare Formate auch im PDF-Ziel (aus #168). Im PDF-Ziel
+ erscheinen Text, HTML, odt/docx, Bild und E-Mail bisher als Hinweis
+ "Darstellung nicht möglich"; in odt/docx werden sie dargestellt. Die
+ Ausgabeeinheiten aus export_dokument.c (Text, Bild, Hinweis) lassen sich
+ wiederverwenden: Text als Story-HTML auf Seiten, Bild als eigene Seite.
+ Zu prüfen mit dem Nutzer.
 
  #169 Projekt-Teilexport: markierte Punkte eines Baums (z.B. BAUM_INHALT
  oder BAUM_AUSWERTUNG) samt zugehöriger Dateien als eigenständiges,
@@ -415,15 +425,6 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  Richtung "raus" in eine neue zond_dbase mit eigenem Root-Verzeichnis,
  in das die betroffenen Dateien kopiert würden). Gemeinsame Infrastruktur
  für #167/#169 naheliegend.
-
- #170 PDFs aus Auszug/markierten Punkten erzeugen: der bestehende
- Auszug-Mechanismus (zond_treeview_open_auszug(), document.c) fügt PDF-
- Segmente bereits zu einer gemeinsamen ANSICHT zusammen (mehrere
- DisplayedDocument in einer Kette) - für eine echte Export-PDF-Datei
- bräuchte es zusätzlich einen Schreibpfad, der dieselben Segmente (via
- mupdf, das für das PDF-Handling ohnehin schon verwendet wird, s.
- zond_pdf_document.c) tatsächlich in eine neue, physische PDF-Datei
- zusammenführt statt nur anzuzeigen.
 ```
 
 ## zond_treeview_get_path() ohne Aufrufer

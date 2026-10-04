@@ -120,9 +120,8 @@ static void cb_app_beenden(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_win_export(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	gint umfang = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "umfang"));
 	GError* error = NULL;
-	if (export_activate(zond, umfang, &error)) {
+	if (export_activate(zond, &error)) {
 		display_message(zond->app_window, "Export fehlgeschlagen\n", error->message, NULL);
 		g_error_free(error);
 	}
@@ -1239,7 +1238,7 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append(m_proj, "Schliessen", "win.projekt-schliessen");
 
 	GMenu *sec_export = g_menu_new();
-	g_menu_append(sec_export, "Export als odt-Dokument", "win.export-odt");
+	g_menu_append(sec_export, "Export als Dokument...", "win.export-odt");
 	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_export));
 	g_object_unref(sec_export);
 

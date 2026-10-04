@@ -4728,3 +4728,47 @@ Vom Nutzer getestet.
  Kind-Items samt Leck des Arrays in der alten Rekursion.
  Filter nach Dateiendung, Größe, Datum: zurückgestellt (#202).
 ```
+
+## #168 Export als Dokument, Neuentwurf (umfasst #170) (04.10.2026)
+
+Vom Nutzer getestet.
+
+```text
+ #168/#170 Der alte Export (export.c: RTF per Hand, LibreOffice zum
+ Konvertieren) lieferte nur den Projekttitel, weil "umfang" nie gesetzt
+ wurde. Er ist durch einen Neuentwurf ersetzt, der ohne LibreOffice
+ auskommt und aus dem Hauptmenü (Projekt, "Export als Dokument...") über
+ einen Dialog läuft (export_dialog.c).
+ Auswahl-Schicht (export_selection.c): Quelle ist die Markierung im
+ aktuellen Baum (BAUM_INHALT/BAUM_AUSWERTUNG) oder der ganze Baum; die
+ Auswahlsperre (kein Vorfahr zusammen mit Nachfahr) bleibt. Statt "nur
+ Punkte/Zweige" gibt es die Ebenentiefe unter jedem markierten Punkt
+ (0 = nur der Punkt, n, alle). Knoten-Info je Häkchen: Knotentext, Text
+ (Notiz, in beiden Bäumen), Anbindung (Datei und Seitenbereich), Pfad der
+ Vorfahren. Gliederungsnummern relativ zur Markierung, abschaltbar.
+ Link-Köpfe zählen wie ihr Ziel, ihr Unterbaum wird beim Durchlaufen
+ geladen.
+ Ziele ohne LibreOffice, direkt geschrieben: odt (export_odt.c) und docx
+ (export_docx.c) als ZIP mit XML über libzip, gemeinsames Schreiben im
+ Speicher in export_zip.c (g_file_set_contents, UTF-8-Dateinamen); PDF
+ (export_pdf.c, export_pdf_seiten.c). Überschriftenstile statt
+ Einrückung, Infoseiten im PDF per MuPDF-Story (HTML, Umbruch über
+ mehrere Seiten).
+ "Angebundene Dokumente ausgeben" (Inhalts-Schicht export_dokument.c, für
+ alle Ziele gemeinsam): PDF-Seiten (PDF-Ziel: Seiten per Graft; odt/docx:
+ als Bild mit 150 dpi), unterseitige Anbindungen werden beschnitten (PDF:
+ CropBox, odt/docx: Bildausschnitt), Text/HTML/odt/docx als Text, Bilder
+ und E-Mail (Text und Bildanhänge) eingebettet, alles andere und Fehler
+ als Hinweis im Dokument. #170 ist der Fall PDF-Ziel, Knoten-Info
+ abgewählt, Dokumente an.
+ Im Viewer offene PDFs werden aus dem offenen ZondPdfDocument genommen:
+ Anbindungen per anbindung_aktualisieren() auf die Live-Zählung
+ umgerechnet, gelöschte Seiten ausgelassen, Zugriff unter dem Mutex des
+ Dokuments.
+ Annotationen: pdf_graft_mapped_page() lässt /Annots weg. Neue Funktion
+ pdf_graft_page_mit_annots() (sond_pdf_helper.c) kopiert sie mit (ohne P,
+ Parent, IRT, Popups, Links, Formularfelder und versteckte Annotationen
+ - im Viewer gelöschte Anmerkungen bleiben als versteckt im Dokument).
+ pdf_copy_page() blieb unverändert (offene Frage zum Viewer: #203).
+ Zeilenenden: export.c/export.h CRLF wie im Bestand, neue Dateien LF.
+```

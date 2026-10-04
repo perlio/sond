@@ -17,419 +17,86 @@
  */
 
 #include <gtk/gtk.h>
-#ifdef _WIN32
-#include <windows.h>
-#include <shlwapi.h>
-#endif // _WIN32
 
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
 
-#include "../zond_dbase.h"
+#include "export.h"
+#include "export_selection.h"
+#include "export_dialog.h"
+#include "export_odt.h"
+#include "export_docx.h"
+#include "export_pdf.h"
 
-#include "../40viewer/viewer.h"
+//zuletzt gewählte Optionen, gelten bis zum Programmende
+static ExportOptionen optionen = { EXPORT_FORMAT_ODT, FALSE, EXPORT_TIEFE_ALLE,
+		TRUE, TRUE, FALSE, FALSE, TRUE, FALSE };
 
-#include "project.h"
-
-static gchar*
-export_get_buffer(gint left_indent, gchar *node_text, gchar *rel_path,
-		Anbindung *anbindung, gchar *text) {
-	gchar *buffer = NULL;
-	gchar *node_text_locale = NULL;
-	GError *error = NULL;
-
-	node_text_locale = g_locale_from_utf8(node_text, -1, NULL, NULL, &error);
-	if (error) {
-		g_free(node_text_locale);
-		node_text_locale = g_strdup_printf("Fehler: %s", error->message);
-		g_error_free(error);
-	}
-
-	buffer = g_strdup_printf("{\\li%i\\fs28\\b %s \\b0", left_indent,
-			node_text_locale);
-	g_free(node_text_locale);
-
-	if (rel_path)
-		buffer = add_string(buffer,
-				g_strdup_printf("\\par\\fs20 %s", rel_path));
-	{
-		if (anbindung)
-			buffer = add_string(buffer,
-					g_strdup_printf(
-							" - von Seite %i, Index %i, bis Seite %i, Index %i",
-							anbindung->von.seite, anbindung->von.index,
-							anbindung->bis.seite, anbindung->bis.index));
-		buffer = add_string(buffer, g_strdup("\\par"));
-	}
-
-	if (text) {
-		gchar **strv = NULL;
-		gint zaehler = 0;
-		gchar *text_locale = NULL;
-		GError *error = NULL;
-
-		text_locale = g_locale_from_utf8(text, -1, NULL, NULL, &error);
-		if (error) {
-			g_free(text_locale);
-			text_locale = g_strdup_printf("Fehler: %s", error->message);
-			g_error_free(error);
-		}
-
-		buffer = add_string(buffer, g_strdup_printf("\\par\\fs24\\par\\ "));
-		strv = g_strsplit(text_locale, "\n", -1);
-
-		while (strv[zaehler]) {
-			gchar *zeile = NULL;
-
-			zeile = g_strconcat(strv[zaehler], "\\line ", NULL);
-			buffer = add_string(buffer, zeile);
-
-			zaehler++;
-		}
-
-		g_strfreev(strv);
-		g_free(text_locale);
-
-		buffer = add_string(buffer, g_strdup("\\par"));
-	}
-
-	buffer = add_string(buffer, g_strdup("}"));
-
-	return buffer;
-}
-
-static gint export_node(Projekt *zond, GtkTreeModel *model, GtkTreePath *path,
-		gint depth, GFileOutputStream *stream, GError **error) {
+gint export_activate(Projekt *zond, GError **error) {
+	Baum baum = KEIN_BAUM;
+	const gchar *endung = NULL;
+	gchar *vorschlag = NULL;
+	gchar *filename = NULL;
+	GPtrArray *eintraege = NULL;
 	gint rc = 0;
 
-	gchar *node_text = NULL;
-	gint node_id = 0;
-	gchar *text = NULL;
-	gchar *buffer = NULL;
-	gint left_indent = 0;
-
-	GtkTreeIter iter;
-	if (!gtk_tree_model_get_iter(model, &iter, path)) {
-		g_set_error(error, SOND_ERROR, 0, "iter konnte nicht gesetzt werden");
+	baum = export_selection_baum(zond);
+	if (baum == KEIN_BAUM) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Kein Baum ausgewählt - bitte zuerst im Inhalts- oder "
+				"Auswertungsbaum arbeiten");
 
 		return -1;
 	}
 
-	gtk_tree_model_get(model, &iter, 1, &node_text, 2, &node_id, -1);
+	if (!export_dialog_run(zond, baum, &optionen))
+		return 0;
 
-	left_indent = 200 * depth;
-
-	if (!(model
-			== gtk_tree_view_get_model(
-					GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))
-			|| (GTK_IS_TREE_MODEL_FILTER(model)
-					&& (gtk_tree_model_filter_get_model(
-							GTK_TREE_MODEL_FILTER(model))
-							== gtk_tree_view_get_model(
-									GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])))))) {
-		rc = zond_dbase_get_text(zond->dbase_zond->zond_dbase_work, node_id,
-				&text, error);
-		if (rc) {
-			g_free(node_text);
-
-			return -1;
-		}
-	}
-
-	buffer = export_get_buffer(left_indent, node_text, NULL, NULL, text);
-	g_free(node_text);
-	g_free(text);
-	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), (const void*) buffer,
-			strlen(buffer), NULL, error);
-	g_free(buffer);
-	if (rc == -1)
-		return -1;
-
-	return 0;
-}
-
-static gint export_selektierte_punkte(Projekt *zond, Baum baum,
-		GFileOutputStream *stream, GError **error) {
-	GList *selected = NULL;
-	GList *list = NULL;
-	GtkTreeModel *model = NULL;
-
-	model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]));
-
-	selected = gtk_tree_selection_get_selected_rows(zond->selection[baum],
-			NULL);
-	if (!selected) {
-		g_set_error(error, SOND_ERROR, 0, "Keine Punkte ausgewählt");
+	if (!optionen.nodetext && !optionen.text && !optionen.anbindung
+			&& !optionen.pfad && !optionen.nummern && !optionen.dokumente) {
+		g_set_error(error, SOND_ERROR, 0, "Nichts zum Exportieren gewählt");
 
 		return -1;
 	}
 
-	g_object_set_data(G_OBJECT(model), "stream", (gpointer) stream);
-	g_object_set_data(G_OBJECT(model), "error", (gpointer) error);
+	if (optionen.format == EXPORT_FORMAT_PDF)
+		endung = ".pdf";
+	else if (optionen.format == EXPORT_FORMAT_DOCX)
+		endung = ".docx";
+	else
+		endung = ".odt";
 
-	list = selected;
-
-	do //alle rows aus der Liste
-	{
-		gint rc = 0;
-
-		rc = export_node(zond, model, list->data, 1, stream, error);
-		if (rc) {
-			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			return -1;
-		}
-	} while ((list = list->next));
-
-	g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-
-	return 0;
-}
-
-static gboolean export_foreach(GtkTreeModel *model, GtkTreePath *path,
-		GtkTreeIter *iter, gpointer user_data) {
-	GError *error_ii = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	GFileOutputStream *stream = (GFileOutputStream*) g_object_get_data(
-			G_OBJECT(model), "stream");
-	GError **error = (GError**) g_object_get_data(G_OBJECT(model), "error");
-	gint offset = GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(model), "offset" ));
-
-	gint depth = gtk_tree_path_get_depth(path);
-
-	gint rc = 0;
-	rc = export_node(zond, model, path, depth + offset, stream, &error_ii);
-	if (rc) {
-		if (error)
-			*error = error_ii;
-		else
-			g_error_free(error_ii);
-
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
-static gint export_selektierte_zweige(Projekt *zond, Baum baum,
-		GFileOutputStream *stream, GError **error) {
-	GList *selected = NULL;
-	GList *list = NULL;
-
-	selected = gtk_tree_selection_get_selected_rows(zond->selection[baum],
-			NULL);
-	if (!selected) {
-		g_set_error(error, SOND_ERROR, 0, "Keine Punkte ausgewählt");
-
-		return -1;
-	}
-
-	GtkTreeModel *model = gtk_tree_view_get_model(
-			GTK_TREE_VIEW(zond->treeview[baum]));
-
-	list = selected;
-	do //alle rows aus der Liste
-	{
-		gint rc = 0;
-		GError *error_ii = NULL;
-
-		rc = export_node(zond, model, list->data, 1, stream, error);
-		if (rc) {
-			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			return -1;
-		}
-
-		//neuen treeview mit root_node
-		GtkTreeModel *new_model = gtk_tree_model_filter_new(model, list->data);
-
-		g_object_set_data(G_OBJECT(new_model), "stream", (gpointer) stream);
-		g_object_set_data(G_OBJECT(new_model), "error", (gpointer) &error_ii);
-		g_object_set_data(G_OBJECT(new_model), "offset", GINT_TO_POINTER(1));
-
-		gtk_tree_model_foreach(new_model,
-				(GtkTreeModelForeachFunc) export_foreach, (gpointer) zond);
-		g_object_unref(new_model);
-		if (error_ii) {
-			if (error)
-				*error = error_ii;
-			else
-				g_error_free(error_ii);
-
-			return -1;
-		}
-	} while ((list = list->next));
-
-	g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-
-	return 0;
-}
-
-static gint export_alles(Projekt *zond, Baum baum, GFileOutputStream *stream,
-		GError **error) {
-	GError *error_ii = NULL;
-	GtkTreeModel *model = gtk_tree_view_get_model(
-			GTK_TREE_VIEW(zond->treeview[baum]));
-
-	g_object_set_data(G_OBJECT(model), "stream", (gpointer) stream);
-	g_object_set_data(G_OBJECT(model), "error", (gpointer) &error_ii);
-
-	gtk_tree_model_foreach(model, (GtkTreeModelForeachFunc) export_foreach,
-			(gpointer) zond);
-
-	if (error_ii) {
-		if (error)
-			*error = error_ii;
-		else
-			g_error_free(error_ii);
-
-		return -1;
-	}
-
-	return 0;
-}
-
-static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
-		GError **error) {
-	gint rc = 0;
-
-	if (zond->baum_zuletzt == KEIN_BAUM) {
-		g_set_error(error, SOND_ERROR, 0, "Kein Baum ausgewählt");
-
-		return -1;
-	}
-
-	const gchar *buffer = g_strconcat("{\\rtf1 "
-			"{\\fs50\\b\\ul ", zond->project_name, "\\par\\plain ",
-	NULL);
-
-	//Hier htm-Datei in stream schreiben
-	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), (const void*) buffer,
-			strlen(buffer), NULL, error);
-	if (rc == -1)
-		return -1;
-
-	switch (umfang) {
-	case 1:
-		rc = export_alles(zond, zond->baum_zuletzt, stream, error);
-		break;
-	case 2:
-		rc = export_selektierte_zweige(zond, zond->baum_zuletzt, stream, error);
-		break;
-	case 3:
-		rc = export_selektierte_punkte(zond, zond->baum_zuletzt, stream, error);
-		break;
-	}
-	if (rc)
-		return -1;
-
-	//Hier htm-Datei in stream schreiben
-	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), "}}", strlen("}}"),
-			NULL, error);
-	if (rc == -1)
-		return -1;
-
-	return 0;
-}
-
-gint export_activate(Projekt* zond, gint umfang, GError** error) {
-	gchar *filename = filename_speichern(GTK_WINDOW(zond->app_window),
-			"Datei wählen", ".odt");
+	vorschlag = g_strdup_printf("%s%s",
+			zond->project_name ? zond->project_name : "Export", endung);
+	filename = filename_speichern(GTK_WINDOW(zond->app_window), "Datei wählen",
+			vorschlag);
+	g_free(vorschlag);
 	if (!filename)
 		return 0;
 
-	GFile *file = g_file_new_for_path("export_tmp.rtf");
-	GFileOutputStream *stream = g_file_replace(file, NULL, FALSE,
-			G_FILE_CREATE_NONE, NULL, error);
-	if (!stream) {
-		g_object_unref(file);
+	if (!g_str_has_suffix(filename, endung)) {
+		gchar *neu = g_strconcat(filename, endung, NULL);
+
+		g_free(filename);
+		filename = neu;
+	}
+
+	eintraege = export_selection_build(zond, baum, &optionen, error);
+	if (!eintraege) {
 		g_free(filename);
 
 		return -1;
 	}
 
-	gint res = export_html(zond, stream, umfang, error);
-	g_object_unref(stream);
-	if (res) {
-		g_object_unref(file);
-		g_free(filename);
+	if (optionen.format == EXPORT_FORMAT_PDF)
+		rc = export_pdf_schreiben(zond, eintraege, &optionen, filename, error);
+	else if (optionen.format == EXPORT_FORMAT_DOCX)
+		rc = export_docx_schreiben(zond, eintraege, &optionen, filename, error);
+	else
+		rc = export_odt_schreiben(zond, eintraege, &optionen, filename, error);
 
-		return -1;
-	}
-
-	//Nun in .odt umwandeln
-	//Pfad LibreOffice herausfinden
-	gchar soffice_exe[270] = { 0 };
-
-#ifdef _WIN32
-	HRESULT rc = 0;
-
-	DWORD bufferlen = 270;
-
-	rc = AssocQueryString(0, ASSOCSTR_EXECUTABLE, ".odt", "open", soffice_exe,
-			&bufferlen);
-	if (rc != S_OK) {
-		g_set_error(error, SOND_ERROR, 0,
-				"AssocQueryString fehlgeschlagen");
-
-		g_object_unref(file);
-		g_free(filename);
-
-		return -1;
-	}
-#else
-    //für Linux etc: Pfad von soffice suchen
-#endif // _WIN32
-
-	//htm-Datei umwandeln
-	gboolean ret = FALSE;
-
-	gchar *argv[6] = { NULL };
-	argv[0] = soffice_exe;
-	argv[1] = "--convert-to";
-	argv[2] = "odt:writer8";
-	argv[3] = "export_tmp.rtf";
-	argv[4] = "--headless";
-
-	ret = g_spawn_sync( NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL,
-	NULL, NULL, error);
-	if (!ret) {
-		g_file_delete(file, NULL, NULL);
-		g_object_unref(file);
-		g_free(filename);
-
-		return -1;
-	}
-
-	if (!g_file_delete(file, NULL, error)) {
-		LOG_WARN("Löschen der bei Export im Arbeitsverzeichnis "
-						"erzeugten Datei 'export_tmp.rtf' fehlgeschlagen:\n%s",
-				(*error)->message);
-		g_clear_error(error);
-	}
-
-	g_object_unref(file);
-
-	GFile *source = g_file_new_for_path("export_tmp.odt");
-	GFile *dest = g_file_new_for_path((const gchar*) filename);
+	g_ptr_array_unref(eintraege);
 	g_free(filename);
-	GError* error_tmp = NULL;
 
-	gboolean suc = g_file_move(source, dest, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL,
-			&error_tmp);
-	g_object_unref(source);
-	g_object_unref(dest);
-	if (!suc) {
-		g_set_error(error, SOND_ERROR, 0,
-				"Exportierte Datei konnte nicht umbenannt werden:\n\n%s\n\n"
-				"Erzeugte Datei 'export_tmp.odt' von Hand umbenennen", error_tmp->message);
-		g_error_free(error_tmp);
-
-		return -1;
-	}
-
-
-	return 0;
+	return rc;
 }
-
