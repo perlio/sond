@@ -415,7 +415,20 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  "Darstellung nicht möglich"; in odt/docx werden sie dargestellt. Die
  Ausgabeeinheiten aus export_dokument.c (Text, Bild, Hinweis) lassen sich
  wiederverwenden: Text als Story-HTML auf Seiten, Bild als eigene Seite.
- Zu prüfen mit dem Nutzer.
+ Zu prüfen mit dem Nutzer. Festgelegt (04.10.2026): Dokumenttext
+ proportional wie die Infoseiten (10 pt), Bilder in natürlicher Größe und
+ nur bei Bedarf auf Seitenbreite verkleinert, eine Bildseite je Bild.
+ Umgesetzt, zu testen: export_pdf.c (Einheiten als Seiten),
+ export_pdf_seiten.c (fortlaufender Satz: export_pdf_satz_html()/_bild(),
+ Klasse dok; Kopf, Text und Bilder mehrerer Knoten teilen sich Seiten,
+ fremde PDF-Seiten beginnen auf einer neuen Seite).
+
+ #205 Rendering von odt/docx verbessern (Nutzer, 04.10.2026): Die Anzeige
+ im Renderer (sond_renderer.c) und die Texteinheit im Export (Text aus
+ sond_text_extract_odt/_docx) liefern flachen Text ohne Gestaltung.
+ Prüfen, ob das besser geht (Überschriften, Listen, Tabellen, Fett/
+ Kursiv, eingebettete Bilder). Was dabei entsteht, auch in den Export
+ übernehmen (odt, docx und PDF-Ziel, s. #204).
 
  #169 Projekt-Teilexport: markierte Punkte eines Baums (z.B. BAUM_INHALT
  oder BAUM_AUSWERTUNG) samt zugehöriger Dateien als eigenständiges,

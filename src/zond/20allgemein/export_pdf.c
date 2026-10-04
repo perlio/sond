@@ -127,11 +127,55 @@ static pdf_graft_map* map_holen(fz_context *ctx, GHashTable *ht_maps,
 	return map;
 }
 
+/* Text und Bilder eines nicht-PDF-Dokuments im fortlaufenden Satz. Hinweise
+ * stehen schon im Kopf des Knotens und werden hier übersprungen. Lässt sich
+ * ein Bild nicht setzen, folgt ein Hinweis statt eines Abbruchs. */
+static gint export_pdf_einheiten_setzen(ExportPdfSatz *satz,
+		GPtrArray *einheiten, GError **error) {
+	for (guint i = 0; i < einheiten->len; i++) {
+		ExportEinheit *u = g_ptr_array_index(einheiten, i);
+
+		if (u->typ == EXPORT_EINHEIT_TEXT) {
+			GString *h = g_string_new(NULL);
+			gint rc = 0;
+
+			html_absatz(h, "dok", u->text);
+			rc = export_pdf_satz_html(satz, h->str, error);
+			g_string_free(h, TRUE);
+			if (rc)
+				return -1;
+		} else if (u->typ == EXPORT_EINHEIT_BILD) {
+			gsize len = 0;
+			const guchar *data = g_bytes_get_data(u->bild, &len);
+			GError *error_bild = NULL;
+
+			if (export_pdf_satz_bild(satz, data, len, u->breite_cm,
+					u->hoehe_cm, &error_bild)) {
+				GString *h = g_string_new(NULL);
+				gchar *text = g_strdup_printf("Bild konnte nicht eingefügt "
+						"werden: %s", error_bild ? error_bild->message : "?");
+				gint rc = 0;
+
+				html_absatz(h, "hinweis", text);
+				rc = export_pdf_satz_html(satz, h->str, error);
+				g_string_free(h, TRUE);
+				g_free(text);
+				g_clear_error(&error_bild);
+				if (rc)
+					return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
 gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 		const ExportOptionen *opt, const gchar *filename, GError **error) {
 	fz_context *ctx = zond->ctx;
 	pdf_document *dest = NULL;
 	ExportDokumentCtx *dctx = NULL;
+	ExportPdfSatz *satz = NULL;
 	GHashTable *ht_maps = NULL;
 	fz_buffer *buf = NULL;
 	gint seiten = 0;
@@ -143,6 +187,7 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 		ERROR_PDF
 
 	dctx = export_dokument_ctx_new(zond);
+	satz = export_pdf_satz_new(ctx, dest);
 	ht_maps = g_hash_table_new(NULL, NULL);
 
 	for (guint i = 0; i < eintraege->len; i++) {
@@ -154,6 +199,7 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 		const gchar *hinweis_quelle = NULL;
 		ExportPdfBereich bereich = { 0 };
 		gboolean mit_dokument = FALSE;
+		GPtrArray *einheiten = NULL;
 
 		export_pdf_info_html(html, e, opt);
 
@@ -174,9 +220,23 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 				mit_dokument = (ret == 0);
 			} else if (hinweis_quelle)
 				hinweis = g_strdup(hinweis_quelle);
-			else //andere Formate als PDF folgen mit dem Rendern ins PDF
-				hinweis = g_strdup_printf("%s - Darstellung nicht möglich",
-						e->datei);
+			else {
+				//Text, Bild, E-Mail: Hinweise in den Kopf, Rest danach
+				einheiten = export_dokument_einheiten(dctx, e, error);
+				if (!einheiten) {
+					g_string_free(html, TRUE);
+					rc = -1;
+
+					goto aufraeumen;
+				}
+
+				for (guint u = 0; u < einheiten->len; u++) {
+					ExportEinheit *einheit = g_ptr_array_index(einheiten, u);
+
+					if (einheit->typ == EXPORT_EINHEIT_HINWEIS)
+						html_absatz(html, "hinweis", einheit->text);
+				}
+			}
 		}
 
 		if (hinweis) {
@@ -184,17 +244,32 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 			g_free(hinweis);
 		}
 
-		if (html->len && export_pdf_infoseiten(ctx, dest, html->str, error)) {
+		//Kopf, Text und Bilder laufen fortlaufend, ohne eigene Seite je Knoten
+		if ((html->len && export_pdf_satz_html(satz, html->str, error))
+				|| (einheiten && export_pdf_einheiten_setzen(satz, einheiten,
+						error))) {
 			g_string_free(html, TRUE);
 			export_dokument_bereich_clear(&bereich);
+			if (einheiten)
+				g_ptr_array_unref(einheiten);
 			rc = -1;
 
 			goto aufraeumen;
 		}
 		g_string_free(html, TRUE);
+		if (einheiten)
+			g_ptr_array_unref(einheiten);
 
 		if (mit_dokument) {
 			gint ret = 0;
+
+			//fremde Seiten beginnen auf einer neuen Seite
+			if (export_pdf_satz_schliessen(satz, error)) {
+				export_dokument_bereich_clear(&bereich);
+				rc = -1;
+
+				goto aufraeumen;
+			}
 
 			export_dokument_sperren(zpdfd);
 			ret = export_pdf_seiten_kopieren(ctx, dest, src,
@@ -208,6 +283,12 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 				goto aufraeumen;
 			}
 		}
+	}
+
+	if (export_pdf_satz_schliessen(satz, error)) {
+		rc = -1;
+
+		goto aufraeumen;
 	}
 
 	fz_try(ctx)
@@ -245,6 +326,8 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 	aufraeumen:
 	if (buf)
 		fz_drop_buffer(ctx, buf);
+
+	export_pdf_satz_free(satz);
 
 	{
 		GHashTableIter it;

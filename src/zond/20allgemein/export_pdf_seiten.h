@@ -26,9 +26,31 @@ gint export_pdf_seiten_kopieren(fz_context *ctx, pdf_document *dest,
 		pdf_document *src, pdf_graft_map *map, const ExportPdfBereich *bereich,
 		GError **error);
 
-/* Setzt html (HTML-Fragment) auf A4-Seiten und hängt diese an dest an.
- * Ein langer Text läuft über mehrere Seiten. */
-gint export_pdf_infoseiten(fz_context *ctx, pdf_document *dest,
-		const gchar *html, GError **error);
+/* Fortlaufender Satz auf A4-Seiten: HTML-Fragmente und Bilder folgen
+ * untereinander, eine Seite wird erst abgeschlossen, wenn der nächste
+ * Inhalt nicht mehr hineinpasst oder export_pdf_satz_schliessen() es
+ * verlangt (vor dem Anhängen fremder Seiten, am Ende). Klassen für p:
+ * pfad, anb, hinweis, dok (Dokumenttext). */
+typedef struct _ExportPdfSatz ExportPdfSatz;
+
+ExportPdfSatz* export_pdf_satz_new(fz_context *ctx, pdf_document *dest);
+
+/* Verwirft eine noch offene Seite */
+void export_pdf_satz_free(ExportPdfSatz *satz);
+
+/* Setzt html (HTML-Fragment) ab der aktuellen Position; ein langer Text
+ * läuft über mehrere Seiten. */
+gint export_pdf_satz_html(ExportPdfSatz *satz, const gchar *html,
+		GError **error);
+
+/* Setzt ein Bild (png oder jpeg) ab der aktuellen Position, auf die
+ * nächste Seite, wenn es auf der aktuellen nicht mehr passt.
+ * breite_cm/hoehe_cm ist die natürliche Größe; zu große Bilder werden auf
+ * den Satzspiegel verkleinert, nie vergrößert. */
+gint export_pdf_satz_bild(ExportPdfSatz *satz, const guchar *data, gsize len,
+		gdouble breite_cm, gdouble hoehe_cm, GError **error);
+
+/* Schließt die offene Seite ab (ohne offene Seite ohne Wirkung) */
+gint export_pdf_satz_schliessen(ExportPdfSatz *satz, GError **error);
 
 #endif // EXPORT_PDF_SEITEN_H_INCLUDED

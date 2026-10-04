@@ -149,10 +149,10 @@ gboolean export_dialog_run(Projekt *zond, Baum baum, ExportOptionen *opt) {
 	inner = export_dialog_frame(box, "Dokumente");
 	check_dokumente = export_dialog_check(inner,
 			"Angebundene Dokumente ausgeben", opt->dokumente,
-			"PDF-Ziel: PDF-Seiten werden übernommen, andere Formate sind "
-			"noch nicht darstellbar. odt- und docx-Ziel: PDF-Seiten als Bild, "
-			"Text als Text, Bilder eingebettet. Nicht darstellbare Dateien erscheinen "
-			"als Hinweis. Unterseitige Anbindungen werden beschnitten.");
+			"PDF-Seiten werden im PDF-Ziel als Seiten übernommen, in odt und "
+			"docx als Bild. Text, HTML, odt/docx, Bilder und E-Mails werden "
+			"dargestellt, alles andere erscheint als Hinweis. Unterseitige "
+			"Anbindungen werden beschnitten.");
 
 	//Format
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
