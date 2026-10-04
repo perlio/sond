@@ -4772,3 +4772,28 @@ Vom Nutzer getestet.
  pdf_copy_page() blieb unverändert (offene Frage zum Viewer: #203).
  Zeilenenden: export.c/export.h CRLF wie im Bestand, neue Dateien LF.
 ```
+
+## #204 Export: renderbare Formate im PDF-Ziel (04.10.2026)
+
+Vom Nutzer getestet.
+
+```text
+ #204 Im PDF-Ziel werden jetzt auch Text, HTML, odt/docx, Bilder und
+ E-Mails dargestellt (bisher Hinweis "Darstellung nicht möglich"). Die
+ Ausgabeeinheiten aus export_dokument.c (Text, Bild, Hinweis) werden
+ wiederverwendet: Dokumenttext proportional wie die Infoseiten (10 pt,
+ Klasse dok), Bilder in natürlicher Größe, nur bei Bedarf auf den
+ Satzspiegel verkleinert, nie vergrößert. PDF-Quellen laufen unverändert
+ über den Graft. Hinweise (nicht darstellbar, Lesefehler, kaputtes Bild)
+ stehen im Kopf des Knotens; lässt sich ein Bild nicht setzen, folgt ein
+ Hinweis statt eines Abbruchs.
+ Feintuning: Statt einer eigenen Seite je Knoten läuft der Satz
+ fortlaufend (ExportPdfSatz in export_pdf_seiten.c: export_pdf_satz_html(),
+ export_pdf_satz_bild(), export_pdf_satz_schliessen()). Kopf, Text und
+ Bilder mehrerer Knoten teilen sich die Seiten; ein Bild kommt unter den
+ bisherigen Inhalt, wenn es noch passt, sonst auf die nächste Seite. Fremde
+ PDF-Seiten beginnen auf einer neuen Seite. Ein Kopf allein zwischen zwei
+ PDF-Blöcken bekommt weiter eine eigene Seite. Seitenlimit je Text 10000.
+ Offen: besseres Rendering von odt/docx (#205), das dann auch in den
+ Export kommt.
+```
