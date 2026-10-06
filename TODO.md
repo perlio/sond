@@ -15,13 +15,6 @@ Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stan
 - Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
 - #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt, bei Bedarf als
   weiteres Feld in SondTVFMSearchOpts)
-- #203 Seitenkopie im Viewer ohne Annotationen: pdf_copy_page() (sond_pdf_helper.c)
-  nutzt pdf_graft_mapped_page(), das /Annots weglaesst - betrifft Seiten kopieren/
-  einfuegen (seiten.c, zond_pdf_document_insert_pages), Speichern eingefuegter
-  Seiten (viewer_save.c) und OCR-Hilfsdokument (pdf_ocr.c). Der Export nutzt
-  seit #168 pdf_graft_page_mit_annots(). Zu klaeren: sollen Anmerkungen beim
-  Kopieren/Einfuegen von Seiten mitkommen? Haengt an Journal und arr_annots
-  des Viewers (sonst doppelte Annotationen beim Speichern).
 
  - Abschnitte neu organisieren
 

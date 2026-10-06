@@ -4797,3 +4797,23 @@ Vom Nutzer getestet.
  Offen: besseres Rendering von odt/docx (#205), das dann auch in den
  Export kommt.
 ```
+
+## #203 Seitenkopie im Viewer mit Annotationen (06.10.2026)
+
+Vom Nutzer getestet.
+
+```text
+ #203 pdf_copy_page() (sond_pdf_helper.c) nimmt jetzt Annotationen mit
+ (über pdf_graft_page_mit_annots(), neue Parameter page_dest und
+ versteckte_mit), vorher gingen sie beim Kopieren, Ausschneiden und
+ Einfügen von Seiten im Viewer verloren. Das gilt auch für Einfügen aus
+ Datei und Verschieben zwischen Dokumenten. Link, Popup und Widget bleiben
+ ausgelassen (wie MuPDFs Annotationsliste).
+ Kopieren/Ausschneiden und Einfügen lassen versteckte (gelöschte)
+ Anmerkungen weg. Beim Speichern eingefügter Seiten (viewer_save.c) werden
+ auch versteckte mitkopiert, damit die Reihenfolge zu arr_annots passt und
+ die Löschschleife sie regulär entfernt; ANNOT_CREATED/ANNOT_CHANGED werden
+ für diese Seiten nicht nachgespielt (stecken schon in der Kopie).
+ Der Export (export_pdf_seiten.c) ruft die Funktion mit page_dest -1 auf.
+ pdf_ocr_create_doc_from_page() (ungenutzt) entfernt.
+```
