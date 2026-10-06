@@ -537,10 +537,12 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		if (pdfp->inserted && !pdfp->deleted) {
 			gint rc = 0;
 
+			//mit Annotationen aus dem Live-Dokument, auch den versteckten:
+			//die Löschschleife unten arbeitet positionsweise über arr_annots
 			zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
 			rc = pdf_copy_page(ctx,
 					zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document),
-					i, i, doc, page_orig, error);
+					i, i, doc, page_orig, TRUE, error);
 			zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 			if (rc) {
 				pdf_drop_document(ctx, doc);
@@ -574,6 +576,12 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				continue;
 
 			if (entry.pdf_document_page->deleted)
+				continue;
+
+			//eingefügte Seite: Annotationen kamen schon mit der Kopie
+			//aus dem Live-Dokument (samt allen Änderungen)
+			if (pdfp->inserted && (entry.type == JOURNAL_TYPE_ANNOT_CREATED ||
+					entry.type == JOURNAL_TYPE_ANNOT_CHANGED))
 				continue;
 
 			if (entry.type == JOURNAL_TYPE_ROTATE) {

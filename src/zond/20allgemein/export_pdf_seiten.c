@@ -91,8 +91,8 @@ gint export_pdf_seiten_kopieren(fz_context *ctx, pdf_document *dest,
 		if (bereich->auslassen && bereich->auslassen[i - bereich->von])
 			continue;
 
-		//mit Annotationen, die pdf_graft_mapped_page() allein weglässt
-		if (pdf_graft_page_mit_annots(ctx, map, dest, src, i, error))
+		//ans Ende, mit Annotationen, ohne versteckte
+		if (pdf_graft_page_mit_annots(ctx, map, dest, src, i, -1, FALSE, error))
 			return -1;
 
 		if ((i == bereich->von && bereich->y0 >= 0)

@@ -67,51 +67,6 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 	return buf;
 }
 
-//thread-safe
-static pdf_document*
-pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
-		GError **error) {
-	gint rc = 0;
-	pdf_document *doc_new = NULL;
-	pdf_page *page = NULL;
-
-	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
-	pdf_document *doc = zond_pdf_document_get_pdf_doc(
-			pdf_document_page->document);
-
-	fz_try( ctx )
-		doc_new = pdf_create_document(ctx);
-	fz_catch(ctx)
-		ERROR_PDF_VAL(NULL)
-
-	zond_pdf_document_mutex_lock(pdf_document_page->document);
-	rc = pdf_copy_page(ctx, doc, pdf_document_page->page_akt,
-			pdf_document_page->page_akt, doc_new, 0, error);
-	zond_pdf_document_mutex_unlock(pdf_document_page->document);
-	if (rc) {
-		pdf_drop_document(ctx, doc_new);
-		return NULL;
-	}
-
-	fz_try(ctx)
-		page = pdf_load_page(ctx, doc_new, 0);
-	fz_catch(ctx) {
-		pdf_drop_document(ctx, doc_new);
-		ERROR_PDF_VAL(NULL)
-	}
-
-	//neues dokument mit einer Seite filtern
-//	rc = pdf_ocr_filter_content_stream(ctx, page, flag, error);
-	fz_drop_page(ctx, &page->super);
-	if (rc) {
-		pdf_drop_document(ctx, doc_new);
-		g_set_error(error, g_quark_from_static_string("mupdf"), 0,
-				"pdf_zond_filter_content_stream");
-		return NULL;
-	}
-	return doc_new;
-}
-
 static GtkWidget*
 pdf_ocr_create_dialog(InfoWindow *info_window, gint page) {
 	gchar *titel = g_strdup_printf("Seite %i enthält bereits "

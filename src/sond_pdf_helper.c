@@ -272,18 +272,22 @@ pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, GError **error
 }
 
 gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
-		gint page_to, pdf_document *doc_dest, gint page, GError **error) {
+		gint page_to, pdf_document *doc_dest, gint page,
+		gboolean versteckte_mit, GError **error) {
 	pdf_graft_map *graft_map = NULL;
 
 	graft_map = pdf_new_graft_map(ctx, doc_dest); //keine exception
 
 	for (gint u = page_from; u <= page_to; u++) {
-		fz_try(ctx)
-			pdf_graft_mapped_page(ctx, graft_map, page++, doc_src, u);
-		fz_catch( ctx )
-		{
+		gint rc = 0;
+
+		//page < 0: jede Seite ans Ende, sonst fortlaufend ab page einfügen
+		rc = pdf_graft_page_mit_annots(ctx, graft_map, doc_dest, doc_src, u,
+				(page < 0) ? -1 : page++, versteckte_mit, error);
+		if (rc) {
 			pdf_drop_graft_map(ctx, graft_map);
-			ERROR_PDF
+
+			return -1;
 		}
 	}
 
@@ -293,7 +297,8 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 }
 
 //Annotation, die beim Seitenkopieren nicht mitgenommen wird
-static gboolean pdf_annot_nicht_kopieren(fz_context *ctx, pdf_obj *annot) {
+static gboolean pdf_annot_nicht_kopieren(fz_context *ctx, pdf_obj *annot,
+		gboolean versteckte_mit) {
 	pdf_obj *subtype = NULL;
 	gint flags = 0;
 
@@ -305,6 +310,11 @@ static gboolean pdf_annot_nicht_kopieren(fz_context *ctx, pdf_obj *annot) {
 			|| pdf_name_eq(ctx, subtype, PDF_NAME(Widget))
 			|| pdf_name_eq(ctx, subtype, PDF_NAME(Popup)))
 		return TRUE;
+
+	//Speichern im Viewer: auch versteckte (= gelöschte) Annotationen mitnehmen,
+	//damit die Reihenfolge zu arr_annots passt und sie dort regulär gelöscht werden
+	if (versteckte_mit)
+		return FALSE;
 
 	//Hidden (2) und NoView (32)
 	flags = pdf_dict_get_int(ctx, annot, PDF_NAME(F));
@@ -357,7 +367,7 @@ static pdf_obj* pdf_annot_kopieren(fz_context *ctx, pdf_graft_map *map,
 
 gint pdf_graft_page_mit_annots(fz_context *ctx, pdf_graft_map *map,
 		pdf_document *doc_dest, pdf_document *doc_src, gint page_src,
-		GError **error) {
+		gint page_dest, gboolean versteckte_mit, GError **error) {
 	pdf_obj *annots_dest = NULL;
 
 	fz_var(annots_dest);
@@ -367,7 +377,7 @@ gint pdf_graft_page_mit_annots(fz_context *ctx, pdf_graft_map *map,
 		pdf_obj *annots_src = NULL;
 		gint n = 0;
 
-		pdf_graft_mapped_page(ctx, map, -1, doc_src, page_src);
+		pdf_graft_mapped_page(ctx, map, page_dest, doc_src, page_src);
 
 		obj_src = pdf_lookup_page_obj(ctx, doc_src, page_src);
 		annots_src = pdf_dict_get(ctx, obj_src, PDF_NAME(Annots));
@@ -377,7 +387,7 @@ gint pdf_graft_page_mit_annots(fz_context *ctx, pdf_graft_map *map,
 			pdf_obj *annot = pdf_array_get(ctx, annots_src, i);
 			pdf_obj *ref = NULL;
 
-			if (pdf_annot_nicht_kopieren(ctx, annot))
+			if (pdf_annot_nicht_kopieren(ctx, annot, versteckte_mit))
 				continue;
 
 			ref = pdf_annot_kopieren(ctx, map, doc_dest, annot);
@@ -393,9 +403,9 @@ gint pdf_graft_page_mit_annots(fz_context *ctx, pdf_graft_map *map,
 		}
 
 		if (annots_dest) {
-			//die eben angehängte Seite
+			//die eben eingefügte Seite (bei page_dest < 0 die letzte)
 			pdf_obj *obj_dest = pdf_lookup_page_obj(ctx, doc_dest,
-					pdf_count_pages(ctx, doc_dest) - 1);
+					(page_dest < 0) ? pdf_count_pages(ctx, doc_dest) - 1 : page_dest);
 
 			pdf_dict_put(ctx, obj_dest, PDF_NAME(Annots), annots_dest);
 		}

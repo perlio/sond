@@ -1395,10 +1395,12 @@ fz_catch	( pv->zond->ctx ) {
 		viewer_page = g_ptr_array_index(pv->arr_pages, page_pv);
 		pdf_document_page = viewer_page->pdf_document_page;
 
+		//gelöschte (versteckte) Annotationen sollen nicht in die Zwischenablage
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = pdf_copy_page(pv->zond->ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
-				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1, error);
+				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1,
+				FALSE, error);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
 			pdf_drop_document(pv->zond->ctx, doc_dest);

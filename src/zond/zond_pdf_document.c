@@ -778,9 +778,9 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		return 0;
 	}
 
-	//einfügen in doc
+	//einfügen in doc, Annotationen kommen mit, gelöschte (versteckte) nicht
 	rc = pdf_copy_page(priv->ctx, pdf_doc, 0, count - 1,
-			priv->doc, pos, error);
+			priv->doc, pos, FALSE, error);
 	zond_pdf_document_mutex_unlock(zond_pdf_document);
 	if (rc)
 		return -1;
