@@ -109,7 +109,13 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
      * vorher geliehene Referenz aus dem Tree-Modell) eine neue Referenz
      * liefert. */
     {
-        g_autoptr(SondFilePart) sfp = sond_file_part_from_filepart(filename,
+        /* Treffer im Header einer Mail ("x.eml//header"): es gibt keinen
+         * Teil dieses Namens - geöffnet wird die ganze Mail. Der Header ist
+         * der Anfang ihres Textes, die Position des Treffers stimmt dort. */
+        g_autofree gchar *open_path = g_str_has_suffix(filename, "//header") ?
+                g_strndup(filename, strlen(filename) - strlen("//header")) :
+                g_strdup(filename);
+        g_autoptr(SondFilePart) sfp = sond_file_part_from_filepart(open_path,
                 &error);
 
         if (!sfp) {
@@ -118,10 +124,14 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                     error ? error->message : "?", NULL);
             g_clear_error(&error);
         } else {
-            if (SOND_IS_FILE_PART_PDF(sfp) && page_nr >= 0) {
+            if (SOND_IS_FILE_PART_PDF(sfp)) {
             	DisplayedDocument* dd = NULL;
             	ZondPdfDocument* zpdfd_open = NULL;
-            	gint page_nr_akt = page_nr;
+            	/* Ein Dateinamen-Treffer hat keine Seite (page_nr -1): die
+            	 * PDF wird dann an ihrem Anfang geöffnet, ohne Markierung */
+            	gboolean has_pos = page_nr >= 0;
+            	gint page_start = has_pos ? page_nr : 0;
+            	gint page_nr_akt = page_start;
 
             	/* Erneut (unmittelbar vor der Navigation) gegen den JETZT
             	 * aktuellen Live-Stand übersetzen - nicht gegen den Stand
@@ -131,7 +141,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             	 * Zielseite zwischen Anzeige und Klick. */
             	zpdfd_open = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
             	if (zpdfd_open) {
-            		Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
+            		Anbindung anbindung = { { page_start, 0 }, { page_start, EOP } };
             		GPtrArray *arr_pages = NULL;
             		PdfDocumentPage *pdfp = NULL;
 
@@ -167,8 +177,9 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 		FALSE, NULL, &error);
                 if (!dd) {
                 	display_message(zond->app_window, "DisplayedDocument "
-                			"konnte nicht erstellt werden:\n", error->message, NULL);
-                	g_error_free(error);
+                			"konnte nicht erstellt werden:\n",
+                			error ? error->message : "?", NULL);
+                	g_clear_error(&error);
                 	g_free(filename);
                 	return;
                 }
@@ -180,7 +191,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                             "Fehler beim Öffnen\n\n",
                             error ? error->message : "?", NULL);
                     g_clear_error(&error);
-                } else if (term && zond->arr_pv->len > 0) {
+                } else if (has_pos && term && zond->arr_pv->len > 0) {
                     PdfViewer *pv = g_ptr_array_index(zond->arr_pv,
                             zond->arr_pv->len - 1);
                     viewer_highlight_at_char_pos(pv, page_nr_akt,
@@ -475,19 +486,24 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
     }
 
     if (is_pdf && range && range->von >= 0) {
-        gint von = range->von, bis = range->bis;
-
-        total = bis - von + 1;
-
         GArray     *indexed     = sond_index_ctx_get_pages_for_file(index_ctx, fp);
         GHashTable *indexed_set = g_hash_table_new(NULL, NULL);
+
+        total = 0;
         for (guint i = 0; i < indexed->len; i++)
             g_hash_table_add(indexed_set,
                     GINT_TO_POINTER(g_array_index(indexed, gint, i)));
 
-        for (gint p = von; p <= bis; p++)
-            if (!g_hash_table_contains(indexed_set, GINT_TO_POINTER(p)))
-                missing++;
+        /* alle (disjunkten) Seitenbereiche der Auswahl */
+        for (gint r = 0; r < sond_page_range_count(range); r++) {
+            gint von = 0, bis = 0;
+
+            sond_page_range_get(range, r, &von, &bis);
+            total += bis - von + 1;
+            for (gint p = von; p <= bis; p++)
+                if (!g_hash_table_contains(indexed_set, GINT_TO_POINTER(p)))
+                    missing++;
+        }
 
         g_hash_table_destroy(indexed_set);
         g_array_free(indexed, TRUE);
@@ -899,6 +915,153 @@ handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
     return TRUE;
 }
 
+/* Mehr Treffer bekommt die Ergebnisliste nicht: ein häufiges Wort ergäbe
+ * sonst Hunderttausende Zeilen samt Ausschnitten und friert die Oberfläche
+ * ein. */
+#define ZOND_INDEXSUCHE_MAX_HITS 5000
+
+/* Einschränkung der Treffer auf eine Auswahl, einmal vorbereitet. by_fp:
+ * Pfad der ausgewählten Datei -> GPtrArray von SelEntry* (dieselbe Datei kann
+ * mehrfach ausgewählt sein). */
+typedef struct {
+    SondPageRange *range;      /* (transfer none), NULL = ganze Datei */
+    gboolean       nur_seiten; /* nur Seiten/Seitenbereich einer PDF, nicht
+                                * ihre eingebetteten Dateien (ToDo.c #191) */
+    GHashTable    *mail_parts; /* nur bei E-Mail-Auswahl: Pfade ihrer
+                                * Bestandteile (Header, ggf. Inline-Teile) */
+} SelEntry;
+
+typedef struct {
+    GHashTable *by_fp;
+} SelFilter;
+
+static void
+sel_entry_free(gpointer p) {
+    SelEntry *e = p;
+
+    g_clear_pointer(&e->mail_parts, g_hash_table_destroy);
+    g_free(e);
+}
+
+static SelFilter*
+sel_filter_new(SondIndexCtx *index_ctx, GHashTable *ht_filter) {
+    SelFilter *sf = g_new0(SelFilter, 1);
+    GHashTableIter iter;
+    gpointer key = NULL;
+    gpointer value = NULL;
+
+    sf->by_fp = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+            (GDestroyNotify) g_ptr_array_unref);
+
+    g_hash_table_iter_init(&iter, ht_filter);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        SondPageRange *range = (SondPageRange*) value;
+        gchar *fp = sond_file_part_get_filepart((SondFilePart*) key);
+        SelEntry *e = NULL;
+        GPtrArray *entries = NULL;
+
+        if (!fp)
+            continue;
+
+        e = g_new0(SelEntry, 1);
+        e->range = range;
+        e->nur_seiten = range && (range->pdf_pagetree_only || range->von >= 0);
+
+        /* Angebundene E-Mail (ToDo.c #197) bzw. "Message"-Knoten in BAUM_FS:
+         * nur Treffer aus der Mail selbst und ihren Bestandteilen */
+        if (range && (range->gmessage_message || range->gmessage_header_only)) {
+            GPtrArray *parts = gmessage_parts(index_ctx, fp, range);
+
+            e->mail_parts = g_hash_table_new_full(g_str_hash, g_str_equal,
+                    g_free, NULL);
+            for (guint p = 0; p < parts->len; p++)
+                g_hash_table_add(e->mail_parts,
+                        g_strdup(g_ptr_array_index(parts, p)));
+            g_ptr_array_unref(parts);
+        }
+
+        entries = g_hash_table_lookup(sf->by_fp, fp);
+        if (!entries) {
+            entries = g_ptr_array_new_with_free_func(sel_entry_free);
+            g_hash_table_insert(sf->by_fp, fp, entries); /* übernimmt fp */
+        } else
+            g_free(fp);
+        g_ptr_array_add(entries, e);
+    }
+
+    return sf;
+}
+
+static void
+sel_filter_free(SelFilter *sf) {
+    if (!sf)
+        return;
+
+    g_hash_table_destroy(sf->by_fp);
+    g_free(sf);
+}
+
+/* SondIndexHitFilter: Treffer gehört zu einer ausgewählten Datei selbst oder
+ * zu einem darin enthaltenen Unterpfad (Konvention '//' als Trenner). Ein
+ * reiner Prefix-Vergleich würde z.B. "a/b" auch für "a/bc" fälschlich
+ * matchen - deshalb wird der Pfad schrittweise an seinen '//' gekürzt und
+ * jeweils nachgeschlagen. */
+static gboolean
+sel_filter_cb(gchar const *filename, gint page_nr, gpointer data) {
+    SelFilter *sf = data;
+    gchar *cand = g_strdup(filename);
+    gboolean exact = TRUE;
+    gboolean keep = FALSE;
+
+    for (;;) {
+        GPtrArray *entries = g_hash_table_lookup(sf->by_fp, cand);
+        gchar *sep = NULL;
+
+        for (guint i = 0; entries && !keep && i < entries->len; i++) {
+            SelEntry *e = g_ptr_array_index(entries, i);
+
+            if (e->mail_parts)
+                keep = exact || g_hash_table_contains(e->mail_parts, filename);
+            else if (exact || !e->nur_seiten)
+                /* bei Anbindung auf deren Seitenbereiche einschränken (nur
+                 * ganze Seiten); ohne range bzw. bei "nur Seiten": jede
+                 * Seite zählt */
+                keep = !e->range || e->range->pdf_pagetree_only ||
+                        sond_page_range_contains(e->range, page_nr);
+        }
+        if (keep)
+            break;
+
+        sep = g_strrstr(cand, "//");
+        if (!sep)
+            break;
+        *sep = '\0';
+        exact = FALSE;
+    }
+
+    g_free(cand);
+
+    return keep;
+}
+
+/* Sanduhr, solange die (synchrone) Suche läuft */
+static void
+set_wait_cursor(GtkWidget *widget) {
+    GdkWindow *gw = gtk_widget_get_window(widget);
+
+    if (gw) {
+        GdkCursor *cursor = gdk_cursor_new_from_name(
+                gdk_window_get_display(gw), "wait");
+
+        gdk_window_set_cursor(gw, cursor);
+        if (cursor)
+            g_object_unref(cursor);
+        gdk_display_flush(gdk_window_get_display(gw));
+    }
+    while (gtk_events_pending())
+        gtk_main_iteration();
+}
+
 static void
 zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage) {
     GtkWidget *dialog     = NULL;
@@ -986,12 +1149,26 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
             gboolean   whole_word = gtk_toggle_button_get_active(
                     GTK_TOGGLE_BUTTON(check_whole_word));
 
+            /* Auswahl (ht_filter): Map SondFilePart* -> SondPageRange*, vom
+             * Aufrufer übergeben. Ein NULL-Wert bedeutet "ganze Datei"; ein
+             * SondPageRange* beschränkt die Treffer zusätzlich auf dessen
+             * Seitenbereiche (die Anbindung des ausgewählten Punkts). Der
+             * Filter läuft in der Suche, bevor Ausschnitte entstehen. */
+            SelFilter *sel = ht_filter ?
+                    sel_filter_new(zond->wctx->index_ctx, ht_filter) : NULL;
+            gboolean   truncated = FALSE;
+
+            set_wait_cursor(dialog);
+
             hits = sond_index_search(
                     zond->wctx->index_ctx,
                     term,
                     (ctx && *ctx) ? ctx : NULL,
                     whole_word,
+                    ZOND_INDEXSUCHE_MAX_HITS,
+                    sel ? sel_filter_cb : NULL, sel, &truncated,
                     &error);
+            sel_filter_free(sel);
 
             if (!hits) {
                 gtk_widget_destroy(dialog);
@@ -1000,91 +1177,6 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
                         error ? error->message : "?", NULL);
                 g_clear_error(&error);
                 return;
-            }
-
-            /* Treffer auf Auswahl filtern wenn gewünscht.
-             * ht_filter ist eine Map SondFilePart* -> SondPageRange*
-             * (siehe sond_treeviewfm_get_fileparts()/zond_treeview_get_
-             * selected_fileparts()) - direkt vom Aufrufer übergeben, kein
-             * erneutes Auslesen einer Treeview-Selektion nötig (das war
-             * vorher kaputt: stvfm_filter war nie zugewiesen/immer NULL,
-             * daher lief dieser Zweig faktisch nie).
-             * Ein NULL-Wert bedeutet "ganze Datei"; ein SondPageRange*
-             * beschränkt den Treffer zusätzlich auf dessen Seitenbereich
-             * (die Anbindung des ausgewählten Punkts). */
-            if (ht_filter && hits->len > 0) {
-                GPtrArray *filtered = g_ptr_array_new_with_free_func(
-                        sond_index_hit_free);
-
-                for (guint i = 0; i < hits->len; i++) {
-                    SondIndexHit *hit = g_ptr_array_index(hits, i);
-                    gboolean keep = FALSE;
-
-                    GHashTableIter iter_sel;
-                    gpointer key = NULL;
-                    gpointer value = NULL;
-                    g_hash_table_iter_init(&iter_sel, ht_filter);
-                    while (g_hash_table_iter_next(&iter_sel, &key, &value)) {
-                        SondFilePart *sfp_sel = (SondFilePart*) key;
-                        SondPageRange *range = (SondPageRange*) value;
-                        gchar *fp = sond_file_part_get_filepart(sfp_sel);
-
-                        /* Treffer gehört zu fp selbst oder zu einem darin
-                         * enthaltenen Unterpfad (Konvention '//' als
-                         * Trenner, wie in sond_index_ctx_clear_file). Ein
-                         * reiner Prefix-Vergleich würde z.B. "a/b" auch
-                         * für "a/bc" fälschlich matchen. */
-                        /* Angebundene E-Mail (ToDo.c #197) bzw. "Message"-
-                         * Knoten in BAUM_FS: nur Treffer aus der Mail selbst
-                         * (Indizierung als Ganzes) und ihren Bestandteilen
-                         * (Header, ggf. Inline-Teile) */
-                        if (fp && range && (range->gmessage_message ||
-                                range->gmessage_header_only)) {
-                            GPtrArray *parts = gmessage_parts(
-                                    zond->wctx->index_ctx, fp, range);
-
-                            keep = !g_strcmp0(hit->filename, fp);
-                            for (guint p = 0; !keep && p < parts->len; p++)
-                                keep = !g_strcmp0(hit->filename,
-                                        g_ptr_array_index(parts, p));
-                            g_ptr_array_unref(parts);
-                        }
-                        else if (fp) {
-                            gsize fp_len = strlen(fp);
-                            /* Nur Seiten bzw. Seitenbereich einer PDF:
-                             * Treffer nur aus der PDF selbst, nicht aus
-                             * eingebetteten Dateien (ToDo.c #191). */
-                            gboolean nur_seiten = range &&
-                                    (range->pdf_pagetree_only || range->von >= 0);
-
-                            if (g_str_has_prefix(hit->filename, fp) &&
-                                    (hit->filename[fp_len] == '\0' ||
-                                     (!nur_seiten &&
-                                      hit->filename[fp_len] == '/' &&
-                                      hit->filename[fp_len + 1] == '/'))) {
-                                /* Datei passt - bei Anbindung (range) auf
-                                 * deren Seitenbereich einschränken (nur
-                                 * ganze Seiten, s. Absprache). Ohne range
-                                 * bzw. bei "nur Seiten": jede Seite zählt. */
-                                if (!range || range->pdf_pagetree_only ||
-                                        (hit->page_nr >= range->von &&
-                                        hit->page_nr <= range->bis))
-                                    keep = TRUE;
-                            }
-                        }
-                        g_free(fp);
-                        if (keep) break;
-                    }
-
-                    if (keep) {
-                        g_ptr_array_add(filtered, hit);
-                        /* Eigentumsübertragung: aus hits entfernen ohne free */
-                        g_ptr_array_index(hits, i) = NULL;
-                    }
-                }
-
-                g_ptr_array_unref(hits);
-                hits = filtered;
             }
 
             if (hits->len == 0) {
@@ -1107,8 +1199,11 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
              *           Klick weitere Seiten eingefügt/gelöscht wurden.
              */
             gchar const *cols[] = { "Datei", "Seite", "Fundstelle", "", "", NULL };
-            gchar *titel = g_strdup_printf(
-                    "Index-Suche: \u201e%s\u201c", term);
+            gchar *titel = truncated ?
+                    g_strdup_printf("Index-Suche: \u201e%s\u201c (nur die "
+                            "ersten %d Treffer - Suchbegriff eingrenzen)",
+                            term, ZOND_INDEXSUCHE_MAX_HITS) :
+                    g_strdup_printf("Index-Suche: \u201e%s\u201c", term);
             GtkWidget *rv = sond_result_view_new(
                     GTK_WINDOW(zond->app_window),
                     titel,

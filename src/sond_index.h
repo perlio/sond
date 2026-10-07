@@ -126,8 +126,9 @@ gboolean sond_index_ctx_has_embeddings(SondIndexCtx *ctx);
  * @filename: Dateiname (wie in dispatch_buffer)
  * @error:    GError
  *
- * Löscht alle vorhandenen Chunks und pages-Einträge für filename
- * (und alle Unter-Pfade, d.h. LIKE 'filename//%') vor der Neuindizierung.
+ * Löscht alle vorhandenen Chunks und pages-Einträge für filename und alles
+ * darunter (Dateien in einem Verzeichnis "filename/...", eingebettete Teile
+ * "filename//...") sowie die zugehörigen Seiten-/Eintragszahlen.
  * Erwartet eine bereits laufende Transaktion (kein eigenes BEGIN/COMMIT).
  *
  * Returns: TRUE bei Erfolg.
@@ -560,9 +561,9 @@ gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx,
 /**
  * sond_index_ctx_coverage_expand_to_pages:
  * @ctx:              SondIndexCtx
- * @filename:         Dateiname, der gerade einen EIGENEN (nicht nur über
- *                     einen Vorfahren geerbten) coverage-Eintrag hat oder
- *                     haben könnte
+ * @filename:         Dateiname, der einen eigenen oder über einen Vorfahren
+ *                     (z.B. Verzeichnis) abdeckenden coverage-Eintrag hat
+ *                     oder haben könnte
  * @pages_to_write:   Seiten (0-basiert = page_akt), die einzeln
  *                     eingetragen werden sollen - typischerweise alle
  *                     aktuell noch existierenden (nicht gelöschten)
@@ -584,10 +585,10 @@ gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx,
  * tatsächlich noch existierender Seiten. Der Aufrufer muss die Liste
  * daher unter Berücksichtigung von PdfDocumentPage->deleted selbst bilden.
  *
- * Hat filename keinen eigenen Eintrag (z.B. nur über einen Vorfahren
- * abgedeckt), passiert nichts - dieser Fall wird bereits vollständig von
- * sond_index_ctx_coverage_invalidate() (Fall 2, Geschwister-Dateien)
- * abgedeckt.
+ * Ist filename weder selbst noch über einen Vorfahren abgedeckt, passiert
+ * nichts. Bei Abdeckung über einen Vorfahren muss das hier geschehen:
+ * coverage_invalidate() trägt danach nur die Geschwister neu ein, nicht
+ * filename selbst.
  *
  * Returns: FALSE bei Datenbankfehler.
  */
@@ -780,6 +781,20 @@ typedef struct _SondIndexHit {
 void sond_index_hit_free(gpointer p);
 
 /**
+ * SondIndexHitFilter:
+ * @filename:    filepart-Pfad des Treffers
+ * @page_nr:     Seite (-1 bei Dateinamen-Treffern und Nicht-PDF)
+ * @data:        Zeiger des Aufrufers
+ *
+ * Entscheidet VOR dem Aufbau des Kontextausschnitts, ob ein Treffer
+ * übernommen wird (Einschränkung auf eine Auswahl).
+ *
+ * Returns: TRUE = übernehmen
+ */
+typedef gboolean (*SondIndexHitFilter)(gchar const *filename, gint page_nr,
+        gpointer data);
+
+/**
  * sond_index_search:
  * @ctx:        SondIndexCtx
  * @term:       Hauptsuchbegriff (ein oder mehrere Wörter → Phrasensuche)
@@ -789,6 +804,12 @@ void sond_index_hit_free(gpointer p);
  *              findet "Vertrag" auch "Vertragspartner" - bei einer Phrase
  *              gilt der Präfix nur für deren letztes Wort (FTS5-Grenze).
  *              TRUE: nur exakte, ganze Wörter (bisheriges Verhalten).
+ * @max_hits:   höchstens so viele Treffer (nach dem Filter); <= 0: keine
+ *              Begrenzung
+ * @filter:     (optional) Filter, s. SondIndexHitFilter
+ * @filter_data: Zeiger für @filter
+ * @truncated:  (optional) wird TRUE, wenn die Suche wegen @max_hits
+ *              abgebrochen wurde (es gäbe weitere Treffer)
  * @error:      GError
  *
  * Durchsucht chunks_fts nach @term. Wenn @context angegeben ist, müssen
@@ -803,6 +824,10 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
                               gboolean      whole_word,
+                              gint          max_hits,
+                              SondIndexHitFilter filter,
+                              gpointer      filter_data,
+                              gboolean     *truncated,
                               GError      **error);
 
 /* =======================================================================
@@ -876,8 +901,10 @@ GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
  *
  * Indiziert wird für:
  *   application/pdf   – Text aus OCR-tem PDF (MuPDF stext)
- *   message/rfc822    – Header + Textteile (GMime), oder nur Header
- *                        (s. @gmessage_header_only)
+ *   message/rfc822    – nur der Header (s. @gmessage_header_only); ohne
+ *                        das kein Text, nur Struktur und Coverage - die
+ *                        Textteile einer Mail werden einzeln als "x.eml//N"
+ *                        indiziert (sond_process_file.c)
  *   text*             – Rohtext direkt
  * Alle anderen MIME-Typen: sofortiger Rücksprung.
  */

@@ -61,6 +61,20 @@ static const gchar *SQL_CREATE_CHUNKS =
            * Table - keine sqlite-vec-Abhängigkeit, Ähnlichkeitssuche läuft
            * brute-force in C (siehe sond_index_semantic_search()). */
 
+/* Ohne diesen Index laufen clear_page(), delete_index() und die Suche
+ * (Seitenanfang je Treffer) als Vollscan über chunks. */
+static const gchar *SQL_CREATE_CHUNKS_IDX =
+    "CREATE INDEX IF NOT EXISTS chunks_file_page_idx"
+    " ON chunks(filename, page_nr, char_pos);";
+
+/* Pfad-Präfix ohne LIKE (dessen Wildcards "_" und "%" und die
+ * Groß-/Kleinschreibung passen nicht zu Pfaden). Bereich statt SUBSTR, damit
+ * der Primärschlüsselindex genutzt wird: '/' ist 0x2F, '0' das nächste
+ * Zeichen. SQL_UNDER: alles unter ?1 ("?1/..." also auch "?1//..."),
+ * SQL_UNDER_EMB: nur eingebettete Teile ("?1//..."). */
+#define SQL_UNDER(col)     "(" col " >= ?1 || '/' AND " col " < ?1 || '0')"
+#define SQL_UNDER_EMB(col) "(" col " >= ?1 || '//' AND " col " < ?1 || '/0')"
+
 static const gchar *SQL_CREATE_FTS =
     "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
     "  text,"
@@ -206,6 +220,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE chunks: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_CHUNKS_IDX, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE INDEX chunks: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -576,22 +598,21 @@ void sond_index_ctx_free(SondIndexCtx *ctx) {
 gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                                     gchar const  *filename,
                                     GError      **error) {
-    sqlite3_stmt *stmt    = NULL;
-    gchar        *pattern = g_strdup_printf("%s//%%", filename);
+    sqlite3_stmt *stmt = NULL;
 
+    /* filename selbst und alles darunter: Unterverzeichnisse und Dateien in
+     * einem gelöschten Ordner ("x/...") wie eingebettete Teile ("x//...") */
     gint rc = sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM chunks WHERE filename = ? OR filename LIKE ?",
+            "DELETE FROM chunks WHERE filename = ?1 OR " SQL_UNDER("filename"),
             -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "sond_index_ctx_clear_file: prepare: %s",
                     sqlite3_errmsg(ctx->db));
-        g_free(pattern);
         return FALSE;
     }
 
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 
@@ -604,21 +625,18 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
 
     /* pages-Einträge löschen */
     rc = sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM pages WHERE filename = ? OR filename LIKE ?",
+            "DELETE FROM pages WHERE filename = ?1 OR " SQL_UNDER("filename"),
             -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "sond_index_ctx_clear_file: prepare pages: %s",
                     sqlite3_errmsg(ctx->db));
-        g_free(pattern);
         return FALSE;
     }
 
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    g_free(pattern);
 
     if (rc != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -695,33 +713,27 @@ gint sond_index_ctx_get_page_count(SondIndexCtx *ctx, gchar const *filename) {
 
 gboolean sond_index_ctx_clear_page_count(SondIndexCtx *ctx,
         gchar const *filename, GError **error) {
-    sqlite3_stmt *stmt    = NULL;
-    gchar        *pattern = NULL;
+    sqlite3_stmt *stmt = NULL;
 
     if (!ctx || !filename)
         return TRUE;
 
-    pattern = g_strdup_printf("%s/%%", filename);
-
     if (sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM file_pagecount WHERE filename = ?1 OR filename LIKE ?2",
+            "DELETE FROM file_pagecount WHERE filename = ?1 OR "
+            SQL_UNDER("filename"),
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
-        g_free(pattern);
         return FALSE;
     }
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
         sqlite3_finalize(stmt);
-        g_free(pattern);
         return FALSE;
     }
     sqlite3_finalize(stmt);
-    g_free(pattern);
 
     return TRUE;
 }
@@ -780,33 +792,27 @@ gint sond_index_ctx_get_entry_count(SondIndexCtx *ctx, gchar const *filename) {
 
 gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
         gchar const *filename, GError **error) {
-    sqlite3_stmt *stmt    = NULL;
-    gchar        *pattern = NULL;
+    sqlite3_stmt *stmt = NULL;
 
     if (!ctx || !filename)
         return TRUE;
 
-    pattern = g_strdup_printf("%s/%%", filename);
-
     if (sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM container_entrycount WHERE filename = ?1 OR filename LIKE ?2",
+            "DELETE FROM container_entrycount WHERE filename = ?1 OR "
+            SQL_UNDER("filename"),
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
-        g_free(pattern);
         return FALSE;
     }
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
         sqlite3_finalize(stmt);
-        g_free(pattern);
         return FALSE;
     }
     sqlite3_finalize(stmt);
-    g_free(pattern);
 
     //Inline-Teile einer Mail, Anhänge einer PDF: gleiche Lebensdauer wie
     //container_entrycount
@@ -1050,7 +1056,6 @@ static void gmessage_collect_inline(GMimeObject *object,
 
 gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
     sqlite3_stmt *stmt       = NULL;
-    gchar        *pattern    = NULL;
     gsize         prefix_len = 0;
     GHashTable   *ht_children = NULL;
     gint          result     = -1;
@@ -1058,7 +1063,6 @@ gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
     if (!ctx || !path)
         return -1;
 
-    pattern    = g_strdup_printf("%s//%%", path);
     prefix_len = strlen(path) + 2; /* Länge von "path//" */
 
     /* Nested Pfade (Konvention "path//..."), die IRGENDEINEN Hinweis auf
@@ -1075,15 +1079,15 @@ gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
      * total_entries (container_entrycount), das ebenfalls nur eine Ebene
      * zählt (ToDo.c, 12.-14.09.2026). */
     if (sqlite3_prepare_v2(ctx->db,
-            "SELECT DISTINCT filename AS p FROM pages WHERE filename LIKE ?1"
+            "SELECT DISTINCT filename AS p FROM pages WHERE "
+            SQL_UNDER_EMB("filename")
             "  UNION"
-            "  SELECT DISTINCT path AS p FROM coverage WHERE path LIKE ?1",
-            -1, &stmt, NULL) != SQLITE_OK) {
-        g_free(pattern);
+            "  SELECT DISTINCT path AS p FROM coverage WHERE "
+            SQL_UNDER_EMB("path"),
+            -1, &stmt, NULL) != SQLITE_OK)
         return -1;
-    }
 
-    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 
     ht_children = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
@@ -1106,7 +1110,6 @@ gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
 
     result = (gint) g_hash_table_size(ht_children);
     g_hash_table_destroy(ht_children);
-    g_free(pattern);
 
     return result;
 }
@@ -1554,9 +1557,8 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
 
 SondIndexStatus sond_index_ctx_get_dir_status(SondIndexCtx *ctx,
         gchar const *path) {
-    sqlite3_stmt *stmt    = NULL;
-    gchar        *pattern = NULL;
-    gboolean      any     = FALSE;
+    sqlite3_stmt *stmt = NULL;
+    gboolean      any  = FALSE;
 
     if (!ctx || !path)
         return SOND_INDEX_STATUS_NONE;
@@ -1564,19 +1566,16 @@ SondIndexStatus sond_index_ctx_get_dir_status(SondIndexCtx *ctx,
     if (sond_index_ctx_coverage_get(ctx, path) >= 0)
         return SOND_INDEX_STATUS_FULL;
 
-    pattern = g_strdup_printf("%s/%%", path);
-
     if (sqlite3_prepare_v2(ctx->db,
-            "SELECT EXISTS(SELECT 1 FROM pages WHERE filename LIKE ?1)"
-            " OR EXISTS(SELECT 1 FROM coverage WHERE path LIKE ?1)",
+            "SELECT EXISTS(SELECT 1 FROM pages WHERE " SQL_UNDER("filename") ")"
+            " OR EXISTS(SELECT 1 FROM coverage WHERE " SQL_UNDER("path") ")",
             -1, &stmt, NULL) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) == SQLITE_ROW)
             any = (sqlite3_column_int(stmt, 0) != 0);
         sqlite3_finalize(stmt);
     }
 
-    g_free(pattern);
     return any ? SOND_INDEX_STATUS_PARTIAL : SOND_INDEX_STATUS_NONE;
 }
 
@@ -1596,11 +1595,32 @@ SondIndexStatus sond_index_ctx_get_dir_status(SondIndexCtx *ctx,
  * Ersetzt einen eventuell schon vorhandenen Eintrag für path selbst
  * (INSERT OR REPLACE).
  */
+static gboolean db_savepoint(SondIndexCtx *ctx, GError **error);
+static void db_savepoint_end(SondIndexCtx *ctx, gboolean ok);
+
+static gboolean coverage_mark_impl(SondIndexCtx *ctx, gchar const *path,
+        gint ocr_mode, GError **error);
+
 gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
         gint ocr_mode, GError **error) {
-    sqlite3_stmt *stmt      = NULL;
-    gchar        *like_dir  = NULL;
-    gchar        *like_file = NULL;
+    gboolean ok = FALSE;
+
+    if (!ctx || !path)
+        return coverage_mark_impl(ctx, path, ocr_mode, error);
+
+    /* Löschen der feineren Einträge und Eintragen von path nur zusammen */
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = coverage_mark_impl(ctx, path, ocr_mode, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+static gboolean coverage_mark_impl(SondIndexCtx *ctx, gchar const *path,
+        gint ocr_mode, GError **error) {
+    sqlite3_stmt *stmt = NULL;
+    gint          rc   = 0;
 
     if (!ctx || !path) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -1608,43 +1628,44 @@ gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
         return FALSE;
     }
 
-    like_dir  = g_strdup_printf("%s/%%", path);
-    like_file = g_strdup_printf("%s//%%", path);
-
     if (sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM coverage WHERE path = ?1 OR path LIKE ?2",
+            "DELETE FROM coverage WHERE path = ?1 OR " SQL_UNDER("path"),
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: prepare DELETE coverage: %s", __func__,
                 sqlite3_errmsg(ctx->db));
-        g_free(like_dir);
-        g_free(like_file);
         return FALSE;
     }
-    sqlite3_bind_text(stmt, 1, path,     -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, like_dir, -1, SQLITE_TRANSIENT);
-    sqlite3_step(stmt);
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     stmt = NULL;
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE coverage '%s': %s", __func__, path,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
 
     if (sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM pages WHERE filename = ?1 OR filename LIKE ?2",
+            "DELETE FROM pages WHERE filename = ?1 OR "
+            SQL_UNDER_EMB("filename"),
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: prepare DELETE pages: %s", __func__,
                 sqlite3_errmsg(ctx->db));
-        g_free(like_dir);
-        g_free(like_file);
         return FALSE;
     }
-    sqlite3_bind_text(stmt, 1, path,      -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, like_file, -1, SQLITE_TRANSIENT);
-    sqlite3_step(stmt);
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     stmt = NULL;
-
-    g_free(like_dir);
-    g_free(like_file);
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE pages '%s': %s", __func__, path,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
 
     if (sqlite3_prepare_v2(ctx->db,
             "INSERT INTO coverage(path, ocr_mode) VALUES(?, ?)"
@@ -1678,8 +1699,7 @@ gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
  */
 gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx, gchar const *path,
         GError **error) {
-    sqlite3_stmt *stmt     = NULL;
-    gchar        *like_dir = NULL;
+    sqlite3_stmt *stmt = NULL;
 
     if (!ctx || !path) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -1687,29 +1707,23 @@ gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx, gchar const *path,
         return FALSE;
     }
 
-    like_dir = g_strdup_printf("%s/%%", path);
-
     if (sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM coverage WHERE path = ?1 OR path LIKE ?2",
+            "DELETE FROM coverage WHERE path = ?1 OR " SQL_UNDER("path"),
             -1, &stmt, NULL) != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: prepare DELETE coverage: %s", __func__,
                 sqlite3_errmsg(ctx->db));
-        g_free(like_dir);
         return FALSE;
     }
-    sqlite3_bind_text(stmt, 1, path,     -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, like_dir, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "%s: step DELETE coverage: %s", __func__,
                 sqlite3_errmsg(ctx->db));
         sqlite3_finalize(stmt);
-        g_free(like_dir);
         return FALSE;
     }
     sqlite3_finalize(stmt);
-    g_free(like_dir);
 
     return TRUE;
 }
@@ -1739,34 +1753,24 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
         return FALSE;
     }
 
-    if (sqlite3_prepare_v2(ctx->db,
-            "SELECT ocr_mode FROM coverage WHERE path = ?", -1, &stmt, NULL)
-            != SQLITE_OK) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                "%s: prepare SELECT coverage: %s", __func__,
-                sqlite3_errmsg(ctx->db));
-        return FALSE;
-    }
-    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(stmt) == SQLITE_ROW)
-        mode = sqlite3_column_int(stmt, 0);
+    /* Eigener Eintrag oder abdeckender Vorfahre (z.B. das Verzeichnis nach
+     * dem Zusammenfassen): in beiden Fällen sind die Seiten als indiziert
+     * vermerkt und müssen einzeln gerettet werden, bevor der Eintrag
+     * aufgelöst wird (coverage_invalidate() trägt nur die Geschwister neu
+     * ein, nicht filename selbst). */
+    mode = sond_index_ctx_coverage_get(ctx, filename);
 
     /* Sonst ggf. der Seiten-Eintrag "filename//" (PDF, nur Seiten - s.
      * sond_index()): auch er steht für "alle Seiten abgedeckt". */
     if (mode < 0) {
         gchar *pages_path = g_strdup_printf("%s//", filename);
 
-        sqlite3_reset(stmt);
-        sqlite3_bind_text(stmt, 1, pages_path, -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) == SQLITE_ROW)
-            mode = sqlite3_column_int(stmt, 0);
+        mode = coverage_get_exact(ctx, pages_path);
         g_free(pages_path);
     }
-    sqlite3_finalize(stmt);
-    stmt = NULL;
 
     if (mode < 0)
-        return TRUE; /* kein eigener Eintrag - nichts zu tun, s.o. */
+        return TRUE; /* nicht abgedeckt - nichts zu tun */
 
     if (sqlite3_prepare_v2(ctx->db,
             "INSERT INTO pages(filename, page_nr, ocr_mode) VALUES(?,?,?)"
@@ -1840,7 +1844,50 @@ static gboolean path_is_pdf(gchar const *path) {
     return len >= 4 && !g_ascii_strcasecmp(path + len - 4, ".pdf");
 }
 
+/* Savepoint statt BEGIN: verschachtelbar. Die Funktionen unten ändern
+ * mehrere Zeilen und Tabellen und laufen auch innerhalb einer schon offenen
+ * Transaktion des Aufrufers (z.B. beim Löschen im Dateibaum); ohne offene
+ * Transaktion wird der Savepoint selbst zu einer - alles oder nichts, und
+ * nur ein Commit statt einem je Statement. */
+static gboolean db_savepoint(SondIndexCtx *ctx, GError **error) {
+    char *errmsg = NULL;
+
+    if (sqlite3_exec(ctx->db, "SAVEPOINT sond_sp;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "SAVEPOINT: %s", errmsg);
+        sqlite3_free(errmsg);
+
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void db_savepoint_end(SondIndexCtx *ctx, gboolean ok) {
+    sqlite3_exec(ctx->db, ok ? "RELEASE sond_sp;" :
+            "ROLLBACK TO sond_sp; RELEASE sond_sp;", NULL, NULL, NULL);
+}
+
+static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
+        gchar const *path, gchar const *root_dir, GError **error);
+
 gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
+        gchar const *path, gchar const *root_dir, GError **error) {
+    gboolean ok = FALSE;
+
+    if (!ctx || !path)
+        return coverage_invalidate_impl(ctx, path, root_dir, error);
+
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = coverage_invalidate_impl(ctx, path, root_dir, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
         gchar const *path, gchar const *root_dir, GError **error) {
     sqlite3_stmt *stmt     = NULL;
     gchar        *ancestor = NULL;
@@ -2161,7 +2208,25 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
  * verhindern das Coalescing auf dieser Ebene dauerhaft. Kein Fehler,
  * lediglich eine verpasste Optimierung.
  */
+static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
+        gchar const *path, gchar const *root_dir, GError **error);
+
 gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
+        gchar const *path, gchar const *root_dir, GError **error) {
+    gboolean ok = FALSE;
+
+    if (!ctx || !path)
+        return TRUE;
+
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = coverage_try_collapse_impl(ctx, path, root_dir, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
         gchar const *path, gchar const *root_dir, GError **error) {
     gchar *current = NULL;
 
@@ -2365,7 +2430,28 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
  * sond_index_ctx_delete_index / sond_index_ctx_delete_all
  * ======================================================================= */
 
+static gboolean delete_index_impl(SondIndexCtx *ctx, gchar const *path,
+        gint von_seite, gint bis_seite, gchar const *root_dir,
+        GError **error);
+
 gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
+        gint von_seite, gint bis_seite, gchar const *root_dir,
+        GError **error) {
+    gboolean ok = FALSE;
+
+    if (!ctx || !path)
+        return delete_index_impl(ctx, path, von_seite, bis_seite, root_dir,
+                error);
+
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = delete_index_impl(ctx, path, von_seite, bis_seite, root_dir, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+static gboolean delete_index_impl(SondIndexCtx *ctx, gchar const *path,
         gint von_seite, gint bis_seite, gchar const *root_dir,
         GError **error) {
     sqlite3_stmt *stmt = NULL;
@@ -2430,34 +2516,36 @@ gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
         if (!sond_index_ctx_coverage_invalidate(ctx, path, root_dir, error))
             return FALSE;
 
-        if (sqlite3_prepare_v2(ctx->db,
-                "DELETE FROM chunks WHERE filename = ?1 AND page_nr "
-                "BETWEEN ?2 AND ?3", -1, &stmt, NULL) != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "%s: prepare DELETE chunks: %s", __func__,
-                    sqlite3_errmsg(ctx->db));
-            return FALSE;
-        }
-        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int (stmt, 2, von_seite);
-        sqlite3_bind_int (stmt, 3, bis_seite);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        stmt = NULL;
+        static gchar const *sql_range[] = {
+            "DELETE FROM chunks WHERE filename = ?1 AND page_nr "
+            "BETWEEN ?2 AND ?3",
+            "DELETE FROM pages WHERE filename = ?1 AND page_nr "
+            "BETWEEN ?2 AND ?3"
+        };
 
-        if (sqlite3_prepare_v2(ctx->db,
-                "DELETE FROM pages WHERE filename = ?1 AND page_nr "
-                "BETWEEN ?2 AND ?3", -1, &stmt, NULL) != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "%s: prepare DELETE pages: %s", __func__,
-                    sqlite3_errmsg(ctx->db));
-            return FALSE;
+        for (guint i = 0; i < G_N_ELEMENTS(sql_range); i++) {
+            gint rc = 0;
+
+            if (sqlite3_prepare_v2(ctx->db, sql_range[i], -1, &stmt, NULL)
+                    != SQLITE_OK) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: prepare DELETE: %s", __func__,
+                        sqlite3_errmsg(ctx->db));
+                return FALSE;
+            }
+            sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (stmt, 2, von_seite);
+            sqlite3_bind_int (stmt, 3, bis_seite);
+            rc = sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+            if (rc != SQLITE_DONE) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: DELETE '%s': %s", __func__, path,
+                        sqlite3_errmsg(ctx->db));
+                return FALSE;
+            }
         }
-        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int (stmt, 2, von_seite);
-        sqlite3_bind_int (stmt, 3, bis_seite);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
 
         return TRUE;
     }
@@ -2466,37 +2554,32 @@ gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
      * (Unterverzeichnisse, eingebettete Teile - "path/%" deckt per
      * Konvention beides ab, s. Kommentar bei coverage_mark). */
     {
-        gchar *like_below = g_strdup_printf("%s/%%", path);
+        static gchar const *sql[] = {
+            "DELETE FROM chunks WHERE filename = ?1 OR " SQL_UNDER("filename"),
+            "DELETE FROM pages WHERE filename = ?1 OR " SQL_UNDER("filename")
+        };
 
-        if (sqlite3_prepare_v2(ctx->db,
-                "DELETE FROM chunks WHERE filename = ?1 OR filename LIKE ?2",
-                -1, &stmt, NULL) != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "%s: prepare DELETE chunks: %s", __func__,
-                    sqlite3_errmsg(ctx->db));
-            g_free(like_below);
-            return FALSE;
-        }
-        sqlite3_bind_text(stmt, 1, path,       -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, like_below, -1, SQLITE_TRANSIENT);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        stmt = NULL;
+        for (guint i = 0; i < G_N_ELEMENTS(sql); i++) {
+            gint rc = 0;
 
-        if (sqlite3_prepare_v2(ctx->db,
-                "DELETE FROM pages WHERE filename = ?1 OR filename LIKE ?2",
-                -1, &stmt, NULL) != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "%s: prepare DELETE pages: %s", __func__,
-                    sqlite3_errmsg(ctx->db));
-            g_free(like_below);
-            return FALSE;
+            if (sqlite3_prepare_v2(ctx->db, sql[i], -1, &stmt, NULL)
+                    != SQLITE_OK) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: prepare DELETE: %s", __func__,
+                        sqlite3_errmsg(ctx->db));
+                return FALSE;
+            }
+            sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+            rc = sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            stmt = NULL;
+            if (rc != SQLITE_DONE) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: DELETE '%s': %s", __func__, path,
+                        sqlite3_errmsg(ctx->db));
+                return FALSE;
+            }
         }
-        sqlite3_bind_text(stmt, 1, path,       -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, like_below, -1, SQLITE_TRANSIENT);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        g_free(like_below);
     }
 
     if (!sond_index_ctx_coverage_invalidate(ctx, path, root_dir, error))
@@ -2519,7 +2602,23 @@ gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
     return TRUE;
 }
 
+static gboolean delete_all_impl(SondIndexCtx *ctx, GError **error);
+
 gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error) {
+    gboolean ok = FALSE;
+
+    if (!ctx)
+        return delete_all_impl(ctx, error);
+
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = delete_all_impl(ctx, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+static gboolean delete_all_impl(SondIndexCtx *ctx, GError **error) {
     char *errmsg = NULL;
 
     if (!ctx) {
@@ -2980,10 +3079,9 @@ void sond_index_hit_free(gpointer p) {
 }
 
 /*
- * Baut den FTS5-Query-String:
- *   - Mehrere Wörter in term → Phrasensuche: "Wort1 Wort2"
- *   - Ein Wort                → einfaches Token: Wort
- *   - context vorhanden      → AND-Verknüpfung: <term> AND <context>
+ * FTS5-Query-String für einen Suchbegriff (term wie context):
+ *   - ein oder mehrere Wörter → immer als Phrase: "Wort1 Wort2",
+ *     auch ein einzelnes Wort ("Wort") - s. fts_quote()
  *   - whole_word == FALSE    → zusätzlich Präfix-Suche (angehängtes "*"):
  *     bei einem einzelnen Wort auf das Wort selbst (Wort*, findet z.B.
  *     auch "Wortliste"), bei einer Phrase auf deren letztes Wort
@@ -2995,34 +3093,24 @@ void sond_index_hit_free(gpointer p) {
  *
  * Rückgabe: neu allozierter String, mit g_free() freigeben.
  */
-static gchar* build_fts_query(gchar const *term, gchar const *context,
-        gboolean whole_word) {
-    gchar *term_q   = NULL;
-    gchar *query    = NULL;
+/* Ein Suchbegriff als FTS5-String-Literal: immer in Anführungszeichen (ein
+ * Wort wie eine Phrase), "\"" im Begriff verdoppelt. Ungequotet wären
+ * Bindestrich, Punkt, Doppelpunkt, Klammern und die Operatoren AND/OR/NOT/
+ * NEAR Syntax - "Müller-Lüdenscheid" oder "31.12.2024" ergäben einen
+ * Fehler. Der Tokenizer zerlegt den Inhalt wie beim Indizieren. */
+static gchar* fts_quote(gchar const *term, gboolean whole_word) {
+    GString *s = g_string_new("\"");
 
-    /* Phrase wenn term ein Leerzeichen enthält */
-    if (strchr(term, ' '))
-        term_q = g_strdup_printf(whole_word ? "\"%s\"" : "\"%s\"*", term);
-    else
-        term_q = g_strdup_printf(whole_word ? "%s" : "%s*", term);
-
-    if (context && *context) {
-        gchar *ctx_q = NULL;
-
-        if (strchr(context, ' '))
-            ctx_q = g_strdup_printf(whole_word ? "\"%s\"" : "\"%s\"*", context);
-        else
-            ctx_q = g_strdup_printf(whole_word ? "%s" : "%s*", context);
-
-        query = g_strdup_printf("%s AND %s", term_q, ctx_q);
-        g_free(ctx_q);
-    } else {
-        query = term_q;
-        term_q = NULL; /* Eigentum übertragen */
+    for (gchar const *p = term; *p; p++) {
+        if (*p == '"')
+            g_string_append_c(s, '"');
+        g_string_append_c(s, *p);
     }
+    g_string_append_c(s, '"');
+    if (!whole_word)
+        g_string_append_c(s, '*');
 
-    g_free(term_q);
-    return query;
+    return g_string_free(s, FALSE);
 }
 
 /* PDF-Schriften mit defektem/nicht standardkonformem Encoding mappen
@@ -3121,33 +3209,65 @@ static gchar* fetch_prev_chunk_tail(SondIndexCtx *ctx, gchar const *filename,
     return result;
 }
 
+/* Pfad, unter dem eine Datei in der Dateinamensuche erscheint: Header und
+ * Mimeparts einer Mail ("x.eml//header", "x.eml//0") gehören zur Mail selbst,
+ * alles andere steht für sich. Neu alloziert. */
+static gchar* index_name_owner(gchar const *filename) {
+    gchar const *sep = gmessage_find_last_boundary(filename);
+
+    if (sep && is_gmessage_child_segment(sep + 2))
+        return g_strndup(filename, sep - filename);
+
+    return g_strdup(filename);
+}
+
 GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
                               gboolean      whole_word,
+                              gint          max_hits,
+                              SondIndexHitFilter filter,
+                              gpointer      filter_data,
+                              gboolean     *truncated,
                               GError      **error) {
     GPtrArray    *result = NULL;
     sqlite3_stmt *stmt   = NULL;
     gchar        *query  = NULL;
+    gchar        *query_ctx = NULL;
+    gchar        *sql    = NULL;
     gint          rc     = 0;
+    gboolean      stop   = FALSE; /* max_hits erreicht */
+    /* Durch Chunk-Überlappung kann dasselbe Vorkommen aus zwei Chunks
+     * gemeldet werden: Duplikate mit gleicher (filename, page_nr,
+     * char_pos_in_page) werden gleich beim Sammeln verworfen. */
+    GHashTable   *seen   = NULL;
 
     g_return_val_if_fail(ctx    != NULL, NULL);
     g_return_val_if_fail(term   != NULL, NULL);
     g_return_val_if_fail(*term  != '\0', NULL);
 
+    if (truncated)
+        *truncated = FALSE;
+
     result = g_ptr_array_new_with_free_func(sond_index_hit_free);
+    seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
     /* ---------------------------------------------------------------
      * 1. Volltextsuche über FTS5
      * ------------------------------------------------------------- */
-    query = build_fts_query(term, context, whole_word);
+    query = fts_quote(term, whole_word);
+    query_ctx = (context && *context) ? fts_quote(context, whole_word) : NULL;
 
     /* highlight() markiert jeden Token-Treffer mit \x01...\x02. Bei
      * Präfix-Suche (whole_word == FALSE, Default) markiert es dabei den
      * ganzen getroffenen Token, nicht nur den eingegebenen Präfix - so
      * erscheint z.B. bei Suche nach "Vertrag" auch "Vertragspartner"
-     * komplett markiert. */
-    rc = sqlite3_prepare_v2(ctx->db,
+     * komplett markiert.
+     * Der Kontext steht als Unterabfrage, nicht als "AND" im MATCH: highlight()
+     * markiert sonst auch die Kontextwörter, und jede Markierung würde ein
+     * Treffer für den Suchbegriff. So zählt der Kontext nur als Bedingung
+     * (selber Chunk). */
+    sql = g_strdup_printf(
         "SELECT c.filename, c.page_nr, c.char_pos,"
         "       c.char_pos - (SELECT MIN(c2.char_pos) FROM chunks c2"
         "                     WHERE c2.filename = c.filename"
@@ -3156,28 +3276,42 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
         "       highlight(chunks_fts, 0, '\x01', '\x02')"
         " FROM chunks_fts"
         " JOIN chunks c ON c.id = chunks_fts.rowid"
-        " WHERE chunks_fts MATCH ?"
+        " WHERE chunks_fts MATCH ?1%s"
         " ORDER BY c.filename, c.page_nr, c.char_pos",
-        -1, &stmt, NULL);
+        query_ctx ?
+                " AND c.id IN (SELECT rowid FROM chunks_fts"
+                " WHERE chunks_fts MATCH ?2)" : "");
+    rc = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
+    g_free(sql);
 
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "sond_index_search: prepare FTS: %s",
                     sqlite3_errmsg(ctx->db));
         g_free(query);
+        g_free(query_ctx);
+        g_hash_table_destroy(seen);
         g_ptr_array_unref(result);
         return NULL;
     }
 
     sqlite3_bind_text(stmt, 1, query, -1, SQLITE_TRANSIENT);
+    if (query_ctx)
+        sqlite3_bind_text(stmt, 2, query_ctx, -1, SQLITE_TRANSIENT);
     g_free(query);
+    g_free(query_ctx);
 
-    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    while (!stop && (rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         gchar const *chunk_text       = (gchar const *) sqlite3_column_text(stmt, 4);
         gint         chunk_offset_on_page = sqlite3_column_int(stmt, 3);
         gchar const *highlighted      = (gchar const *) sqlite3_column_text(stmt, 5);
 
         if (!chunk_text || !*chunk_text || !highlighted || !*highlighted) continue;
+
+        /* Nicht zur Auswahl gehörende Chunks, bevor Ausschnitte entstehen */
+        if (filter && !filter((gchar const *) sqlite3_column_text(stmt, 0),
+                sqlite3_column_int(stmt, 1), filter_data))
+            continue;
 
         /* Durchsuche highlighted nach \x01-Markierungen.
          * Für jede Markierung: Offset im Original-chunk_text berechnen.
@@ -3204,6 +3338,29 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
             gchar const *term_end_hl = strchr(ph, '\x02');
             if (!term_end_hl) break; /* defekter highlight-Text */
             gint term_len_orig = (gint)(term_end_hl - ph);
+
+            /* Dublette (Chunk-Überlappung) oder Limit erreicht - vor dem
+             * Aufbau des Ausschnitts */
+            {
+                gchar *key = g_strdup_printf("%s|%d|%d",
+                        (gchar const *) sqlite3_column_text(stmt, 0),
+                        sqlite3_column_int(stmt, 1), occ_pos_in_page);
+
+                if (g_hash_table_contains(seen, key)) {
+                    g_free(key);
+                    ph = term_end_hl + 1;
+                    marker_bytes++;
+                    continue;
+                }
+                if (max_hits > 0 && (gint) result->len >= max_hits) {
+                    g_free(key);
+                    if (truncated)
+                        *truncated = TRUE;
+                    stop = TRUE;
+                    break;
+                }
+                g_hash_table_add(seen, key);
+            }
 
             /* Snippet aus dem Original-chunk_text um die Fundstelle */
 /* Zeichen Kontext vor/hinter dem Treffer. Großzügig bemessen, seit das
@@ -3268,7 +3425,10 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
         }
     }
 
-    if (rc != SQLITE_DONE) {
+    g_hash_table_destroy(seen);
+    seen = NULL;
+
+    if (!stop && rc != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "sond_index_search: step FTS: %s",
                     sqlite3_errmsg(ctx->db));
@@ -3279,95 +3439,91 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
 
     sqlite3_finalize(stmt);
 
-    /* ---------------------------------------------------------------
-     * 1b. Deduplizierung: Durch Chunk-Überlappung kann dasselbe Vorkommen
-     * aus zwei Chunks gemeldet werden. Duplikate mit gleicher
-     * (filename, page_nr, char_pos_in_page) werden entfernt.
-     * ------------------------------------------------------------- */
-    {
-        GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                  g_free, NULL);
-        guint i = 0;
-        while (i < result->len) {
-            SondIndexHit *h   = g_ptr_array_index(result, i);
-            gchar        *key = g_strdup_printf("%s|%d|%d",
-                    h->filename ? h->filename : "",
-                    h->page_nr, h->char_pos_in_page);
-            if (g_hash_table_contains(seen, key)) {
-                g_free(key);
-                g_ptr_array_remove_index(result, i);
-            } else {
-                g_hash_table_insert(seen, key, GINT_TO_POINTER(1));
-                i++;
-            }
-        }
-        g_hash_table_destroy(seen);
-    }
+    /* Limit schon durch Volltext-Treffer erreicht: keine Dateinamen-Treffer
+     * mehr anhängen */
+    if (stop)
+        return result;
 
     /* ---------------------------------------------------------------
-     * 2. Dateinamen-Suche über files-Tabelle (LIKE, Basename)
+     * 2. Dateinamen-Suche
      *
-     * Gesucht wird im letzten Pfadsegment nach dem letzten '/'.
-     * Bereits per FTS gefundene Dateien werden nicht doppelt gelistet.
-     * Der context-Parameter wird bei der Dateinamensuche ignoriert.
+     * Gesucht wird (ohne Groß-/Kleinschreibung) im letzten Pfadsegment der
+     * Dateien, die Chunks im Index haben - auch zusammengefaßte Dateien, zu
+     * denen es keine pages-Zeilen mehr gibt. Header und Teile einer Mail
+     * zählen zur Mail ("x.eml//0" -> "x.eml"). Dateien, die schon per
+     * Volltext gefunden wurden, werden nicht doppelt gelistet. Der
+     * context-Parameter wird bei der Dateinamensuche ignoriert.
      * ------------------------------------------------------------- */
     {
-        /* LIKE-Muster: %term%
-         * LIKE-Sonderzeichen (% _) im Suchbegriff werden nicht maskiert –
-         * sie treten in Dateinamen so gut wie nie auf. */
-        gchar *pattern = g_strdup_printf("%%%s%%", term);
+        GHashTable *fts_owners = g_hash_table_new_full(g_str_hash,
+                g_str_equal, g_free, NULL);
+        GHashTable *name_seen  = g_hash_table_new_full(g_str_hash,
+                g_str_equal, g_free, NULL);
+        gchar      *needle     = g_utf8_casefold(term, -1);
+
+        for (guint i = 0; i < result->len; i++) {
+            SondIndexHit *h = g_ptr_array_index(result, i);
+
+            g_hash_table_add(fts_owners, index_name_owner(h->filename));
+        }
 
         rc = sqlite3_prepare_v2(ctx->db,
-            /* Basename per SQLite-String-Funktionen isolieren:
-             * SUBSTR(filename, INSTR(filename,'/')+1) liefert
-             * alles nach dem ersten '/'. Da der Pfad immer
-             * relative Segmente mit '/' trennt, reicht ein
-             * einfacher Vergleich auf den Gesamt-Dateinamen
-             * mit dem LIKE-Pattern – false positives durch
-             * Verzeichnisnamen sind akzeptabel, da das Ergebnis
-             * ohnehin auf den Dateinamen zeigt.
-             *
-             * Zusätzlich: Ergebnis nur wenn filename NICHT bereits
-             * in der FTS-Treffermenge ist, damit keine Duplikate.
-             */
-            "SELECT DISTINCT filename FROM pages"
-            " WHERE filename LIKE ? ESCAPE '\\'"
-            "   AND filename NOT IN ("
-            "     SELECT DISTINCT c.filename FROM chunks_fts"
-            "     JOIN chunks c ON c.id = chunks_fts.rowid"
-            "     WHERE chunks_fts MATCH ?2"
-            "   )"
-            " ORDER BY filename",
+            "SELECT DISTINCT filename FROM chunks ORDER BY filename",
             -1, &stmt, NULL);
 
         if (rc != SQLITE_OK) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                         "sond_index_search: prepare filename: %s",
                         sqlite3_errmsg(ctx->db));
-            g_free(pattern);
+            g_hash_table_destroy(fts_owners);
+            g_hash_table_destroy(name_seen);
+            g_free(needle);
             g_ptr_array_unref(result);
             return NULL;
         }
 
-        /* ?1 = LIKE-Muster, ?2 = FTS-Query (für NOT IN) */
-        gchar *fts_query = build_fts_query(term, context, whole_word);
-        sqlite3_bind_text(stmt, 1, pattern,   -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, fts_query, -1, SQLITE_TRANSIENT);
-        g_free(pattern);
-        g_free(fts_query);
-
         while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-            SondIndexHit *hit = g_new0(SondIndexHit, 1);
+            gchar *owner = index_name_owner(
+                    (gchar const *) sqlite3_column_text(stmt, 0));
+            gchar const *base = strrchr(owner, '/');
+            gchar *folded = NULL;
+            gboolean match = FALSE;
 
-            hit->filename = g_strdup((gchar const *) sqlite3_column_text(stmt, 0));
-            hit->page_nr  = -1;
-            hit->char_pos = 0;
-            hit->snippet  = g_strdup("(Dateiname)");
+            base = base ? base + 1 : owner;
+            folded = g_utf8_casefold(base, -1);
+            match = strstr(folded, needle) != NULL;
+            g_free(folded);
 
-            g_ptr_array_add(result, hit);
+            if (match && !g_hash_table_contains(fts_owners, owner) &&
+                    !g_hash_table_contains(name_seen, owner) &&
+                    (!filter || filter(owner, -1, filter_data))) {
+                SondIndexHit *hit = NULL;
+
+                if (max_hits > 0 && (gint) result->len >= max_hits) {
+                    g_free(owner);
+                    if (truncated)
+                        *truncated = TRUE;
+                    stop = TRUE;
+                    break;
+                }
+
+                hit = g_new0(SondIndexHit, 1);
+                hit->filename = g_strdup(owner);
+                hit->page_nr  = -1;
+                hit->char_pos = 0;
+                hit->snippet  = g_strdup("(Dateiname)");
+
+                g_ptr_array_add(result, hit);
+                g_hash_table_add(name_seen, owner);
+            } else
+                g_free(owner);
         }
 
-        if (rc != SQLITE_DONE) {
+        g_hash_table_destroy(fts_owners);
+        g_hash_table_destroy(name_seen);
+        g_free(needle);
+
+        if (!stop && rc != SQLITE_DONE) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                         "sond_index_search: step filename: %s",
                         sqlite3_errmsg(ctx->db));
@@ -3702,14 +3858,21 @@ void sond_index(fz_context* ctx,
      * ohne extrahierbaren Text liefern kein Segment). Für
      * sond_index_ctx_set_page_count() weiter unten. */
     gint n_pages_total = -1;
+    /* Seiten, deren Text sich nicht extrahieren ließ (defekte Seite) */
+    g_autoptr(GArray) failed_pages = g_array_new(FALSE, FALSE, sizeof(gint));
 
     if (!g_strcmp0(mime_type, "application/pdf"))
         segs = sond_text_extract_pdf(ctx, buf, size,
         		(SondLogFunc) log_func, log_func_data, seite_von, seite_bis,
-        		&n_pages_total);
+        		&n_pages_total, failed_pages);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
+        /* Eine Mail steht im Index über ihren Header ("x.eml//header") und
+         * ihre Mimeparts ("x.eml//N"), jeweils mit eigener Coverage. Ihr
+         * Gesamttext würde alles ein zweites Mal ablegen (doppelte Treffer,
+         * auch für geschachtelte Mails) - hier daher kein Text, nur
+         * Struktur (oben) und Coverage (unten). */
         segs = is_header_only ? sond_text_extract_gmessage_header(buf, size) :
-                sond_text_extract_gmessage(buf, size);
+                g_ptr_array_new_with_free_func(sond_text_segment_free);
     else if (!g_strcmp0(mime_type, "text/html"))
         segs = sond_text_extract_html(buf, size);
     else if (!g_strcmp0(mime_type,
@@ -3722,8 +3885,18 @@ void sond_index(fz_context* ctx,
     else
         return; /* MIME-Typ nicht indizierbar */
 
-    if (!segs || segs->len == 0) {
-        if (segs) g_ptr_array_unref(segs);
+    if (!segs)
+        return;
+
+    /* Eine Datei ohne extrahierbaren Text (leer, Seiten ohne Textebene) gilt
+     * trotzdem als verarbeitet - sonst bliebe sie dauerhaft "nicht
+     * indiziert" und würde in jedem Lauf neu angefaßt. Nur eine PDF, die
+     * sich gar nicht öffnen ließ (Seitenzahl unbekannt), wird nicht
+     * vermerkt. */
+    gboolean is_pdf = !g_strcmp0(mime_type, "application/pdf");
+
+    if (segs->len == 0 && is_pdf && n_pages_total < 0) {
+        g_ptr_array_unref(segs);
         return;
     }
 
@@ -3762,6 +3935,12 @@ void sond_index(fz_context* ctx,
         if (!sond_index_ctx_should_process_page(sond_index_ctx, idx_filename,
                 seg->page_nr, ocr_mode))
             continue;
+
+        /* Die Seite (Löschen der alten Chunks, neue Chunks, pages-Zeile) ist
+         * ein Savepoint: bei Abbruch mitten in der Seite wird sie
+         * zurückgerollt, es bleiben weder halbe Seiten noch ein fehlender
+         * alter Stand zurück. */
+        gboolean sp_page = db_savepoint(sond_index_ctx, NULL);
 
         /* Vorhandene Chunks dieser Seite entfernen, bevor sie neu
          * eingefügt werden (Löschen-vor-Einfügen wie zuvor auf
@@ -3827,27 +4006,52 @@ void sond_index(fz_context* ctx,
 
         g_ptr_array_unref(chunks);
 
-        if (cancelled)
+        if (cancelled) {
+            if (sp_page)
+                db_savepoint_end(sond_index_ctx, FALSE);
             break;
+        }
 
         /* Seite als (mit diesem Modus) indiziert markieren */
         sond_index_page_set(sond_index_ctx, idx_filename, seg->page_nr, ocr_mode);
+        if (sp_page)
+            db_savepoint_end(sond_index_ctx, TRUE);
     }
 
-    /* Bei Abbruch mitten in der Datei: bislang fertig indizierte Seiten
-     * trotzdem committen (nicht verwerfen) - resumable dank
-     * sond_index_ctx_should_process_page() beim nächsten Lauf. Die
-     * angebrochene Seite wurde oben bewusst nicht als fertig markiert,
-     * ihre halb eingefügten Chunks sind also verwaist; das ist unschädlich,
-     * da clear_page() sie beim nächsten Lauf vor dem Neu-Indizieren
-     * dieser Seite entfernt. */
-    if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
-        if (log_func)
-            log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);
-        sqlite3_free(errmsg);
-        sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-        g_ptr_array_unref(segs);
-        return;
+    /* Seiten ohne Text (kein Segment) im angeforderten Bereich ebenfalls als
+     * verarbeitet vermerken - ohne pages-Zeile blieben sie in jedem
+     * Seitenbereich dauerhaft "fehlend", und der Bereich würde nie FULL. */
+    if (!cancelled && is_pdf && n_pages_total >= 0) {
+        gint i_von = (seite_von >= 0) ? seite_von : 0;
+        gint i_bis = (seite_bis >= 0) ? MIN(seite_bis, n_pages_total - 1) :
+                n_pages_total - 1;
+        guint j = 0;
+
+        for (gint p = i_von; p <= i_bis; p++) {
+            while (j < segs->len &&
+                    ((SondTextSegment*) g_ptr_array_index(segs, j))->page_nr < p)
+                j++;
+            if (j < segs->len &&
+                    ((SondTextSegment*) g_ptr_array_index(segs, j))->page_nr == p)
+                continue; /* hat Text, oben behandelt */
+
+            /* nicht lesbare Seite: weder Text noch "ohne Text" */
+            {
+                gboolean failed = FALSE;
+
+                for (guint f = 0; !failed && f < failed_pages->len; f++)
+                    failed = (g_array_index(failed_pages, gint, f) == p);
+                if (failed)
+                    continue;
+            }
+
+            if (!sond_index_ctx_should_process_page(sond_index_ctx,
+                    idx_filename, p, ocr_mode))
+                continue;
+
+            sond_index_ctx_clear_page(sond_index_ctx, idx_filename, p, NULL);
+            sond_index_page_set(sond_index_ctx, idx_filename, p, ocr_mode);
+        }
     }
 
     /* Coverage-Coalescing: nur wenn die ganze Datei angefordert war
@@ -3860,7 +4064,19 @@ void sond_index(fz_context* ctx,
      * sieht) könnte eine Datei fälschlich als komplett markieren, die
      * wegen eines anderen Fehlers (nicht Abbruch) nur teilweise
      * verarbeitet wurde. */
-    if (!cancelled && seite_von == -1 && seite_bis == -1) {
+    if (failed_pages->len > 0 && log_func)
+        log_func(log_func_data,
+                "sond_index: '%s': %u Seite(n) nicht lesbar - die Datei gilt "
+                "nicht als vollständig indiziert", idx_filename,
+                failed_pages->len);
+
+    /* Auch bei nicht lesbaren Seiten kein Voll-Eintrag: sie fehlen im Index.
+     * Coverage und Seitenzahl stehen noch in der Transaktion der Chunks und
+     * Seiten: entweder alles oder nichts, und ein Commit je Datei. */
+    gboolean full_done = !cancelled && failed_pages->len == 0 &&
+            seite_von == -1 && seite_bis == -1;
+
+    if (full_done) {
         GError *coverage_error = NULL;
 
         if (!sond_index_ctx_coverage_mark(sond_index_ctx, coverage_path, ocr_mode,
@@ -3888,7 +4104,23 @@ void sond_index(fz_context* ctx,
                 g_clear_error(&pagecount_error);
             }
         }
+    }
 
+    /* Bei Abbruch mitten in der Datei: bislang fertig indizierte Seiten
+     * trotzdem committen (nicht verwerfen) - resumable dank
+     * sond_index_ctx_should_process_page() beim nächsten Lauf. Die
+     * angebrochene Seite wurde oben zurückgerollt (Savepoint je Seite), von
+     * ihr bleibt nichts im Index. */
+    if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
+        if (log_func)
+            log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);
+        sqlite3_free(errmsg);
+        sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+        g_ptr_array_unref(segs);
+        return;
+    }
+
+    if (full_done) {
         /* Schritt 5 (17.09.2026, s. ToDo.c): bei einer normalen (nicht auf
          * den Header beschränkten) Ganze-Datei-Indizierung einer E-Mail
          * zusätzlich den Header UNTER SEINEM EIGENEN Pfad ("filename//header")

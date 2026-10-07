@@ -30,6 +30,7 @@
 #include <zip.h>
 
 #include "sond_log_and_error.h"
+#include "sond_file_helper.h"
 #include "sond_gmessage_helper.h"
 
 /* =========================================================================
@@ -72,12 +73,14 @@ static void log_warn(SondLogFunc log_func, gpointer log_data, gchar const *fmt, 
 
 GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
         SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis,
-        gint *out_n_pages) {
+        gint *out_n_pages, GArray *out_failed_pages) {
     GPtrArray *segs = g_ptr_array_new_with_free_func(
             (GDestroyNotify) sond_text_segment_free);
 
     pdf_document *doc = NULL;
     gint char_pos_total = 0;
+
+    fz_var(doc);
 
     fz_try(ctx) {
         fz_stream *stream = fz_open_memory(ctx, (guchar*) buf, size);
@@ -93,20 +96,44 @@ GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
 
         for (gint i = i_von; i <= i_bis; i++) {
             fz_stext_options opts = { 0 };
-            fz_stext_page *stext = fz_new_stext_page_from_page_number(
-                    ctx, (fz_document*) doc, i, &opts);
-
-            /* Denselben Flat-Text wie fz_search_stext_page intern verwendet:
-             * FZ_TEXT_FLATTEN_ALL -> alle Lücken als einzelnes Leerzeichen,
-             * keine Zeilenumbrüche. map wird nicht benötigt (NULL). */
-            fz_buffer *fzbuf = fz_new_buffer_from_flattened_stext_page(
-                    ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
-            fz_drop_stext_page(ctx, stext);
-
+            fz_stext_page *stext = NULL;
+            fz_buffer *fzbuf = NULL;
             gsize   len  = 0;
             guchar *data = NULL;
-            fz_buffer_extract(ctx, fzbuf, &data); /* transfer ownership */
-            fz_drop_buffer(ctx, fzbuf);
+
+            fz_var(stext);
+            fz_var(fzbuf);
+            fz_var(data);
+
+            /* Eine defekte Seite darf nicht die übrigen mitnehmen: eigener
+             * Versuch je Seite, der Fehler wird gemeldet (Seite zählt dann
+             * weder als Text noch als "ohne Text"). */
+            fz_try(ctx) {
+                stext = fz_new_stext_page_from_page_number(
+                        ctx, (fz_document*) doc, i, &opts);
+
+                /* Denselben Flat-Text wie fz_search_stext_page intern
+                 * verwendet: FZ_TEXT_FLATTEN_ALL -> alle Lücken als einzelnes
+                 * Leerzeichen, keine Zeilenumbrüche. map wird nicht
+                 * benötigt (NULL). */
+                fzbuf = fz_new_buffer_from_flattened_stext_page(
+                        ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
+                fz_buffer_extract(ctx, fzbuf, &data); /* transfer ownership */
+            }
+            fz_always(ctx) {
+                fz_drop_buffer(ctx, fzbuf);
+                fz_drop_stext_page(ctx, stext);
+            }
+            fz_catch(ctx) {
+                log_warn(log_func, log_data,
+                        "sond_text_extract_pdf: Seite %d: %s", i + 1,
+                        fz_caught_message(ctx));
+                g_free(data);
+                if (out_failed_pages)
+                    g_array_append_val(out_failed_pages, i);
+                continue;
+            }
+
             len = (data) ? strlen((gchar*) data) : 0;
 
             if (len > 0) {
@@ -690,6 +717,14 @@ static char* extract_from_zip(const unsigned char *zip_data, size_t zip_len,
         return NULL;
     }
 
+    /* Größe steht im Archiv und kann beschädigt oder gefälscht sein */
+    if (!(st.valid & ZIP_STAT_SIZE) || st.size > SOND_ZIP_ENTRY_MAX_SIZE) {
+        LOG_WARN("extract_from_zip: '%s': Größe unbekannt oder zu groß",
+                filename);
+        zip_close(archive);
+        return NULL;
+    }
+
     zip_file_t *file = zip_fopen(archive, filename, 0);
     if (!file) {
         LOG_WARN("extract_from_zip: '%s' konnte nicht geöffnet werden", filename);
@@ -697,7 +732,13 @@ static char* extract_from_zip(const unsigned char *zip_data, size_t zip_len,
         return NULL;
     }
 
-    char *content = g_malloc(st.size + 1);
+    char *content = g_try_malloc(st.size + 1);
+    if (!content) {
+        LOG_WARN("extract_from_zip: '%s': nicht genug Speicher", filename);
+        zip_fclose(file);
+        zip_close(archive);
+        return NULL;
+    }
     zip_int64_t bytes_read = zip_fread(file, content, st.size);
 
     if (bytes_read < 0) {

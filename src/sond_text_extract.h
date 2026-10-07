@@ -83,6 +83,12 @@ typedef void (*SondLogFunc)(gpointer log_data, gchar const *format, ...);
  *                sond_index.c) - unverändert (nicht auf -1 gesetzt),
  *                wenn das Dokument gar nicht erst geöffnet werden
  *                konnte.
+ * @out_failed_pages: (optional, darf NULL sein) GArray von gint, an den die
+ *                Seiten (0-basiert) angehängt werden, deren Text sich nicht
+ *                extrahieren ließ (MuPDF-Fehler). Die übrigen Seiten werden
+ *                trotzdem geliefert. Eine solche Seite ist weder "mit" noch
+ *                "ohne Text" - der Aufrufer darf sie nicht als verarbeitet
+ *                vermerken.
  *
  * Höchstens ein Segment pro Seite (nur im Bereich [seite_von, seite_bis],
  * und nur für Seiten mit tatsächlich extrahiertem Text - Seiten ohne
@@ -91,7 +97,7 @@ typedef void (*SondLogFunc)(gpointer log_data, gchar const *format, ...);
  */
 GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
         SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis,
-        gint *out_n_pages);
+        gint *out_n_pages, GArray *out_failed_pages);
 
 /**
  * sond_text_extract_html:
