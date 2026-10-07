@@ -1,5 +1,5 @@
 /*
- sond (sond_server_index.c) - Akten, Bewäisstücke, Unterlagen
+ sond (sond_index.c) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -40,7 +40,6 @@
 
 #define INDEX_DEFAULT_CHUNK_SIZE    1000
 #define INDEX_DEFAULT_CHUNK_OVERLAP  100
-#define INDEX_DB_FILENAME           "/.sond_index.db"
 
 /* =======================================================================
  * Datenbank-Schema
@@ -428,6 +427,10 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
         return NULL;
     }
 
+    /* Ist die Datei kurz gesperrt (zweite Verbindung, Sync-Client), bis zu 5
+     * Sekunden warten statt sofort mit "database is locked" zu scheitern */
+    sqlite3_busy_timeout(ctx->db, 5000);
+
     /* Kein WAL: .sond_index.db liegt im SeaDrive-synchronisierten Projekt-
      * verzeichnis (anders als die "work"-DB, s. Task #42) - WAL braucht
      * verlässliches mmap/Byte-Range-Locking auf der -shm-Datei, was ein
@@ -583,6 +586,11 @@ void sond_index_ctx_free(SondIndexCtx *ctx) {
     if (ctx->llama_model)
         llama_model_free((struct llama_model*)ctx->llama_model);
 #endif
+
+    /* vor dem Schließen: sonst scheitert sqlite3_close() an der offenen
+     * Anweisung */
+    if (ctx->stmt_insert_chunk)
+        sqlite3_finalize(ctx->stmt_insert_chunk);
 
     if (ctx->db)
         sqlite3_close(ctx->db);
@@ -2882,15 +2890,37 @@ static gint utf8_align_to_char_start(gchar const *text, gint pos) {
     return pos;
 }
 
+/* Leerraum (ASCII); Bytes von Mehrbyte-Zeichen sind nie ASCII */
+static gboolean chunk_is_space(gchar c) {
+    return c == ' ' || c == '\n' || c == '\t' || c == '\r';
+}
+
+/* Zerlegt text in Chunks von höchstens chunk_size BYTE, die sich um etwa
+ * chunk_overlap Byte überlappen. Geschnitten wird nach Möglichkeit an
+ * Wortgrenzen (Ende: letzter Leerraum innerhalb der letzten chunk_overlap
+ * Byte, Anfang des nächsten: erstes Wort im Überlappungsbereich): ein
+ * mitten im Wort abgeschnittenes Bruchstück würde sonst bei "ganzes Wort"
+ * als eigenes Wort gefunden. Gibt es dort keinen Leerraum, wird wie bisher
+ * an beliebiger Stelle (aber nie mitten in einem UTF-8-Zeichen) geschnitten. */
 static GPtrArray* text_to_chunks(gchar const *text, gint chunk_size, gint chunk_overlap) {
     GPtrArray *chunks = g_ptr_array_new_with_free_func((GDestroyNotify)sond_chunk_free);
     gint len  = (gint)strlen(text);
-    gint step = chunk_size - chunk_overlap;
 
-    if (step <= 0) step = chunk_size;
+    if (chunk_overlap < 0 || chunk_overlap >= chunk_size)
+        chunk_overlap = 0;
 
     for (gint pos = 0; pos < len; ) {
         gint end = utf8_align_to_char_start(text, MIN(pos + chunk_size, len));
+
+        /* Ende an die letzte Wortgrenze zurücknehmen (nur wenn der Text
+         * danach noch weitergeht) */
+        if (end < len && chunk_overlap > 0) {
+            for (gint k = end; k > pos + 1 && k > end - chunk_overlap; k--)
+                if (chunk_is_space(text[k - 1])) {
+                    end = k;
+                    break;
+                }
+        }
 
         /* utf8_align_to_char_start kann end bis auf pos zurückwerfen, wenn
          * bereits das erste Zeichen ab pos länger als chunk_size (in Byte)
@@ -2910,15 +2940,39 @@ static GPtrArray* text_to_chunks(gchar const *text, gint chunk_size, gint chunk_
         if (end == len) break;
 
         {
-            gint next_pos = utf8_align_to_char_start(text, pos + step);
+            gint next_pos = utf8_align_to_char_start(text,
+                    MAX(end - chunk_overlap, pos + 1));
+
+            /* an einen Wortanfang vorrücken, solange das noch innerhalb des
+             * Chunks liegt */
+            if (next_pos > pos && !chunk_is_space(text[next_pos - 1])) {
+                gint q = next_pos;
+
+                while (q < end && !chunk_is_space(text[q]))
+                    q++;
+                if (q < end)
+                    next_pos = q + 1;
+            }
+
             /* Sicherheitsnetz: next_pos muss echt vorwärts gehen, sonst
-             * Endlosschleife bei sehr kleinem step relativ zu Mehrbyte-
+             * Endlosschleife bei sehr kleinem Überlapp relativ zu Mehrbyte-
              * Zeichen. */
             pos = (next_pos > pos) ? next_pos : end;
         }
     }
 
     return chunks;
+}
+
+/* Hat der Chunk mindestens einen Buchstaben oder eine Ziffer? Ein Chunk aus
+ * lauter Steuer-/Ersatzzeichen (kaputte PDF-Schrift, U+FFFD, CR) wird nicht
+ * abgelegt: er ist nicht durchsuchbar und füllt nur den Index. */
+static gboolean chunk_has_text(gchar const *text) {
+    for (gchar const *p = text; *p; p = g_utf8_next_char(p))
+        if (g_unichar_isalnum(g_utf8_get_char(p)))
+            return TRUE;
+
+    return FALSE;
 }
 
 /* =======================================================================
@@ -3012,18 +3066,27 @@ static gboolean db_insert_chunk(SondIndexCtx *sond_index_ctx,
                                  gchar const  *mime_type,
                                  gchar const  *text,
                                  gfloat       *embedding) {
-    sqlite3_stmt  *stmt  = NULL;
+    sqlite3_stmt  *stmt  = sond_index_ctx->stmt_insert_chunk;
     gint           rc    = 0;
 
-    rc = sqlite3_prepare_v2(sond_index_ctx->db,
-            "INSERT INTO chunks(filename, chunk_idx, page_nr, char_pos, mime_type, text, embedding)"
-            " VALUES(?,?,?,?,?,?,?)",
-            -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        if (log_func)
-            log_func(log_func_data,
-                    "db_insert_chunk: prepare: %s", sqlite3_errmsg(sond_index_ctx->db));
-        return FALSE;
+    /* Das INSERT wird einmal vorbereitet und für jeden Chunk wiederverwendet
+     * (sond_index_ctx_free() gibt es frei) */
+    if (!stmt) {
+        rc = sqlite3_prepare_v2(sond_index_ctx->db,
+                "INSERT INTO chunks(filename, chunk_idx, page_nr, char_pos, mime_type, text, embedding)"
+                " VALUES(?,?,?,?,?,?,?)",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            if (log_func)
+                log_func(log_func_data,
+                        "db_insert_chunk: prepare: %s", sqlite3_errmsg(sond_index_ctx->db));
+            return FALSE;
+        }
+        sond_index_ctx->stmt_insert_chunk = stmt;
+    }
+    else {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
     }
 
     sqlite3_bind_text(stmt, 1, filename,  -1, SQLITE_STATIC);
@@ -3045,14 +3108,19 @@ static gboolean db_insert_chunk(SondIndexCtx *sond_index_ctx,
 #endif
 
     rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
 
     if (rc != SQLITE_DONE) {
         if (log_func)
             log_func(log_func_data,
                     "db_insert_chunk: step: %s", sqlite3_errmsg(sond_index_ctx->db));
+        sqlite3_reset(stmt);
         return FALSE;
     }
+
+    /* zurücksetzen, damit die Anweisung keine Sperre auf der Datenbank hält
+     * (die gebundenen Texte gelten nur bis hierher) */
+    sqlite3_reset(stmt);
+    sqlite3_clear_bindings(stmt);
 
     return TRUE;
 }
@@ -3170,7 +3238,7 @@ static gchar* normalize_snippet_whitespace(gchar const *text) {
     return g_strstrip(g_string_free(out, FALSE));
 }
 
-/* Chunks überlappen sich nur um chunk_overlap Zeichen (deutlich weniger als
+/* Chunks überlappen sich nur um chunk_overlap Byte (deutlich weniger als
  * SNIPPET_CTX, s.u.) - liegt ein Treffer nahe am Anfang "seines" Chunks,
  * reicht der Text INNERHALB dieses einen Chunks nicht für den gewünschten
  * Vorlauf, obwohl auf der Seite davor noch mehr steht (im vorangehenden,
@@ -3719,7 +3787,7 @@ static void sond_index_page_set(SondIndexCtx *ctx, gchar const *filename,
 }
 
 /* =======================================================================
- * sond_server_index
+ * sond_index
  * ======================================================================= */
 
 /* Muss mit der Dispatch-Liste unten in sond_index() übereinstimmen. */
@@ -3986,6 +4054,10 @@ void sond_index(fz_context* ctx,
                 cancelled = TRUE;
                 break;
             }
+
+            /* Chunk ohne Buchstaben/Ziffern (Müll) nicht ablegen */
+            if (!chunk_has_text(chunk->text))
+                continue;
 
             gfloat *embedding  = compute_embedding(sond_index_ctx,
                     log_func, log_func_data, chunk->text);

@@ -1,5 +1,5 @@
 /*
- sond (sond_server_index.h) - Akten, Beweisstücke, Unterlagen
+ sond (sond_index.h) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -16,8 +16,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SRC_SOND_SERVER_INDEX_H_
-#define SRC_SOND_SERVER_INDEX_H_
+#ifndef SRC_SOND_INDEX_H_
+#define SRC_SOND_INDEX_H_
 
 #include <glib.h>
 #include <sqlite3.h>
@@ -36,8 +36,8 @@ G_BEGIN_DECLS
  * @llama_model:   llama.cpp-Modell für Embeddings (opaker Zeiger)
  * @llama_ctx:     llama.cpp-Kontext für Embedding-Berechnungen (opaker Zeiger)
  * @n_embd:        Dimension der Embedding-Vektoren
- * @chunk_size:    Maximale Chunk-Größe in Zeichen
- * @chunk_overlap: Überlappung zwischen Chunks in Zeichen
+ * @chunk_size:    Maximale Chunk-Größe in Byte
+ * @chunk_overlap: Überlappung zwischen Chunks in Byte
  * @embedding_model_changed:
  *                 TRUE, wenn beim Öffnen festgestellt wurde, daß das jetzt
  *                 konfigurierte Embedding-Modell von dem abweicht, mit dem
@@ -58,6 +58,10 @@ typedef struct _SondIndexCtx {
     gint      chunk_size;
     gint      chunk_overlap;
     gboolean  embedding_model_changed;
+    /* intern (sond_index.c): wiederverwendetes INSERT für Chunks. Am Ende,
+     * damit sich der Aufbau für Dateien, die nur auf db zugreifen, nicht
+     * ändert. */
+    sqlite3_stmt *stmt_insert_chunk;
 } SondIndexCtx;
 
 /* =======================================================================
@@ -68,8 +72,8 @@ typedef struct _SondIndexCtx {
  * sond_index_ctx_new:
  * @db_path:       Pfad zur lokalen SQLite-Datei (wird erstellt falls nicht vorhanden)
  * @model_path:    Pfad zum GGUF-Embedding-Modell (NULL: kein Embedding)
- * @chunk_size:    Maximale Chunk-Größe in Zeichen (0: Standardwert 1000)
- * @chunk_overlap: Überlappung in Zeichen (0: Standardwert 100)
+ * @chunk_size:    Maximale Chunk-Größe in Byte (0: Standardwert 1000)
+ * @chunk_overlap: Überlappung in Byte (0: Standardwert 100)
  * @error:         GError
  *
  * Öffnet/erstellt SQLite-DB, legt Tabellen an, lädt das llama-Modell.
@@ -867,7 +871,7 @@ GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
  * ======================================================================= */
 
 /**
- * sond_server_index:
+ * sond_index:
  * @ctx:       SondIndexCtx (NULL → sofortiger Rücksprung)
  * @filename:  Dateiname/Pfad der Datei
  * @buf:       Rohdaten (bei PDF: bereits OCR-ter Buffer)
@@ -941,4 +945,4 @@ gboolean sond_index_mime_type_supported(gchar const *mime_type);
 
 G_END_DECLS
 
-#endif /* SRC_SOND_SERVER_INDEX_H_ */
+#endif /* SRC_SOND_INDEX_H_ */
