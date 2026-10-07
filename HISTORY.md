@@ -5092,3 +5092,16 @@ Noch nicht getestet (Syntaxprüfung; Testlauf mit PDF/TXT-Ordner: Coverage und C
    auch nach Abbruch. Vertreter der Gruppe ist der erste fertig indizierte
    Schlüssel; Bedingung wie bisher coverage_get() >= ocr_mode.
 ```
+
+## #213 Rest: Rückfall bei E-Mail (07.10.2026)
+
+Noch nicht getestet (nur Syntaxprüfung).
+
+```text
+ #213 Rest: scheitert bei einer E-Mail die Bearbeitung (rc == -1 in
+ sond_process_file_do_rec, z.B. Zurückschreiben der geänderten Mail), werden
+ Header und Inline-Teile der Originaldaten trotzdem indiziert (Modus "kein
+ OCR", wie bei PDF: ein späterer Lauf mit OCR-Prüfung versucht es erneut).
+ ZIP bleibt ohne Rückfall: kein eigener Text, die Einträge sind schon einzeln
+ indiziert, nur das Zurückschreiben ist gescheitert.
+```

@@ -482,9 +482,6 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  Endung einem nicht indizierbaren Typ entspricht, auch wenn libmagic sie als
  Text erkannt hätte (.sql, .sh, .bat, .json, .py ...).
 
- #213 Rest: Verarbeitungsfehler (rc == -1 in sond_process_file_do_rec) bei E-Mail
- und ZIP überspringen die Datei weiter ganz, ohne Fallback auf die Indizierung.
-
  #214 Rest: Die Indexsuche läuft weiter synchron im UI-Thread (die Oberfläche
  steht während der FTS-Abfrage, bei großen Indizes einige Sekunden). Eine Suche
  im Thread bräuchte ein Info-Fenster mit Abbrechen wie beim Indizieren. Die
