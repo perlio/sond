@@ -495,26 +495,20 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  listet nach jeder Datei das Verzeichnis (Zusammenfassen besser am Ende je
  Verzeichnis); das Löschen läuft weiter im UI-Thread.
 
- #219 Kleinigkeiten aus dem Index-Review:
- - Lecks: clear_file (#206) und die Lecks in sond_process_file.c (#208) sind
-   behoben.
- - chunk_size zählt Bytes (Kommentar: Zeichen); Chunks schneiden Wörter
-   ("ganzes Wort" kann am Chunk-Ende falsch treffen).
- - UTF-16-Textdateien (windows-1252, NUL-Abschnitt); HTML-Extraktion nimmt
-   script/style im Body mit; leere DOCX/ODT indizieren den englischen
-   Platzhaltertext; Müll-Chunks (U+FFFD, CR).
- - Renderer: Highlight-Offset aus casefold-Text im Originaltext
-   (sond_renderer.c ~1469); FTS entfernt Diakritika, Markierung nicht.
- - INSERT je Chunk neu vorbereitet; busy_timeout fehlt.
- - wctx teilt zond->ctx (ohne Locks), sicher nur durch den modalen
-   Info-Dialog; wctx->log_func_data zeigt nach info_window_close ins Leere;
-   sond_stat() mit projektrelativen Pfaden hängt am Prozess-CWD.
- - Tot/veraltet: sond_index_ctx_embedding_model_changed ohne Aufrufer,
-   INDEX_DB_FILENAME ungenutzt, sond_index.h nennt sich noch sond_server_index,
-   Datums-Kommentare entgegen CLAUDE.md (sond_index.c, zond_indexsuche.c,
-   headerbar.c u.a.).
- - Lange Funktionen: sond_index (~270 Z.), coverage_invalidate (~265),
-   coverage_try_collapse (~200), zond_indexsuche_do (~270),
-   sond_process_fileparts (~175). Keine Tests; sond_index.c lässt sich mit
-   zehn Stubs linken (Testprogramm im Review).
+ #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
+ - wctx teilt zond->ctx (ohne Locks): sicher nur, weil der modale Info-Dialog
+   die Oberfläche sperrt. Sauber wäre ein eigener Kontext für den Thread
+   (fz_clone_context braucht beim Anlegen von zond->ctx in zond_init.c einen
+   fz_locks_context, sonst ist der gemeinsame Speicher nicht thread-sicher).
+ - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein
+   Modellwechsel stößt kein Re-Embedding an (Embeddings gibt es nur im
+   Debug-Build, Release ohne SOND_WITH_EMBEDDINGS).
+ - Datums-Kommentare entgegen CLAUDE.md in sond_index.c, sond_index.h,
+   sond_process_file.c, sond_text_extract.c, zond_indexsuche.c, headerbar.c
+   u.a.
+ - Lange Funktionen: sond_index (~290 Z.), coverage_invalidate (~265),
+   coverage_try_collapse (~200), zond_indexsuche_do (~280),
+   sond_process_fileparts (~200). Keine automatischen Tests im Repository:
+   sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
+   aus dem Review liegen nur im Scratchpad).
 ```

@@ -5028,3 +5028,50 @@ Noch nicht getestet - auf Wunsch des Nutzers hierher übernommen, bei Fehlern me
  Geprüft mit Testprogramm: ZIP und DOCX mit gefälschter Größe im Verzeichnis
  (3,75 GB) werden übersprungen, der Lauf geht weiter.
 ```
+
+## #219 Index-Review: Kleinigkeiten (07.10.2026)
+
+Noch nicht getestet - auf Wunsch des Nutzers hierher übernommen, bei Fehlern meldet er sich.
+Der nicht erledigte Rest steht in TODO.md.
+
+```text
+ #219 Kleinigkeiten aus dem Index-Review:
+ - Chunking (sond_index.c, text_to_chunks()): chunk_size und chunk_overlap
+   zählen Byte (Kommentare, Doku in sond_index.h: vorher "Zeichen"). Chunks
+   werden nach Möglichkeit an Wortgrenzen geschnitten (Ende: letzter Leerraum
+   innerhalb der letzten chunk_overlap Byte, Anfang des nächsten Chunks: erstes
+   Wort im Überlappungsbereich); ein mitten im Wort abgeschnittenes
+   Bruchstück wurde bei "ganzes Wort" als eigenes Wort gefunden. Ohne Leerraum
+   dort wie bisher an beliebiger Stelle, nie mitten in einem UTF-8-Zeichen.
+ - Chunks ohne Buchstaben und Ziffern (Müll: U+FFFD, CR, kaputte PDF-Schrift)
+   werden nicht mehr abgelegt (chunk_has_text()).
+ - sond_text_extract.c: UTF-16-Textdateien (BOM FF FE / FE FF) werden gelesen
+   (vorher als windows-1252 gedeutet, nach dem ersten Zeichen abgeschnitten),
+   eine UTF-8-Kennung bleibt nicht als U+FEFF im Text. HTML: script und style
+   zählen nicht als Text (füllten den Index mit CSS/JavaScript, v.a. bei
+   HTML-Mails). Leere DOCX/ODT: der englische Platzhaltertext steht nur noch
+   in der Anzeige (out_attrs gesetzt), nicht mehr im Index.
+ - Renderer (sond_renderer.c): die Markierung der Fundstelle sitzt auch bei
+   Zeichen, deren Länge sich beim Casefold ändert (ß, ẞ, İ, Ligaturen); vorher
+   wurde ein Offset im gefalteten Text im Originaltext benutzt. Faltung jetzt
+   wie die Volltextsuche (Casefold und Akzente: "Munchen" markiert "München"),
+   fold_for_search() mit Abbildung der Positionen auf das Original.
+ - sond_index.c: das INSERT für Chunks wird einmal vorbereitet und
+   wiederverwendet (SondIndexCtx.stmt_insert_chunk, am Ende der Struktur;
+   sond_index_ctx_free() gibt es vor sqlite3_close() frei);
+   sqlite3_busy_timeout 5 s; ungenutztes INDEX_DB_FILENAME entfernt; Kopf von
+   sond_index.c/.h und Include-Schutz heißen nicht mehr sond_server_index,
+   Tippfehler im Dateikopf.
+ - sond_stat() mit absolutem Pfad (Wurzel + relativer Pfad) in
+   zond_indexsuche.c (Lücken-Scan), zond_treeviewfm.c (readdir-Scanner) und
+   sond_tvfm_item.c (Verzeichnis laden): ein projektrelativer Pfad hing am
+   Arbeitsverzeichnis des Prozesses und hatte unter Windows keinen
+   Long-Path-Schutz.
+ - headerbar.c: wctx->log_func_data wird nach dem Schließen des Info-Fensters
+   auf NULL gesetzt (zeigte auf das freigegebene Fenster).
+ Geprüft mit Testprogrammen (Chunking: keine Wörter abgeschnitten, Positionen
+ stimmen, keine Lücken; Müll-Chunk; BOM; HTML; leere DOCX/ODT; Faltung und
+ Positionsabbildung), nicht in der Oberfläche.
+ Bestehende Indizes behalten ihre alten Chunks (anderer Zuschnitt, ggf. Müll,
+ Skript-Text aus HTML) bis zum erneuten Indizieren.
+```
