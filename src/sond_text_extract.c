@@ -176,6 +176,12 @@ static void extract_text_from_html_node(lxb_dom_node_t *node, GString *text) {
         size_t tag_len;
         const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
 
+        /* Skript und Formatvorlagen sind kein sichtbarer Text (und füllten
+         * den Index mit CSS/JavaScript, v.a. bei HTML-Mails) */
+        if ((tag_len == 6 && memcmp(tag, "script", 6) == 0) ||
+                (tag_len == 5 && memcmp(tag, "style", 5) == 0))
+            return;
+
         if (tag_len == 2 && memcmp(tag, "br", 2) == 0) {
             g_string_append(text, "\n");
         } else if (tag_len == 1 && memcmp(tag, "p", 1) == 0) {
@@ -306,18 +312,42 @@ GPtrArray* sond_text_extract_plain(guchar const *buf, gsize size) {
             (GDestroyNotify) sond_text_segment_free);
     if (!buf || size == 0) return segs;
 
+    /* Zeichensatz-Kennung (BOM): UTF-16 (z.B. "Unicode"-Textdateien aus
+     * Windows) hat NUL-Bytes und wäre sonst als windows-1252 nach dem ersten
+     * Zeichen abgeschnitten; die UTF-8-Kennung bleibt nicht als U+FEFF im
+     * Text stehen. */
+    guchar const *src = buf;
+    gsize src_size = size;
+    gchar *converted = NULL;
+
+    if (size >= 2 && ((buf[0] == 0xFF && buf[1] == 0xFE) ||
+            (buf[0] == 0xFE && buf[1] == 0xFF))) {
+        converted = g_convert((const gchar*) buf + 2, (gssize) (size - 2),
+                "UTF-8", buf[0] == 0xFF ? "UTF-16LE" : "UTF-16BE",
+                NULL, NULL, NULL);
+        if (converted) {
+            src = (guchar const*) converted;
+            src_size = strlen(converted);
+        }
+    }
+    else if (size >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) {
+        src = buf + 3;
+        src_size = size - 3;
+    }
+
     gchar *safe_text = NULL;
-    if (g_utf8_validate((const gchar*) buf, (gssize) size, NULL)) {
-        safe_text = g_strndup((const gchar*) buf, size);
+    if (g_utf8_validate((const gchar*) src, (gssize) src_size, NULL)) {
+        safe_text = g_strndup((const gchar*) src, src_size);
     } else {
         GError *conv_err = NULL;
-        safe_text = g_convert((const gchar*) buf, (gssize) size,
+        safe_text = g_convert((const gchar*) src, (gssize) src_size,
                 "UTF-8", "windows-1252", NULL, NULL, &conv_err);
         if (!safe_text) {
             g_clear_error(&conv_err);
-            safe_text = g_utf8_make_valid((const gchar*) buf, (gssize) size);
+            safe_text = g_utf8_make_valid((const gchar*) src, (gssize) src_size);
         }
     }
+    g_free(converted);
     if (!safe_text) return segs;
 
     GString *text = g_string_new(NULL);
@@ -967,8 +997,16 @@ GPtrArray* sond_text_extract_docx(guchar const *buf, gsize size, PangoAttrList *
     }
     xmlFreeDoc(doc);
 
-    if (text->len == 0)
+    /* Platzhalter nur für die Anzeige (out_attrs gesetzt); der Index
+     * (out_attrs NULL) bekommt keinen Text, sonst fände man leere Dokumente
+     * über "Document" und "content" */
+    if (text->len == 0) {
+        if (!out_attrs) {
+            g_string_free(text, TRUE);
+            return segs;
+        }
         g_string_append(text, "DOCX Document\n\n(No readable content found)");
+    }
 
     if (out_attrs) *out_attrs = attr_list;
 
@@ -1011,8 +1049,13 @@ GPtrArray* sond_text_extract_odt(guchar const *buf, gsize size, PangoAttrList **
     }
     xmlFreeDoc(doc);
 
-    if (text->len == 0)
+    if (text->len == 0) {
+        if (!out_attrs) {
+            g_string_free(text, TRUE);
+            return segs;
+        }
         g_string_append(text, "ODT Document\n\n(No readable content found)");
+    }
 
     if (out_attrs) *out_attrs = attr_list;
 
