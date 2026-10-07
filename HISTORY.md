@@ -5249,3 +5249,21 @@ Noch nicht in der Oberfläche getestet; im Testprogramm geprüft.
  - Restrisiko: Die Textextraktion kopiert den Inhalt noch mehrfach; ein
    mehrere GB großer Text kann dort noch an g_malloc scheitern.
 ```
+
+## #215 Rest: ein Commit je ZIP und je Mail (07.10.2026)
+
+Noch nicht in der Oberfläche getestet; im Testprogramm geprüft.
+
+```text
+ #215 Rest: sond_process_file_do_rec() klammert wie bei PDF auch die
+ Verarbeitung eines ZIP-Archivs und einer Mail (process_gmessage_for_ocr, nicht
+ bei reinem Header) mit sond_index_ctx_batch_begin()/_end(): Anzahl der
+ Einträge, alle Einträge bzw. Mimeparts und die Datei selbst in einer
+ Transaktion, ein Commit je ZIP/Mail statt einem je Eintrag.
+ - Test (ZIP mit 50 Textdateien, Mail mit 3 Teilen): 2 statt 56 Commits,
+   Inhalt der Index-DB (106 Zeilen) identisch zum Stand davor.
+ - Folge: ein Absturz mitten im Archiv verliert den Index-Stand des ganzen
+   Archivs (nicht nur des laufenden Eintrags); das Archiv selbst wird ohnehin
+   erst am Ende zurückgeschrieben. Abbrechen: was fertig ist, bleibt.
+ - Das Löschen im UI-Thread bleibt (TODO.md #220).
+```

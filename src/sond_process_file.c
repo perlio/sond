@@ -1003,18 +1003,27 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		if (pdf_pagetree_only && n_emb == 0)
 			pdf_pagetree_only = FALSE;
 	}
-	else if (!g_strcmp0(mime_type, "application/zip"))
+	else if (!g_strcmp0(mime_type, "application/zip")) {
+		/* Einträge und ihre Anzahl in einer Transaktion: ein Commit je
+		 * ZIP statt einem je Eintrag. */
+		batch = sond_index_ctx_batch_begin(wctx->index_ctx, NULL);
+
 		rc = process_zip_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
+	}
 	else if (!g_strcmp0(mime_type, "message/rfc822") &&
-			(!gmessage_header_only || gmessage_message))
+			(!gmessage_header_only || gmessage_message)) {
 		/* Bei gmessage_header_only wird ohnehin nur der Header indiziert
 		 * - das OCRen/Bearbeiten
 		 * eingebetteter Inhalte (Bilder, PDF-Attachments) wäre hier
 		 * verschwendete Arbeit und wird deshalb übersprungen. Bei
-		 * gmessage_message nur die Inline-Teile, keine Anhänge. */
+		 * gmessage_message nur die Inline-Teile, keine Anhänge. Teile und
+		 * Mail in einer Transaktion: ein Commit je Mail. */
+		batch = sond_index_ctx_batch_begin(wctx->index_ctx, NULL);
+
 		rc = process_gmessage_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, gmessage_message, &error);
+	}
 
 	if (rc == -1) {
 		if (wctx->log_func)
