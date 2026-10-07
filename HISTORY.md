@@ -5075,3 +5075,20 @@ Der nicht erledigte Rest steht in TODO.md.
  Bestehende Indizes behalten ihre alten Chunks (anderer Zuschnitt, ggf. Müll,
  Skript-Text aus HTML) bis zum erneuten Indizieren.
 ```
+
+## #215 Rest: Mail-Struktur und Zusammenfassen (07.10.2026)
+
+Noch nicht getestet (Syntaxprüfung; Testlauf mit PDF/TXT-Ordner: Coverage und Commit-Zahl unverändert, keine Mail im Test).
+
+```text
+ #215 Rest:
+ - sond_index(): sond_index_ctx_record_gmessage_structure() läuft jetzt nach
+   dem BEGIN innerhalb der Datei-Transaktion (vorher zwei eigene Commits vor
+   der Extraktion) und ist selbst atomar (Savepoint um entry_count und
+   Inline-Teile).
+ - sond_process_fileparts(): coverage_try_collapse() nicht mehr nach jeder
+   Datei (listete jedes Mal das Verzeichnis), sondern einmal je Gruppe
+   (Container = Teil vor dem letzten "//", sonst Verzeichnis) nach dem Lauf,
+   auch nach Abbruch. Vertreter der Gruppe ist der erste fertig indizierte
+   Schlüssel; Bedingung wie bisher coverage_get() >= ocr_mode.
+```

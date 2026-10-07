@@ -490,10 +490,8 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  im Thread bräuchte ein Info-Fenster mit Abbrechen wie beim Indizieren. Die
  Dateinamen-Suche liest alle Dateinamen aus chunks; Ergebnisliste ohne Paging.
 
- #215 Rest: set_entry_count/set_pdf_embedded/record_gmessage_structure
- (sond_process_file.c) machen weiter je einen Commit; coverage_try_collapse
- listet nach jeder Datei das Verzeichnis (Zusammenfassen besser am Ende je
- Verzeichnis); das Löschen läuft weiter im UI-Thread.
+ #215 Rest: set_entry_count/set_pdf_embedded (sond_process_file.c) machen weiter
+ je einen Commit (einzeln jeweils klein); das Löschen läuft weiter im UI-Thread.
 
  #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
  - wctx teilt zond->ctx (ohne Locks): sicher nur, weil der modale Info-Dialog
