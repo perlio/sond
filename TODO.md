@@ -484,19 +484,14 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  je einen Commit (einzeln jeweils klein); das Löschen läuft weiter im UI-Thread.
 
  #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
- - wctx teilt zond->ctx (ohne Locks): sicher nur, weil der modale Info-Dialog
-   die Oberfläche sperrt. Sauber wäre ein eigener Kontext für den Thread
-   (fz_clone_context braucht beim Anlegen von zond->ctx in zond_init.c einen
-   fz_locks_context, sonst ist der gemeinsame Speicher nicht thread-sicher).
  - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein
-   Modellwechsel stößt kein Re-Embedding an (Embeddings gibt es nur im
-   Debug-Build, Release ohne SOND_WITH_EMBEDDINGS).
- - Datums-Kommentare entgegen CLAUDE.md in sond_index.c, sond_index.h,
-   sond_process_file.c, sond_text_extract.c, zond_indexsuche.c, headerbar.c
-   u.a.
+   Modellwechsel stößt kein Re-Embedding an. Embeddings gibt es nur im
+   Debug-Build (Release ohne SOND_WITH_EMBEDDINGS); beim Wiedereinschalten
+   der Embeddings muss der Aufrufer bei TRUE ein Re-Embedding anstoßen.
+ - Datums- und Verlaufs-Kommentare entgegen CLAUDE.md stehen noch in den
+   übrigen Dateien (rund 150 Stellen, z.B. "ToDo.c", "Nutzer-Fund", Datum).
  - Lange Funktionen: sond_index (~290 Z.), coverage_invalidate (~265),
    coverage_try_collapse (~200), zond_indexsuche_do (~280),
    sond_process_fileparts (~200). Keine automatischen Tests im Repository:
    sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
    aus dem Review liegen nur im Scratchpad).
-```

@@ -5157,3 +5157,23 @@ Noch nicht getestet (Syntaxprüfung, Testprogramm).
    übersprungen, 600-MB-Datei mit Warnung übersprungen.
  - Offen (TODO.md): Abbrechen beim Lesen einer großen Datei.
 ```
+
+## #219 Rest: eigener fz_context, Kommentare (07.10.2026)
+
+Noch nicht getestet (Syntaxprüfung, Testlauf der Indizierung ohne und mit OCR).
+
+```text
+ #219 Rest:
+ - sond_process_file_create_wctx() legt einen eigenen fz_context mit Sperren
+   (FZ_LOCK_MAX Mutexe, SondProcessFileCtx.fz_locks) an und gibt ihn in
+   sond_process_file_destroy_wctx() frei; der Parameter fz_context entfällt
+   (project.c). Der Indizier-Thread teilt damit keinen ungesperrten Kontext
+   mehr mit der Oberfläche (zond->ctx). Bei Fehlern in create_wctx wird über
+   destroy_wctx aufgeräumt.
+ - Datums-, Entscheidungs- und Verlaufs-Kommentare (ToDo.c, Nutzer-Fund,
+   Task-Nummern, "vorher/jetzt") in sond_index.c/.h, sond_process_file.c,
+   sond_text_extract.c, zond_indexsuche.c und headerbar.c gestrichen oder
+   auf den Ist-Stand gekürzt. Die übrigen Dateien stehen noch in TODO.md.
+ - Embedding-Modellwechsel: Hinweis in TODO.md (Embeddings sind im Release
+   abgeschaltet).
+```
