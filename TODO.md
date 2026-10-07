@@ -482,8 +482,15 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 
  #215 Rest: set_entry_count (sond_process_file.c, ZIP) macht weiter einen
  eigenen Commit je ZIP (ein Commit kostet lokal rund 16 ms); ein späterer Lauf
- nach Abbruch bräuchte die Zahl noch. Das Löschen des Index läuft weiter im
- UI-Thread (eine Transaktion, aber Verzeichnis-Listing je gelöschter Datei).
+ nach Abbruch bräuchte die Zahl noch.
+
+ #220 Index löschen läuft im UI-Thread (headerbar.c, zond_index_loeschen_...):
+ bewußt so belassen. Gemessen auf einer Kopie des größten Index (23 MB, 15.519
+ Chunks, 30 Dateien): 30 Dateien 1,3 s (rund 43 ms je Datei), ganzer Index
+ 0,9 s; hochgerechnet etwa 40 s Stillstand bei 1000 Dateien mit ähnlich vielen
+ Chunks. Ohne Abbrechen-Button. Wird das im Betrieb zu langsam: Löschen in
+ einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
+ Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
 
  #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
  - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein
