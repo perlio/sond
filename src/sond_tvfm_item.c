@@ -504,12 +504,21 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 					filename, NULL);
 		else rel_path_child = g_strdup(filename);
 
-		if (sond_stat(rel_path_child, &st, error)) {
-			LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, (*error)->message);
-			g_clear_error(error);
-			g_free(rel_path_child);
+		/* absoluter Pfad: ein projektrelativer hinge am Arbeitsverzeichnis des
+		 * Prozesses (und bekäme unter Windows keinen Long-Path-Schutz) */
+		{
+			gchar *abs_path_child = g_strconcat(stvfm_priv->root, "/",
+					rel_path_child, NULL);
+			gint rc_stat = sond_stat(abs_path_child, &st, error);
 
-			continue;
+			g_free(abs_path_child);
+			if (rc_stat) {
+				LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, (*error)->message);
+				g_clear_error(error);
+				g_free(rel_path_child);
+
+				continue;
+			}
 		}
 
 		if (S_ISDIR(st.st_mode)) {

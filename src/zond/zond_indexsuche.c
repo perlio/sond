@@ -678,12 +678,21 @@ scan_coverage_gaps_fs(Projekt *zond, SondTreeviewFM *stvfm,
         rel_path_child = rel_dir ?
                 g_strconcat(rel_dir, "/", filename, NULL) : g_strdup(filename);
 
-        if (sond_stat(rel_path_child, &st, &error_stat)) {
-            LOG_WARN("%s: sond_stat('%s') gibt Fehler zurück: %s", __func__,
-                    rel_path_child, error_stat ? error_stat->message : "?");
-            g_clear_error(&error_stat);
-            g_free(rel_path_child);
-            continue;
+        /* absoluter Pfad: ein projektrelativer hinge am Arbeitsverzeichnis
+         * des Prozesses */
+        {
+            gchar *abs_path_child = g_strconcat(root, "/", rel_path_child,
+                    NULL);
+            gint rc_stat = sond_stat(abs_path_child, &st, &error_stat);
+
+            g_free(abs_path_child);
+            if (rc_stat) {
+                LOG_WARN("%s: sond_stat('%s') gibt Fehler zurück: %s", __func__,
+                        rel_path_child, error_stat ? error_stat->message : "?");
+                g_clear_error(&error_stat);
+                g_free(rel_path_child);
+                continue;
+            }
         }
 
         if (S_ISDIR(st.st_mode)) {

@@ -259,6 +259,8 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 	g_hash_table_destroy(ht_index);
 	g_free(td);
 	info_window_close(info_window);
+	/* zeigt sonst auf das freigegebene Info-Fenster */
+	zond->wctx->log_func_data = NULL;
 	return TRUE;
 }
 
