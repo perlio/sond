@@ -5177,3 +5177,45 @@ Noch nicht getestet (Syntaxprüfung, Testlauf der Indizierung ohne und mit OCR).
  - Embedding-Modellwechsel: Hinweis in TODO.md (Embeddings sind im Release
    abgeschaltet).
 ```
+
+## PDF-Text: Puffer von MuPDF nicht terminiert (07.10.2026)
+
+Noch nicht getestet in der Oberfläche; im Testprogramm geprüft.
+
+```text
+ sond_text_extract_pdf() (sond_text_extract.c): der Seitentext kam über
+ fz_buffer_extract() und wurde mit strlen() gemessen. MuPDF terminiert diesen
+ Puffer nicht; strlen las über sein Ende hinaus und lieferte je nach
+ Speicherinhalt zusätzlichen Müll am Seitenende. Folge: derselbe PDF-Text
+ ergab bei jedem Lauf andere Chunks (Testdatei: 23.100 bis 26.000 Byte, 34
+ bis 35 Chunks), Müll im Index und falsche Positionen (char_pos). Jetzt
+ wird der Text mit fz_buffer_storage() gelesen und mit g_strndup() in eine
+ NUL-terminierte Kopie übernommen. Geprüft: vier Läufe hintereinander
+ ergeben dieselbe Byte-Zahl (21.295) und dieselben Chunks.
+ Der Fehler bestand seit dem ersten Stand der Funktion. Bereits indizierte
+ PDFs können Müll am Seitenende enthalten (und ihre Treffer-Positionen
+ abweichen) - neu indizieren ("erzwingen" ist dafür nicht nötig, Index
+ löschen und neu erstellen genügt).
+```
+
+## #215 Rest: ein Commit je PDF (07.10.2026)
+
+Noch nicht getestet in der Oberfläche; im Testprogramm geprüft.
+
+```text
+ #215 Rest: die Anhangsliste einer PDF (pdf_embedded) wurde vor dem
+ Indizieren mit einem eigenen Commit geschrieben, dazu kam die Transaktion
+ für den Text, also zwei Commits je PDF (rund 16 ms je Commit lokal, auf
+ SeaDrive mehr).
+ - sond_index_ctx_batch_begin()/_batch_end() (sond_index.c/.h): bündeln
+   mehrere Schritte in einem Savepoint.
+ - sond_process_file_do_rec(): für PDF Savepoint um die ganze Verarbeitung
+   (Anhangsliste, eingebettete Dateien, Text der PDF); ein Commit je PDF, auch
+   im Rückfall bei Fehler und nach Abbruch.
+ - sond_index(): die Datei-Transaktion ist jetzt ein Savepoint statt
+   BEGIN/COMMIT, damit sie sich verschachteln läßt (vorher: BEGIN innerhalb
+   einer offenen Transaktion scheitert).
+ - Test (Ordner mit 2 PDFs, eine mit Anhang, 7 Textdateien): 8 statt 11
+   Commits, Inhalt der Index-DB (chunks, coverage, pdf_embedded) identisch.
+ Offen (TODO.md): set_entry_count je ZIP, Löschen im UI-Thread.
+```

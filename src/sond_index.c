@@ -3760,6 +3760,15 @@ gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
     return ok;
 }
 
+gboolean sond_index_ctx_batch_begin(SondIndexCtx *ctx, GError **error) {
+    return ctx ? db_savepoint(ctx, error) : TRUE;
+}
+
+void sond_index_ctx_batch_end(SondIndexCtx *ctx, gboolean ok) {
+    if (ctx)
+        db_savepoint_end(ctx, ok);
+}
+
 void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
@@ -3840,11 +3849,15 @@ void sond_index(fz_context* ctx,
         return;
     }
 
+    /* Die Datei ist ein Savepoint (verschachtelbar: der Aufrufer kann mehr
+     * Schritte in einer Transaktion bündeln, s. sond_index_ctx_batch_begin()) */
     char *errmsg = NULL;
-    if (sqlite3_exec(sond_index_ctx->db, "BEGIN;", NULL, NULL, &errmsg) != SQLITE_OK) {
+    GError *begin_error = NULL;
+    if (!db_savepoint(sond_index_ctx, &begin_error)) {
         if (log_func)
-            log_func(log_func_data, "sond_index: BEGIN fehlgeschlagen: %s", errmsg);
-        sqlite3_free(errmsg);
+            log_func(log_func_data, "sond_index: Transaktion nicht gestartet: %s",
+                    begin_error ? begin_error->message : "?");
+        g_clear_error(&begin_error);
         g_ptr_array_unref(segs);
         return;
     }
@@ -3957,7 +3970,9 @@ void sond_index(fz_context* ctx,
                             chunk->text, embedding)) {
                 g_free(embedding);
                 g_ptr_array_unref(chunks);
-                sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+                if (sp_page)
+                    db_savepoint_end(sond_index_ctx, FALSE);
+                db_savepoint_end(sond_index_ctx, FALSE);
                 g_ptr_array_unref(segs);
                 return;
             }
@@ -4071,11 +4086,11 @@ void sond_index(fz_context* ctx,
      * sond_index_ctx_should_process_page() beim nächsten Lauf. Die
      * angebrochene Seite wurde oben zurückgerollt (Savepoint je Seite), von
      * ihr bleibt nichts im Index. */
-    if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
+    if (sqlite3_exec(sond_index_ctx->db, "RELEASE sond_sp;", NULL, NULL, &errmsg) != SQLITE_OK) {
         if (log_func)
             log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);
         sqlite3_free(errmsg);
-        sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+        db_savepoint_end(sond_index_ctx, FALSE);
         g_ptr_array_unref(segs);
         return;
     }

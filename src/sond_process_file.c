@@ -965,6 +965,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	gboolean gmessage_message = range ? range->gmessage_message : FALSE;
 	gboolean gmessage_header_only = range ?
 			(range->gmessage_header_only || gmessage_message) : FALSE;
+	gboolean batch = FALSE;
 
 	if (g_atomic_int_get(&wctx->cancel))
 		return;
@@ -984,6 +985,10 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	}
 
 	if (!g_strcmp0(mime_type, "application/pdf")) {
+		/* Anhangsliste, eingebettete Dateien und Text der PDF in einer
+		 * Transaktion: ein Commit je PDF statt mehrerer. */
+		batch = sond_index_ctx_batch_begin(wctx->index_ctx, NULL);
+
 		/* Eingebettete Dateien nur bei ganzer Datei - "nur Seiten" und ein
 		 * Seitenbereich meinen den PageTree, die Einbettungen sind eigene
 		 * Fileparts. Hat die PDF keine Einbettungen, ist "nur Seiten"
@@ -1038,6 +1043,8 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 					gmessage_header_only, pdf_pagetree_only);
 		}
 
+		if (batch)
+			sond_index_ctx_batch_end(wctx->index_ctx, TRUE);
 		g_free(mime_type);
 
 		return;
@@ -1051,6 +1058,8 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 			mime_type, seite_von, seite_bis, wctx->ocr_mode, &wctx->cancel,
 			gmessage_header_only, pdf_pagetree_only);
 
+	if (batch)
+		sond_index_ctx_batch_end(wctx->index_ctx, TRUE);
 	g_free(mime_type);
 
 	if (wctx->log_func)

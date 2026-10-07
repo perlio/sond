@@ -448,6 +448,19 @@ gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
         gchar const *filename, guchar const *buf, gsize size, GError **error);
 
 /**
+ * sond_index_ctx_batch_begin:
+ * sond_index_ctx_batch_end:
+ *
+ * Bündelt mehrere Schreibvorgänge in einer Transaktion (ein Commit statt
+ * einem je Schritt): batch_begin eröffnet einen Savepoint, batch_end gibt ihn
+ * frei (@ok TRUE, bei äußerster Ebene Commit) oder rollt ihn zurück. Nur
+ * aufrufen, wenn batch_begin TRUE lieferte; verschachtelbar. ctx NULL: nichts
+ * zu tun, TRUE.
+ */
+gboolean sond_index_ctx_batch_begin(SondIndexCtx *ctx, GError **error);
+void sond_index_ctx_batch_end(SondIndexCtx *ctx, gboolean ok);
+
+/**
  * sond_index_ctx_set_pdf_embedded:
  *
  * Hält die Adressen der eingebetteten Dateien einer PDF fest (s.

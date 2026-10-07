@@ -480,8 +480,10 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  kann das dauern). Ein Fix bräuchte einen cancel-Parameter bis in den Lesepfad
  (sond_fileparts.c).
 
- #215 Rest: set_entry_count/set_pdf_embedded (sond_process_file.c) machen weiter
- je einen Commit (einzeln jeweils klein); das Löschen läuft weiter im UI-Thread.
+ #215 Rest: set_entry_count (sond_process_file.c, ZIP) macht weiter einen
+ eigenen Commit je ZIP (ein Commit kostet lokal rund 16 ms); ein späterer Lauf
+ nach Abbruch bräuchte die Zahl noch. Das Löschen des Index läuft weiter im
+ UI-Thread (eine Transaktion, aber Verzeichnis-Listing je gelöschter Datei).
 
  #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
  - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein
