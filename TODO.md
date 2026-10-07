@@ -484,8 +484,10 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 
  #214 Rest: Die Indexsuche läuft weiter synchron im UI-Thread (die Oberfläche
  steht während der FTS-Abfrage, bei großen Indizes einige Sekunden). Eine Suche
- im Thread bräuchte ein Info-Fenster mit Abbrechen wie beim Indizieren. Die
- Dateinamen-Suche liest alle Dateinamen aus chunks; Ergebnisliste ohne Paging.
+ im Thread bräuchte ein Info-Fenster mit Abbrechen wie beim Indizieren und eine
+ eigene Nur-Lese-Verbindung zur Index-DB (sonst liest sie mitten in einem
+ Savepoint des Indizierens). Vorher messen, ob nötig. Ergebnisliste ohne Paging
+ (genügt bei höchstens 5000 Treffern).
 
  #215 Rest: set_entry_count/set_pdf_embedded (sond_process_file.c) machen weiter
  je einen Commit (einzeln jeweils klein); das Löschen läuft weiter im UI-Thread.

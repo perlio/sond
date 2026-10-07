@@ -5105,3 +5105,18 @@ Noch nicht getestet (nur Syntaxprüfung).
  ZIP bleibt ohne Rückfall: kein eigener Text, die Einträge sind schon einzeln
  indiziert, nur das Zurückschreiben ist gescheitert.
 ```
+
+## #214 Rest: Dateinamen-Suche aus der Indexsuche entfernt (07.10.2026)
+
+Noch nicht getestet (nur Syntaxprüfung).
+
+```text
+ #214 Rest: sond_index_search() sucht nur noch im Inhalt (FTS5). Der
+ Abschnitt "Dateinamen-Suche" (SELECT DISTINCT filename FROM chunks, hit
+ "(Dateiname)") und index_name_owner() sind entfernt: Namen findet die
+ Dateisuche (auch in Containern, mit Haken "Auch in Containern"), angebundene
+ Dateien die Baumsuche; der Index soll nur Inhalte erfassen. Damit entfällt
+ auch die Abfrage über alle Chunks bei jeder Suche. Kommentare in
+ sond_index.h und zond_indexsuche.c angepaßt (page_nr -1 gibt es weiter bei
+ Nicht-PDF).
+```
