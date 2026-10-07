@@ -1181,23 +1181,19 @@ static gboolean gmessage_message_covered(SondProcessFileCtx* wctx,
 	return known && covered;
 }
 
-/* Datei im Dateisystem (kein Teil eines Containers), die sich allein am Namen
- * als nicht indizierbar erkennen läßt: die Index-DB samt Journal, Projekt-
- * dateien (.ZND) und alles, dessen Endung einem bekannten, nicht
- * indizierbaren Typ entspricht. Unbekannte oder fehlende Endung: nicht
- * erkennbar, die Datei wird wie bisher über den Inhalt geprüft (z.B. eine
- * Mail ohne Endung). Container (ZIP) bleiben im Lauf. */
-static gboolean file_part_not_indexable(SondFilePart* sfp,
-		gchar const* file_part) {
+/* Datei im Dateisystem, die sich allein am Namen als nicht indizierbar
+ * erkennen läßt: die Index-DB samt Journal, Projektdateien (.ZND) und alles,
+ * dessen Endung einem bekannten, nicht indizierbaren Typ entspricht.
+ * Unbekannte oder fehlende Endung: nicht erkennbar, die Datei wird wie
+ * bisher über den Inhalt geprüft (z.B. eine Mail ohne Endung). Container
+ * (ZIP) bleiben im Lauf. */
+gboolean sond_file_name_not_indexable(gchar const* path) {
 	gchar const* base = NULL;
 	gchar const* mime = NULL;
 	gsize len = 0;
 
-	if (sond_file_part_get_parent(sfp))
-		return FALSE;
-
-	base = strrchr(file_part, '/');
-	base = base ? base + 1 : file_part;
+	base = strrchr(path, '/');
+	base = base ? base + 1 : path;
 
 	if (g_str_has_prefix(base, ".sond_index.db"))
 		return TRUE;
@@ -1212,6 +1208,48 @@ static gboolean file_part_not_indexable(SondFilePart* sfp,
 
 	return !sond_index_mime_type_supported(mime) &&
 			g_strcmp0(mime, "application/zip");
+}
+
+/* Wie sond_file_name_not_indexable(), aber nur für Dateien im Dateisystem
+ * (kein Teil eines Containers). */
+static gboolean file_part_not_indexable(SondFilePart* sfp,
+		gchar const* file_part) {
+	if (sond_file_part_get_parent(sfp))
+		return FALSE;
+
+	return sond_file_name_not_indexable(file_part);
+}
+
+/* Datei im Dateisystem (außer PDF), die zum Indizieren zu groß wäre. Meldet
+ * die Warnung selbst. */
+static gboolean file_part_too_large(SondProcessFileCtx* wctx, SondFilePart* sfp,
+		gchar const* file_part) {
+	g_autofree gchar* abs_path = NULL;
+	GStatBuf st = { 0 };
+	GError* error = NULL;
+
+	if (!wctx->project_dir || sond_file_part_get_parent(sfp) ||
+			!g_strcmp0(mime_from_extension(file_part), "application/pdf"))
+		return FALSE;
+
+	abs_path = g_strconcat(wctx->project_dir, "/", file_part, NULL);
+	if (sond_stat(abs_path, &st, &error)) {
+		g_clear_error(&error);
+
+		return FALSE; /* Lesefehler meldet get_bytes */
+	}
+
+	if ((guint64) st.st_size <= SOND_INDEX_FILE_MAX_SIZE)
+		return FALSE;
+
+	if (wctx->log_func)
+		wctx->log_func(wctx->log_func_data,
+				"Warnung: '%s' ist zu groß zum Indizieren (%" G_GUINT64_FORMAT
+				" MB, Grenze %" G_GUINT64_FORMAT " MB) - übersprungen",
+				file_part, (guint64) st.st_size >> 20,
+				SOND_INDEX_FILE_MAX_SIZE >> 20);
+
+	return TRUE;
 }
 
 /* Gruppe, in der try_collapse beim Zusammenfassen listet: der Container
@@ -1321,7 +1359,8 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		 * SeaDrive-Platzhaltern auch heruntergeladen), nur damit
 		 * sond_index() sie danach verwirft. Sie haben nie einen
 		 * coverage-Eintrag, wurden also in jedem Lauf erneut gelesen. */
-		if (file_part_not_indexable(sfp, file_part)) {
+		if (file_part_not_indexable(sfp, file_part) ||
+				file_part_too_large(wctx, sfp, file_part)) {
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
 			continue;

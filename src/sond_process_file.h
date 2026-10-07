@@ -156,6 +156,11 @@ void sond_process_file(SondProcessFileCtx* wctx,
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 
+/* Datei im Dateisystem, die sich allein am Namen (Pfad oder Dateiname) als
+ * nicht indizierbar erkennen läßt: Index-DB, Projektdatei, Endung eines nicht
+ * indizierbaren Typs. Unbekannte oder fehlende Endung: FALSE. */
+gboolean sond_file_name_not_indexable(gchar const* path);
+
 /* Struktur eines Containers in der Index-DB festhalten: Anhänge einer PDF
  * (pdf_embedded) bzw. Mimeparts einer Mail (container_entrycount,
  * gmessage_inline). Andere Typen: nichts zu tun. Liest die Datei. ToDo.c

@@ -1511,6 +1511,9 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 				sond_dir_close(dir);
 				return -1;
 			}
+		} else if (sond_file_name_not_indexable(filename)) {
+			//am Namen als nicht indizierbar erkennbar (Bild, Video, ...)
+			g_free(rel_path_child);
 		} else {
 			gchar const *mime = mime_from_extension(filename);
 			SondFilePart *sfp_leaf = sond_file_part_create_leaf(

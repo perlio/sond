@@ -3683,9 +3683,27 @@ static void sond_index_page_set(SondIndexCtx *ctx, gchar const *filename,
  * ======================================================================= */
 
 /* Muss mit der Dispatch-Liste unten in sond_index() übereinstimmen. */
+/* Textartige Typen außerhalb von "text/": Text mit anderer Kennung, der
+ * wie Klartext gelesen wird. */
+static gboolean mime_type_is_text_application(gchar const *mime_type) {
+    static gchar const *const types[] = {
+        "application/json", "application/xml", "application/sql",
+        "application/x-sh", "application/x-bat", "application/x-yaml",
+        NULL };
+
+    for (gint i = 0; types[i]; i++)
+        if (!g_strcmp0(mime_type, types[i]))
+            return TRUE;
+
+    return FALSE;
+}
+
 gboolean sond_index_mime_type_supported(gchar const *mime_type) {
     if (!mime_type)
         return FALSE;
+
+    if (mime_type_is_text_application(mime_type))
+        return TRUE;
 
     if (!g_strcmp0(mime_type, "application/pdf"))
         return TRUE;
@@ -3828,7 +3846,8 @@ void sond_index(fz_context* ctx,
         segs = sond_text_extract_docx(buf, size, NULL);
     else if (!g_strcmp0(mime_type, "application/vnd.oasis.opendocument.text"))
         segs = sond_text_extract_odt(buf, size, NULL);
-    else if (g_str_has_prefix(mime_type, "text/"))
+    else if (g_str_has_prefix(mime_type, "text/") ||
+            mime_type_is_text_application(mime_type))
         segs = sond_text_extract_plain(buf, size);
     else
         return; /* MIME-Typ nicht indizierbar */

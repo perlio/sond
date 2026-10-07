@@ -29,6 +29,10 @@
  * Anforderung das Programm. */
 #define SOND_ZIP_ENTRY_MAX_SIZE ((guint64) 1 << 30)
 
+/* Größte Datei im Dateisystem (außer PDF), die zum Indizieren komplett in den
+ * Speicher gelesen wird; größere werden mit Warnung übersprungen. */
+#define SOND_INDEX_FILE_MAX_SIZE ((guint64) 512 << 20)
+
 #ifdef G_OS_WIN32
 #include <wchar.h>
 /**
