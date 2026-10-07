@@ -213,7 +213,7 @@ static gint ask_ocr_mode(GtkWindow *parent) {
 /* Gemeinsamer Kern von zond_index_erstellen_ht() (fragt den OCR-Modus
  * selbst ab, für alle Aufrufer außer "Index erstellen (Gesamtes Projekt)")
  * - dort (do_index_erstellen_gesamt()) muss der Modus schon VOR der
- * Fileparts-Sammlung feststehen (Verzeichnis-Kurzschluss, Task #100, s.
+ * Fileparts-Sammlung feststehen (Verzeichnis-Kurzschluss, s.
  * dortigen Kommentar), wird also vorher abgefragt und hier direkt
  * durchgereicht statt erneut nachgefragt zu werden. */
 static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
@@ -275,7 +275,7 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	return zond_index_erstellen_ht_mit_modus(zond, ht_index, ocr_mode);
 }
 
-/* Nutzer-Wunsch 16.09.2026 (Task #100): Verzeichnis-Kurzschluss analog
+/* Verzeichnis-Kurzschluss analog
  * "Index durchsuchen" (scan_coverage_gaps_fs(), zond_indexsuche.c) auch
  * hier für "Gesamtes Projekt" - ein bereits vollständig indizierter
  * Verzeichnis-Ast wird gar nicht erst per readdir aufgeschlüsselt (s.
@@ -353,7 +353,7 @@ static void cb_app_index_erstellen(GSimpleAction *a, GVariant *p, gpointer d) {
  * verschwindet sie: sie zeigt lediglich (wie jede sonst nicht
  * indizierte Datei/Seite) keinen grünen/gemischten Badge mehr an, und
  * Volltextsuche/Indexsuche liefern für diesen Bereich keine Treffer
- * mehr, bis neu indiziert wird (Nutzer-Klärung 11.09.2026, s. ToDo.c). */
+ * mehr, bis neu indiziert wird. */
 
 static void zond_index_loeschen_redraw(Projekt *zond) {
 	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
@@ -416,7 +416,7 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		SondPageRange *range = (SondPageRange*) value; /* NULL = ganze Datei */
 		gchar *file_part_raw = sond_file_part_get_filepart(sfp);
 
-		/* Angebundene E-Mail (ToDo.c #197): Header und Inline-Teile einzeln
+		/* Angebundene E-Mail: Header und Inline-Teile einzeln
 		 * löschen, Anhänge bleiben */
 		if (range && range->gmessage_message) {
 			GPtrArray *parts = sond_index_ctx_gmessage_message_parts(
@@ -440,29 +440,27 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 			continue;
 		}
 		/* Der "Message"-Knoten einer E-Mail teilt sich denselben SondFilePart
-		 * mit der ganzen .eml-Datei (s. zond_treeviewfm_item_get_fileparts(),
-		 * Schritt 2/6, ToDo.c 17.09.2026) - sond_file_part_get_filepart()
-		 * liefert dafür also nur den nackten Dateinamen, ohne "//header".
-		 * Ohne diese Umrechnung würde "Index löschen" für den Message-Knoten
-		 * fälschlich die GANZE .eml als "ganze Datei" an delete_index()
-		 * übergeben: hat "mail.eml" selbst einen coverage-Eintrag (aus dem
-		 * Ganze-Datei-Indizierlauf), träfe das Fall 1 in
-		 * coverage_invalidate() (Vorfahre == path selbst) - der Eintrag wird
-		 * dort einfach gelöscht, OHNE die Geschwister-Rekonstruktion aus
-		 * Fall 2, die nur greift, wenn path selbst NICHT der eigene
-		 * coverage-Träger ist. Ergebnis: Message- UND alle Mimepart-Badges
-		 * verschwinden - genau der von Nutzer gemeldete Bug (17.09.2026, s.
-		 * ToDo.c). Analog zu coverage_key in sond_process_fileparts()
+		 * mit der ganzen .eml-Datei (s. zond_treeviewfm_item_get_fileparts()) -
+		 * sond_file_part_get_filepart() liefert dafür also nur den nackten
+		 * Dateinamen, ohne "//header". Ohne diese Umrechnung würde
+		 * "Index löschen" für den Message-Knoten die GANZE .eml als "ganze
+		 * Datei" an delete_index() übergeben: hat "mail.eml" selbst einen
+		 * coverage-Eintrag (aus dem Ganze-Datei-Indizierlauf), träfe das
+		 * Fall 1 in coverage_invalidate() (Vorfahre == path selbst) - der
+		 * Eintrag wird dort gelöscht, OHNE die Geschwister-Rekonstruktion
+		 * aus Fall 2, die nur greift, wenn path selbst NICHT der eigene
+		 * coverage-Träger ist; Message- UND alle Mimepart-Badges
+		 * verschwänden. Analog zu coverage_key in sond_process_fileparts()
 		 * (sond_process_file.c) muss deshalb auch hier für gmessage_header_only
 		 * der Pfad "file_part//header" verwendet werden - derselbe Pfad, unter
-		 * dem sond_index() den Header tatsächlich abgelegt/abgedeckt hat. */
+		 * dem sond_index() den Header abgelegt/abgedeckt hat. */
 		gchar *file_part = (range && range->gmessage_header_only) ?
 				g_strdup_printf("%s//header", file_part_raw) : file_part_raw;
 		GError *error = NULL;
 		gint von = range ? range->von : -1;
 		gint bis = range ? range->bis : -1;
 
-		/* Nur die Seiten einer PDF (ToDo.c #191): als Seitenbereich über
+		/* Nur die Seiten einer PDF: als Seitenbereich über
 		 * alle Seiten löschen - "ganze Datei" träfe auch die eingebetteten
 		 * Dateien (x.pdf//...). Der Seiten-Eintrag "x.pdf//" wird dabei von
 		 * coverage_invalidate() mit entfernt. */
@@ -576,8 +574,8 @@ static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d)
  * Projekt-Wurzel unabhängig von einer Auswahl, "Auswahl" braucht dagegen
  * wie bei cb_win_indexsuche_auswahl() zond_baum_aktuell(), weil das
  * globale Menü - anders als die Kontextmenüs der einzelnen Bäume - keinen
- * festen Baum-Kontext hat. Die Kontextmenüs selbst bieten seit 11.09.2026
- * nur noch "Auswahl" an, s. sond_treeviewfm.c/zond_treeview.c.
+ * festen Baum-Kontext hat. Die Kontextmenüs selbst bieten nur
+ * noch "Auswahl" an, s. sond_treeviewfm.c/zond_treeview.c.
  * sond_treeviewfm_seadrive_pin_root()/_pin_selection() sind auf Nicht-
  * Windows/Nicht-SeaDrive-Projekten ein No-Op.
  * ========================================================================== */
@@ -933,9 +931,7 @@ static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
  * xjustiz_nachricht.xml (aus dem beA-Akteneinsichtsportal, s.
  * filepart_oeffnen() in project.c) und bindet die referenzierten
  * PDF-Dokumente an der aktuellen Cursor-Position im Bestandsverzeichnis
- * an - s. ausfuehrlichen Kommentar in xjustiz_import.h/.c (22.09.2026,
- * neues Feature; 23.09.2026 auf sond_file_part-Maschinerie/
- * filepart_oeffnen()-Dialog umgestellt). Wie bei "Punkt einfügen"/
+ * an - s. ausfuehrlichen Kommentar in xjustiz_import.h/.c. Wie bei "Punkt einfügen"/
  * "Einfügen" zwei Varianten (Gleiche Ebene/Unterebene, s. Untermenü in
  * build_menu() weiter unten). */
 static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
@@ -1263,15 +1259,13 @@ static GMenuModel* build_menu(Projekt *zond) {
 
 	/* "Index": eigenes Untermenü (statt zweier lose in "Projekt" hängender
 	 * Einträge), damit auf den ersten Blick klar ist, dass "Erstellen" und
-	 * "Durchsuchen" zusammengehören - genau dieselbe Struktur wie beim
-	 * "SeaDrive"-Untermenü unten (Nutzerwunsch 11.09.2026: Parität
-	 * zwischen beiden). Je Aktion "Gesamtes Projekt"/"Auswahl". Die
-	 * Kontextmenüs von BAUM_FS/BAUM_INHALT/BAUM_AUSWERTUNG
-	 * (sond_treeviewfm.c/zond_treeview.c) bieten dagegen bewusst nur noch
-	 * "Auswahl" an - "Gesamtes Projekt" betrifft immer das ganze
-	 * Projektverzeichnis, unabhängig vom Rechtsklick-Ziel, und gehörte
-	 * deshalb eigentlich nie in ein Kontextmenü (Nutzer-Feedback, s.
-	 * ToDo.c). */
+	 * "Durchsuchen" zusammengehören - dieselbe Struktur wie beim
+	 * "SeaDrive"-Untermenü unten. Je Aktion "Gesamtes Projekt"/"Auswahl".
+	 * Die Kontextmenüs von BAUM_FS/BAUM_INHALT/BAUM_AUSWERTUNG
+	 * (sond_treeviewfm.c/zond_treeview.c) bieten dagegen nur "Auswahl"
+	 * an - "Gesamtes Projekt" betrifft immer das ganze
+	 * Projektverzeichnis, unabhängig vom Rechtsklick-Ziel, und gehört
+	 * deshalb nicht in ein Kontextmenü. */
 	GMenu *sec_dateisuche = g_menu_new();
 	g_menu_append(sec_dateisuche, "Dateisuche …", "win.dateisuche");
 	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_dateisuche));

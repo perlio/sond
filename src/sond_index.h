@@ -154,8 +154,7 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
  * Setzt/überschreibt die in file_pagecount gemerkte Seitenzahl
  * (INSERT OR REPLACE). Aufzurufen bei jeder vollständigen Indizierung
  * sowie nach Seiten-Einfügen/-Löschen im Viewer (dort mit der Anzahl
- * noch existierender, nicht als gelöscht markierter Seiten) - s.
- * ToDo.c (11.09.2026, Nutzerentscheidung).
+ * noch existierender, nicht als gelöscht markierter Seiten).
  *
  * Returns: FALSE bei Datenbankfehler (kein Fehler, wenn ctx/filename
  *          fehlen - dann No-Op).
@@ -260,7 +259,7 @@ gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
  * eigener Eintrag - was sich in einem indizierten Kind selbst verbirgt,
  * ist für die Coverage-Aussage über path unerheblich. Zusammen mit
  * sond_index_ctx_get_entry_count() ergibt das "X von Y Einträgen fehlen"
- * für Container, ohne sie zu öffnen - s. ToDo.c (12.-14.09.2026).
+ * für Container, ohne sie zu öffnen.
  *
  * Returns: Anzahl, oder -1 bei Datenbankfehler bzw. fehlendem ctx/path.
  */
@@ -443,7 +442,7 @@ SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
  *
  * Hält die Struktur einer Mail fest (container_entrycount, gmessage_inline),
  * aus ihren Rohdaten @buf. Aufgerufen, sobald eine Mail oder ein Teil davon
- * verarbeitet wird, und nach Änderungen an ihren Mimeparts (ToDo.c #199).
+ * verarbeitet wird, und nach Änderungen an ihren Mimeparts.
  */
 gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
         gchar const *filename, guchar const *buf, gsize size, GError **error);
@@ -453,8 +452,7 @@ gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
  *
  * Hält die Adressen der eingebetteten Dateien einer PDF fest (s.
  * pdf_emb_addresses_new()) - Grundlage, um ihre Coverage ohne Öffnen der
- * PDF in Seiten und Anhänge aufzulösen bzw. wieder zusammenzufassen
- * (ToDo.c #199).
+ * PDF in Seiten und Anhänge aufzulösen bzw. wieder zusammenzufassen.
  */
 gboolean sond_index_ctx_set_pdf_embedded(SondIndexCtx *ctx,
         gchar const *filename, GPtrArray *addresses, GError **error);
@@ -466,7 +464,7 @@ gboolean sond_index_ctx_set_pdf_embedded(SondIndexCtx *ctx,
  * Index-DB: in allen Pfad-Tabellen wird die Mimepart-Nummer direkt hinter
  * @prefix (z.B. "x.eml//" oder "x.eml//0/") um 1 erhöht (@into) bzw.
  * verringert, sofern sie >= @index ist. Nur rein numerische Segmente
- * ("header" bleibt). S. ToDo.c #194.
+ * ("header" bleibt).
  */
 gboolean sond_index_ctx_update_gmessage_index(SondIndexCtx *ctx,
         gchar const *prefix, gint index, gboolean into, GError **error);
@@ -485,7 +483,7 @@ gboolean sond_index_ctx_clear_gmessage_structure(SondIndexCtx *ctx,
  * sond_index_ctx_gmessage_message_parts:
  *
  * Bestandteile einer angebundenen E-Mail (BAUM_INHALT/_AUSWERTUNG: Header +
- * Inline-Teile, ToDo.c #197) als Index-Pfade: "@filename//header" und je
+ * Inline-Teile) als Index-Pfade: "@filename//header" und je
  * Inline-Teil "@filename//N". Die Inline-Teile kennt die Index-DB, sobald
  * die Mail einmal indiziert wurde (gmessage_inline); vorher nur der Header,
  * *known (darf NULL sein) ist dann FALSE. Ohne Dateizugriff.
@@ -894,14 +892,13 @@ GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
  *             ("@filename//header") für should_process_page/clear_page/
  *             Chunks/coverage_mark verwendet, damit dieser Teil-Index
  *             unabhängig vom (möglicherweise unvollständigen) Rest der
- *             Mail als abgedeckt gilt. S. ToDo.c, 17.09.2026,
- *             E-Mail-Coverage-Redesign (Schritt 3/6).
+ *             Mail als abgedeckt gilt.
  * @pdf_pagetree_only: nur für mime_type "application/pdf" relevant. TRUE:
  *             es wurden nur die Seiten verarbeitet, nicht die eingebetteten
  *             Dateien. Chunks/pages bleiben unter @filename, abgedeckt wird
  *             aber nur "@filename//" (Coverage-Schlüssel der Seiten) statt
  *             @filename selbst - ein Eintrag @filename hieße "Seiten und
- *             alle Einbettungen". S. ToDo.c #191.
+ *             alle Einbettungen".
  *
  * Indiziert wird für:
  *   application/pdf   – Text aus OCR-tem PDF (MuPDF stext)

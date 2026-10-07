@@ -509,9 +509,9 @@ static void collect_gmessage_parts(GMimeObject *obj, GPtrArray *parts) {
 /* Baut nur den Header (Von/An/CC/BCC/Betreff/Datum) auf - gemeinsamer Kern
  * von build_gmessage_text() (Header+Body, für Renderer und die "ganze
  * Datei"-Indizierung) und sond_text_extract_gmessage_header() (nur
- * Header, für die Indizierung des "Message"-Knotens - 17.09.2026,
- * Nutzerwunsch: an den Header kommt man im Baum sonst nicht heran, da der
- * Message-Knoten beim Öffnen die ganze Mail zeigt, s. ToDo.c). */
+ * Header, für die Indizierung des "Message"-Knotens: an den Header kommt
+ * man im Baum sonst nicht heran, da der Message-Knoten beim Öffnen die
+ * ganze Mail zeigt). */
 static gchar* build_gmessage_header_text(GMimeMessage *message) {
     GString *text = g_string_new(NULL);
 
@@ -552,8 +552,7 @@ static gchar* build_gmessage_header_text(GMimeMessage *message) {
      * internen GDateTime vorzeitig auf 0 bringen und das Objekt
      * freigeben, während die Message noch darauf zeigt - Absturz/
      * GLib-CRITICAL ("g_date_time_unref: assertion 'datetime->ref_count
-     * > 0' failed") erst später bei deren eigenem Aufräumen. Gefunden
-     * per Log-Fund des Nutzers, 15.09.2026. */
+     * > 0' failed") erst später bei deren eigenem Aufräumen. */
     GDateTime *date = g_mime_message_get_date(message);
     if (date) {
         gchar *date_str = g_date_time_format(date, "%d.%m.%Y %H:%M:%S %Z");
@@ -656,9 +655,8 @@ GPtrArray* sond_text_extract_gmessage(guchar const *buf, gsize size) {
 }
 
 /* Nur der Header (Von/An/CC/BCC/Betreff/Datum), ohne Body/Mimeparts - für
- * die Indizierung des "Message"-Knotens (17.09.2026, Schritt 1 des
- * E-Mail-Coverage-Redesigns, s. ToDo.c). Der Message-Knoten bleibt beim
- * Öffnen/"Öffnen mit" weiterhin die ganze Mail (dafür bräuchte es die
+ * die Indizierung des "Message"-Knotens. Der Message-Knoten bleibt beim
+ * Öffnen/"Öffnen mit" die ganze Mail (dafür bräuchte es die
  * Originaldatei, kein extrahierter Text) - diese Funktion betrifft
  * ausschließlich die Volltextindizierung. */
 GPtrArray* sond_text_extract_gmessage_header(guchar const *buf, gsize size) {

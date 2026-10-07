@@ -159,7 +159,7 @@ static const gchar *SQL_CREATE_PAGECOUNT =
            * Seiten-Einfügen/-Löschen im Viewer (viewer_save.c), gelöscht
            * nur wenn die Datei komplett aus dem Index entfernt wird
            * (sond_index_ctx_clear_file()/delete_index() bei ganzer
-           * Datei) - s. ToDo.c (11.09.2026, Nutzerentscheidung). */
+           * Datei). */
 
 static const gchar *SQL_CREATE_ENTRYCOUNT =
     "CREATE TABLE IF NOT EXISTS container_entrycount ("
@@ -168,20 +168,16 @@ static const gchar *SQL_CREATE_ENTRYCOUNT =
     ");"; /* Zuletzt bekannte Anzahl der internen Einträge eines Container-
            * Formats (ZIP-Archiv, E-Mail mit Anhängen, PDF mit eingebetteten
            * Dateien) - dieselbe Rolle wie file_pagecount, nur "Eintrag"
-           * statt "Seite" als Einheit. Grund: das Durchsuchen des Index
-           * (im Unterschied zum Erstellen) soll NIE eine Datei öffnen
-           * müssen (SeaDrive-Hydrierung, s. ToDo.c 12.09.2026) - ohne
+           * statt "Seite" als Einheit. Das Durchsuchen des Index
+           * soll nie eine Datei öffnen müssen (SeaDrive-Hydrierung) - ohne
            * diese Tabelle gäbe es keine Möglichkeit, "X von Y Einträgen
-           * fehlen" für einen Container zu ermitteln, ohne ihn erneut zu
-           * öffnen. Befüllt beim Indizieren, sobald zond die interne
-           * Einträgeliste eines Containers ohnehin ermittelt (s.
-           * sond_index_ctx_set_entry_count()). Keine mtime/Größe nötig:
-           * Änderungen an Container-Interna finden laut Absprache nur
-           * über zond selbst statt und werden dabei bereits über die
-           * bestehende Invalidierung erfasst - der DB-Stand gilt daher
-           * immer als aktuell (Nutzer-Entscheidung 12.09.2026). Eigene
-           * Tabelle statt gemeinsam mit file_pagecount: unterschiedliche
-           * Einheit (Seiten vs. Einträge), eigenständig erweiterbar. */
+           * fehlen" für einen Container zu ermitteln. Befüllt beim
+           * Indizieren (s. sond_index_ctx_set_entry_count()). Keine
+           * mtime/Größe nötig: Änderungen an Container-Interna finden nur
+           * über zond selbst statt und werden dabei über die bestehende
+           * Invalidierung erfasst - der DB-Stand gilt daher immer als
+           * aktuell. Eigene Tabelle statt gemeinsam mit file_pagecount:
+           * unterschiedliche Einheit (Seiten vs. Einträge). */
 
 static const gchar *SQL_CREATE_GMSG_INLINE =
     "CREATE TABLE IF NOT EXISTS gmessage_inline ("
@@ -191,7 +187,7 @@ static const gchar *SQL_CREATE_GMSG_INLINE =
            * Disposition "attachment", die sich indizieren lassen), als
            * "\n"-getrennte Pfade relativ zur Mail ("0", "0/1"). Leerer
            * String: keine. Eine angebundene Mail (BAUM_INHALT/_AUSWERTUNG)
-           * steht für Header + diese Teile (ToDo.c #197) - Badge und
+           * steht für Header + diese Teile - Badge und
            * Index durchsuchen brauchen die Liste, ohne die Mail zu öffnen.
            * Befüllt bei jeder Indizierung einer Mail (sond_index()),
            * gelöscht mit container_entrycount. */
@@ -204,7 +200,7 @@ static const gchar *SQL_CREATE_PDF_EMBEDDED =
            * pdf_emb_addresses_new()), leerer String: keine. Damit kann die
            * Coverage einer PDF in Seiten ("x.pdf//") und Anhänge aufgelöst
            * und wieder zu "x.pdf" zusammengefasst werden, ohne die PDF zu
-           * öffnen (ToDo.c #199). Befüllt, sobald irgendein Teil der PDF
+           * öffnen. Befüllt, sobald irgendein Teil der PDF
            * verarbeitet wird, und nach jeder Änderung an ihren Anhängen. */
 
 /* =======================================================================
@@ -432,10 +428,10 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
     sqlite3_busy_timeout(ctx->db, 5000);
 
     /* Kein WAL: .sond_index.db liegt im SeaDrive-synchronisierten Projekt-
-     * verzeichnis (anders als die "work"-DB, s. Task #42) - WAL braucht
+     * verzeichnis - WAL braucht
      * verlässliches mmap/Byte-Range-Locking auf der -shm-Datei, was ein
-     * Cloud-Sync-Laufwerk nicht zuverlässig bietet (Nutzer-Fund 22.09.2026:
-     * "database disk image is malformed" bei db_insert_chunk). Klassisches
+     * Cloud-Sync-Laufwerk nicht zuverlässig bietet ("database disk image is
+     * malformed"). Klassisches
      * Rollback-Journal (DELETE) + synchronous=FULL ist auf einem solchen
      * Laufwerk das robustere, wenn auch langsamere Verhalten. */
     {
@@ -854,7 +850,7 @@ gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
 }
 
 /* =======================================================================
- * Anhänge einer PDF (ToDo.c #199)
+ * Anhänge einer PDF
  * ======================================================================= */
 
 gboolean sond_index_ctx_set_pdf_embedded(SondIndexCtx *ctx,
@@ -923,7 +919,7 @@ static GPtrArray* pdf_embedded_get(SondIndexCtx *ctx, gchar const *filename) {
 }
 
 /* =======================================================================
- * Inline-Teile einer E-Mail (ToDo.c #197)
+ * Inline-Teile einer E-Mail
  * ======================================================================= */
 
 static gboolean gmessage_inline_set(SondIndexCtx *ctx, gchar const *filename,
@@ -1085,7 +1081,7 @@ gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
      * innerhalb eines bereits als embedded file indizierten Zip-Eintrags),
      * zählt als Beleg für "kind", nicht als eigener Eintrag - passend zu
      * total_entries (container_entrycount), das ebenfalls nur eine Ebene
-     * zählt (ToDo.c, 12.-14.09.2026). */
+     * zählt. */
     if (sqlite3_prepare_v2(ctx->db,
             "SELECT DISTINCT filename AS p FROM pages WHERE "
             SQL_UNDER_EMB("filename")
@@ -1345,8 +1341,8 @@ gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
  *
  * Wie sond_index_ctx_coverage_get(), aber OHNE den Ahnen-Walk - liefert
  * nur den Modus, wenn path SELBST einen coverage-Eintrag hat, sonst -1.
- * Für das GMessage-bewusste Collapse/Invalidate unten (17.09.2026, s.
- * ToDo.c) gebraucht: dort werden gezielt die erwarteten Kind-Pfade
+ * Für das GMessage-bewusste Collapse/Invalidate unten gebraucht: dort werden
+ * gezielt die erwarteten Kind-Pfade
  * ("x.eml//header", "x.eml//0", ...) einzeln geprüft - ein Ahnen-Walk
  * würde dabei (bei verschachtelten Containern) unter Umständen fälschlich
  * bei einem GANZ ANDEREN, weiter oben liegenden Vorfahren landen (derselbe
@@ -1407,7 +1403,7 @@ static gchar* gmessage_find_last_boundary(gchar const *path) {
  * das GMessage-bewusste Collapse/Invalidate greift dann bewusst NICHT,
  * die Verarbeitung fällt auf das bisherige (unveränderte) Verhalten
  * zurück. Tiefer verschachtelte Multiparts sind damit (noch) nicht
- * Teil des Collapse - bewusste Einschränkung, s. ToDo.c 17.09.2026. */
+ * Teil des Collapse - bewusste Einschränkung. */
 static gboolean is_gmessage_child_segment(gchar const *segment) {
     if (!segment || !*segment)
         return FALSE;
@@ -1427,7 +1423,7 @@ static gboolean is_gmessage_child_segment(gchar const *segment) {
  *
  * Liefert die vollständige, erwartete Liste der Kind-coverage-Pfade eines
  * GMessage-Containers (container, OHNE trailing "//..."): ein virtueller
- * "container//header"-Slot (s. Schritt 3, ToDo.c) plus je ein
+ * "container//header"-Slot plus je ein
  * "container//0" .. "container//(N-1)" für die N direkten Mimeparts, N =
  * container_entrycount(container) - 1 (die dort hinterlegte Gesamtzahl
  * zählt den Header-Slot mit, s. gmessage_count_root_entries() in
@@ -1827,23 +1823,14 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
  * (kein rekursiver Scan); an einer E-Mail-Container-Grenze ("//", Header
  * oder ein nummerierter Mimepart, s. is_gmessage_child_segment()) über die
  * per container_entrycount errechneten erwarteten Kind-Schlüssel, OHNE
- * die Mail zu öffnen (GMessage-bewusstes Invalidate, 17.09.2026, s.
- * ToDo.c - behebt den ursprünglichen Bug, dass beim Löschen des Index für
- * EINEN Mimepart plötzlich ALLE Mimepart- und der Message-Badge
- * verschwanden, weil die Geschwister-Neueintragung zuvor per
- * sond_dir_open() auf die - als Verzeichnis unlesbare - .eml-Datei
- * selbst traf und stillschweigend ausfiel).
+ * die Mail zu öffnen.
  *
  * Bekannte Einschränkung: für andere "//"-Container als E-Mail (z.B.
  * ZIP-interne Pfade) sowie für tiefer verschachtelte Multiparts
- * (z.B. "x.eml//0/1") ist die Geschwister-Rekonstruktion weiterhin nicht
- * vorgesehen - dieselbe Einschränkung wie vor dem GMessage-bewussten
- * Invalidate, nur nicht mehr fälschlich mit einfachem "/" statt "//"
- * vermischt (s. is_gmessage_child_segment()). Ebenso unbehandelt: die
+ * (z.B. "x.eml//0/1") ist die Geschwister-Rekonstruktion nicht
+ * vorgesehen. Ebenso unbehandelt: die
  * Seiten-Ebene innerhalb einer bereits gemeinsam abgedeckten Datei (dort
- * gibt es kein "Verzeichnis" zum Auflisten) - dafür wird eine gesonderte
- * Behandlung bei der eigentlichen Anbindung an die Edit/Löschen-Stellen
- * gebraucht.
+ * gibt es kein "Verzeichnis" zum Auflisten).
  */
 /* Endung ".pdf" (ohne sond_mime.c, das der Server nicht linkt) */
 static gboolean path_is_pdf(gchar const *path) {
@@ -1981,11 +1968,10 @@ static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
         return TRUE;
     }
 
-    /* Fall 2: von ancestor aus Richtung path absteigen, auf jeder
-     * Zwischenebene die Geschwister außer dem jeweils weiterführenden Kind
-     * mit mode neu eintragen. Zwei Arten von Zwischenebenen, je nachdem,
-     * welcher Trenner im ORIGINALEN path an dieser Stelle stand (17.09.2026,
-     * GMessage-bewusstes Invalidate, s. ToDo.c):
+     /* Fall 2: von ancestor aus Richtung path absteigen, auf jeder
+      * Zwischenebene die Geschwister außer dem jeweils weiterführenden Kind
+      * mit mode neu eintragen. Zwei Arten von Zwischenebenen, je nachdem,
+      * welcher Trenner im ORIGINALEN path an dieser Stelle stand:
      *  - "/"  : echtes Dateisystem-Verzeichnis -> Geschwister per
      *           sond_dir_open()-Listing (unverändertes Verhalten).
      *  - "//" : Grenze in einen Container hinein. Nur für E-Mail-Kinder
@@ -2062,8 +2048,8 @@ static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
                 /* In eine PDF hinein (eingebettete Datei oder - bei leerem
                  * segment - ihr Seiten-Eintrag selbst): Seiten und übrige
                  * Anhänge bleiben gültig, ausgenommen der, in dessen Richtung
-                 * entwertet wird. Die Anhänge kennt pdf_embedded (ToDo.c
-                 * #199); fehlt die Liste, verlieren sie ihre Abdeckung. */
+                 * entwertet wird. Die Anhänge kennt pdf_embedded; fehlt die
+                 * Liste, verlieren sie ihre Abdeckung. */
                 GPtrArray *addresses = pdf_embedded_get(ctx, current_dir);
 
                 if (*segment) {
@@ -2096,12 +2082,7 @@ static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
                  * fürs Öffnen wird der echte Dateisystempfad gebraucht (wie
                  * bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
                  * Präfix schlägt das Öffnen praktisch immer fehl (relativ zum
-                 * Prozess-CWD, nicht zur Projektwurzel) und die Geschwister-
-                 * Neueintragung unten wird stillschweigend übersprungen -
-                 * Bug-Fix 11.09.2026: dadurch verloren beim Kopieren einer
-                 * nicht indizierten Datei in einen abgedeckten Ordner auch die
-                 * BEREITS indizierten Geschwister ihren coverage-Eintrag
-                 * (grüner Badge verschwand fälschlich mit). sond_dir_open()
+                 * Prozess-CWD, nicht zur Projektwurzel). sond_dir_open()
                  * statt g_dir_open(): Long-Path-sicher (Windows), wie überall
                  * sonst im Code für Dateisystemzugriffe (sond_file_helper.c). */
                 if (!root_dir) {
@@ -2167,8 +2148,7 @@ static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
  *
  * Nach dem path (Datei, Verzeichnis oder E-Mail-Kind wie "x.eml//header")
  * soeben abgedeckt wurde (coverage_mark() ist für path bereits erfolgt),
- * wird von hier aus schrittweise nach oben geprüft. Zwei Ebenen-Arten
- * (17.09.2026, GMessage-bewusstes Collapse, s. ToDo.c):
+ * wird von hier aus schrittweise nach oben geprüft. Zwei Ebenen-Arten:
  *  - Liegt current an einer E-Mail-Container-Grenze ("//", Header oder
  *    ein nummerierter Mimepart, s. is_gmessage_child_segment()): sind
  *    ALLE per container_entrycount erwarteten Geschwister (Header + jeder
@@ -2254,18 +2234,18 @@ static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
         gchar       *slash       = NULL;
         gchar       *boundary    = NULL;
 
-        /* GMessage-Container-Grenze ("//") hat Vorrang vor einer
-         * Dateisystem-Ebene ("/"): current ist dann ein E-Mail-internes
-         * Kind (Header oder Mimepart), dessen "Elternverzeichnis" die
-         * E-Mail selbst ist - kein echtes Verzeichnis, das sond_dir_open()
-         * lesen könnte. S. ToDo.c, 17.09.2026, Schritt 4/6. */
+         /* GMessage-Container-Grenze ("//") hat Vorrang vor einer
+          * Dateisystem-Ebene ("/"): current ist dann ein E-Mail-internes
+          * Kind (Header oder Mimepart), dessen "Elternverzeichnis" die
+          * E-Mail selbst ist - kein echtes Verzeichnis, das sond_dir_open()
+          * lesen könnte. */
         boundary = gmessage_find_last_boundary(current);
 
         /* Innerhalb einer PDF (Seiten "x.pdf//" oder Anhang "x.pdf//adr"):
          * sind die Seiten und alle Anhänge laut pdf_embedded einzeln
          * abgedeckt, wird daraus "x.pdf" (Mindestmodus), danach weiter mit
          * der PDF in ihrem Verzeichnis. Ist "x.pdf" schon selbst abgedeckt
-         * (PDF ohne Anhänge), gleich dort weiter. ToDo.c #199. */
+         * (PDF ohne Anhänge), gleich dort weiter. */
         if (boundary) {
             gchar *container = g_strndup(current, boundary - current);
 
@@ -2497,8 +2477,7 @@ static gboolean delete_index_impl(SondIndexCtx *ctx, gchar const *path,
              * Gesamtseitenzahl lassen sich stattdessen alle NICHT zu
              * löschenden Seiten (0..total_pages-1 außerhalb
              * [von_seite,bis_seite]) korrekt rekonstruieren, ohne die
-             * Datei erneut zu öffnen (SeaDrive-Hydrierung vermeiden,
-             * s. ToDo.c, 11.09.2026, Nutzerentscheidung). */
+             * Datei erneut zu öffnen (SeaDrive-Hydrierung vermeiden). */
             gint total_pages = sond_index_ctx_get_page_count(ctx, path);
 
             if (total_pages >= 0) {
@@ -2704,10 +2683,8 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
                                      GError      **error) {
     /* prefix_old selbst und alles darunter - "/" (Unterverzeichnis, Datei
      * in umbenanntem Ordner) wie "//" (eingebetteter Inhalt) - bekommt
-     * prefix_new als Anfang. Vorher erfassten chunks/pages/... nur "//":
-     * beim Umbenennen eines Ordners blieben die Einträge der Dateien darin
-     * unter dem alten Pfad. SUBSTR statt LIKE, weil "%" und "_" in Pfaden
-     * vorkommen (Adressen eingebetteter Dateien, ToDo.c #193). */
+     * prefix_new als Anfang. SUBSTR statt LIKE, weil "%" und "_" in Pfaden
+     * vorkommen (Adressen eingebetteter Dateien). */
     static const struct {
         gchar const *table;
         gchar const *column;
@@ -2777,7 +2754,7 @@ gboolean sond_index_ctx_update_gmessage_index(SondIndexCtx *ctx,
     /* Zwei Durchgänge: erst auf "-N" (kann nicht belegt sein), dann zurück
      * auf "N" - beim Hochzählen wäre das Ziel sonst noch belegt und die
      * eindeutigen Schlüssel der Tabellen würden verletzt. Nur rein
-     * numerische Segmente, "header" bleibt (s. ToDo.c #194). */
+     * numerische Segmente, "header" bleibt. */
     for (guint t = 0; t < G_N_ELEMENTS(targets); t++) {
         gchar const *c = targets[t].column;
         gchar *seg = g_strdup_printf(GMSG_SEG, c, c);
@@ -3732,13 +3709,9 @@ gboolean sond_index_mime_type_supported(gchar const *mime_type) {
  * SeaDrive-unbedenklich - der Puffer liegt an dieser Stelle ohnehin
  * schon vor, s. sond_process_fileparts()). -1 bei Öffnen-Fehler.
  *
- * Wiedereinführung (17.09.2026, Nutzer-Entscheidung, nachdem eine
- * frühere E-Mail-Population am 15.09.2026 als toter Code zurückgebaut
- * worden war, s. ToDo.c Task #94): mit der Header/Mimepart-Trennung
- * (Schritt 2/3) gibt es jetzt erstmals echte, einzeln abgedeckte
- * E-Mail-Kinder ("x.eml//header", "x.eml//0", ...), die für ein
- * GMessage-bewusstes Collapse/Invalidate (Schritt 4) gezählt werden
- * müssen, ohne die Mail dafür zu öffnen.
+ * Mit der Header/Mimepart-Trennung gibt es einzeln abgedeckte E-Mail-Kinder
+ * ("x.eml//header", "x.eml//0", ...), die für das GMessage-bewusste
+ * Collapse/Invalidate gezählt werden müssen, ohne die Mail dafür zu öffnen.
  */
 gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
         gchar const *filename, guchar const *buf, gsize size, GError **error) {
@@ -4078,8 +4051,7 @@ void sond_index(fz_context* ctx,
 
         /* file_pagecount: nur bei PDF bekannt (n_pages_total bleibt -1
          * bei allen anderen Formaten, insbesondere auch bei
-         * gmessage_header_only) - coalescing-unabhängige Gesamtseitenzahl,
-         * s. sond_index.h/ToDo.c. */
+         * gmessage_header_only) - coalescing-unabhängige Gesamtseitenzahl. */
         if (n_pages_total >= 0) {
             GError *pagecount_error = NULL;
 
@@ -4109,24 +4081,20 @@ void sond_index(fz_context* ctx,
     }
 
     if (full_done) {
-        /* Schritt 5 (17.09.2026, s. ToDo.c): bei einer normalen (nicht auf
+        /* Bei einer normalen (nicht auf
          * den Header beschränkten) Ganze-Datei-Indizierung einer E-Mail
          * zusätzlich den Header UNTER SEINEM EIGENEN Pfad ("filename//header")
          * indizieren - per rekursivem Selbstaufruf mit
          * gmessage_header_only=TRUE (is_header_only verhindert dort eine
-         * weitere Rekursion). Jeder einzelne Mimepart (inkl. Attachments!)
-         * bekommt bereits unabhängig davon einen eigenen Coverage-Eintrag
-         * "filename//N", weil process_gmessage_for_ocr()/
-         * gmessage_process_part() (sond_process_file.c) für JEDES
-         * MIME-Leaf - unabhängig von dessen Content-Disposition -
-         * sond_process_file_do_rec() aufruft, das am Ende ganz normal in
-         * sond_index() mündet (Anhänge werden also, entgegen einer früheren
-         * Annahme in diesem Redesign, bereits heute individuell indiziert,
-         * sofern ihr MIME-Typ unterstützt wird). Mit dem hier ergänzten
-         * "filename//header" ist der Satz an Kind-Einträgen (Header + jeder
-         * Mimepart) vollständig - das GMessage-bewusste Collapse (Schritt 4)
-         * kann "filename" damit auch bei einem ganz normalen "Gesamtes
-         * Projekt"-Lauf automatisch erreichen (bei flacher Multipart-Struktur
+         * weitere Rekursion). Jeder einzelne Mimepart (auch Anhänge) hat
+         * bereits einen eigenen Coverage-Eintrag "filename//N", weil
+         * process_gmessage_for_ocr()/gmessage_process_part()
+         * (sond_process_file.c) für jedes MIME-Leaf sond_process_file_do_rec()
+         * aufrufen, das in sond_index() mündet (sofern der MIME-Typ
+         * unterstützt wird). Mit "filename//header" ist der Satz an
+         * Kind-Einträgen (Header + jeder Mimepart) vollständig - das
+         * GMessage-bewusste Collapse kann "filename" damit auch bei einem
+         * "Gesamtes Projekt"-Lauf erreichen (bei flacher Multipart-Struktur
          * ohne verschachtelte Multiparts, s. is_gmessage_child_segment()). */
         if (!is_header_only && !g_strcmp0(mime_type, "message/rfc822"))
             sond_index(ctx, log_func, log_func_data, sond_index_ctx, filename,

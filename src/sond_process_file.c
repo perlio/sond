@@ -293,8 +293,8 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 	 * der direkten Einträge dieses Containers DB-seitig festhalten, ohne
 	 * dass dafür je wieder in die ZIP hineingesehen werden müsste. Nur
 	 * eine Ebene - was sich innerhalb eines Eintrags, der selbst wieder
-	 * ein Container ist, verbirgt, zählt hier bewusst nicht mit (ToDo.c,
-	 * 12.-14.09.2026). Unabhängig von "modified" setzen: die Zahl der
+	 * ein Container ist, verbirgt, zählt hier bewusst nicht mit.
+	 * Unabhängig von "modified" setzen: die Zahl der
 	 * Einträge ist auch dann bekannt, wenn keiner von ihnen tatsächlich
 	 * verändert wurde. */
 	if (wctx->index_ctx) {
@@ -525,7 +525,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 	if (g_atomic_int_get(&wctx->cancel))
 		return FALSE;
 
-	/* inline_only: angebundene Mail = Header + Inline-Teile (ToDo.c #197) -
+	/* inline_only: angebundene Mail = Header + Inline-Teile -
 	 * Anhänge (Content-Disposition "attachment") überspringen */
 	if (inline_only && !GMIME_IS_MULTIPART(object)) {
 		GMimeContentDisposition* disp =
@@ -721,7 +721,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		return 0; //kein Abbruch, nur Fehler protokollieren
 	}
 
-	//Pfad im Index ist die Adresse, nicht der Dateiname (ToDo.c #193)
+	//Pfad im Index ist die Adresse, nicht der Dateiname
 	path = g_hash_table_lookup(((ProcessPdfData*)data)->addresses, val);
 	if (!path) {
 		if (((ProcessPdfData*)data)->wctx->log_func)
@@ -870,7 +870,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	}
 
 	/* Adressen der Anhänge: zählen, in der Index-DB festhalten (pdf_embedded,
-	 * ToDo.c #199 - bei jedem Lauf, auch nur Seiten/Seitenbereich) und bei
+	 * bei jedem Lauf, auch nur Seiten/Seitenbereich) und bei
 	 * ganzer Datei die Anhänge verarbeiten */
 	process_data.addresses = pdf_emb_addresses_new(wctx->ctx, doc, error);
 	if (!process_data.addresses) {
@@ -960,7 +960,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	gint seite_von = range ? range->von : -1;
 	gint seite_bis = range ? range->bis : -1;
 	gboolean pdf_pagetree_only = range ? range->pdf_pagetree_only : FALSE;
-	/* angebundene Mail (Header + Inline-Teile, ToDo.c #197): Header wie
+	/* angebundene Mail (Header + Inline-Teile): Header wie
 	 * bei gmessage_header_only, dazu die Inline-Mimeparts */
 	gboolean gmessage_message = range ? range->gmessage_message : FALSE;
 	gboolean gmessage_header_only = range ?
@@ -1004,7 +1004,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	else if (!g_strcmp0(mime_type, "message/rfc822") &&
 			(!gmessage_header_only || gmessage_message))
 		/* Bei gmessage_header_only wird ohnehin nur der Header indiziert
-		 * (Schritt 3, s. ToDo.c 17.09.2026) - das OCRen/Bearbeiten
+		 * - das OCRen/Bearbeiten
 		 * eingebetteter Inhalte (Bilder, PDF-Attachments) wäre hier
 		 * verschwendete Arbeit und wird deshalb übersprungen. Bei
 		 * gmessage_message nur die Inline-Teile, keine Anhänge. */
@@ -1295,7 +1295,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		gsize out_size = 0;
 		gint out_pdf_count = 0;
 		SondPageRange* range = (SondPageRange*) value; /* NULL = ganze Datei */
-		/* angebundene Mail (Header + Inline-Teile, ToDo.c #197): der Header
+		/* angebundene Mail (Header + Inline-Teile): der Header
 		 * ist ihr Coverage-Schlüssel wie bei gmessage_header_only, die
 		 * Inline-Teile haben ihre eigenen */
 		gboolean gmessage_message = range ? range->gmessage_message : FALSE;
@@ -1317,8 +1317,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 		/* Bei gmessage_header_only wird - wie in sond_index() - unter dem
 		 * eigenen Pfad "file_part//header" abgedeckt, unabhängig vom Rest
-		 * der Mail (s. ToDo.c, 17.09.2026, E-Mail-Coverage-Redesign,
-		 * Schritt 3/6). Die beiden coverage_get()-Prüfungen unten (Vorab-
+		 * der Mail. Die beiden coverage_get()-Prüfungen unten (Vorab-
 		 * Kurzschluss und Nach-Prüfung fürs Coalescing) müssen deshalb
 		 * denselben Pfad abfragen, den sond_index() tatsächlich beschreibt -
 		 * sonst würde hier immer "nicht abgedeckt" gesehen, obwohl der
@@ -1438,8 +1437,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 		/* Teil einer PDF oder Mail: deren Struktur (Anhänge bzw. Mimeparts)
 		 * festhalten - die Eltern-Datei wurde zum Lesen des Teils ohnehin
-		 * geöffnet. Grundlage fürs Auflösen/Zusammenfassen der Coverage
-		 * (ToDo.c #199). */
+		 * geöffnet. Grundlage fürs Auflösen/Zusammenfassen der Coverage. */
 		if (!g_atomic_int_get(&wctx->cancel) && wctx->index_ctx) {
 			SondFilePart* parent = sond_file_part_get_parent(sfp);
 
@@ -1457,24 +1455,17 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			}
 		}
 
-		/* Coverage-Hochprüfen (Coalescing mit den Geschwistern): das
-		 * eigentliche Markieren der Datei als vollständig abgedeckt
-		 * passiert bereits zuverlässig in sond_index() selbst (dort ist
-		 * die wahre Gesamtseitenzahl bekannt - hier nur "nicht
-		 * abgebrochen" zu prüfen wäre nicht sicher genug, s. dortiger
-		 * Kommentar). Hier deshalb nur per coverage_get() nachsehen, ob
-		 * das gerade tatsächlich passiert ist, und wenn ja, nach oben
-		 * weiterprüfen, ob jetzt auch das Elternverzeichnis komplett ist.
-		 * Auch für gmessage_header_only jetzt zulässig (Schritt 4,
-		 * 17.09.2026, s. ToDo.c): sond_index_ctx_coverage_try_collapse()
-		 * ist GMessage-bewusst geworden und erkennt "file_part//header"
-		 * als E-Mail-internes Kind (container_entrycount statt
-		 * sond_dir_open()) - keine Berührung mehr mit dem alten
-		 * "//"-Ahnen-Walk-Bug.
-		 * Bei pages_key vom Seiten-Eintrag "x.pdf//" aus: try_collapse() fasst
-		 * Seiten und Anhänge (pdf_embedded) zu "x.pdf" zusammen bzw. geht
-		 * gleich von "x.pdf" weiter, wenn das schon abgedeckt ist (ToDo.c
-		 * #199). */
+		/* Coverage-Zusammenfassen mit den Geschwistern: das Markieren der
+		 * Datei als vollständig abgedeckt passiert in sond_index() selbst
+		 * (dort ist die wahre Gesamtseitenzahl bekannt). Hier per
+		 * coverage_get() nachsehen, ob das gerade geschehen ist, und wenn
+		 * ja, den Schlüssel für das Zusammenfassen vormerken. Auch für
+		 * gmessage_header_only zulässig: try_collapse() erkennt
+		 * "file_part//header" als E-Mail-internes Kind (container_entrycount
+		 * statt sond_dir_open()). Bei pages_key vom Seiten-Eintrag "x.pdf//"
+		 * aus: try_collapse() fasst Seiten und Anhänge (pdf_embedded) zu
+		 * "x.pdf" zusammen bzw. geht gleich von "x.pdf" weiter, wenn das
+		 * schon abgedeckt ist. */
 		collapse_key = coverage_key;
 
 		/* Das Zusammenfassen listet das Verzeichnis bzw. zählt den Container:
@@ -1514,16 +1505,40 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	return;
 }
 
-SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
+static void fz_lock_cb(void* user, gint lock) {
+	g_mutex_lock(&((GMutex*) user)[lock]);
+}
+
+static void fz_unlock_cb(void* user, gint lock) {
+	g_mutex_unlock(&((GMutex*) user)[lock]);
+}
+
+SondProcessFileCtx* sond_process_file_create_wctx(
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,
 		gchar const* index_db_filename, gchar const* embedding_model_path,
 		gchar const* project_dir, GError **error) {
 
 	SondProcessFileCtx* wctx = g_new0(SondProcessFileCtx, 1);
+	fz_locks_context locks = { 0 };
 
-	/* fz_context */
-	wctx->ctx = ctx;
+	/* eigener fz_context mit Sperren: Der Lauf arbeitet in einem Thread,
+	 * der Kontext der Oberfläche ist nicht thread-sicher. */
+	wctx->fz_locks = g_new0(GMutex, FZ_LOCK_MAX);
+	for (gint i = 0; i < FZ_LOCK_MAX; i++)
+		g_mutex_init(&wctx->fz_locks[i]);
+	locks.user = wctx->fz_locks;
+	locks.lock = fz_lock_cb;
+	locks.unlock = fz_unlock_cb;
+
+	wctx->ctx = fz_new_context(NULL, &locks, FZ_STORE_UNLIMITED);
+	if (!wctx->ctx) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"fz_context konnte nicht angelegt werden");
+		sond_process_file_destroy_wctx(wctx);
+
+		return NULL;
+	}
 
 	wctx->progress = 0;
 	wctx->cancel = 0;
@@ -1537,8 +1552,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 	wctx->ocr_pool = sond_ocr_pool_new(tessdata_path, "deu",
 			num_ocr_threads, &wctx->cancel, &wctx->progress, error);
 	if (!wctx->ocr_pool) {
-		g_free(wctx->project_dir);
-		g_free(wctx);
+		sond_process_file_destroy_wctx(wctx);
 
 		return NULL;
 	}
@@ -1546,9 +1560,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 	wctx->index_ctx = sond_index_ctx_new(index_db_filename,
 			embedding_model_path, 0, 0, error);
 	if (!wctx->index_ctx) {
-		sond_ocr_pool_free(wctx->ocr_pool);
-		g_free(wctx->project_dir);
-		g_free(wctx);
+		sond_process_file_destroy_wctx(wctx);
 
 		return NULL;
 	}
@@ -1561,6 +1573,13 @@ void sond_process_file_destroy_wctx(SondProcessFileCtx *wctx) {
 		sond_index_ctx_free(wctx->index_ctx);
 	if (wctx->ocr_pool)
 		sond_ocr_pool_free(wctx->ocr_pool);
+	if (wctx->ctx)
+		fz_drop_context(wctx->ctx);
+	if (wctx->fz_locks) {
+		for (gint i = 0; i < FZ_LOCK_MAX; i++)
+			g_mutex_clear(&wctx->fz_locks[i]);
+		g_free(wctx->fz_locks);
+	}
 	g_free(wctx->project_dir);
 
 	g_free(wctx);

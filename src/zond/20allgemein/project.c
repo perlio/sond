@@ -965,7 +965,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
-	zond->wctx = sond_process_file_create_wctx(zond->ctx,
+	zond->wctx = sond_process_file_create_wctx(
 			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
 			NULL, datadir, 4, ".sond_index.db", embedding_model_path,
 			zond->project_dir, error);

@@ -93,14 +93,10 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
         char_pos_in_page = atoi(char_pos_str);
     g_free(char_pos_str);
 
-    /* SondFilePart direkt aus dem file_part-String aufbauen (Nutzer-
-     * Nachfrage 23.09.2026: "Warum nicht über sond_file_part_get_filepart()"
-     * - gemeint war vermutlich die Gegenrichtung, sond_file_part_from_
-     * filepart()) statt über einen Tree-Walk in BAUM_FS (sond_treeviewfm_
-     * file_part_visible()): letzteres brauchte zwingend ein sichtbares
-     * BAUM_FS, um den Baum überhaupt durchlaufen zu können, und schaltete
-     * dafür zond->fs_button zwangsweise ein - Nutzer-Fund: "es wird
-     * außerdem der BAUM_FS eingeblendet und das Verzeichnis ... geöffnet".
+    /* SondFilePart direkt aus dem file_part-String aufbauen statt über
+     * einen Tree-Walk in BAUM_FS (sond_treeviewfm_file_part_visible()):
+     * der brauchte ein sichtbares BAUM_FS und schaltete dafür
+     * zond->fs_button ein.
      * sond_file_part_from_filepart() baut dieselbe Objekt-Kette direkt aus
      * dem String auf; sond_file_part_create() darin prüft zuerst
      * sond_file_part_is_open() (globale Registry), liefert also bei
@@ -156,7 +152,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             		 * anbindung_korrigieren(). Treffer und Seite sind dabei
             		 * nach wie vor gültig (Index bzw. gespeicherte PDF-Datei
             		 * unverändert) - nur die aktuelle Sitzung würde die Seite
-            		 * nicht mehr anzeigen können, s. Task #16. */
+            		 * nicht mehr anzeigen können. */
             		arr_pages = zond_pdf_document_get_arr_pages(zpdfd_open);
             		if (page_nr_akt >= 0 && (guint) page_nr_akt < arr_pages->len)
             			pdfp = g_ptr_array_index(arr_pages, page_nr_akt);
@@ -242,8 +238,8 @@ typedef struct {
     gchar         *display_name;
     /* total_known == FALSE: PDF ganz ohne Coverage-Eintrag und ohne
      * expliziten Seitenbereich - die echte Gesamtseitenzahl wird bewusst
-     * NICHT durch Öffnen der Datei ermittelt (Nutzer-Entscheidung
-     * 11.09.2026: das würde bei SeaDrive-Platzhaltern Hydrierung
+     * NICHT durch Öffnen der Datei ermittelt (das würde bei SeaDrive-
+     * Platzhaltern Hydrierung
      * auslösen, nur um eine Zahl fürs Anzeigen zu bekommen). Dann ist nur
      * "indexed" aussagekräftig (rein aus der pages-Tabelle, kein
      * Dateizugriff), missing/total sind in diesem Fall ungültig. */
@@ -263,8 +259,7 @@ typedef struct {
                                    * Aufschlüsselung in einzelne Fileparts
                                    * passiert erst bei Bedarf, wenn der
                                    * Nutzer "jetzt nachindizieren" wählt
-                                   * (s. handle_coverage_gaps()). ToDo.c
-                                   * (15.09.2026). */
+                                   * (s. handle_coverage_gaps()). */
 } SondIndexCoverageGap;
 
 static void
@@ -278,7 +273,7 @@ sond_index_coverage_gap_free(gpointer p) {
 
 /* Index-Pfade der Bestandteile einer E-Mail-Auswahl: angebundene Mail
  * (gmessage_message) -> Header + Inline-Teile, "Message"-Knoten in BAUM_FS
- * (gmessage_header_only) -> nur Header. ToDo.c #197. */
+ * (gmessage_header_only) -> nur Header. */
 static GPtrArray*
 gmessage_parts(SondIndexCtx *index_ctx, gchar const *fp,
         SondPageRange const *range) {
@@ -305,7 +300,7 @@ gmessage_parts(SondIndexCtx *index_ctx, gchar const *fp,
  * PDFs OHNE Coverage-Eintrag und OHNE expliziten Seitenbereich ("ganze
  * Datei", der Normalfall bei "Gesamtes Projektverzeichnis"): die
  * tatsächliche Gesamtseitenzahl wird bewusst NICHT durch Öffnen der Datei
- * ermittelt (Nutzer-Entscheidung 11.09.2026) - das würde bei SeaDrive-
+ * ermittelt - das würde bei SeaDrive-
  * Platzhaltern eine Cloud-Hydrierung auslösen, nur um eine Zahl für die
  * Anzeige zu bekommen, und ist fürs eigentliche Ziel (auf Lücken
  * hinweisen, ggf. nachindizieren) nicht nötig. Stattdessen rein aus der
@@ -345,7 +340,7 @@ gmessage_parts(SondIndexCtx *index_ctx, gchar const *fp,
  * angelegt werden (kein Dateizugriff zur Typbestimmung, s.
  * zond_treeviewfm_item_get_fileparts_readdir()).
  *
- * Kein Dateizugriff in diesem gesamten Ablauf (ToDo.c, 12.-14.09.2026).
+ * Kein Dateizugriff in diesem gesamten Ablauf.
  *
  * Returns: TRUE bei Erfolg (auch wenn missing == 0), FALSE bei Fehler
  *          (z.B. Datei nicht lesbar) - error gesetzt.
@@ -375,11 +370,11 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
      * zond_treeviewfm_item_get_fileparts_readdir()) sind bewusst immer
      * SOND_TYPE_FILE_PART_LEAF (kein Dateizugriff zur Typbestimmung) -
      * SOND_IS_FILE_PART_PDF() wäre für sie also immer FALSE, obwohl es
-     * sich um eine PDF-Datei handelt. ToDo.c (12.-14.09.2026). */
+     * sich um eine PDF-Datei handelt. */
     is_pdf = SOND_IS_FILE_PART_PDF(sfp) ||
             !g_strcmp0(mime_from_extension(fp), "application/pdf");
 
-    /* Angebundene E-Mail (ToDo.c #197): Header + Inline-Teile, jeder
+    /* Angebundene E-Mail: Header + Inline-Teile, jeder
      * Bestandteil zählt als ein Eintrag. "Message"-Knoten in BAUM_FS
      * (gmessage_header_only): nur der Header unter "fp//header". */
     if (range && (range->gmessage_message || range->gmessage_header_only)) {
@@ -402,7 +397,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
      * (oder ein Vorfahre) komplett abgedeckt, brauchen wir die
      * pages-Tabelle für diesen Punkt gar nicht erst anzufassen - spart bei
      * großen, bereits vollständig indizierten Projektverzeichnissen den
-     * Großteil der Arbeit (s. Task #32). Deckt auch den Fall ab, dass ein
+     * Großteil der Arbeit. Deckt auch den Fall ab, dass ein
      * Container (ZIP/E-Mail) komplett bis hierhin kollabiert ist. */
     if (sond_index_ctx_coverage_get(index_ctx, fp) >= 0) {
         g_free(fp);
@@ -412,7 +407,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
     }
 
     /* Nur Seiten bzw. Seitenbereich einer PDF: auch der Seiten-Eintrag
-     * "fp//" genügt (ToDo.c #191). */
+     * "fp//" genügt. */
     if (is_pdf && range && !range->gmessage_header_only) {
         gchar *pages_key = g_strdup_printf("%s//", fp);
         gint mode = sond_index_ctx_coverage_get(index_ctx, pages_key);
@@ -439,7 +434,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
          * ohne dass fp selbst indizierbar ist, kann darin - über eine
          * frühere explizite Auswahl innerhalb des Containers - bereits
          * etwas indiziert worden sein (z.B. genau eine PDF in einem
-         * ZIP-Archiv - das ist keineswegs selten, s. ToDo.c). Rein per DB
+         * ZIP-Archiv - das ist keineswegs selten). Rein per DB
          * geprüft (container_entrycount + Präfix-Treffer in
          * pages/coverage), der Container wird dafür nie geöffnet. */
         gint total_entries = sond_index_ctx_get_entry_count(index_ctx, fp);
@@ -469,7 +464,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
          * z.B. weil bisher nur ein einzelner Eintrag darin gezielt über
          * BAUM_FS ausgewählt und indiziert wurde. In diesem Fall reicht
          * laut Vorgabe die schlichte Aussage "nicht erfaßt", ohne
-         * Anspruch auf eine genaue Zahl (ToDo.c, 12.-14.09.2026) - dafür
+         * Anspruch auf eine genaue Zahl - dafür
          * wie bei einer normalen, noch nie indizierten Datei behandelt
          * (missing = total = 1, s. format_gap_line()). */
         if (!g_strcmp0(mime_from_extension(fp), "application/zip")) {
@@ -511,9 +506,9 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         /* Ganze Datei, keine Coverage - s. Funktionskommentar: bewusst
          * kein sond_file_part_pdf_open_document()/pdf_count_pages() mehr
          * hier, rein DB-Zugriffe (pages-Tabelle + file_pagecount), keine
-         * Datei wird geöffnet. Seit Einführung von file_pagecount
-         * (11.09.2026, coalescing-unabhängig gemerkte Gesamtseitenzahl,
-         * s. sond_index.h) kennen wir die echte Seitenzahl oft trotzdem
+         * Datei wird geöffnet. Dank file_pagecount (coalescing-unabhängig
+         * gemerkte Gesamtseitenzahl, s. sond_index.h) kennen wir die echte
+         * Seitenzahl oft trotzdem
          * - dann lässt sich "X von Y Seiten" wieder genau wie bei einer
          * Anbindung mit explizitem Bereich angeben, statt nur "nur X
          * Seiten indiziert" ohne Gesamtzahl. */
@@ -598,15 +593,15 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
  * Alternative zu check_coverage() für "Gesamtes Projekt": statt für jede
  * einzelne Datei ein SondFilePart anzulegen und check_coverage_one()
  * aufzurufen (bei einem großen, größtenteils schon indizierten
- * Projektverzeichnis mehrere Minuten allein für den Abgleich, Nutzer-Fund
- * 15.09.2026), wird pro Verzeichnis-Ebene zuerst EINE Abfrage
+ * Projektverzeichnis mehrere Minuten allein für den Abgleich), wird pro
+ * Verzeichnis-Ebene zuerst EINE Abfrage
  * (sond_index_ctx_get_dir_status() - coverage_get() + eine
  * LIKE-Existenzprüfung auf pages/coverage, rein DB-seitig) genutzt, um zu
  * entscheiden:
  * - FULL: der ganze Ast ist schon abgedeckt - gar nicht erst per readdir
  *   hineinlesen, keine Lücke.
  * - NONE: nirgends im Ast irgendein Indizierungs-Hinweis - NICHT einzeln
- *   jede Datei darin auflisten (Nutzer-Vorgabe: Pfad reicht, keine
+ *   jede Datei darin auflisten (Pfad reicht, keine
  *   Dateizahl - eine Zählung würde wieder ein volles Listing erfordern),
  *   sondern der ganze Ast als EINE Lücke (dir_path gesetzt, sfp bleibt
  *   NULL). Die tatsächliche Aufschlüsselung in einzelne Fileparts
@@ -633,7 +628,7 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
  * Konstruktion dort auch technisch nicht auf die Wurzel anwendbar).
  *
  * Kein Dateizugriff in diesem gesamten Ablauf, nur Verzeichnis-Metadaten
- * (sond_dir_open()/sond_stat()) und DB-Abfragen. ToDo.c (15.09.2026).
+ * (sond_dir_open()/sond_stat()) und DB-Abfragen.
  */
 static gint
 scan_coverage_gaps_fs(Projekt *zond, SondTreeviewFM *stvfm,
@@ -757,8 +752,8 @@ format_gap_line(SondIndexCoverageGap *gap) {
     if (gap->total == 1)
         return g_strdup_printf("%s (nicht indiziert)", gap->display_name);
 
-    /* Einheit: angebundene E-Mail zählt Header + Inline-Teile (ToDo.c
-     * #197), ZIP-Archiv Einträge, sonst Seiten */
+    /* Einheit: angebundene E-Mail zählt Header + Inline-Teile,
+     * ZIP-Archiv Einträge, sonst Seiten */
     if (gap->range && gap->range->gmessage_message)
         return g_strdup_printf("%s (%d von %d Teilen fehlen - Header und "
                 "Inline-Teile)", gap->display_name, gap->missing, gap->total);
@@ -872,7 +867,7 @@ ask_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
  * zond_treeviewfm_item_get_fileparts_readdir() in einzelne Fileparts
  * aufgeschlüsselt - die teure Aufschlüsselung findet also nur für
  * tatsächlich vom Nutzer bestätigte Lücken statt, nicht schon beim
- * bloßen Anzeigen des Berichts. ToDo.c (15.09.2026).
+ * bloßen Anzeigen des Berichts.
  *
  * Returns: TRUE weiter mit der Suche, FALSE = Suche ganz abbrechen
  * (Nutzer hat "Abbrechen" gewählt). */
@@ -935,7 +930,7 @@ handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
 typedef struct {
     SondPageRange *range;      /* (transfer none), NULL = ganze Datei */
     gboolean       nur_seiten; /* nur Seiten/Seitenbereich einer PDF, nicht
-                                * ihre eingebetteten Dateien (ToDo.c #191) */
+                                * ihre eingebetteten Dateien */
     GHashTable    *mail_parts; /* nur bei E-Mail-Auswahl: Pfade ihrer
                                 * Bestandteile (Header, ggf. Inline-Teile) */
 } SelEntry;
@@ -976,7 +971,7 @@ sel_filter_new(SondIndexCtx *index_ctx, GHashTable *ht_filter) {
         e->range = range;
         e->nur_seiten = range && (range->pdf_pagetree_only || range->von >= 0);
 
-        /* Angebundene E-Mail (ToDo.c #197) bzw. "Message"-Knoten in BAUM_FS:
+        /* Angebundene E-Mail bzw. "Message"-Knoten in BAUM_FS:
          * nur Treffer aus der Mail selbst und ihren Bestandteilen */
         if (range && (range->gmessage_message || range->gmessage_header_only)) {
             GPtrArray *parts = gmessage_parts(index_ctx, fp, range);
@@ -1285,12 +1280,12 @@ zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
     gboolean cont = TRUE;
 
     /* "Gesamtes Projektverzeichnis": keine Auswahl zum Filtern (ht_filter
-     * bleibt NULL, wie bisher), aber der Abdeckungs-Check (schon
+     * bleibt NULL), aber der Abdeckungs-Check (schon
      * indiziert?) soll trotzdem laufen - dafür über den verzeichnisbasierten
-     * Scanner (s. scan_coverage_gaps_fs()), NICHT mehr über eine flache
+     * Scanner (s. scan_coverage_gaps_fs()), nicht über eine flache
      * Fileparts-Sammlung über ALLE Dateien im Projekt: bei einem großen,
-     * größtenteils schon indizierten Projekt dauerte das bisher mehrere
-     * Minuten (Nutzer-Fund 15.09.2026). Schlägt der Scan fehl bzw. bricht
+     * größtenteils schon indizierten Projekt dauerte das mehrere
+     * Minuten. Schlägt der Scan fehl bzw. bricht
      * er mittendrin ab, wird die Suche trotzdem ausgeführt, nur eben mit
      * den bis dahin gefundenen Lücken (kein Grund, die Suche deswegen zu
      * blockieren). ht_owner hält die währenddessen frisch angelegten
