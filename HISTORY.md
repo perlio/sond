@@ -5135,3 +5135,25 @@ Noch nicht getestet (nur Syntaxprüfung).
  spürbar langsam, neu aufnehmen. Ergebnisliste ohne Paging genügt bei
  höchstens 5000 Treffern.
 ```
+
+## #210 Rest: Scanner, Textendungen, Größengrenze (07.10.2026)
+
+Noch nicht getestet (Syntaxprüfung, Testprogramm).
+
+```text
+ #210 Rest:
+ - sond_file_name_not_indexable(path) (sond_process_file.c/.h): die
+   Namensprüfung von file_part_not_indexable() als öffentliche Funktion. Der
+   readdir-Scanner (zond_treeviewfm.c) legt Dateien, die sich am Namen als
+   nicht indizierbar erkennen lassen, gar nicht mehr an.
+ - Textartige application/*-Typen (json, xml, sql, x-sh, x-bat, x-yaml) gelten
+   als indizierbar (sond_index_mime_type_supported()) und werden wie Klartext
+   extrahiert; damit werden .json, .sql, .sh, .bat, .yaml wieder indiziert
+   (der Namens-Vorfilter aus #210 hatte sie ausgeschlossen).
+ - Dateien im Dateisystem (außer PDF) über SOND_INDEX_FILE_MAX_SIZE (512 MB,
+   sond_file_helper.h) werden nicht gelesen; Warnung im Info-Fenster ("zu groß
+   zum Indizieren"), in jedem Lauf erneut. PDF unbegrenzt.
+ - Geprüft mit Testprogramm: a.txt, b.json, c.sql, e.sh indiziert, d.jpg
+   übersprungen, 600-MB-Datei mit Warnung übersprungen.
+ - Offen (TODO.md): Abbrechen beim Lesen einer großen Datei.
+```

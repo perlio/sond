@@ -475,12 +475,10 @@ Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implem
 sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 
 ```text
- #210 Rest: Der readdir-Scanner (zond_treeviewfm.c) legt für nicht indizierbare
- Dateien weiter Einträge an (kostet nur Speicher); Abbrechen wirkt weiter erst
- zwischen Dateien (auch beim Lesen einer großen Datei); große indizierbare
- Dateien werden komplett gelesen. Nicht mehr indiziert werden Dateien, deren
- Endung einem nicht indizierbaren Typ entspricht, auch wenn libmagic sie als
- Text erkannt hätte (.sql, .sh, .bat, .json, .py ...).
+ #210 Rest: Abbrechen wirkt weiter erst zwischen Dateien, auch beim Lesen einer
+ großen Datei (sond_file_part_get_bytes liest am Stück, bei SeaDrive-Platzhaltern
+ kann das dauern). Ein Fix bräuchte einen cancel-Parameter bis in den Lesepfad
+ (sond_fileparts.c).
 
  #215 Rest: set_entry_count/set_pdf_embedded (sond_process_file.c) machen weiter
  je einen Commit (einzeln jeweils klein); das Löschen läuft weiter im UI-Thread.
