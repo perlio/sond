@@ -3277,18 +3277,6 @@ static gchar* fetch_prev_chunk_tail(SondIndexCtx *ctx, gchar const *filename,
     return result;
 }
 
-/* Pfad, unter dem eine Datei in der Dateinamensuche erscheint: Header und
- * Mimeparts einer Mail ("x.eml//header", "x.eml//0") gehören zur Mail selbst,
- * alles andere steht für sich. Neu alloziert. */
-static gchar* index_name_owner(gchar const *filename) {
-    gchar const *sep = gmessage_find_last_boundary(filename);
-
-    if (sep && is_gmessage_child_segment(sep + 2))
-        return g_strndup(filename, sep - filename);
-
-    return g_strdup(filename);
-}
-
 GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
@@ -3321,7 +3309,7 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
     seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
     /* ---------------------------------------------------------------
-     * 1. Volltextsuche über FTS5
+     * Volltextsuche über FTS5
      * ------------------------------------------------------------- */
     query = fts_quote(term, whole_word);
     query_ctx = (context && *context) ? fts_quote(context, whole_word) : NULL;
@@ -3506,102 +3494,6 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
     }
 
     sqlite3_finalize(stmt);
-
-    /* Limit schon durch Volltext-Treffer erreicht: keine Dateinamen-Treffer
-     * mehr anhängen */
-    if (stop)
-        return result;
-
-    /* ---------------------------------------------------------------
-     * 2. Dateinamen-Suche
-     *
-     * Gesucht wird (ohne Groß-/Kleinschreibung) im letzten Pfadsegment der
-     * Dateien, die Chunks im Index haben - auch zusammengefaßte Dateien, zu
-     * denen es keine pages-Zeilen mehr gibt. Header und Teile einer Mail
-     * zählen zur Mail ("x.eml//0" -> "x.eml"). Dateien, die schon per
-     * Volltext gefunden wurden, werden nicht doppelt gelistet. Der
-     * context-Parameter wird bei der Dateinamensuche ignoriert.
-     * ------------------------------------------------------------- */
-    {
-        GHashTable *fts_owners = g_hash_table_new_full(g_str_hash,
-                g_str_equal, g_free, NULL);
-        GHashTable *name_seen  = g_hash_table_new_full(g_str_hash,
-                g_str_equal, g_free, NULL);
-        gchar      *needle     = g_utf8_casefold(term, -1);
-
-        for (guint i = 0; i < result->len; i++) {
-            SondIndexHit *h = g_ptr_array_index(result, i);
-
-            g_hash_table_add(fts_owners, index_name_owner(h->filename));
-        }
-
-        rc = sqlite3_prepare_v2(ctx->db,
-            "SELECT DISTINCT filename FROM chunks ORDER BY filename",
-            -1, &stmt, NULL);
-
-        if (rc != SQLITE_OK) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                        "sond_index_search: prepare filename: %s",
-                        sqlite3_errmsg(ctx->db));
-            g_hash_table_destroy(fts_owners);
-            g_hash_table_destroy(name_seen);
-            g_free(needle);
-            g_ptr_array_unref(result);
-            return NULL;
-        }
-
-        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-            gchar *owner = index_name_owner(
-                    (gchar const *) sqlite3_column_text(stmt, 0));
-            gchar const *base = strrchr(owner, '/');
-            gchar *folded = NULL;
-            gboolean match = FALSE;
-
-            base = base ? base + 1 : owner;
-            folded = g_utf8_casefold(base, -1);
-            match = strstr(folded, needle) != NULL;
-            g_free(folded);
-
-            if (match && !g_hash_table_contains(fts_owners, owner) &&
-                    !g_hash_table_contains(name_seen, owner) &&
-                    (!filter || filter(owner, -1, filter_data))) {
-                SondIndexHit *hit = NULL;
-
-                if (max_hits > 0 && (gint) result->len >= max_hits) {
-                    g_free(owner);
-                    if (truncated)
-                        *truncated = TRUE;
-                    stop = TRUE;
-                    break;
-                }
-
-                hit = g_new0(SondIndexHit, 1);
-                hit->filename = g_strdup(owner);
-                hit->page_nr  = -1;
-                hit->char_pos = 0;
-                hit->snippet  = g_strdup("(Dateiname)");
-
-                g_ptr_array_add(result, hit);
-                g_hash_table_add(name_seen, owner);
-            } else
-                g_free(owner);
-        }
-
-        g_hash_table_destroy(fts_owners);
-        g_hash_table_destroy(name_seen);
-        g_free(needle);
-
-        if (!stop && rc != SQLITE_DONE) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                        "sond_index_search: step filename: %s",
-                        sqlite3_errmsg(ctx->db));
-            sqlite3_finalize(stmt);
-            g_ptr_array_unref(result);
-            return NULL;
-        }
-
-        sqlite3_finalize(stmt);
-    }
 
     return result;
 }

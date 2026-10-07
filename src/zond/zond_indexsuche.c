@@ -127,7 +127,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             if (SOND_IS_FILE_PART_PDF(sfp)) {
             	DisplayedDocument* dd = NULL;
             	ZondPdfDocument* zpdfd_open = NULL;
-            	/* Ein Dateinamen-Treffer hat keine Seite (page_nr -1): die
+            	/* Ein Treffer ohne Seite (Nicht-PDF, page_nr -1): die
             	 * PDF wird dann an ihrem Anfang geöffnet, ohne Markierung */
             	gboolean has_pos = page_nr >= 0;
             	gint page_start = has_pos ? page_nr : 0;

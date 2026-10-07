@@ -787,7 +787,7 @@ void sond_index_hit_free(gpointer p);
 /**
  * SondIndexHitFilter:
  * @filename:    filepart-Pfad des Treffers
- * @page_nr:     Seite (-1 bei Dateinamen-Treffern und Nicht-PDF)
+ * @page_nr:     Seite (-1 bei Nicht-PDF)
  * @data:        Zeiger des Aufrufers
  *
  * Entscheidet VOR dem Aufbau des Kontextausschnitts, ob ein Treffer
