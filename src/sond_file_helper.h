@@ -29,10 +29,6 @@
  * Anforderung das Programm. */
 #define SOND_ZIP_ENTRY_MAX_SIZE ((guint64) 1 << 30)
 
-/* Größte Datei im Dateisystem (außer PDF), die zum Indizieren komplett in den
- * Speicher gelesen wird; größere werden mit Warnung übersprungen. */
-#define SOND_INDEX_FILE_MAX_SIZE ((guint64) 512 << 20)
-
 #ifdef G_OS_WIN32
 #include <wchar.h>
 /**
@@ -163,5 +159,14 @@ gboolean sond_open(const gchar *path, gboolean open_with, GError **error);
  * Analog zu g_file_get_contents, mit Long-Path-Support unter Windows.
  */
 gboolean sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error);
+
+/**
+ * Wie sond_file_get_contents(), liest aber in Blöcken und prüft nach jedem
+ * Block *cancel (darf NULL sein). Bei Abbruch: FALSE mit
+ * G_IO_ERROR_CANCELLED. Reicht der Speicher nicht, gibt es einen Fehler
+ * statt eines Programmendes.
+ */
+gboolean sond_file_get_contents_cancellable(const gchar *path, gchar **contents,
+		gsize *length, gint const *cancel, GError **error);
 
 #endif /* SRC_SOND_FILE_HELPER_H_ */

@@ -475,11 +475,6 @@ Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implem
 sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 
 ```text
- #210 Rest: Abbrechen wirkt weiter erst zwischen Dateien, auch beim Lesen einer
- großen Datei (sond_file_part_get_bytes liest am Stück, bei SeaDrive-Platzhaltern
- kann das dauern). Ein Fix bräuchte einen cancel-Parameter bis in den Lesepfad
- (sond_fileparts.c).
-
  #215 Rest: set_entry_count (sond_process_file.c, ZIP) macht weiter einen
  eigenen Commit je ZIP (ein Commit kostet lokal rund 16 ms); ein späterer Lauf
  nach Abbruch bräuchte die Zahl noch.

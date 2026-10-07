@@ -87,6 +87,12 @@ GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);
 
+/* Wie sond_file_part_get_bytes(); *cancel (darf NULL sein) wird beim Lesen
+ * ganzer Dateien und ZIP-Einträge blockweise geprüft. Bei Abbruch: NULL mit
+ * G_IO_ERROR_CANCELLED. */
+GBytes* sond_file_part_get_bytes_cancellable(SondFilePart*, gint const* cancel,
+		GError**);
+
 gint sond_file_part_replace(SondFilePart*, GBytes*, GError**);
 
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);

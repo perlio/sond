@@ -25,6 +25,9 @@
 #include <sys/stat.h>
 #include <string.h>
 
+/* Blockgröße beim Lesen ganzer Dateien (Abbruchprüfung nach jedem Block) */
+#define SOND_READ_BLOCK_SIZE ((gsize) 4 << 20)
+
 #ifdef G_OS_WIN32
 #include <windows.h>
 #include <io.h>
@@ -999,6 +1002,14 @@ sond_dir_close(SondDir *dir)
 gboolean
 sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error)
 {
+    return sond_file_get_contents_cancellable(path, contents, length, NULL,
+            error);
+}
+
+gboolean
+sond_file_get_contents_cancellable(const gchar *path, gchar **contents,
+        gsize *length, gint const *cancel, GError **error)
+{
     g_return_val_if_fail(path != NULL, FALSE);
     g_return_val_if_fail(contents != NULL, FALSE);
 
@@ -1012,8 +1023,35 @@ sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GErro
     if (!f)
         return FALSE;
 
-    gchar *buf = g_malloc(file_size + 1);
-    gsize bytes_read = fread(buf, 1, file_size, f);
+    gchar *buf = g_try_malloc(file_size + 1);
+    if (!buf) {
+        fclose(f);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NO_SPACE,
+                    "%s\nnicht genug Speicher für %" G_GUINT64_FORMAT " MB",
+                    __func__, (guint64) (file_size >> 20));
+        return FALSE;
+    }
+
+    /* Blockweise lesen, damit ein Abbruch auch bei einer großen Datei (bei
+     * SeaDrive-Platzhaltern auch der Download) bald wirkt */
+    gsize bytes_read = 0;
+    while (bytes_read < file_size) {
+        gsize want = MIN(file_size - bytes_read, SOND_READ_BLOCK_SIZE);
+        gsize n = 0;
+
+        if (cancel && g_atomic_int_get(cancel)) {
+            fclose(f);
+            g_free(buf);
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                        "%s\nabgebrochen", __func__);
+            return FALSE;
+        }
+
+        n = fread(buf + bytes_read, 1, want, f);
+        bytes_read += n;
+        if (n < want)
+            break;
+    }
     fclose(f);
 
     if (bytes_read != file_size) {

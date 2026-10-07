@@ -1229,38 +1229,6 @@ static gboolean file_part_not_indexable(SondFilePart* sfp,
 	return sond_file_name_not_indexable(file_part);
 }
 
-/* Datei im Dateisystem (außer PDF), die zum Indizieren zu groß wäre. Meldet
- * die Warnung selbst. */
-static gboolean file_part_too_large(SondProcessFileCtx* wctx, SondFilePart* sfp,
-		gchar const* file_part) {
-	g_autofree gchar* abs_path = NULL;
-	GStatBuf st = { 0 };
-	GError* error = NULL;
-
-	if (!wctx->project_dir || sond_file_part_get_parent(sfp) ||
-			!g_strcmp0(mime_from_extension(file_part), "application/pdf"))
-		return FALSE;
-
-	abs_path = g_strconcat(wctx->project_dir, "/", file_part, NULL);
-	if (sond_stat(abs_path, &st, &error)) {
-		g_clear_error(&error);
-
-		return FALSE; /* Lesefehler meldet get_bytes */
-	}
-
-	if ((guint64) st.st_size <= SOND_INDEX_FILE_MAX_SIZE)
-		return FALSE;
-
-	if (wctx->log_func)
-		wctx->log_func(wctx->log_func_data,
-				"Warnung: '%s' ist zu groß zum Indizieren (%" G_GUINT64_FORMAT
-				" MB, Grenze %" G_GUINT64_FORMAT " MB) - übersprungen",
-				file_part, (guint64) st.st_size >> 20,
-				SOND_INDEX_FILE_MAX_SIZE >> 20);
-
-	return TRUE;
-}
-
 /* Gruppe, in der try_collapse beim Zusammenfassen listet: der Container
  * (Teil vor dem letzten "//") bzw. das Verzeichnis. NULL ohne "/" im Schlüssel. */
 static gchar* collapse_group(gchar const* key) {
@@ -1367,16 +1335,18 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		 * SeaDrive-Platzhaltern auch heruntergeladen), nur damit
 		 * sond_index() sie danach verwirft. Sie haben nie einen
 		 * coverage-Eintrag, wurden also in jedem Lauf erneut gelesen. */
-		if (file_part_not_indexable(sfp, file_part) ||
-				file_part_too_large(wctx, sfp, file_part)) {
+		if (file_part_not_indexable(sfp, file_part)) {
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
 			continue;
 		}
 
-		bytes = sond_file_part_get_bytes(sfp, &error);
+		bytes = sond_file_part_get_bytes_cancellable(sfp, &wctx->cancel, &error);
 		if (!bytes) {
-			if (wctx->log_func)
+			gboolean cancelled = g_error_matches(error, G_IO_ERROR,
+					G_IO_ERROR_CANCELLED);
+
+			if (!cancelled && wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
 						"sond_process_fileparts: get_bytes '%s': %s",
 						file_part,
@@ -1384,6 +1354,9 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			g_clear_error(&error);
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
+
+			if (cancelled)
+				break;
 
 			continue;
 		}

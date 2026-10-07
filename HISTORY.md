@@ -5219,3 +5219,33 @@ Noch nicht getestet in der Oberfläche; im Testprogramm geprüft.
    Commits, Inhalt der Index-DB (chunks, coverage, pdf_embedded) identisch.
  Offen (TODO.md): set_entry_count je ZIP, Löschen im UI-Thread.
 ```
+
+## #210 Rest: Lesen abbrechbar, Größengrenze entfernt (07.10.2026)
+
+Noch nicht in der Oberfläche getestet; im Testprogramm geprüft.
+
+```text
+ #210 Rest:
+ - sond_file_get_contents_cancellable() (sond_file_helper.c/.h) liest eine
+   Datei in Blöcken zu 4 MiB und prüft nach jedem Block das Abbruch-Flag; bei
+   Abbruch G_IO_ERROR_CANCELLED. Der Puffer wird mit g_try_malloc angelegt:
+   reicht der Speicher nicht, gibt es einen Fehler ("nicht genug Speicher für
+   N MB") statt eines Programmendes. sond_file_get_contents() ruft sie ohne
+   Abbruch-Flag auf.
+ - sond_file_part_get_bytes_cancellable() (sond_fileparts.c/.h): reicht das
+   Flag an das Lesen ganzer Dateien im Dateisystem und an das blockweise Lesen
+   eines ZIP-Eintrags weiter. sond_file_part_get_bytes() bleibt unverändert.
+ - sond_process_fileparts(): liest mit dem Flag des Laufs; bei Abbruch endet
+   die Schleife ohne Fehlermeldung, das Zusammenfassen der Abdeckung läuft
+   wie bisher.
+ - Die Grenze von 512 MB (SOND_INDEX_FILE_MAX_SIZE, file_part_too_large())
+   ist entfernt. Eine Datei, die nicht in den Speicher paßt, wird mit der
+   Meldung "get_bytes '...': nicht genug Speicher" übersprungen.
+ - Geprüft (Testprogramm): Größen 0, 1, 4 MiB -1/0/+1, 8 MiB, 9 MiB + 5 Byte
+   byteweise identisch zu g_file_get_contents(); 400 MB ohne Abbruch 214 ms,
+   mit Abbruch nach 60 ms kehrt das Lesen nach 76 ms mit CANCELLED zurück;
+   Lauf durch sond_process_fileparts() mit unverändertem Ergebnis der
+   Index-DB.
+ - Restrisiko: Die Textextraktion kopiert den Inhalt noch mehrfach; ein
+   mehrere GB großer Text kann dort noch an g_malloc scheitern.
+```

@@ -230,7 +230,7 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 }
 
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
-		gchar const* path, gssize max_len, GError** error);
+		gchar const* path, gssize max_len, gint const* cancel, GError** error);
 
 SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 		GError** error) {
@@ -243,7 +243,7 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	if (sfp)
 		return sfp;
 
-	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, error);
+	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, NULL, error);
 	if (!bytes)
 		return NULL;
 
@@ -452,7 +452,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
  * Gibt GBytes* zurück, oder NULL bei Fehler.
  */
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
-		gchar const* path, gssize max_len, GError** error) {
+		gchar const* path, gssize max_len, gint const* cancel, GError** error) {
 	if (!sfp_parent) {
 		gchar* full_path = NULL;
 
@@ -467,7 +467,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		if (max_len == -1) {
 			guchar* data = NULL;
 			gsize len = 0;
-			gboolean ok = sond_file_get_contents(full_path, (gchar**)&data, &len, error);
+			gboolean ok = sond_file_get_contents_cancellable(full_path, (gchar**)&data, &len, cancel, error);
 			g_free(full_path);
 			if (!ok)
 				return NULL;
@@ -525,10 +525,28 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 						(guint64) zstat.size);
 				return NULL;
 			}
-			zip_int64_t bytes_read = zip_fread(zf, data, zstat.size);
+			/* blockweise, damit ein Abbruch bald wirkt */
+			zip_uint64_t done = 0;
+			while (done < zstat.size) {
+				zip_uint64_t want = MIN(zstat.size - done, (zip_uint64_t) 4 << 20);
+				zip_int64_t n = 0;
+
+				if (cancel && g_atomic_int_get(cancel)) {
+					zip_fclose(zf);
+					sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
+					g_free(data);
+					g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+							"%s\nabgebrochen", __func__);
+					return NULL;
+				}
+				n = zip_fread(zf, data + done, want);
+				if (n <= 0)
+					break;
+				done += (zip_uint64_t) n;
+			}
 			zip_fclose(zf);
 			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-			if (bytes_read < 0 || (zip_uint64_t)bytes_read != zstat.size) {
+			if (done != zstat.size) {
 				g_free(data);
 				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fread('%s'): unvollständig gelesen", __func__, path);
@@ -759,13 +777,18 @@ SondFilePart* sond_file_part_from_filepart_leaf(gchar const* filepart,
 	return (sfp) ? g_object_ref(sfp) : NULL;
 }
 
-GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
+GBytes* sond_file_part_get_bytes_cancellable(SondFilePart* sfp,
+		gint const* cancel, GError** error) {
 	g_return_val_if_fail(sfp, NULL);
 
 	return sond_file_part_read_bytes_internal(
 			sond_file_part_get_parent(sfp),
 			sond_file_part_get_path(sfp),
-			-1, error);
+			-1, cancel, error);
+}
+
+GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
+	return sond_file_part_get_bytes_cancellable(sfp, NULL, error);
 }
 
 static gboolean
