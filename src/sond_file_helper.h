@@ -23,6 +23,12 @@
 #include <glib/gstdio.h>
 #include <stdio.h>
 
+/* Obergrenze für die Größe, die ein ZIP-Eintrag laut Header haben darf, wenn
+ * er in den Speicher gelesen wird. Die Größe steht im Archiv und kann
+ * beschädigt oder gefälscht sein - g_malloc() beendet bei einer solchen
+ * Anforderung das Programm. */
+#define SOND_ZIP_ENTRY_MAX_SIZE ((guint64) 1 << 30)
+
 #ifdef G_OS_WIN32
 #include <wchar.h>
 /**

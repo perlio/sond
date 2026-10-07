@@ -513,7 +513,18 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 				return NULL;
 			}
-			guchar* data = g_malloc(zstat.size);
+			/* Größe steht im Archiv und kann beschädigt oder gefälscht sein:
+			 * g_malloc() würde das Programm beenden */
+			guchar* data = g_try_malloc(zstat.size);
+			if (!data && zstat.size > 0) {
+				zip_fclose(zf);
+				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
+				g_set_error(error, SOND_ERROR, 0,
+						"%s\nDatei '%s' (%" G_GUINT64_FORMAT " Byte): nicht "
+						"genug Speicher", __func__, path,
+						(guint64) zstat.size);
+				return NULL;
+			}
 			zip_int64_t bytes_read = zip_fread(zf, data, zstat.size);
 			zip_fclose(zf);
 			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
