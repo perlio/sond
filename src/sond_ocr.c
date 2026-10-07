@@ -388,7 +388,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
-								"Transform-Matrix konnte nicht berechnet werden: %s",
+								"Seite %u: Transform-Matrix konnte nicht berechnet werden: %s",
 								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
@@ -401,7 +401,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 				if (!suc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
-								"Thread konnte nicht gepusht werden: %s",
+								"Seite %u: Thread konnte nicht gepusht werden: %s",
 								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
@@ -494,10 +494,10 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx,
 	fz_try(ctx)
 		task->page = pdf_load_page(ctx, doc, page_num);
 	fz_catch(ctx) {
-		if (log_func_data)
-			log_func(log_func_data,
-					"pdf_page %u konnte nicht geladen werden: %s",
-					page_num, fz_caught_message(ctx));
+		/* Der Aufrufer meldet den Fehler (und liest error->message) */
+		g_set_error(error, SOND_ERROR, 0,
+				"pdf_page %u konnte nicht geladen werden: %s",
+				page_num, fz_caught_message(ctx));
 		g_free(task);
 
 		return NULL;
@@ -548,7 +548,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 				sond_ocr_task_new(ctx, doc, i, font_ref,
 						log_func, log_func_data, error);
 		if (!task) {
-			if (log_func_data)
+			if (log_func)
 				log_func(log_func_data,
 						"Seite %u: Task konnte nicht erzeugt werden: %s",
 						i, (*error)->message);
