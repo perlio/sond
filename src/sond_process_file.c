@@ -31,6 +31,8 @@
 #include "sond_gmessage_helper.h"
 #include "sond_pdf_helper.h"
 #include "sond_log_and_error.h"
+#include "sond_mime.h"
+#include "sond_file_helper.h"
 
 
 static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
@@ -70,11 +72,177 @@ SondPageRange* sond_page_range_new_pdf_pagetree(void) {
 }
 
 SondPageRange* sond_page_range_copy(SondPageRange const *range) {
-	return range ? g_memdup2(range, sizeof(SondPageRange)) : NULL;
+	SondPageRange* copy = NULL;
+
+	if (!range)
+		return NULL;
+
+	copy = g_memdup2(range, sizeof(SondPageRange));
+	copy->more = range->more ? g_array_copy(range->more) : NULL;
+
+	return copy;
 }
 
 void sond_page_range_free(gpointer p) {
-	g_free(p);
+	SondPageRange* range = (SondPageRange*) p;
+
+	if (!range)
+		return;
+
+	g_clear_pointer(&range->more, g_array_unref);
+	g_free(range);
+}
+
+static gint page_span_cmp(gconstpointer a, gconstpointer b) {
+	SondPageSpan const* sa = a;
+	SondPageSpan const* sb = b;
+
+	return (sa->von > sb->von) - (sa->von < sb->von);
+}
+
+void sond_page_range_add(SondPageRange* range, gint von, gint bis) {
+	GArray* all = NULL;
+	GArray* more = NULL;
+	SondPageSpan cur = { 0 };
+
+	if (!range || range->von < 0 || von < 0)
+		return;
+
+	if (bis < von)
+		bis = von;
+
+	all = g_array_new(FALSE, FALSE, sizeof(SondPageSpan));
+	cur.von = range->von;
+	cur.bis = range->bis;
+	g_array_append_val(all, cur);
+	if (range->more)
+		g_array_append_vals(all, range->more->data, range->more->len);
+	cur.von = von;
+	cur.bis = bis;
+	g_array_append_val(all, cur);
+	g_array_sort(all, page_span_cmp);
+
+	/* überlappende und aneinander grenzende Bereiche verschmelzen */
+	more = g_array_new(FALSE, FALSE, sizeof(SondPageSpan));
+	cur = g_array_index(all, SondPageSpan, 0);
+	for (guint i = 1; i < all->len; i++) {
+		SondPageSpan s = g_array_index(all, SondPageSpan, i);
+
+		if ((gint64) s.von <= (gint64) cur.bis + 1)
+			cur.bis = MAX(cur.bis, s.bis);
+		else {
+			g_array_append_val(more, cur);
+			cur = s;
+		}
+	}
+	g_array_append_val(more, cur);
+	g_array_unref(all);
+
+	/* der erste (kleinste) Bereich steht in von/bis, alle weiteren in more */
+	range->von = g_array_index(more, SondPageSpan, 0).von;
+	range->bis = g_array_index(more, SondPageSpan, 0).bis;
+	g_clear_pointer(&range->more, g_array_unref);
+	if (more->len > 1) {
+		g_array_remove_index(more, 0);
+		range->more = more;
+	}
+	else
+		g_array_unref(more);
+}
+
+gint sond_page_range_count(SondPageRange const* range) {
+	if (range && range->von >= 0 && range->more)
+		return 1 + (gint) range->more->len;
+
+	return 1;
+}
+
+void sond_page_range_get(SondPageRange const* range, gint i, gint* von,
+		gint* bis) {
+	SondPageSpan s = { -1, -1 };
+
+	if (range && range->von >= 0) {
+		if (i == 0) {
+			s.von = range->von;
+			s.bis = range->bis;
+		}
+		else if (range->more && i - 1 < (gint) range->more->len)
+			s = g_array_index(range->more, SondPageSpan, i - 1);
+	}
+
+	if (von)
+		*von = s.von;
+	if (bis)
+		*bis = s.bis;
+}
+
+gboolean sond_page_range_contains(SondPageRange const* range, gint page) {
+	if (!range || range->von < 0)
+		return TRUE;
+
+	if (page >= range->von && page <= range->bis)
+		return TRUE;
+
+	for (guint i = 0; range->more && i < range->more->len; i++) {
+		SondPageSpan const* s = &g_array_index(range->more, SondPageSpan, i);
+
+		if (page >= s->von && page <= s->bis)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+void sond_page_range_merge(GHashTable* ht, gpointer sfp, SondPageRange* range) {
+	gpointer key = NULL;
+	gpointer value = NULL;
+	SondPageRange* existing = NULL;
+
+	if (!g_hash_table_lookup_extended(ht, sfp, &key, &value)) {
+		g_hash_table_insert(ht, sfp, range);
+
+		return;
+	}
+
+	existing = (SondPageRange*) value;
+
+	if (!existing || !range) {
+		/* einer von beiden will die ganze Datei -> ganze Datei */
+		sond_page_range_free(range);
+		if (existing)
+			g_hash_table_insert(ht, sfp, NULL); /* gibt den Wert und die
+					* überzählige Referenz auf sfp frei */
+		else
+			g_object_unref(sfp);
+
+		return;
+	}
+
+	if (existing->pdf_pagetree_only || range->pdf_pagetree_only) {
+		/* alle Seiten, aber keine eingebetteten Dateien */
+		existing->pdf_pagetree_only = TRUE;
+		existing->von = -1;
+		existing->bis = -1;
+		g_clear_pointer(&existing->more, g_array_unref);
+	}
+	else if (existing->von >= 0 && range->von >= 0) {
+		/* Vereinigung der Seitenbereiche, nicht deren Hülle */
+		for (gint i = 0; i < sond_page_range_count(range); i++) {
+			gint von = 0;
+			gint bis = 0;
+
+			sond_page_range_get(range, i, &von, &bis);
+			sond_page_range_add(existing, von, bis);
+		}
+	}
+	else {
+		/* Teile einer E-Mail: Header + Inline-Teile umfassen den Header */
+		existing->gmessage_header_only |= range->gmessage_header_only;
+		existing->gmessage_message |= range->gmessage_message;
+	}
+
+	sond_page_range_free(range);
+	g_object_unref(sfp);
 }
 
 static gint process_zip_for_ocr(guchar* data, gsize size,
@@ -157,6 +325,27 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		if (!(zstat.valid & ZIP_STAT_SIZE))
 			continue;
 
+		/* Größe steht im Archiv und kann beschädigt oder gefälscht sein:
+		 * g_malloc() würde das Programm beenden */
+		if (zstat.size > SOND_ZIP_ENTRY_MAX_SIZE) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+					"ZIP '%s': Eintrag '%s' zu groß (%" G_GUINT64_FORMAT
+					" Byte) - übersprungen", filename, entry_name,
+					(guint64) zstat.size);
+			continue;
+		}
+
+		guchar* entry_data = g_try_malloc(zstat.size);
+		if (!entry_data && zstat.size > 0) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+					"ZIP '%s': Eintrag '%s' (%" G_GUINT64_FORMAT " Byte): "
+					"nicht genug Speicher - übersprungen", filename,
+					entry_name, (guint64) zstat.size);
+			continue;
+		}
+
 		zip_file_t* zf = zip_fopen_index(archive, (zip_uint64_t)i, 0);
 		if (!zf) {
 			if (wctx->log_func)
@@ -164,10 +353,10 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 					"ZIP '%s': Kann Eintrag '%s' nicht öffnen: %s",
 					filename, entry_name,
 					zip_error_strerror(zip_get_error(archive)));
+			g_free(entry_data);
 			continue;
 		}
 
-		guchar* entry_data = g_malloc(zstat.size);
 		zip_int64_t bytes_read = zip_fread(zf, entry_data, zstat.size);
 		zip_fclose(zf);
 
@@ -200,6 +389,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		if (!entry_src) {
 			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
+					"ZIP '%s': Eintrag '%s' nicht ersetzt: %s",
 					filename, entry_name, zip_error_strerror(&ze));
 			zip_error_fini(&ze);
 			g_free(processed_data);
@@ -211,6 +401,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 				ZIP_FL_ENC_UTF_8) != 0) {
 			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
+					"ZIP '%s': Eintrag '%s' nicht ersetzt: %s",
 					filename, entry_name,
 					zip_error_strerror(zip_get_error(archive)));
 			zip_source_free(entry_src);
@@ -287,6 +478,33 @@ static guchar* gmessage_to_buffer(GMimeMessage* message, gsize* out_size) {
 	*out_size = ba->len;
 	g_object_unref(stream);
 	return result;
+}
+
+/* Textteil, dessen Inhalt nicht UTF-8 ist, aber einen Zeichensatz deklariert
+ * (z.B. ISO-8859-2, UTF-16): nach UTF-8 gewandelt, damit der Index den Text
+ * liest und nicht Bytes in windows-1252-Deutung. Wie beim Gesamttext einer
+ * Mail (sond_text_extract.c) nur, wenn der Inhalt kein gültiges UTF-8 ist.
+ * NULL, wenn nichts zu wandeln ist oder die Wandlung scheitert - dann gilt
+ * der Inhalt unverändert. */
+static guchar* gmessage_part_text_to_utf8(GMimePart* part,
+		guchar const* data, gsize size, gsize* out_size) {
+	GMimeContentType* ct = g_mime_object_get_content_type(GMIME_OBJECT(part));
+	gchar const* charset = NULL;
+
+	if (!ct || !g_mime_content_type_is_type(ct, "text", "*"))
+		return NULL;
+
+	charset = g_mime_content_type_get_parameter(ct, "charset");
+	if (!charset || !g_ascii_strcasecmp(charset, "utf-8") ||
+			!g_ascii_strcasecmp(charset, "utf8") ||
+			!g_ascii_strcasecmp(charset, "us-ascii"))
+		return NULL;
+
+	if (g_utf8_validate((gchar const*) data, (gssize) size, NULL))
+		return NULL;
+
+	return (guchar*) g_convert((gchar const*) data, (gssize) size, "UTF-8",
+			charset, NULL, out_size, NULL);
 }
 
 /*
@@ -398,9 +616,14 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		gchar* part_filename = internal_path
 				? g_strdup_printf("%s//%s", eml_filename, internal_path)
 				: g_strdup_printf("%s//0", eml_filename);
-		sond_process_file_do_rec(wctx, part_data, part_size, part_filename,
+		gsize conv_size = 0;
+		guchar* converted = gmessage_part_text_to_utf8(part, part_data,
+				part_size, &conv_size);
+		sond_process_file_do_rec(wctx, converted ? converted : part_data,
+				converted ? conv_size : part_size, part_filename,
 				&processed, &proc_size, out_pdf_count, NULL);
 		g_free(part_filename);
+		g_free(converted);
 		g_free(part_data);
 
 		if (!processed)
@@ -491,8 +714,9 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	if (!EF_F) {
 		if (((ProcessPdfData*)data)->wctx->log_func)
 			((ProcessPdfData*)data)->wctx->log_func(((ProcessPdfData*)data)->wctx->log_func_data,
+				"'%s': eingebettete Datei nicht lesbar: %s",
 				((ProcessPdfData*)data)->filename,
-				error ? (*error)->message : "unknown error");
+				(error && *error) ? (*error)->message : "unknown error");
 		g_clear_error(error);
 		return 0; //kein Abbruch, nur Fehler protokollieren
 	}
@@ -529,6 +753,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 			((ProcessPdfData*)data)->wctx->log_func(((ProcessPdfData*)data)->wctx->log_func_data,
 				"Failed to read stream for embedded file '%s': %s",
 				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ctx));
+		g_free(filename_emb);
 		return 0;
 	}
 
@@ -792,6 +1017,24 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 				"Failed to process file '%s': %s",
 				filename, error ? error->message : "unknown error");
 		g_clear_error(&error);
+
+		/* PDF: scheitert die OCR-/Anhang-Stufe (z.B. Seitenbaum
+		 * beschädigt), den vorhandenen Text der Originaldaten trotzdem
+		 * indizieren. Mit Modus "kein OCR" vermerkt: ein späterer Lauf mit
+		 * OCR-Prüfung versucht es erneut, die Datei gilt nicht als
+		 * vollständig bearbeitet. */
+		if (!g_strcmp0(mime_type, "application/pdf") &&
+				!g_atomic_int_get(&wctx->cancel)) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+						"'%s': nur der vorhandene Text wird indiziert",
+						filename);
+			sond_index(wctx->ctx, wctx->log_func, wctx->log_func_data,
+					wctx->index_ctx, filename, data, size, mime_type,
+					seite_von, seite_bis, SOND_OCR_MODE_NONE, &wctx->cancel,
+					FALSE, pdf_pagetree_only);
+		}
+
 		g_free(mime_type);
 
 		return;
@@ -935,6 +1178,39 @@ static gboolean gmessage_message_covered(SondProcessFileCtx* wctx,
 	return known && covered;
 }
 
+/* Datei im Dateisystem (kein Teil eines Containers), die sich allein am Namen
+ * als nicht indizierbar erkennen läßt: die Index-DB samt Journal, Projekt-
+ * dateien (.ZND) und alles, dessen Endung einem bekannten, nicht
+ * indizierbaren Typ entspricht. Unbekannte oder fehlende Endung: nicht
+ * erkennbar, die Datei wird wie bisher über den Inhalt geprüft (z.B. eine
+ * Mail ohne Endung). Container (ZIP) bleiben im Lauf. */
+static gboolean file_part_not_indexable(SondFilePart* sfp,
+		gchar const* file_part) {
+	gchar const* base = NULL;
+	gchar const* mime = NULL;
+	gsize len = 0;
+
+	if (sond_file_part_get_parent(sfp))
+		return FALSE;
+
+	base = strrchr(file_part, '/');
+	base = base ? base + 1 : file_part;
+
+	if (g_str_has_prefix(base, ".sond_index.db"))
+		return TRUE;
+
+	len = strlen(base);
+	if (len >= 4 && !g_ascii_strcasecmp(base + len - 4, ".znd"))
+		return TRUE;
+
+	mime = mime_from_extension(base);
+	if (!mime)
+		return FALSE;
+
+	return !sond_index_mime_type_supported(mime) &&
+			g_strcmp0(mime, "application/zip");
+}
+
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTableIter iter = { 0 };
 	gpointer key = NULL;
@@ -1011,15 +1287,26 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			continue;
 		}
 
+		/* Dateien, die schon an Name/Endung als nicht indizierbar zu erkennen
+		 * sind (Bilder, Videos, Datenbanken, die Index-DB selbst, ...), gar
+		 * nicht erst lesen: sie würden komplett in den Speicher geladen (bei
+		 * SeaDrive-Platzhaltern auch heruntergeladen), nur damit
+		 * sond_index() sie danach verwirft. Sie haben nie einen
+		 * coverage-Eintrag, wurden also in jedem Lauf erneut gelesen. */
+		if (file_part_not_indexable(sfp, file_part)) {
+			if (coverage_key != file_part) g_free(coverage_key);
+			g_free(file_part);
+			continue;
+		}
+
 		bytes = sond_file_part_get_bytes(sfp, &error);
 		if (!bytes) {
-			if (wctx->log_func) {
+			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
 						"sond_process_fileparts: get_bytes '%s': %s",
-						sond_file_part_get_filepart(sfp),
+						file_part,
 						error ? error->message : "unknown error");
-				g_error_free(error);
-			}
+			g_clear_error(&error);
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
 
@@ -1028,8 +1315,44 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 		data = g_bytes_get_data(bytes, &length);
 
-		sond_process_file(wctx, (guchar*) data, length, file_part,
-				&out_data, &out_size, &out_pdf_count, range);
+		/* Mehrere Seitenbereiche (disjunkt): nacheinander, jeweils auf dem
+		 * Ergebnis des vorigen (OCR-Text bleibt erhalten); geschrieben wird
+		 * die Datei einmal am Schluss. */
+		{
+			gint n_ranges = sond_page_range_count(range);
+			guchar* cur_data = (guchar*) data;
+			gsize cur_size = length;
+
+			for (gint r = 0; r < n_ranges; r++) {
+				SondPageRange range_one = { 0 };
+				SondPageRange const* range_use = range;
+				guchar* out_one = NULL;
+				gsize out_one_size = 0;
+
+				if (n_ranges > 1) {
+					range_one = *range;
+					range_one.more = NULL;
+					sond_page_range_get(range, r, &range_one.von, &range_one.bis);
+					range_use = &range_one;
+				}
+
+				sond_process_file(wctx, cur_data, cur_size, file_part,
+						&out_one, &out_one_size, &out_pdf_count, range_use);
+
+				if (out_one && out_one_size > 0) {
+					g_free(out_data);
+					out_data = out_one;
+					out_size = out_one_size;
+					cur_data = out_data;
+					cur_size = out_size;
+				}
+				else
+					g_free(out_one);
+
+				if (g_atomic_int_get(&wctx->cancel))
+					break;
+			}
+		}
 		g_bytes_unref(bytes);
 
 		if (out_data && out_size > 0) {
@@ -1037,13 +1360,12 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			gint rc = sond_file_part_replace(sfp, out_bytes, &error);
 			g_bytes_unref(out_bytes);
 			if (rc) {
-				if (wctx->log_func) {
+				if (wctx->log_func)
 					wctx->log_func(wctx->log_func_data,
 							"sond_process_fileparts: replace '%s': %s",
 							file_part,
 							error ? error->message : "unknown error");
-					g_error_free(error);
-				}
+				g_clear_error(&error);
 			}
 		}
 
@@ -1135,13 +1457,19 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 
 	wctx->ocr_pool = sond_ocr_pool_new(tessdata_path, "deu",
 			num_ocr_threads, &wctx->cancel, &wctx->progress, error);
-	if (!wctx->ocr_pool)
+	if (!wctx->ocr_pool) {
+		g_free(wctx->project_dir);
+		g_free(wctx);
+
 		return NULL;
+	}
 
 	wctx->index_ctx = sond_index_ctx_new(index_db_filename,
 			embedding_model_path, 0, 0, error);
 	if (!wctx->index_ctx) {
 		sond_ocr_pool_free(wctx->ocr_pool);
+		g_free(wctx->project_dir);
+		g_free(wctx);
 
 		return NULL;
 	}

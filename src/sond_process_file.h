@@ -25,6 +25,7 @@ typedef struct _SondOcrPool SondOcrPool;
 typedef struct _SondIndexCtx SondIndexCtx;
 typedef struct _GError GError;
 typedef struct _GHashTable GHashTable;
+typedef struct _GArray GArray;
 typedef char gchar;
 typedef unsigned char guchar;
 typedef void* gpointer;
@@ -66,6 +67,11 @@ typedef struct _SondProcessFileCtx {
  * SondPageRange:
  * @von: erste Seite (0-basiert), -1 = ganze Datei
  * @bis: letzte Seite (0-basiert, inklusive), -1 = ganze Datei
+ * @more: weitere, zum ersten Bereich (von/bis) disjunkte Seitenbereiche
+ *         (GArray von SondPageSpan, aufsteigend), NULL = nur von/bis. Mehrere
+ *         ausgewählte Anbindungen derselben Datei ergeben eine Vereinigung
+ *         und nicht deren Hülle - Seiten dazwischen sind nicht gemeint.
+ *         Nur über sond_page_range_add() füllen.
  * @gmessage_header_only: TRUE, wenn dieser Eintrag NICHT einen
  *         Seitenbereich beschreibt, sondern den "Message"-Knoten einer
  *         E-Mail - dort soll (statt der ganzen Mail) nur der Header
@@ -85,9 +91,15 @@ typedef struct _SondProcessFileCtx {
  * (bei PDF: Seiten und alle eingebetteten Dateien). Ein Seitenbereich
  * (von >= 0) umfasst nie eingebettete Dateien.
  */
+typedef struct _SondPageSpan {
+    gint von;
+    gint bis;
+} SondPageSpan;
+
 typedef struct _SondPageRange {
     gint von;
     gint bis;
+    GArray *more;
     gboolean gmessage_header_only;
     gboolean pdf_pagetree_only;
     /* angebundene Mail in BAUM_INHALT/_AUSWERTUNG: Header + Inline-Teile
@@ -113,6 +125,28 @@ SondPageRange* sond_page_range_new_gmessage_message(void);
 SondPageRange* sond_page_range_copy(SondPageRange const *range);
 
 void sond_page_range_free(gpointer p);
+
+/* Seitenbereich dazunehmen (Vereinigung, überlappende und aneinander
+ * grenzende Bereiche werden verschmolzen). Nur für Seitenbereiche
+ * (von >= 0). */
+void sond_page_range_add(SondPageRange* range, gint von, gint bis);
+
+/* Anzahl der disjunkten Seitenbereiche (1 bei NULL und bei allen Einträgen
+ * ohne Seitenbereich) */
+gint sond_page_range_count(SondPageRange const* range);
+
+/* i-ter Seitenbereich (aufsteigend); bei NULL bzw. ohne Seitenbereich -1/-1 */
+void sond_page_range_get(SondPageRange const* range, gint i, gint* von,
+		gint* bis);
+
+/* Gehört die Seite zu einem der Bereiche? Ohne Seitenbereich (von < 0) TRUE. */
+gboolean sond_page_range_contains(SondPageRange const* range, gint page);
+
+/* Eintrag für sfp in ht (Key SondFilePart*, Wert SondPageRange*, NULL = ganze
+ * Datei) durch die Vereinigung aus bisherigem und neuem Wert ersetzen: ganze
+ * Datei vor "nur Seiten" vor Seitenbereich. Übernimmt die eine Referenz auf
+ * sfp (GObject), die der Aufrufer hält, und das Eigentum an range. */
+void sond_page_range_merge(GHashTable* ht, gpointer sfp, SondPageRange* range);
 
 /* range: NULL = ganze Datei, sonst Seitenbereich bzw. Teil wie oben */
 void sond_process_file(SondProcessFileCtx* wctx,

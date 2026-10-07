@@ -4029,28 +4029,8 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		/* Mehrere ausgewählte Punkte können dieselbe Datei referenzieren
 		 * (gleiches SondFilePart, per Identität interniert) - dann
 		 * Vereinigung bilden: ganze Datei (range == NULL) vor "nur Seiten"
-		 * vor Seitenbereich. */
-		if (g_hash_table_contains(ht_fileparts, sfp)) {
-			SondPageRange *existing = g_hash_table_lookup(ht_fileparts, sfp);
-
-			if (!existing || !range) {
-				/* einer von beiden will die ganze Datei -> ganze Datei */
-				sond_page_range_free(range);
-				g_hash_table_insert(ht_fileparts, sfp, NULL);
-			} else if (existing->pdf_pagetree_only || range->pdf_pagetree_only) {
-				existing->pdf_pagetree_only = TRUE;
-				existing->von = -1;
-				existing->bis = -1;
-				sond_page_range_free(range);
-				g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
-			} else {
-				existing->von = MIN(existing->von, range->von);
-				existing->bis = MAX(existing->bis, range->bis);
-				sond_page_range_free(range);
-				g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
-			}
-		} else
-			g_hash_table_insert(ht_fileparts, sfp, range);
+		 * vor Seitenbereichen (disjunkte Bereiche bleiben getrennt). */
+		sond_page_range_merge(ht_fileparts, sfp, range);
 	} else
 		g_free(section);
 

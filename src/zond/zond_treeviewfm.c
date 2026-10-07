@@ -1606,7 +1606,9 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			range = sond_page_range_new_pdf_pagetree();
 		}
 
-		g_hash_table_insert(ht, g_object_ref(sond_file_part), range);
+		/* Mehrere markierte Punkte derselben Datei (z.B. zwei Anbindungen):
+		 * Vereinigung statt Ersetzen des bisherigen Eintrags */
+		sond_page_range_merge(ht, g_object_ref(sond_file_part), range);
 	}
 
 	return 0;

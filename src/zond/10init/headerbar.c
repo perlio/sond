@@ -401,6 +401,13 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		return;
 	}
 
+	/* Alle Löschungen in einer Transaktion (ein Commit statt einer je
+	 * Statement); jede einzelne ist für sich schon atomar (Savepoint in
+	 * sond_index_ctx_delete_index()), ein Fehler bei einer Datei betrifft
+	 * die anderen also nicht. */
+	gboolean in_tx = (sqlite3_exec(zond->wctx->index_ctx->db, "BEGIN;",
+			NULL, NULL, NULL) == SQLITE_OK);
+
 	g_hash_table_iter_init(&iter, ht_index);
 	while (g_hash_table_iter_next(&iter, &key, &value)) {
 		SondFilePart *sfp = SOND_FILE_PART(key);
@@ -465,15 +472,25 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 			bis = (n_pages > 0) ? n_pages - 1 : G_MAXINT;
 		}
 
-		if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
-				von, bis, zond->project_dir, &error)) {
-			LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
-					file_part, error ? error->message : "?");
-			g_clear_error(&error);
+		/* Mehrere (disjunkte) Seitenbereiche einzeln löschen - Seiten
+		 * dazwischen gehören nicht zur Auswahl. */
+		for (gint r = 0; r < sond_page_range_count(range); r++) {
+			if (range && !range->pdf_pagetree_only && range->von >= 0)
+				sond_page_range_get(range, r, &von, &bis);
+
+			if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
+					von, bis, zond->project_dir, &error)) {
+				LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
+						file_part, error ? error->message : "?");
+				g_clear_error(&error);
+			}
 		}
 		if (file_part != file_part_raw) g_free(file_part);
 		g_free(file_part_raw);
 	}
+
+	if (in_tx)
+		sqlite3_exec(zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
 
 	g_hash_table_destroy(ht_index);
 	zond_index_loeschen_redraw(zond);
