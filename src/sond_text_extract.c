@@ -118,7 +118,14 @@ GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
                  * benötigt (NULL). */
                 fzbuf = fz_new_buffer_from_flattened_stext_page(
                         ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
-                fz_buffer_extract(ctx, fzbuf, &data); /* transfer ownership */
+                /* Kopie mit abschließendem NUL: der Puffer von MuPDF ist nicht
+                 * terminiert (strlen läse über sein Ende hinaus) */
+                {
+                    guchar *bytes = NULL;
+                    gsize   n     = fz_buffer_storage(ctx, fzbuf, &bytes);
+
+                    data = (guchar*) g_strndup((gchar const*) bytes, n);
+                }
             }
             fz_always(ctx) {
                 fz_drop_buffer(ctx, fzbuf);
