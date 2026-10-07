@@ -1429,6 +1429,53 @@ const char* document_type_string(DocumentType type) {
  * HIGHLIGHT-RENDERING
  * ======================================================================= */
 
+/* Faltet einen Text für die Suche: je Zeichen Zerlegung (NFD) ohne die
+ * kombinierenden Akzent-Zeichen, dann Casefold (ü -> u, ß -> ss, Ä -> a).
+ * Mit out_map (optional) kommt zu jedem Byte des Ergebnisses das
+ * Byte-Offset des Originalzeichens, aus dem es stammt (zu verwenden mit
+ * g_free(); text_len wird nicht angehängt, die Länge ist strlen(Ergebnis)).
+ * Rückgabe: neu alloziert. */
+static gchar*
+fold_for_search(gchar const *text, gsize text_len, gsize **out_map) {
+    GString *out = g_string_new(NULL);
+    GArray  *map = out_map ? g_array_new(FALSE, FALSE, sizeof(gsize)) : NULL;
+    gchar const *end = text + text_len;
+
+    for (gchar const *p = text; p < end; ) {
+        gchar const *next = g_utf8_next_char(p);
+        gchar *nfd = NULL;
+        GString *plain = g_string_new(NULL);
+        gchar *folded = NULL;
+        gsize off = (gsize)(p - text);
+
+        if (next > end)
+            next = end;
+
+        nfd = g_utf8_normalize(p, (gssize)(next - p), G_NORMALIZE_NFD);
+        for (gchar const *q = nfd ? nfd : ""; *q; q = g_utf8_next_char(q)) {
+            gunichar c = g_utf8_get_char(q);
+
+            if (g_unichar_combining_class(c) == 0)
+                g_string_append_unichar(plain, c);
+        }
+        g_free(nfd);
+
+        folded = g_utf8_casefold(plain->str, (gssize) plain->len);
+        g_string_free(plain, TRUE);
+        g_string_append(out, folded);
+        for (gsize i = 0; map && i < strlen(folded); i++)
+            g_array_append_val(map, off);
+        g_free(folded);
+
+        p = next;
+    }
+
+    if (out_map)
+        *out_map = (gsize*) g_array_free(map, FALSE);
+
+    return g_string_free(out, FALSE);
+}
+
 /*
  * Rendert wie render_document_from_bytes, übergibt aber zusätzlich
  * einen Highlight-Term und eine Byte-Position im Flat-Text des Dokuments.
@@ -1463,35 +1510,52 @@ render_document_with_highlight(GBytes *bytes, SondFilePart *sfp, int render_widt
      * ------------------------------------------------------------- */
     const char *text    = rd->searchable_text;
     gsize       text_len = strlen(text);
-    gsize       term_len = strlen(term);
 
-    /* Groß-/Kleinschreibung ignorieren: beide Seiten casefold */
-    char *text_cf = g_utf8_casefold(text, (gssize)text_len);
-    char *term_cf = g_utf8_casefold(term, (gssize)term_len);
+    /* Groß-/Kleinschreibung und Akzente ignorieren (wie die Volltextsuche:
+     * "Munchen" findet "München"): beide Seiten gefaltet. Die Länge ändert
+     * sich dabei (ß -> ss, ü -> u), deshalb merkt sich text_map zu jedem
+     * Byte des gefalteten Textes die Position im Original. */
+    gsize *text_map = NULL;
+    char  *text_cf  = fold_for_search(text, text_len, &text_map);
+    char  *term_cf  = fold_for_search(term, strlen(term), NULL);
+    gsize  cf_len   = strlen(text_cf);
+    gsize  term_cf_len = strlen(term_cf);
 
-    /* Startposition: versuche char_pos_in_doc, sonst erstes Vorkommen */
+    /* Startposition: ab char_pos_in_doc (Byte-Offset im Originaltext, wie im
+     * Index gespeichert), sonst erstes Vorkommen */
     const char *hit = NULL;
-    if (char_pos_in_doc >= 0 && (gsize)char_pos_in_doc < strlen(text_cf)) {
-        /* Suche ab char_pos_in_doc rückwärts bis Wortanfang, damit
-         * der Index-Offset exakt passt */
-        hit = strstr(text_cf + char_pos_in_doc, term_cf);
+    if (term_cf_len > 0) {
+        gsize from = 0;
+
+        if (char_pos_in_doc >= 0) {
+            while (from < cf_len && text_map[from] < (gsize) char_pos_in_doc)
+                from++;
+            hit = strstr(text_cf + from, term_cf);
+        }
         if (!hit) /* Fallback: erstes Vorkommen */
             hit = strstr(text_cf, term_cf);
-    } else {
-        hit = strstr(text_cf, term_cf);
     }
 
     if (!hit) {
         g_free(text_cf);
         g_free(term_cf);
+        g_free(text_map);
         if (out_highlight_y) *out_highlight_y = 0;
         return rd;
     }
 
-    gsize byte_start = (gsize)(hit - text_cf);
-    gsize byte_end   = byte_start + term_len;
+    /* zurück ins Original: Anfang des ersten und Ende des letzten Zeichens
+     * des Treffers */
+    gsize cf_start  = (gsize)(hit - text_cf);
+    gsize cf_last   = cf_start + term_cf_len - 1;
+    gsize cf_after  = cf_last + 1;
+    while (cf_after < cf_len && text_map[cf_after] == text_map[cf_last])
+        cf_after++;
+    gsize byte_start = text_map[cf_start];
+    gsize byte_end   = (cf_after < cf_len) ? text_map[cf_after] : text_len;
     g_free(text_cf);
     g_free(term_cf);
+    g_free(text_map);
 
     /* ---------------------------------------------------------------
      * Surface neu mit Highlight-Attribut rendern
