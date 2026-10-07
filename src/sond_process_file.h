@@ -62,8 +62,6 @@ typedef struct _SondProcessFileCtx {
      *   2 = SOND_OCR_MODE_FORCE - versteckten Text löschen, neu OCRen
      * Als gint gehalten, damit dieser Header ohne sond_ocr.h auskommt. */
     gint ocr_mode;
-    /* Sperren des eigenen fz_context (FZ_LOCK_MAX Mutexe) */
-    GMutex *fz_locks;
 } SondProcessFileCtx;
 
 /**
@@ -172,7 +170,7 @@ typedef struct _SondFilePart SondFilePart;
 gint sond_process_file_record_structure(SondIndexCtx* index_ctx,
 		SondFilePart* container, GError** error);
 
-/* Legt einen eigenen fz_context mit Sperren an: der Lauf (Thread) teilt
+/* Legt einen eigenen fz_context an: der Lauf (Thread) teilt
  * keinen Kontext mit der Oberfläche. */
 SondProcessFileCtx* sond_process_file_create_wctx(
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,

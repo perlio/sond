@@ -5164,12 +5164,12 @@ Noch nicht getestet (Syntaxprüfung, Testlauf der Indizierung ohne und mit OCR).
 
 ```text
  #219 Rest:
- - sond_process_file_create_wctx() legt einen eigenen fz_context mit Sperren
-   (FZ_LOCK_MAX Mutexe, SondProcessFileCtx.fz_locks) an und gibt ihn in
-   sond_process_file_destroy_wctx() frei; der Parameter fz_context entfällt
-   (project.c). Der Indizier-Thread teilt damit keinen ungesperrten Kontext
-   mehr mit der Oberfläche (zond->ctx). Bei Fehlern in create_wctx wird über
-   destroy_wctx aufgeräumt.
+ - sond_process_file_create_wctx() legt einen eigenen fz_context an (ohne
+   Sperren: der Lauf benutzt ihn allein, die OCR-Worker lesen nur
+   Pixelpuffer) und gibt ihn in sond_process_file_destroy_wctx() frei; der
+   Parameter fz_context entfällt (project.c). Der Indizier-Thread teilt damit
+   keinen Kontext mehr mit der Oberfläche (zond->ctx). Bei Fehlern in
+   create_wctx wird über destroy_wctx aufgeräumt.
  - Datums-, Entscheidungs- und Verlaufs-Kommentare (ToDo.c, Nutzer-Fund,
    Task-Nummern, "vorher/jetzt") in sond_index.c/.h, sond_process_file.c,
    sond_text_extract.c, zond_indexsuche.c und headerbar.c gestrichen oder

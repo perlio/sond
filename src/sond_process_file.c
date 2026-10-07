@@ -1505,14 +1505,6 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	return;
 }
 
-static void fz_lock_cb(void* user, gint lock) {
-	g_mutex_lock(&((GMutex*) user)[lock]);
-}
-
-static void fz_unlock_cb(void* user, gint lock) {
-	g_mutex_unlock(&((GMutex*) user)[lock]);
-}
-
 SondProcessFileCtx* sond_process_file_create_wctx(
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,
@@ -1520,18 +1512,12 @@ SondProcessFileCtx* sond_process_file_create_wctx(
 		gchar const* project_dir, GError **error) {
 
 	SondProcessFileCtx* wctx = g_new0(SondProcessFileCtx, 1);
-	fz_locks_context locks = { 0 };
 
-	/* eigener fz_context mit Sperren: Der Lauf arbeitet in einem Thread,
-	 * der Kontext der Oberfläche ist nicht thread-sicher. */
-	wctx->fz_locks = g_new0(GMutex, FZ_LOCK_MAX);
-	for (gint i = 0; i < FZ_LOCK_MAX; i++)
-		g_mutex_init(&wctx->fz_locks[i]);
-	locks.user = wctx->fz_locks;
-	locks.lock = fz_lock_cb;
-	locks.unlock = fz_unlock_cb;
-
-	wctx->ctx = fz_new_context(NULL, &locks, FZ_STORE_UNLIMITED);
+	/* eigener fz_context: Der Lauf arbeitet in einem Thread, der Kontext der
+	 * Oberfläche (zond->ctx) ist nicht thread-sicher. Der Lauf benutzt ihn
+	 * allein (die OCR-Worker lesen nur Pixelpuffer), Sperren sind daher
+	 * nicht nötig. */
+	wctx->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!wctx->ctx) {
 		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 				"fz_context konnte nicht angelegt werden");
@@ -1575,11 +1561,6 @@ void sond_process_file_destroy_wctx(SondProcessFileCtx *wctx) {
 		sond_ocr_pool_free(wctx->ocr_pool);
 	if (wctx->ctx)
 		fz_drop_context(wctx->ctx);
-	if (wctx->fz_locks) {
-		for (gint i = 0; i < FZ_LOCK_MAX; i++)
-			g_mutex_clear(&wctx->fz_locks[i]);
-		g_free(wctx->fz_locks);
-	}
 	g_free(wctx->project_dir);
 
 	g_free(wctx);
