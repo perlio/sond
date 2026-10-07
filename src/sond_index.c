@@ -3844,6 +3844,13 @@ gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
     if (!message)
         return TRUE; //nicht lesbar - nichts festzuhalten
 
+    //Entry-Count und Inline-Teile gemeinsam oder gar nicht
+    if (!db_savepoint(ctx, error)) {
+        g_object_unref(message);
+
+        return FALSE;
+    }
+
     root = g_mime_message_get_mime_part(message);
 
     /* Zahl der direkten Mimeparts +1 für den virtuellen "header"-Slot, der
@@ -3864,6 +3871,7 @@ gboolean sond_index_ctx_record_gmessage_structure(SondIndexCtx *ctx,
         g_ptr_array_unref(inline_parts);
     }
 
+    db_savepoint_end(ctx, ok);
     g_object_unref(message);
 
     return ok;
@@ -3898,26 +3906,6 @@ void sond_index(fz_context* ctx,
             (pdf_pagetree_only && !g_strcmp0(mime_type, "application/pdf")) ?
             g_strdup_printf("%s//", filename) : NULL;
     gchar const *coverage_path = pagetree_path ? pagetree_path : idx_filename;
-
-    /* container_entrycount für die GANZE Mail (filename, nicht
-     * idx_filename) auffrischen - unabhängig von gmessage_header_only,
-     * da der Puffer hier so oder so schon im Speicher liegt (s.
-     * gmessage_count_root_entries()). +1 für den virtuellen "header"-
-     * Slot, der beim GMessage-bewussten Collapse (sond_index_ctx_
-     * coverage_try_collapse()/_invalidate(), 17.09.2026) neben den
-     * nummerierten Mimeparts mitgezählt wird. */
-    if (!g_strcmp0(mime_type, "message/rfc822")) {
-        GError *structure_error = NULL;
-
-        if (!sond_index_ctx_record_gmessage_structure(sond_index_ctx, filename,
-                buf, size, &structure_error)) {
-            if (log_func)
-                log_func(log_func_data,
-                        "sond_index: Struktur '%s': %s", filename,
-                        structure_error ? structure_error->message : "?");
-            g_clear_error(&structure_error);
-        }
-    }
 
     /* Segmente extrahieren */
     GPtrArray *segs = NULL;
@@ -3975,6 +3963,23 @@ void sond_index(fz_context* ctx,
         sqlite3_free(errmsg);
         g_ptr_array_unref(segs);
         return;
+    }
+
+    /* container_entrycount und Inline-Teile für die GANZE Mail (filename,
+     * nicht idx_filename) auffrischen - unabhängig von gmessage_header_only,
+     * da der Puffer hier so oder so schon im Speicher liegt. Innerhalb der
+     * Datei-Transaktion: ein Commit für alles. */
+    if (!g_strcmp0(mime_type, "message/rfc822")) {
+        GError *structure_error = NULL;
+
+        if (!sond_index_ctx_record_gmessage_structure(sond_index_ctx, filename,
+                buf, size, &structure_error)) {
+            if (log_func)
+                log_func(log_func_data,
+                        "sond_index: Struktur '%s': %s", filename,
+                        structure_error ? structure_error->message : "?");
+            g_clear_error(&structure_error);
+        }
     }
 
     gint chunk_idx = 0;

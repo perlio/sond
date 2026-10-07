@@ -1211,10 +1211,35 @@ static gboolean file_part_not_indexable(SondFilePart* sfp,
 			g_strcmp0(mime, "application/zip");
 }
 
+/* Gruppe, in der try_collapse beim Zusammenfassen listet: der Container
+ * (Teil vor dem letzten "//") bzw. das Verzeichnis. NULL ohne "/" im Schlüssel. */
+static gchar* collapse_group(gchar const* key) {
+	gchar const* sep = NULL;
+	gchar const* p = NULL;
+	gsize len = strlen(key);
+
+	while (len > 0 && key[len - 1] == '/')
+		len--;
+
+	for (p = key; p + 1 < key + len; p++)
+		if (p[0] == '/' && p[1] == '/')
+			sep = p; /* letztes "//" */
+	if (sep)
+		return g_strndup(key, sep - key);
+
+	for (p = key + len; p > key; p--)
+		if (p[-1] == '/')
+			return g_strndup(key, p - 1 - key);
+
+	return NULL;
+}
+
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTableIter iter = { 0 };
 	gpointer key = NULL;
 	gpointer value = NULL;
+	GHashTable* collapse_groups = g_hash_table_new_full(g_str_hash,
+			g_str_equal, g_free, g_free);
 
 	clean_hashtable(files);
 
@@ -1410,27 +1435,39 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		 * #199). */
 		collapse_key = coverage_key;
 
-		if (!g_atomic_int_get(&wctx->cancel) &&
-				wctx->index_ctx && wctx->project_dir &&
+		/* Das Zusammenfassen listet das Verzeichnis bzw. zählt den Container:
+		 * nur einmal je Gruppe nach dem Lauf, nicht nach jeder Datei. */
+		if (wctx->index_ctx && wctx->project_dir &&
 				sond_index_ctx_coverage_get(wctx->index_ctx, collapse_key)
 						>= wctx->ocr_mode) {
-			GError *coverage_error = NULL;
+			gchar *group = collapse_group(collapse_key);
 
-			if (!sond_index_ctx_coverage_try_collapse(wctx->index_ctx,
-					collapse_key, wctx->project_dir,
-					&coverage_error)) {
-				if (wctx->log_func)
-					wctx->log_func(wctx->log_func_data,
-							"sond_process_fileparts: coverage_try_collapse '%s': %s",
-							collapse_key,
-							coverage_error ? coverage_error->message : "?");
-				g_clear_error(&coverage_error);
-			}
+			if (group && !g_hash_table_contains(collapse_groups, group))
+				g_hash_table_insert(collapse_groups, group,
+						g_strdup(collapse_key));
+			else
+				g_free(group);
 		}
 
 		if (coverage_key != file_part) g_free(coverage_key);
 		g_free(file_part);
 	}
+
+	g_hash_table_iter_init(&iter, collapse_groups);
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
+		GError *coverage_error = NULL;
+
+		if (!sond_index_ctx_coverage_try_collapse(wctx->index_ctx,
+				(gchar const*) value, wctx->project_dir, &coverage_error)) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+						"sond_process_fileparts: coverage_try_collapse '%s': %s",
+						(gchar const*) value,
+						coverage_error ? coverage_error->message : "?");
+			g_clear_error(&coverage_error);
+		}
+	}
+	g_hash_table_unref(collapse_groups);
 
 	return;
 }
