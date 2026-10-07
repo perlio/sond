@@ -1018,12 +1018,15 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 				filename, error ? error->message : "unknown error");
 		g_clear_error(&error);
 
-		/* PDF: scheitert die OCR-/Anhang-Stufe (z.B. Seitenbaum
-		 * beschädigt), den vorhandenen Text der Originaldaten trotzdem
-		 * indizieren. Mit Modus "kein OCR" vermerkt: ein späterer Lauf mit
-		 * OCR-Prüfung versucht es erneut, die Datei gilt nicht als
-		 * vollständig bearbeitet. */
-		if (!g_strcmp0(mime_type, "application/pdf") &&
+		/* PDF/E-Mail: scheitert die OCR-/Anhang-Stufe (z.B. Seitenbaum
+		 * beschädigt, Mail nicht zurückschreibbar), den vorhandenen Text der
+		 * Originaldaten trotzdem indizieren. Mit Modus "kein OCR" vermerkt:
+		 * ein späterer Lauf mit OCR-Prüfung versucht es erneut, die Datei
+		 * gilt nicht als vollständig bearbeitet. Bei ZIP gibt es keinen
+		 * eigenen Text; die Einträge sind schon einzeln indiziert, nur das
+		 * Zurückschreiben ist gescheitert. */
+		if ((!g_strcmp0(mime_type, "application/pdf") ||
+				!g_strcmp0(mime_type, "message/rfc822")) &&
 				!g_atomic_int_get(&wctx->cancel)) {
 			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
@@ -1032,7 +1035,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 			sond_index(wctx->ctx, wctx->log_func, wctx->log_func_data,
 					wctx->index_ctx, filename, data, size, mime_type,
 					seite_von, seite_bis, SOND_OCR_MODE_NONE, &wctx->cancel,
-					FALSE, pdf_pagetree_only);
+					gmessage_header_only, pdf_pagetree_only);
 		}
 
 		g_free(mime_type);
