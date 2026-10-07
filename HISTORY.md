@@ -4817,3 +4817,214 @@ Vom Nutzer getestet.
  Der Export (export_pdf_seiten.c) ruft die Funktion mit page_dest -1 auf.
  pdf_ocr_create_doc_from_page() (ungenutzt) entfernt.
 ```
+
+## Review der Index-Implementation: #206–#218 (06./07.10.2026)
+
+Noch nicht getestet - auf Wunsch des Nutzers hierher übernommen, bei Fehlern meldet er sich.
+#210, #213, #214 und #215 sind nur teilweise erledigt, die Reste stehen in TODO.md.
+
+```text
+ #206 (sond_index.c/.h):
+ a) FTS-Suche: Begriff und Kontext werden immer als "..." gequotet
+    (fts_quote()), vorher Syntaxfehler bei Bindestrich, Punkt, Doppelpunkt,
+    AND/OR/NOT, Anführungszeichen ("Müller-Lüdenscheid", "31.12.2024").
+ b) Pfad-Präfixe ohne LIKE (Wildcard "_"/"%", Groß-/Kleinschreibung): Bereich
+    "col >= p/ AND col < p0" (SQL_UNDER, SQL_UNDER_EMB), nutzt den PK-Index.
+    Betrifft clear_file, clear_page_count, clear_entry_count,
+    count_nested_indexed, get_dir_status, coverage_mark, coverage_clear,
+    delete_index.
+ c) clear_file löscht jetzt auch Dateien in einem gelöschten Verzeichnis
+    ("dir/..."), vorher blieben chunks/pages als Geister-Treffer.
+ d) delete_index (Seitenbereich) rettet die übrigen Seiten auch dann, wenn
+    die Datei nur über ein Vorfahren-Verzeichnis abgedeckt ist
+    (coverage_expand_to_pages mit coverage_get statt exakter Abfrage).
+ e) Dateien ohne extrahierbaren Text und PDF-Seiten ohne Text gelten als
+    verarbeitet (coverage/pages), vorher dauerhaft "nicht indiziert" und
+    Anbindungsbereiche mit Leerseite nie FULL. Nicht vermerkt: PDF, die sich
+    nicht öffnen ließ.
+ f) Index chunks(filename, page_nr, char_pos), vorher Vollscan je Seite.
+ g) coverage_mark/delete_index prüfen die Ergebnisse ihrer DELETEs.
+ Geprüft mit Testprogramm (sond_index.c gegen Stubs), nicht im Programm.
+ Hinweis: der neue Index wird beim ersten Öffnen einer bestehenden
+ Index-DB angelegt (einmalig, dauert bei großen DBs kurz).
+
+ #207 Mehrere ausgewählte Anbindungen derselben
+ Datei ergeben die Vereinigung ihrer Seitenbereiche, nicht mehr die Hülle
+ (zwei Anbindungen 1-3 und 50-60 waren 1-60: Index löschen löschte
+ ungewählte Seiten, Index erstellen OCRt sie, die Suche lieferte Treffer
+ außerhalb). SondPageRange hat dafür "more" (weitere disjunkte
+ Bereiche, SondPageSpan) und sond_page_range_add()/_count()/_get()/
+ _contains()/_merge() (sond_process_file.c). sond_page_range_merge() ersetzt
+ den Merge-Block in zond_treeview.c und das g_hash_table_insert in
+ zond_treeviewfm.c (dort ersetzte es bei gleicher Datei den bisherigen Bereich,
+ es zählte nur die zuletzt gesammelte Anbindung). Verbraucher: sond_process_
+ fileparts() verarbeitet die Bereiche nacheinander auf dem Ergebnis des
+ vorigen und schreibt die Datei einmal; Index löschen (Auswahl) löscht jeden
+ Bereich einzeln; Lücken-Check und Treffer-Filter in zond_indexsuche.c
+ kennen alle Bereiche. Geprüft mit Testprogramm (Vereinigung, Hashtabelle,
+ zwei Bereiche in der echten Verarbeitungskette), nicht in der Oberfläche.
+
+ #208 Log-Aufrufe korrigiert. sond_ocr.c:
+ "Transform-Matrix" und "Thread gepusht" bekamen die Seitenzahl für "%s"
+ (Absturz), sond_process_file.c: filename als Format-String (ZIP-Ersetzen,
+ eingebettete Datei), "if (log_func_data)" prüfte den falschen Zeiger.
+ Dazu: sond_ocr_task_new() setzte bei einer nicht ladbaren Seite keinen
+ Fehler, die Aufrufer (sond_ocr_pdf_doc(), seiten.c) lasen error->message
+ aus NULL (Absturz). Außerdem Lecks: filename_emb bei Lesefehler, wctx bei
+ Fehler in create_wctx, GError und get_filepart-String im Log von
+ sond_process_fileparts().
+
+ #209 sond_text_extract_pdf() versucht jede
+ Seite einzeln (fz_try je Seite, doc mit fz_var); eine defekte Seite nimmt
+ die übrigen nicht mehr mit. Neuer Parameter out_failed_pages. sond_index()
+ vermerkt solche Seiten weder als "ohne Text" noch setzt es Voll-Coverage
+ oder Seitenzahl (Meldung "N Seite(n) nicht lesbar"). Die lesbaren Seiten
+ sind indiziert. Geprüft mit einer PDF mit /Count 3 und nur 2 Seiten.
+
+ #210 "Index erstellen" liest Dateien, die sich
+ an Name/Endung als nicht indizierbar erkennen lassen, nicht mehr (vorher
+ las "Gesamtes Projekt" bei jedem Lauf jede Datei komplett: Bilder, Videos,
+ Programme, .sond_index.db, .ZND - bei SeaDrive Hydrierung, dazu RAM).
+ sond_process_fileparts(): file_part_not_indexable() vor get_bytes. Übersprungen
+ werden Dateien im Dateisystem mit Name ".sond_index.db*", Endung .znd und
+ Endungen, die laut mime_from_extension() einem nicht indizierbaren Typ
+ entsprechen. Unbekannte oder fehlende Endung (z.B. eine Mail ohne Endung) und
+ ZIP bleiben im Lauf. Geprüft mit Testprogramm (jpg, .ZND, exe übersprungen;
+ txt, Mail ohne Endung, .xyz, PDF mit Anhang indiziert).
+ Folge: Dateien, deren Endung einem nicht indizierbaren Typ zugeordnet ist,
+ obwohl libmagic sie als Text erkannt hätte (.sql, .sh, .bat, .json, .py ...),
+ werden nicht mehr indiziert. Noch offen: der readdir-Scanner legt für solche
+ Dateien weiter Einträge an (kostet nur Speicher), Abbrechen wirkt weiter erst
+ zwischen Dateien, große indizierbare Dateien werden komplett gelesen.
+
+ #211 "Im Kontext von" lieferte auch Treffer auf
+ das Kontextwort (highlight() markierte beide Begriffe, sond_index_search()
+ machte aus jeder Markierung einen Treffer). Der Kontext steht jetzt als
+ Unterabfrage (AND c.id IN (SELECT rowid FROM chunks_fts WHERE ... MATCH
+ ctx)), im MATCH steht nur der Suchbegriff - der Kontext bleibt Bedingung
+ (selber Chunk), ohne Treffer zu erzeugen. build_fts_query() entfällt.
+
+ #212 Eine Mail steht im Index nur noch über
+ ihren Header ("x.eml//header") und ihre Mimeparts ("x.eml//N", bei
+ geschachtelten Mails "x.eml//N//M" und "x.eml//N//header"). Vorher lag der
+ Text zusätzlich als Gesamttext unter "x.eml" (und bei geschachtelten Mails
+ unter "x.eml//N"), jeder Treffer im Body erschien doppelt.
+ a) sond_index(): für message/rfc822 ohne "nur Header" kein Text mehr, nur
+    Struktur und Coverage (Coverage und Zusammenfassen der Einträge
+    unverändert).
+ b) Treffer in "x.eml//header" öffnen die ganze Mail (zond_indexsuche_row_
+    activated): es gibt keinen Teil dieses Namens, lookup_path machte
+    atoi("header") == 0 und öffnete Mimepart 0. Der Header ist der Anfang des
+    Gesamttexts, die Trefferposition stimmt.
+ c) Textteile mit deklariertem Zeichensatz (ISO-8859-2, UTF-16, ...), die
+    kein gültiges UTF-8 sind, werden vor dem Indizieren nach UTF-8 gewandelt
+    (gmessage_part_text_to_utf8() in sond_process_file.c), vorher als
+    windows-1252 gelesen. Gilt nur für den Index: die Anzeige eines einzelnen
+    Teils (Renderer) liest weiter ohne Zeichensatz, bei exotischen Zeichensätzen
+    stimmt dort die Markierung der Fundstelle nicht.
+ Alte Indizes: Gesamttexte bleiben bis "Index löschen" bestehen (keine
+ Bereinigung, Indizes sind noch in der Testphase). Folge: "Im Kontext von"
+ findet ein Wort im Header und eines im Body nicht mehr im selben Chunk.
+ Geprüft mit Testprogramm: Mail mit ISO-8859-2-Teil und geschachtelter Mail,
+ keine Chunks unter x.eml, Coverage läuft bis zum Ordner zusammen.
+
+ #213 scheitert bei einer PDF die OCR-/
+ Anhang-Stufe (rc == -1 in sond_process_file_do_rec, z.B. beschädigter
+ Seitenbaum: pdf_get_sond_font "cannot find page 3 in page tree"), wird der
+ vorhandene Text der Originaldaten trotzdem indiziert, mit OCR-Modus "kein
+ OCR" vermerkt (ein späterer Lauf mit Prüfung versucht es erneut). Vorher
+ wurde die ganze Datei übersprungen. E-Mail und ZIP: unverändert offen.
+
+ #214 Indexsuche mit großen
+ Trefferzahlen.
+ a) sond_index_search() hat max_hits, einen Filter (SondIndexHitFilter) und
+    truncated. Der Filter und die Dubletten-Prüfung laufen vor dem Aufbau des
+    Ausschnitts (vorher entstanden alle Ausschnitte, dann wurde gefiltert);
+    die Dubletten-Entfernung ist ein Hash-Lookup statt g_ptr_array_remove_index
+    (O(n^2)). Bei max_hits bricht die Suche ab, auch die Dateinamen-Treffer
+    werden dann nicht mehr angehängt.
+ b) zond_indexsuche.c: Limit ZOND_INDEXSUCHE_MAX_HITS 5000, bei Erreichen steht
+    im Titel des Ergebnisfensters "nur die ersten 5000 Treffer - Suchbegriff
+    eingrenzen". Sortiert wird nach Dateiname, es sind also die ersten
+    Dateien alphabetisch.
+ c) Auswahl-Filter: SelFilter wird einmal aus der Auswahl vorbereitet (Pfad ->
+    Einträge, Mail-Bestandteile einmal aus der DB), je Treffer nur noch
+    Nachschlagen mit schrittweise gekürztem Pfad (vorher je Treffer und
+    Auswahl-Element get_filepart und bei Mails eine DB-Abfrage). Dieselbe
+    Auswahl-Semantik wie vorher (geprüft mit Testprogramm).
+ d) Sanduhr-Zeiger während der Suche (set_wait_cursor).
+ Offen: die Suche läuft weiter synchron im UI-Thread (die Oberfläche steht
+ während der FTS-Abfrage); die Dateinamen-Suche liest alle Dateinamen aus
+ chunks; Ergebnisliste ohne Paging.
+
+ #215 Transaktionen in sond_index.c
+ (vorher lief fast jedes Statement im Autocommit, bei synchronous=FULL ein
+ fsync je Statement; bei einem Fehler mitten in delete_all blieb coverage
+ stehen, obwohl die Chunks gelöscht waren).
+ a) Savepoint statt BEGIN (db_savepoint()/db_savepoint_end()): verschachtelbar,
+    läuft also auch innerhalb einer offenen Transaktion des Aufrufers (z.B.
+    zond_treeviewfm.c beim Löschen), sonst wird er selbst zur Transaktion.
+    Atomar sind jetzt sond_index_ctx_delete_index(), _delete_all(),
+    _coverage_mark(), _coverage_invalidate() und _coverage_try_collapse() (je
+    ein Commit); bei einem Fehler wird zurückgerollt.
+ b) sond_index(): Chunks, pages, coverage und Seitenzahl einer Datei stehen
+    in einer Transaktion (das COMMIT liegt hinter coverage_mark/
+    set_page_count, vor dem rekursiven Aufruf für den Mail-Header). Vorher
+    konnten Chunks ohne Coverage-Eintrag oder gelöschte pages ohne neue
+    Coverage zurückbleiben.
+ c) "Index löschen (Auswahl)" (headerbar.c): alle Löschungen in einer
+    Transaktion, jede für sich weiter atomar.
+ Gemessen im echten Ablauf (neun Dateien, PDF mit Anhang, Mail, Textdateien):
+ 26 statt 73 Commits, gleiches Ergebnis. Geprüft mit Testprogramm: Rollback
+ bei Fehler (delete_all, coverage_mark), Verschachtelung in einer offenen
+ Transaktion samt Rollback des Aufrufers.
+ Offen: set_entry_count/set_pdf_embedded/record_gmessage_structure
+ (sond_process_file.c) weiter je ein Commit; try_collapse listet nach jeder
+ Datei das Verzeichnis (Zusammenfassen am Ende je Verzeichnis); das Löschen
+ läuft weiter im UI-Thread.
+
+ #216 Abbruch mitten in einer Seite. Vorher
+ committete sond_index() die angefangene Seite: ihre halb eingefügten Chunks
+ blieben ohne pages-Zeile im Index, durchsuchbar, bis der nächste Lauf sie
+ ersetzte; war die Seite schon (mit niedrigerem Modus) indiziert, war der
+ alte Stand gelöscht. Jetzt ist jede Seite (alte Chunks löschen, neue Chunks,
+ pages-Zeile) ein Savepoint (sond_index.c); bei Abbruch wird die Seite
+ zurückgerollt - von ihr bleibt nichts, ein alter Stand bleibt erhalten. Die
+ bis dahin fertigen Seiten werden wie bisher committet. Geprüft mit
+ Testprogramm (Abbruch per Trigger mitten in Seite 2, auch mit altem Stand der
+ Seite).
+
+ #217 Dateinamen-Treffer.
+ a) Ein Treffer "(Dateiname)" auf eine PDF öffnete sie als Rohtext
+    (zond_indexsuche_row_activated: SOND_IS_FILE_PART_PDF && page_nr >= 0
+    war bei page_nr -1 falsch, es lief der Zweig "Nicht-PDF"). Jetzt öffnet
+    die PDF im Viewer an ihrem Anfang, ohne Markierung. Dazu error->message
+    nach document_new_displayed_document() gegen NULL abgesichert.
+ b) Dateinamensuche in sond_index_search(): ohne LIKE (der Begriff war nicht
+    maskiert: "_" und "%" waren Wildcards), ohne zweite FTS-Abfrage, nur im
+    letzten Pfadsegment (vorher traf sie auch Verzeichnisnamen), ohne
+    Beachtung der Groß-/Kleinschreibung (g_utf8_casefold, auch Umlaute).
+ c) Gesucht wird über chunks statt pages: zusammengefaßte Dateien haben keine
+    pages-Zeilen mehr und wurden vorher nicht gefunden (nur teilweise
+    indizierte). Dateien ohne Text (keine Chunks) erscheinen weiter nicht.
+ d) Header und Teile einer Mail ("x.eml//header", "x.eml//0") zählen zur Mail
+    ("x.eml"), die als ein Treffer erscheint.
+
+ #218 Die Größe eines ZIP-Eintrags kommt aus
+ dem Archiv und kann beschädigt oder gefälscht sein; g_malloc() mit dieser
+ Größe beendet das Programm, wenn der Speicher nicht reicht, oder belegt
+ sonst Gigabytes für nichts. (Mit gefälschten 4 GB lief der alte Code auf der
+ Entwicklungsmaschine durch: g_malloc ging durch, erst das Lesen scheiterte -
+ der Abbruch hängt also vom freien Speicher ab.)
+ - sond_file_helper.h: SOND_ZIP_ENTRY_MAX_SIZE (1 GiB).
+ - sond_process_file.c (process_zip_for_ocr, Indizieren): Einträge über der
+   Grenze werden mit Meldung übersprungen, g_try_malloc mit Meldung bei
+   Fehlschlag, Reihenfolge Größe prüfen - reservieren - öffnen.
+ - sond_text_extract.c (extract_from_zip, docx/odt): Größe muß gültig sein
+   (ZIP_STAT_SIZE) und unter der Grenze liegen, g_try_malloc.
+ - sond_fileparts.c (ZIP-Eintrag lesen, z.B. zum Öffnen): kein hartes Limit
+   (ein echter, großer Eintrag soll sich weiter öffnen lassen), g_try_malloc
+   mit Fehlermeldung statt Programmende.
+ Geprüft mit Testprogramm: ZIP und DOCX mit gefälschter Größe im Verzeichnis
+ (3,75 GB) werden übersprungen, der Lauf geht weiter.
+```
