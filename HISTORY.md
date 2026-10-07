@@ -5120,3 +5120,18 @@ Noch nicht getestet (nur Syntaxprüfung).
  sond_index.h und zond_indexsuche.c angepaßt (page_nr -1 gibt es weiter bei
  Nicht-PDF).
 ```
+
+## #214 Rest: Suche im Thread nicht nötig (07.10.2026)
+
+```text
+ #214 Rest: Die Indexsuche bleibt synchron im UI-Thread, ein Thread mit
+ Abbrechen und eigener Nur-Lese-Verbindung ist nicht nötig. Gemessen mit
+ sond_index_search() (Limit 5000) auf einer Kopie des größten Index (23 MB,
+ 15.519 Chunks, 30 Dateien): sehr häufiges Wort ("der", Treffer gekappt)
+ 200-245 ms, übliche Begriffe 27-43 ms, mit Kontext 7-13 ms, unbekanntes
+ Wort unter 1 ms. Die Zeit hängt an der Trefferzahl (höchstens 5000), nicht
+ an der Indexgröße. Nicht gemessen: Aufbau der 5000 Zeilen im Ergebnisfenster,
+ Auswahl-Filter, Index auf einem Netzlaufwerk. Wird die Suche im Betrieb
+ spürbar langsam, neu aufnehmen. Ergebnisliste ohne Paging genügt bei
+ höchstens 5000 Treffern.
+```
