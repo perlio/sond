@@ -482,6 +482,7 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  Chunks. Ohne Abbrechen-Button. Wird das im Betrieb zu langsam: Löschen in
  einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
  Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
+ Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
 
  #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
  - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein

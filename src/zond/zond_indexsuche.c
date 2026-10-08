@@ -1048,24 +1048,6 @@ sel_filter_cb(gchar const *filename, gint page_nr, gpointer data) {
     return keep;
 }
 
-/* Sanduhr, solange die (synchrone) Suche läuft */
-static void
-set_wait_cursor(GtkWidget *widget) {
-    GdkWindow *gw = gtk_widget_get_window(widget);
-
-    if (gw) {
-        GdkCursor *cursor = gdk_cursor_new_from_name(
-                gdk_window_get_display(gw), "wait");
-
-        gdk_window_set_cursor(gw, cursor);
-        if (cursor)
-            g_object_unref(cursor);
-        gdk_display_flush(gdk_window_get_display(gw));
-    }
-    while (gtk_events_pending())
-        gtk_main_iteration();
-}
-
 static void
 zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage) {
     GtkWidget *dialog     = NULL;
@@ -1086,8 +1068,13 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     }
 
     if (ht_coverage) {
-        GPtrArray *gaps = check_coverage(zond, ht_coverage);
-        gboolean cont = handle_coverage_gaps(zond, gaps);
+        GPtrArray *gaps = NULL;
+        gboolean cont = FALSE;
+
+        wait_cursor_set(zond->app_window);
+        gaps = check_coverage(zond, ht_coverage);
+        wait_cursor_reset(zond->app_window);
+        cont = handle_coverage_gaps(zond, gaps);
         g_ptr_array_unref(gaps);
         if (!cont)
             return;
@@ -1162,7 +1149,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
                     sel_filter_new(zond->wctx->index_ctx, ht_filter) : NULL;
             gboolean   truncated = FALSE;
 
-            set_wait_cursor(dialog);
+            wait_cursor_set(dialog); // Sanduhr, solange die (synchrone) Suche läuft
 
             hits = sond_index_search(
                     zond->wctx->index_ctx,
@@ -1293,12 +1280,14 @@ zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
     ht_owner = g_hash_table_new_full(NULL, NULL, g_object_unref, NULL);
     gaps = g_ptr_array_new_with_free_func(sond_index_coverage_gap_free);
 
+    wait_cursor_set(zond->app_window);
     if (scan_coverage_gaps_fs(zond, SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
             NULL, gaps, ht_owner, &error)) {
         g_warning("zond_indexsuche_activate: Abdeckungs-Check unvollständig: %s",
                 error ? error->message : "?");
         g_clear_error(&error);
     }
+    wait_cursor_reset(zond->app_window);
 
     cont = handle_coverage_gaps(zond, gaps);
 

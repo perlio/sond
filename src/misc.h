@@ -76,6 +76,14 @@ void info_window_set_progress_bar(InfoWindow*);
 
 void info_window_display_progress(InfoWindow*, gint);
 
+/* Wartecursor (Sanduhr) auf dem Fenster von widget, für Arbeit, die synchron im
+ * UI-Thread läuft (die Oberfläche reagiert währenddessen nicht). set
+ * leert die Event-Warteschlange, damit der Cursor schon sichtbar ist, bevor
+ * die Arbeit beginnt; jedes set braucht ein reset (auf allen Ausstiegen). */
+void wait_cursor_set(GtkWidget *widget);
+
+void wait_cursor_reset(GtkWidget *widget);
+
 void info_window_set_message(InfoWindow*, const gchar*, ...);
 
 void info_window_set_message_thread_safe(InfoWindow *info_window, const gchar *format, ...);

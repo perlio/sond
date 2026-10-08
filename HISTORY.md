@@ -5287,3 +5287,23 @@ Nur Kommentare geändert; geprüft durch Vergleich der von Kommentaren befreiten
  Eclipse-Kopfzeilen "Created on" in sond_renderer.c/.h und das Beispiel
  "31.12.2024" in sond_index.c.
 ```
+
+## Wartecursor bei synchroner Arbeit im UI-Thread (08.10.2026)
+
+Nur Syntaxprüfung; der Cursor selbst ist nur in der Oberfläche prüfbar.
+
+```text
+ wait_cursor_set()/wait_cursor_reset() (misc.c/.h): Sanduhr auf dem Fenster des
+ übergebenen Widgets für Arbeit, die synchron im UI-Thread läuft. set leert
+ die Event-Warteschlange, damit der Cursor vor Beginn der Arbeit sichtbar ist;
+ jedes set hat ein reset. Verwendet bei:
+ - Index löschen (Auswahl und gesamt, headerbar.c),
+ - Sammeln der Fileparts für Index erstellen/löschen (Auswahl und gesamt,
+   headerbar.c),
+ - Abdeckungs-Check vor der Indexsuche (Verzeichnis-Scan bei "Gesamtes
+   Projektverzeichnis", check_coverage bei "Auswahl", zond_indexsuche.c),
+ - Indexsuche selbst (bisher eine eigene static-Funktion in
+   zond_indexsuche.c, jetzt die gemeinsame).
+ Der Cursor zeigt nur, daß gearbeitet wird; die Oberfläche reagiert währenddessen
+ weiter nicht und es gibt keinen Abbrechen-Button (s. TODO.md #220).
+```

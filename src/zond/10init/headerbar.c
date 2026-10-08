@@ -293,9 +293,11 @@ static void do_index_erstellen_gesamt(Projekt *zond) {
 	if (ocr_mode == -1)
 		return;
 
+	wait_cursor_set(zond->app_window);
 	ht_index = zond_treeviewfm_get_fileparts(
 			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE,
 			ocr_mode != SOND_OCR_MODE_FORCE, &error);
+	wait_cursor_reset(zond->app_window);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
@@ -320,6 +322,7 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 		return;
 	}
 
+	wait_cursor_set(zond->app_window);
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
 				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
@@ -327,6 +330,7 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
+	wait_cursor_reset(zond->app_window);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
 				error ? error->message : "?", NULL);
@@ -374,7 +378,10 @@ static void do_index_loeschen_gesamt(Projekt *zond) {
 	if (rc != GTK_RESPONSE_YES)
 		return;
 
-	if (!sond_index_ctx_delete_all(zond->wctx->index_ctx, &error)) {
+	wait_cursor_set(zond->app_window);
+	rc = sond_index_ctx_delete_all(zond->wctx->index_ctx, &error);
+	wait_cursor_reset(zond->app_window);
+	if (!rc) {
 		display_message(zond->app_window, "Fehler beim Löschen des Index:\n",
 				error->message, NULL);
 		g_error_free(error);
@@ -407,6 +414,7 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 	 * Statement); jede einzelne ist für sich schon atomar (Savepoint in
 	 * sond_index_ctx_delete_index()), ein Fehler bei einer Datei betrifft
 	 * die anderen also nicht. */
+	wait_cursor_set(zond->app_window);
 	gboolean in_tx = (sqlite3_exec(zond->wctx->index_ctx->db, "BEGIN;",
 			NULL, NULL, NULL) == SQLITE_OK);
 
@@ -491,6 +499,7 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 
 	if (in_tx)
 		sqlite3_exec(zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+	wait_cursor_reset(zond->app_window);
 
 	g_hash_table_destroy(ht_index);
 	zond_index_loeschen_redraw(zond);
@@ -513,6 +522,7 @@ void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
 		return;
 	}
 
+	wait_cursor_set(zond->app_window);
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
 				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
@@ -520,6 +530,7 @@ void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
+	wait_cursor_reset(zond->app_window);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
 				error ? error->message : "?", NULL);
