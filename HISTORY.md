@@ -5267,3 +5267,23 @@ Noch nicht in der Oberfläche getestet; im Testprogramm geprüft.
    erst am Ende zurückgeschrieben. Abbrechen: was fertig ist, bleibt.
  - Das Löschen im UI-Thread bleibt (TODO.md #220).
 ```
+
+## #219 Rest: Verlaufs-Kommentare in allen Dateien gekürzt (07.10.2026)
+
+Nur Kommentare geändert; geprüft durch Vergleich der von Kommentaren befreiten Quelltexte (36 Dateien) vor und nach der Änderung: identisch.
+
+```text
+ #219 Rest: Datums-, Entscheidungs- und Verlaufs-Kommentare (Datum, "ToDo.c",
+ "Nutzer-Fund/-Wunsch/-Entscheidung", "Task #", "Nachtrag", "vorher/jetzt",
+ Monatsangaben wie "09/2026") sind in allen Dateien unter src/ gestrichen oder
+ auf den Ist-Stand gekürzt, 36 Dateien (u.a. sond_seadrive.c/.h,
+ sond_treeviewfm.c/.h, sond_tvfm_item.c/.h, sond_fileparts.c/.h,
+ sond_file_helper.c, sond_mime.c, zond_treeview.c, zond_treeviewfm.c/.h,
+ project.c/.h, zond_dbase.c, suchen.c, xjustiz_import.c/.h, misc.c/.h).
+ Die fachlichen Begründungen (warum etwas so gelöst ist) blieben erhalten.
+ Dabei außerdem behoben: ein widersprüchlicher Kommentar zu sond_fopen()
+ (behauptete _wfopen(), der Code nutzt CreateFileW) und Kommentare mit
+ wörtlichen \uXXXX-Folgen statt Umlauten. Nicht angefaßt: die
+ Eclipse-Kopfzeilen "Created on" in sond_renderer.c/.h und das Beispiel
+ "31.12.2024" in sond_index.c.
+```

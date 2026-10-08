@@ -488,8 +488,6 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
    Modellwechsel stößt kein Re-Embedding an. Embeddings gibt es nur im
    Debug-Build (Release ohne SOND_WITH_EMBEDDINGS); beim Wiedereinschalten
    der Embeddings muss der Aufrufer bei TRUE ein Re-Embedding anstoßen.
- - Datums- und Verlaufs-Kommentare entgegen CLAUDE.md stehen noch in den
-   übrigen Dateien (rund 150 Stellen, z.B. "ToDo.c", "Nutzer-Fund", Datum).
  - Lange Funktionen: sond_index (~290 Z.), coverage_invalidate (~265),
    coverage_try_collapse (~200), zond_indexsuche_do (~280),
    sond_process_fileparts (~200). Keine automatischen Tests im Repository:
