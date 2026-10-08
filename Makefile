@@ -187,8 +187,12 @@ do-release-commit:
 	@echo ""
 	@echo "Zum Veroeffentlichen: make publish"
 
+# Immer voller Neubau (clean vor dem Bauen): gcc -MMD erfasst keine Systemheader,
+# geaenderte Bibliotheken (pacman -Syu) wuerden sonst nicht zum Neukompilieren/
+# Neulinken fuehren.
 .PHONY: release-dir
 release-dir:
+	$(MAKE) CONFIG=Release clean
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows viewer
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond_installer
