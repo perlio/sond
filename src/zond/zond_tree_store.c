@@ -957,7 +957,7 @@ static void zond_tree_store_load_node(GNode *node_parent,
 			 geladen (zond_tree_store_ensure_loaded() in load_link bzw. vor
 			 der Rekursion unten). Früher wurde hier ein Link auf das
 			 aufgelöste Ziel selbst eingefügt - das ergab das Ziel als
-			 eigenes Kind (s. ToDo.c #187). */
+			 eigenes Kind. */
 			g_warning("zond_tree_store_load_node: Dummy in noch nicht "
 					"geladenem Ziel - übersprungen");
 		else //Kind ist kein link

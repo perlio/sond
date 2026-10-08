@@ -313,13 +313,11 @@ static magic_t g_magic = NULL;
  * Hauptthread (Anbinden) als auch vom einzigen Indizier-Hintergrundthread
  * ("ocr-doc", s. headerbar.c) aus aufgerufen, aber beide laufen laut
  * Architektur nie gleichzeitig (Indizieren blockiert das Hauptfenster über
- * ein modales Info-Window, das nachweislich erst schließt, wenn der
- * Hintergrund-Thread wirklich fertig ist - s. Kommentar bei cb_info_window_
- * delete_event(), misc.c). Nutzer-Entscheidung 09/2026, nach einem
- * fehlgeschlagenen Versuch mit Lazy-Init pro Thread (GPrivate), der in
- * einem SIGSEGV endete - vermutlich weil zwei Threads dabei gleichzeitig
- * zum ALLERERSTEN Mal hätten laden können, was hier durch die einmalige,
- * garantiert einzelthreadige Initialisierung ausgeschlossen ist.
+ * ein modales Info-Window, das erst schließt, wenn der Hintergrund-Thread
+ * wirklich fertig ist - s. Kommentar bei cb_info_window_delete_event(),
+ * misc.c). Ein Lazy-Init pro Thread (GPrivate) war keine Lösung (SIGSEGV,
+ * vermutlich weil zwei Threads gleichzeitig zum ersten Mal hätten laden
+ * können); die einmalige, einzelthreadige Initialisierung schließt das aus.
  *
  * Idempotent - unkritisch, mehrfach aufzurufen (z.B. weil project_open()
  * bei jedem Projektwechsel im selben Prozess erneut durchlaufen wird): ist
@@ -348,27 +346,20 @@ gboolean mime_guess_content_type_init(GError** error) {
 	return TRUE;
 }
 
-/* Nutzer-Fund 18.09.2026: eine Datei ohne Erweiterung ("Message"), deren
- * Inhalt tatsächlich eine E-Mail war, wurde von libmagic als text/plain
- * eingestuft (die vorhandene Endungs-basierte Korrektur direkt unten in
- * mime_guess_content_type() - "Endung sagt message/rfc822, libmagic sagt
- * text/plain, Endung gewinnt" - konnte hier nicht greifen, weil es gar
- * keine Endung gab) und lief deshalb über den falschen Renderer, was zu
- * einem eigenständigen Performance-Problem führte (s. render_text_to_
- * surface(), sond_renderer.c, und ToDo.c). Diese Funktion schließt genau
- * diese Lücke - aber bewusst SEHR KONSERVATIV (Nutzer-Entscheidung
- * 18.09.2026, angesichts des früheren Fehlschlags einer zu aggressiven
- * Heuristik, s. "Sicherheitsnetz"-Kommentar unten): anders als die dort
- * beschriebenen generischen, sprachabhängigen Kopfzeilen-Muster ("Von:",
- * "Betreff:", ...), die in gewöhnlichem Fließtext leicht zufällig
- * auftreten können, wird hier NUR auf "MIME-Version:" oder "Message-ID:"
- * geprüft - beides Header, die (a) durch den Doppelpunkt UND die exakte,
- * englische Schreibweise praktisch nie zufällig in normalem Text
- * vorkommen und (b) von jedem MIME-fähigen Mailprogramm/-server gesetzt
- * werden, RFC822 also fast ausnahmslos abdecken. Bewusst hingenommene
- * Einschränkung: eine sehr rudimentäre/alte Mail ganz ohne diese beiden
- * Header (kein MIME, keine Message-ID) wird dadurch nicht erkannt - das
- * wurde dem Risiko neuer Fehlerkennungen bewusst nachgeordnet.
+/* Erkennt eine E-Mail ohne Erweiterung ("Message"), die libmagic als
+ * text/plain einstuft (die Endungs-basierte Korrektur in
+ * mime_guess_content_type() greift ohne Endung nicht). Sonst würde sie über
+ * den falschen Renderer laufen. Bewusst SEHR KONSERVATIV: anders als die
+ * generischen, sprachabhängigen Kopfzeilen-Muster ("Von:", "Betreff:", ...),
+ * die in gewöhnlichem Fließtext leicht zufällig auftreten können (s.
+ * "Sicherheitsnetz"-Kommentar unten), wird hier NUR auf "MIME-Version:" oder
+ * "Message-ID:" geprüft - beides Header, die (a) durch den Doppelpunkt UND
+ * die exakte, englische Schreibweise praktisch nie zufällig in normalem
+ * Text vorkommen und (b) von jedem MIME-fähigen Mailprogramm/-server gesetzt
+ * werden, RFC822 also fast ausnahmslos abdecken. Bekannte Einschränkung:
+ * eine sehr rudimentäre/alte Mail ganz ohne diese beiden Header (kein MIME,
+ * keine Message-ID) wird nicht erkannt - das Risiko neuer Fehlerkennungen
+ * wiegt schwerer.
  *
  * Prüft nur den Kopfbereich (vor der ersten Leerzeile, max. die ersten
  * 8 KB) und nur an Zeilenanfängen - ein zufälliges Vorkommen mitten in
@@ -545,12 +536,11 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	        result = g_strdup("text/csv");
 	    else if (path && !g_strcmp0(mime_from_extension(path), "message/rfc822"))
 	        result = g_strdup("message/rfc822");
-	    /* Nutzer-Fund 18.09.2026 (s. ausführl. Doc-Kommentar an
-	     * buffer_looks_like_rfc822() oben): Dateien ohne (oder mit
-	     * unbekannter) Erweiterung profitieren von den beiden Zweigen
-	     * oben nicht, weil mime_from_extension() dafür NULL liefert -
-	     * greift deshalb hier zusätzlich, nur wenn KEINE der beiden
-	     * Endungs-Prüfungen oben schon etwas ergeben hat. */
+	    /* Dateien ohne (oder mit unbekannter) Erweiterung profitieren von den
+	     * beiden Zweigen oben nicht, weil mime_from_extension() dafür NULL
+	     * liefert - greift deshalb hier zusätzlich, nur wenn KEINE der beiden
+	     * Endungs-Prüfungen oben schon etwas ergeben hat (s.
+	     * buffer_looks_like_rfc822()). */
 	    else if (buffer_looks_like_rfc822(buffer, size))
 	        result = g_strdup("message/rfc822");
 	    else
@@ -568,14 +558,12 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	 * sond_file_part_create_from_mime_type()) - im schlimmsten Fall wird
 	 * der Datenmüll zusätzlich noch als "multipart" fehlgedeutet (GMime
 	 * sucht dann nach Boundaries, die nicht existieren) und erzeugt
-	 * synthetische Kind-Knoten bzw. die Verarbeitung wird extrem langsam.
-	 * Nutzer-Fund 15./16.09.2026: scheinbare Endlosschleife/massive
-	 * Verlangsamung beim Anbinden einer sehr großen ZIP-Datei mit
-	 * ausschließlich XML-Dateien. Eine bekannte, von message/rfc822
-	 * abweichende Dateiendung hat hier Vorrang vor der Heuristik - echte
-	 * E-Mails liegen praktisch immer als .eml vor. Die LOG_WARN-Zeile
-	 * (ohne Dateiname/-pfad, nur die beiden MIME-Typen - Datenschutz)
-	 * dient der Verifikation, wie oft das tatsächlich zuschlägt. */
+	 * synthetische Kind-Knoten bzw. die Verarbeitung wird extrem langsam
+	 * (z.B. bei einer sehr großen ZIP-Datei mit ausschließlich XML-Dateien).
+	 * Eine bekannte, von message/rfc822 abweichende Dateiendung hat deshalb
+	 * Vorrang vor der Heuristik - echte E-Mails liegen praktisch immer als
+	 * .eml vor. Die LOG_WARN-Zeile (ohne Dateiname/-pfad, nur die beiden
+	 * MIME-Typen - Datenschutz) zeigt, wie oft das zuschlägt. */
 	if (path && !g_strcmp0(result, "message/rfc822")) {
 		const gchar *mime_ext = mime_from_extension(path);
 		if (mime_ext && g_strcmp0(mime_ext, "message/rfc822")) {

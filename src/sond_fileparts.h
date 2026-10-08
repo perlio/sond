@@ -71,8 +71,8 @@ void sond_file_part_set_has_children(SondFilePart*, gboolean);
 /* Generisches Attribut auf Basisklassen-Ebene (wie path/parent), obwohl
  * aktuell einziger Erzeuger sond_tvfm_item_load_gmessage_dir()
  * (sond_treeviewfm.c) ist: markiert ein sfp, dessen Erzeugung aus einem
- * MIME-Part mit Content-Disposition "attachment" stammt (16.09.2026,
- * Nutzerwunsch - Anzeige-Unterscheidung Attachment/Inline im Baum). Muss
+ * MIME-Part mit Content-Disposition "attachment" stammt (Anzeige-
+ * Unterscheidung Attachment/Inline im Baum). Muss
  * auf der Basisklasse liegen, nicht auf SondFilePartLeaf, weil ein
  * Attachment je nach Inhalt zu jedem SondFilePart-Subtyp werden kann
  * (PDF/ZIP/GMessage/Leaf - s. sond_file_part_create_from_mime_type()).
@@ -106,7 +106,7 @@ SondFilePart* sond_file_part_from_filepart(gchar const*, GError**);
 /* Wie sond_file_part_from_filepart(), aber ohne jeden Dateizugriff (nur
  * endungsbasierte MIME-Erkennung, s. Doc-Kommentar an der Implementierung) -
  * für den hydrierungsfreien Indizierungs-Sammelpfad bei BAUM_INHALT/
- * BAUM_AUSWERTUNG (ToDo.c, 12.-15.09.2026). */
+ * BAUM_AUSWERTUNG. */
 SondFilePart* sond_file_part_from_filepart_leaf(gchar const*, GError**);
 
 gint sond_file_part_delete(SondFilePart*, GError**);
@@ -152,11 +152,10 @@ typedef struct {
  * sond_fileparts.c) - jeder weitere Aufruf für dasselbe Archiv, gleich für
  * welchen Unterpfad/welche Tiefe, bedient sich per O(1)-Hashtable-Lookup
  * statt das Archiv erneut vollständig zu scannen bzw. sogar erneut zu
- * öffnen. Ohne das: bei rekursivem Aufschlüsseln eines ganzen Archivs
- * (Anbinden von BAUM_FS nach BAUM_INHALT, s. ToDo.c) ein weiterer
- * O(Einträge)-Durchlauf UND ein erneutes Öffnen je besuchtem
- * Verzeichnisknoten - macht bei Archiven mit mehreren tausend Einträgen
- * das Anbinden praktisch endlos (Nutzer-Fund, 15./16.09.2026). Der Cache
+ * öffnen. Ohne das wäre das rekursive Aufschlüsseln eines ganzen Archivs
+ * (Anbinden von BAUM_FS nach BAUM_INHALT) ein weiterer O(Einträge)-Durchlauf
+ * UND ein erneutes Öffnen je besuchtem Verzeichnisknoten - bei Archiven mit
+ * mehreren tausend Einträgen praktisch endlos. Der Cache
  * wird bei jeder Archiv-Änderung (Einfügen/Ersetzen/Löschen/Umbenennen
  * eines Eintrags) invalidiert. */
 GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,

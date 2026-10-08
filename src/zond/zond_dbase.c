@@ -305,15 +305,13 @@ zond_dbase_get_version(sqlite3 *db, GError **error) {
 	return v_string;
 }
 
-/* Indizes auf parent_ID/older_sibling_ID nachrüsten (CREATE INDEX IF NOT
- * EXISTS - gefahrlos für neue wie bestehende Projektdateien). Fehlten
- * bisher komplett (nur der automatische Index auf ID/Primärschlüssel
- * existierte) - jeder Baum-Traversierungsschritt
+/* Indizes nachrüsten (CREATE INDEX IF NOT EXISTS - gefahrlos für neue wie
+ * bestehende Projektdateien). Jeder Baum-Traversierungsschritt
  * (zond_dbase_get_first_child()/_get_younger_sibling(), s.
- * zond_treeview_walk_tree()) filtert aber genau auf diese beiden Spalten
- * und erzwang dadurch pro Knoten einen kompletten Tabellen-Scan über
- * alle Zeilen von "knoten" - bei größeren Projekten (zehntausende
- * Knoten) minutenlange Ladezeiten beim Öffnen (Untersuchung 09/2026).
+ * zond_treeview_walk_tree()) filtert auf parent_ID/older_sibling_ID; ohne
+ * Index erzwänge das pro Knoten einen kompletten Tabellen-Scan über alle
+ * Zeilen von "knoten" - bei größeren Projekten (zehntausende Knoten)
+ * minutenlange Ladezeiten beim Öffnen.
  *
  * idx_knoten_parent_older ist zusammengesetzt (parent_ID, older_sibling_ID)
  * statt zwei getrennter Indizes auf beiden Spalten: get_first_child()
@@ -322,41 +320,33 @@ zond_dbase_get_version(sqlite3 *db, GError **error) {
  * auf older_sibling_ID - der aber denkbar unselektiv ist (jeder "erste
  * Knoten" jeder Geschwistergruppe im gesamten Baum hat
  * older_sibling_ID=0), und filterte parent_ID danach nur noch linear
- * durch die Treffer (per EXPLAIN QUERY PLAN verifiziert, Untersuchung
- * 09/2026) - kaum schneller als der ursprüngliche Volltabellen-Scan. Der
- * zusammengesetzte Index deckt genau dieses WHERE ab (Gleichheit auf
- * beiden Spalten). get_younger_sibling() ("WHERE older_sibling_ID=?1",
- * nur eine Spalte) braucht weiterhin den separaten Index auf
- * older_sibling_ID allein.
+ * durch die Treffer (per EXPLAIN QUERY PLAN verifiziert) - kaum schneller
+ * als ein Volltabellen-Scan. Der zusammengesetzte Index deckt genau dieses
+ * WHERE ab (Gleichheit auf beiden Spalten). get_younger_sibling() ("WHERE
+ * older_sibling_ID=?1", nur eine Spalte) braucht weiterhin den separaten
+ * Index auf older_sibling_ID allein.
  *
  * Wird bei jedem Öffnen (neu, bestehend, konvertiert) einmal ausgeführt -
  * für bereits vorhandene Indizes ist das ein no-op.
  *
- * Nachtrag 09/2026 (eigentliche Ursache des "ZIP-Anbinden hängt sich auf"-
- * Problems - die zuerst vermutete MIME-Fehlerkennung war es nachweislich
- * nicht, s. ToDo.c #101): exakt dieselbe Art von Fehler wie oben bei
- * parent_ID/older_sibling_ID, nur an anderen Spalten. zond_treeview_leaf_
- * anbinden() (zond_treeview.c) ruft für JEDE einzuhängende Datei u.a.
- * zond_dbase_get_section() ("WHERE file_part=?1"), zond_dbase_find_
- * baum_inhalt_file() (rekursives CTE, dessen abschließender JOIN auf
- * "knoten.type=2 AND knoten.link=cte_knoten.ID" filtert) sowie darüber
- * zond_treeview_remove_childish_anbindungen() ->
- * zond_dbase_get_first_baum_inhalt_file_child() (gleiches Muster,
- * "knoten.type=2 AND knoten.link=cte_knoten.ID") auf. Für keine dieser
- * Spalten (file_part, (type,link)) existierte ein Index - jede dieser
- * Abfragen erzwang also einen kompletten Tabellen-Scan über "knoten",
- * und zwar EINMAL PRO ANZUBINDENDER DATEI. Die Tabelle wächst während
- * desselben Anbinden-Vorgangs mit jeder eingefügten Datei um weitere
- * Zeilen - macht den gesamten Vorgang quadratisch (O(n²)) statt linear:
- * bei 2.000 Dateien (~30 Sek., noch gerade akzeptabel) gegenüber
- * ~30.000 Dateien (15x mehr, aber durch die quadratische Wirkung eher
- * 200x mehr Zeilen-Scans) erklärt das zwanglos den beobachteten
- * kompletten Stillstand ohne jede Fortschrittsanzeige. Erklärt zugleich,
- * warum das Transaktions-Batching (#103) beim 2.000er-Fall keine
- * messbare Verbesserung brachte: fsync-pro-Insert war nie die
- * dominante Kosten, sondern diese Volltabellen-Scans. Unabhängig vom
- * Dateiinhalt/MIME-Typ - passt zur Beobachtung, dass ausnahmslos alle
- * Dateien korrekt als XML klassifiziert und angebunden wurden. */
+ * Zwei weitere Indizes (file_part, (type, link)) bedienen die Abfragen, die
+ * zond_treeview_leaf_anbinden() (zond_treeview.c) für JEDE einzuhängende
+ * Datei ausführt: zond_dbase_get_section() ("WHERE file_part=?1"),
+ * zond_dbase_find_baum_inhalt_file() (rekursives CTE, dessen abschließender
+ * JOIN auf "knoten.type=2 AND knoten.link=cte_knoten.ID" filtert) sowie
+ * darüber zond_treeview_remove_childish_anbindungen() ->
+ * zond_dbase_get_first_baum_inhalt_file_child() (gleiches Muster). Ohne
+ * diese Indizes erzwänge jede dieser Abfragen einen kompletten
+ * Tabellen-Scan über "knoten", und zwar EINMAL PRO ANZUBINDENDER DATEI.
+ * Die Tabelle wächst während desselben Anbinden-Vorgangs mit jeder
+ * eingefügten Datei um weitere Zeilen - das macht den gesamten Vorgang
+ * quadratisch (O(n²)) statt linear: 2.000 Dateien wären noch gerade
+ * akzeptabel (~30 Sek.), bei ~30.000 Dateien (15x mehr, aber durch die
+ * quadratische Wirkung eher 200x mehr Zeilen-Scans) stünde die Anwendung
+ * praktisch still, ohne Fortschrittsanzeige. Die Kosten sind unabhängig
+ * vom Dateiinhalt/MIME-Typ; auch das Transaktions-Batching (ein fsync
+ * statt einem je Insert) bringt in diesem Fall keine messbare Verbesserung,
+ * da die dominante Last die Volltabellen-Scans sind, nicht die fsyncs. */
 static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
 	gchar *errmsg = NULL;
 	gint rc = 0;
@@ -484,21 +474,19 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 	 * zond_dbase_ensure_performance_indexes() auf "work" NACH dem Backup
 	 * auf (s. dort), unabhängig vom Zustand von "store".
 	 *
-	 * Nachtrag 09/2026 (Nutzer-Fund: "Fehler beim Laden des Projekts:
-	 * invalid argument" direkt nach Einführung der type/link- und
-	 * file_part-Indizes): ein Fehlschlagen hier (auf "store") NICHT mehr
-	 * fatal behandeln. "store" ist die eigentliche Projektdatei und kann
+	 * Ein Fehlschlagen hier (auf "store") ist NICHT fatal.
+	 * "store" ist die eigentliche Projektdatei und kann
 	 * auf einem Cloud-Sync-Laufwerk (SeaDrive/Seafile/...) liegen - s.
 	 * project_get_local_tmp_path()/project_create_dbase_zond(), die
 	 * "work" genau deswegen bewusst auf einen lokalen Pfad legen. Ein
 	 * CREATE INDEX ist ein echter Schreibzugriff auf die Store-Datei;
 	 * schlägt der (z.B. weil der Cloud-Dienst gerade nicht erreichbar
-	 * ist - bekanntes, bereits in ToDo.c dokumentiertes CRT-EINVAL-Muster
-	 * bei SeaDrive-Zugriffsproblemen) fehl, würde das komplette Laden
+	 * ist - bekanntes CRT-EINVAL-Muster bei SeaDrive-Zugriffsproblemen)
+	 * fehl, würde das komplette Laden
 	 * des Projekts daran scheitern, obwohl die Indizes auf "store" rein
 	 * kosmetisch sind (nur Performance-Feature für die dortigen, kaum
 	 * genutzten Abfragen) - die eigentlich relevante Kopie auf "work"
-	 * bekommt ihre Indizes ja jetzt unabhängig davon direkt gesetzt.
+	 * bekommt ihre Indizes unabhängig davon direkt gesetzt.
 	 * "store" bekommt die Indizes spätestens beim nächsten erfolgreichen
 	 * project_save() automatisch mit (zond_dbase_backup() kopiert das
 	 * komplette Schema samt Indizes von "work" nach "store"). */
@@ -521,8 +509,8 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 
 /* Öffentlicher Wrapper um das dateilokale zond_dbase_ensure_indexes() -
  * s. Doc-Kommentar dort sowie bei zond_dbase_open() und project.c/
- * project_create_dbase_zond() für den Hintergrund (Nutzer-Fund 09/2026,
- * ZIP-Anbinden-Performance). Von project_create_dbase_zond() genutzt, um
+ * project_create_dbase_zond() für den Hintergrund. Von
+ * project_create_dbase_zond() genutzt, um
  * die Indizes verlässlich (unabhängig vom Erreichbarkeits-/Schreibzustand
  * von "store") direkt auf "work" zu setzen - dort laufen alle
  * performance-kritischen Abfragen. */
@@ -530,16 +518,15 @@ gint zond_dbase_ensure_performance_indexes(ZondDBase *zond_dbase, GError **error
 	return zond_dbase_ensure_indexes(zond_dbase_get_dbase(zond_dbase), error);
 }
 
-/* journal_mode/synchronous prüfen und ggf. korrigieren (ToDo.c,
- * Architektur-Plan Atomarität store/work, Punkt 1): Voraussetzung für
+/* journal_mode/synchronous prüfen und ggf. korrigieren: Voraussetzung für
  * atomare Mehrdatei-Transaktionen per ATTACH ist journal_mode in
  * {DELETE, TRUNCATE, PERSIST} (nicht WAL/MEMORY/OFF) UND synchronous
- * != OFF (s. sqlite.org/atomiccommit.html, sqlite.org/wal.html,
- * Zitate im ToDo.c-Eintrag). Beides sind Dateieigenschaften, nicht an
- * eine Verbindung gebunden - können also jederzeit von außen (auch bei
- * offener eigener Verbindung) unbemerkt umgestellt worden sein, daher
- * hier bei jedem Öffnen geprüft (zond_dbase_open()) UND zusätzlich vor
- * jeder Dual-Write-Transaktion (dbase_zond_begin(), project.c). */
+ * != OFF (s. sqlite.org/atomiccommit.html, sqlite.org/wal.html). Beides sind
+ * Dateieigenschaften, nicht an eine Verbindung gebunden - können also
+ * jederzeit von außen (auch bei offener eigener Verbindung) unbemerkt
+ * umgestellt worden sein, daher hier bei jedem Öffnen geprüft
+ * (zond_dbase_open()) UND zusätzlich vor jeder Dual-Write-Transaktion
+ * (dbase_zond_begin(), project.c). */
 gint zond_dbase_check_journal_settings(ZondDBase *zond_dbase, GError **error) {
 	sqlite3 *db = zond_dbase_get_dbase(zond_dbase);
 	sqlite3_stmt *stmt = NULL;

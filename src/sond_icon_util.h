@@ -37,13 +37,13 @@ GdkPixbuf* sond_icon_util_load_pixbuf(GtkWidget *widget,
  * direkt per Cairo, statt über einen Icon-Theme-Namen zu gehen (Standard-
  * Freedesktop-Namen wie "emblem-ok" sind auf einem minimalen Windows/
  * MSYS2-Setup ohne vollständiges Icon-Theme oft nicht auflösbar). Grün =
- * vollständig indiziert, Grau = teilweise (11.09.2026 von Orange auf Grau
- * umgestellt - Orange wirkte als Warn-/Unfertig-Signal statt eines reinen
- * Ist-Zustands, s. auch SEADRIVE_DIR_STATUS_MIXED), NULL (kein Pixbuf) bei
+ * vollständig indiziert, Grau = teilweise (Orange wirkte als Warn-/
+ * Unfertig-Signal statt eines reinen Ist-Zustands, s. auch
+ * SEADRIVE_DIR_STATUS_MIXED), NULL (kein Pixbuf) bei
  * SOND_INDEX_STATUS_NONE. */
 GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size);
 
-/* Attachment-Badge (16.09.2026, Nutzerwunsch): einfaches, über das
+/* Attachment-Badge: einfaches, über das
  * Icon-Theme geladenes Symbol ("mail-attachment-symbolic") statt eines
  * Farbkreises wie bei den Status-Badges oben - hier gibt es keine
  * mehrwertige Zustandsskala (indiziert/teilweise/SeaDrive-Status), sondern
@@ -73,7 +73,7 @@ GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size);
  * 3. hydriert UND gepinnt -> PINNED (Grün).
  * 4. sonst (hydriert, nicht gepinnt) -> NONE - der unmarkierte
  *    Normalzustand, keine Garantie, aber auch keine Aktion nötig.
- * (Untersuchung/Redesign "SeaDrive-Badges Datei+Ordner", 09/2026) */
+ */
 typedef enum {
 	SOND_SEADRIVE_BADGE_NONE = 0,
 	SOND_SEADRIVE_BADGE_OFFLINE,  /* nicht lokal, nicht angefordert */
@@ -101,11 +101,7 @@ GdkPixbuf* sond_icon_util_seadrive_badge_pixbuf(SondSeadriveBadge badge, gint si
  * - MIXED (Grau): weder komplett hydriert noch komplett offline -
  *   uneinheitlicher Teilbaum, hat also KEINEN gemeinsamen Nenner mit
  *   einer der anderen drei Bedeutungen.
- * (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026 - vorherige Version
- * hatte PARTIAL/FULL_OFFLINE basierend auf "gepinnt+pending", nicht auf
- * tatsächlicher Hydrierung - das ließ Ordner ohne jedes Pin fälschlich
- * badge-los erscheinen, obwohl ihre Dateien einzeln als offline
- * angezeigt wurden.) */
+ */
 typedef enum {
 	SOND_SEADRIVE_DIR_STATUS_NONE = 0,
 	SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE,
@@ -116,11 +112,11 @@ typedef enum {
 GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status, gint size);
 
 /* Ecke, in der ein Overlay-Icon auf dem Basis-Icon plaziert wird
- * (gdk_pixbuf_composite). Die beiden unteren Ecken sind seit längerem in
- * Gebrauch (SeaDrive-Status unten rechts, Indizierungsstatus unten links);
- * TOP_RIGHT kam 16.09.2026 für das Attachment-Badge (E-Mail-Mimeparts,
- * s. sond_file_part_get_is_attachment()) hinzu - unten wären beide Ecken
- * für Dateien mit SeaDrive-Status UND Indizierungsstatus schon belegt. */
+ * (gdk_pixbuf_composite). Unten rechts steht der SeaDrive-Status, unten
+ * links der Indizierungsstatus; TOP_RIGHT ist für das Attachment-Badge
+ * (E-Mail-Mimeparts, s. sond_file_part_get_is_attachment()) da - unten wären
+ * beide Ecken für Dateien mit SeaDrive-Status UND Indizierungsstatus schon
+ * belegt. */
 typedef enum {
 	SOND_ICON_CORNER_BOTTOM_LEFT,
 	SOND_ICON_CORNER_BOTTOM_RIGHT,

@@ -135,24 +135,16 @@ static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) 
 	if (SOND_IS_FILE_PART_PDF(sfp))
 		rc = sond_file_part_pdf_test_for_embedded_files(SOND_FILE_PART_PDF(sfp), error);
 	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
-		/* Nutzer-Fund 16.09.2026: sond_file_part_zip_test_for_files() rief
-		 * bisher sond_file_part_zip_open_archive() auf, nur um
-		 * zip_get_num_entries() abzufragen - aber schon das bloße ÖFFNEN
-		 * (zip_open_from_source(), libzip) parst IMMER das komplette
-		 * Central Directory, unabhängig davon, was man danach mit dem
-		 * Handle macht. Das ist also selbst schon die teure Operation,
-		 * nicht (nur) der spätere dir_index-Aufbau (s. Task #116). Bei
-		 * jedem bloßen ENTDECKEN einer ZIP-Datei (jedes Auflisten eines
-		 * sie enthaltenden Verzeichnisses, z.B. Auf-/Zuklappen in
-		 * BAUM_FS) wurde so ihr komplettes Archiv geöffnet+geparst (und
-		 * beim Zuklappen die zugehörige SondFilePartZip-Instanz samt
-		 * dieser Struktur wieder verworfen - beim nächsten Aufklappen von
-		 * vorn). Fix: gar nicht erst öffnen - has_children optimistisch
-		 * TRUE setzen (Nutzer-Entscheidung: leere ZIPs sind selten und
-		 * harmlos, wenn sie fälschlich mit einem Aufklapp-Pfeil gezeigt
-		 * werden, der dann nichts enthält). Echtes Öffnen passiert
-		 * weiterhin beim tatsächlichen Bedarf (Aufklappen der ZIP-Datei
-		 * selbst: sond_tvfm_item_load_zip_dir(); Anbinden). */
+		/* Das Öffnen eines ZIP-Archivs (zip_open_from_source(), libzip) parst
+		 * IMMER das komplette Central Directory und ist damit selbst die
+		 * teure Operation. Bei jedem bloßen ENTDECKEN einer ZIP-Datei
+		 * (jedes Auflisten eines sie enthaltenden Verzeichnisses, z.B.
+		 * Auf-/Zuklappen in BAUM_FS) soll das Archiv deshalb nicht geöffnet
+		 * werden: has_children wird optimistisch TRUE gesetzt (leere ZIPs
+		 * sind selten und harmlos, wenn sie mit einem Aufklapp-Pfeil
+		 * gezeigt werden, der dann nichts enthält). Echtes Öffnen passiert
+		 * erst beim tatsächlichen Bedarf (Aufklappen der ZIP-Datei selbst:
+		 * sond_tvfm_item_load_zip_dir(); Anbinden). */
 		sond_file_part_set_has_children(sfp, TRUE);
 	}
 	else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
@@ -735,8 +727,7 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
  * (zond_treeview_get_selected_fileparts_foreach(), zond_treeview.c) -
  * an allen anderen Aufrufstellen von sond_file_part_from_filepart() wird
  * die Datei ohnehin gleich darauf geöffnet (Viewer/PDF-Stapelfunktionen),
- * dort bleibt die echte Inhaltserkennung sinnvoll und unangetastet. s.
- * ToDo.c (12.-15.09.2026). */
+ * dort bleibt die echte Inhaltserkennung sinnvoll und unangetastet. */
 SondFilePart* sond_file_part_from_filepart_leaf(gchar const* filepart,
 		GError** error) {
 	g_autoptr(SondFilePart) sfp = NULL;
@@ -1173,7 +1164,7 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 	if (!SOND_IS_FILE_PART_GMESSAGE(sfp_priv->parent)) {
 		g_free(sfp_priv->path);
 		/* PDF: Adresse ist der (kodierte) Schlüssel, der beim Schreiben an
-		 * den neuen Dateinamen angeglichen wurde (ToDo.c #193) */
+		 * den neuen Dateinamen angeglichen wurde */
 		sfp_priv->path = SOND_IS_FILE_PART_PDF(sfp_priv->parent) ?
 				pdf_emb_escape(path_new) : g_strdup(path_new);
 	}
@@ -1291,17 +1282,15 @@ typedef struct {
 	 * '/' ("" = Wurzel), Value: GPtrArray<SondZipDirEntry*>. NULL = noch
 	 * nicht aufgebaut (lazy) oder invalidiert. */
 	GHashTable* dir_index;
-	/* Nutzer-Fund 16.09.2026: gecachter, read-only Archiv-Handle für den
-	 * (häufigsten) Fall "Archiv ist eine normale Datei im Filesystem,
-	 * nicht verschachtelt" (s. sond_file_part_zip_open_archive()). Ohne
-	 * diesen Cache öffnete jeder einzelne Lesezugriff (insbes. das
-	 * MIME-Sniffing beim Anbinden, sond_file_part_create() ->
-	 * sond_file_part_read_bytes_internal()) das komplette Archiv neu und
-	 * parste dessen Central Directory neu - bei ZIPs mit vielen Einträgen
-	 * (und erst recht auf SeaDrive) macht allein das pro Datei spürbare
-	 * Zeit aus. NULL = noch nicht geöffnet oder invalidiert. Analog zu
-	 * dir_index: lazy aufgebaut, in
-	 * sond_file_part_zip_invalidate_dir_index() (bei jeder
+	/* Gecachter, read-only Archiv-Handle für den (häufigsten) Fall "Archiv
+	 * ist eine normale Datei im Filesystem, nicht verschachtelt" (s.
+	 * sond_file_part_zip_open_archive()). Der Cache erspart, bei jedem
+	 * einzelnen Lesezugriff (insbes. dem MIME-Sniffing beim Anbinden,
+	 * sond_file_part_create() -> sond_file_part_read_bytes_internal()) das
+	 * komplette Archiv zu öffnen und dessen Central Directory neu zu parsen
+	 * - bei ZIPs mit vielen Einträgen (und erst recht auf SeaDrive) spürbar.
+	 * NULL = noch nicht geöffnet oder invalidiert. Analog zu dir_index: lazy
+	 * aufgebaut, in sond_file_part_zip_invalidate_dir_index() (bei jeder
 	 * Archiv-Änderung) und in sond_file_part_zip_finalize() geschlossen. */
 	zip_t* cached_archive;
 } SondFilePartZipPrivate;
@@ -1489,8 +1478,8 @@ GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
  * Bei writeable=TRUE wird src_out (falls nicht NULL) mit der zip_source_t* befüllt,
  * die nach zip_close() die geänderten Daten hält (für sond_file_part_zip_archive_to_buf_with_src).
  *
- * Rückgabe: zip_t*. Freigabe je nach Fall unterschiedlich (Nutzer-Fund
- * 16.09.2026, s. cached_archive in SondFilePartZipPrivate):
+ * Rückgabe: zip_t*. Freigabe je nach Fall unterschiedlich (s.
+ * cached_archive in SondFilePartZipPrivate):
  * - writeable==TRUE: wie bisher mit zip_close() freigeben (Aufrufer
  *   unverändert).
  * - writeable==FALSE: MUSS mit sond_file_part_zip_release_archive()
@@ -1517,17 +1506,15 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_zip));
 
 	if (!sfp_parent && !writeable) {
-		/* Nutzer-Fund 16.09.2026: dieser Fall (normale ZIP-Datei im
-		 * Filesystem, nur lesend) ist bei Weitem der häufigste beim
-		 * Anbinden/Durchsuchen - u.a. wird er für JEDEN einzelnen Eintrag
-		 * beim MIME-Sniffing neu durchlaufen
-		 * (sond_file_part_create() -> read_bytes_internal()). Deshalb
-		 * hier gecacht (analog zum dir_index-Cache oben): einmal öffnen
-		 * und für die Lebensdauer des Objekts wiederverwenden, statt bei
-		 * jedem Aufruf das komplette Archiv (Central Directory) neu zu
-		 * parsen. Freigabe über sond_file_part_zip_release_archive(),
-		 * NICHT mehr über direktes zip_discard()/zip_close() durch den
-		 * Aufrufer. */
+		/* Dieser Fall (normale ZIP-Datei im Filesystem, nur lesend) ist bei
+		 * Weitem der häufigste beim Anbinden/Durchsuchen - u.a. wird er für
+		 * JEDEN einzelnen Eintrag beim MIME-Sniffing durchlaufen
+		 * (sond_file_part_create() -> read_bytes_internal()). Deshalb hier
+		 * gecacht (analog zum dir_index-Cache oben): einmal öffnen und für
+		 * die Lebensdauer des Objekts wiederverwenden, statt bei jedem
+		 * Aufruf das komplette Archiv (Central Directory) neu zu parsen.
+		 * Freigabe über sond_file_part_zip_release_archive(), NICHT über
+		 * direktes zip_discard()/zip_close() durch den Aufrufer. */
 		if (priv->cached_archive)
 			return priv->cached_archive;
 
@@ -1681,12 +1668,6 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 
 	return g_bytes_new_take(data, (gsize)len);
 }
-
-/* sond_file_part_zip_test_for_files() (öffnete das Archiv nur für
- * zip_get_num_entries()) wurde entfernt - s. ausführlichen Kommentar an
- * sond_file_part_test_for_children() (Nutzer-Fund 16.09.2026): schon das
- * Öffnen allein ist die teure Operation, has_children wird für ZIP jetzt
- * optimistisch TRUE gesetzt statt echt geprüft. */
 
 static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 		gchar const* path, GBytes* bytes, GError** error) {
@@ -2105,7 +2086,7 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		return -1;
 
-	//Adresse s. pdf_emb_addresses_new(), angezeigt mit Dateinamen (ToDo.c #193)
+	//Adresse s. pdf_emb_addresses_new(), angezeigt mit Dateinamen
 	address = g_hash_table_lookup(load->addresses, val);
 	if (!address) {
 		g_set_error(error, SOND_ERROR, 0,
@@ -2323,7 +2304,7 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 /* Trifft der Eintrag val die Adresse path (addresses aus
  * pdf_emb_addresses_new())? by_filename: Ersatzsuche über den Dateinamen
  * (/UF bzw. /F) für gespeicherte Adressen, die keine mehr sind - erster
- * Treffer wie früher (ToDo.c #193). */
+ * Treffer wie früher. */
 static gboolean emb_matches(GHashTable* addresses, pdf_obj* val,
 		gchar const* path_embedded, gchar const* path, gboolean by_filename) {
 	if (by_filename)
@@ -2580,7 +2561,7 @@ typedef struct {
 
 /* Ist path_new als Dateiname oder als Schlüssel schon vergeben (außer beim
  * Eintrag path_old selbst)? Beides muss frei sein, damit Schlüssel =
- * Dateiname gelten kann (ToDo.c #193). */
+ * Dateiname gelten kann. */
 static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
@@ -2758,7 +2739,7 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 		return -1;
 
 	/* Name muss als Dateiname und als Schlüssel frei sein, damit Adresse =
-	 * Dateiname gilt (ToDo.c #193). G_IO_ERROR_EXISTS lässt die
+	 * Dateiname gilt. G_IO_ERROR_EXISTS lässt die
 	 * Suffix-Logik beim Einfügen (sond_treeviewfm.c) einen neuen Namen
 	 * versuchen. look.path_old ist NULL, die Adresstabelle wird nicht
 	 * gebraucht. */
@@ -2952,7 +2933,7 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 	 * Top-Level-.eml-Tree-Knoten wird mit path_or_section==NULL angelegt
 	 * (sond_treeviewfm.c, sond_tvfm_item_create() - Konvention wie bei PDF/
 	 * "//"), eine Assertion hier hätte JEDE Expansion eines .eml auf
-	 * oberster Ebene abgelehnt (Absturz-Untersuchung 09/2026). */
+	 * oberster Ebene abgelehnt. */
 	g_return_val_if_fail(arr_mime_parts, -1);
 
 	object = sond_file_part_gmessage_lookup_part_by_path(

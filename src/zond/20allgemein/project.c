@@ -73,21 +73,19 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	if (rc)
 		return -1;
 
-	/* Nur noch EIN BEGIN auf der store-Connection - work ist per ATTACH
+	/* Ein BEGIN auf der store-Connection - work ist per ATTACH
 	 * (project_create_dbase_zond()) als zweites Schema mit eingehängt,
 	 * die Dual-Write-Funktionen (dbase_zond_update_sections()/_path()/
 	 * _gmessage_index()) schreiben schema-qualifiziert auf main+work
-	 * innerhalb dieser einen Transaktion (ToDo.c, Architektur-Plan
-	 * Atomarität store/work, Punkt 4). */
+	 * innerhalb dieser einen Transaktion (Atomarität store/work). */
 	return zond_dbase_begin(dbase_zond->zond_dbase_store, error);
 }
 
 void dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
 	GError* error_int = NULL;
 
-	/* Nur noch EIN ROLLBACK (Punkt 4) - die alte Merge-Logik für ZWEI
-	 * unabhängige Rollback-Fehler (store- und work-Connection) entfällt
-	 * dadurch (Punkt 5). Trotzdem weiterhin über einen lokalen error_int,
+	/* Ein ROLLBACK auf der store-Connection (work hängt als Schema daran).
+	 * Über einen lokalen error_int,
 	 * NICHT direkt über den übergebenen error-Parameter: der hält an
 	 * dieser Stelle i.d.R. schon den Fehler, WEGEN dem gerade
 	 * zurückgerollt wird (z.B. den gescheiterten Commit, s.
@@ -139,15 +137,15 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
  * angehängtem work-Schema (project_create_dbase_zond(), ATTACH DATABASE
  * ... AS work) - dieselbe schema-qualifizierte SQL wird einmal für "main"
  * (=store) und einmal für "work" ausgeführt, innerhalb derselben, von
- * dbase_zond_begin() geöffneten Transaktion (ToDo.c, Architektur-Plan
- * Atomarität store/work, Punkt 3). work behält daneben unverändert seine
- * eigene Connection für alle anderen (Einzel-DB-)Operationen. */
-
-/* Sections müssen für main und work UNABHÄNGIG gelesen und neu berechnet
+ * dbase_zond_begin() geöffneten Transaktion. work behält daneben
+ * unverändert seine eigene Connection für alle anderen (Einzel-DB-)
+ * Operationen.
+ *
+ * Sections müssen für main und work UNABHÄNGIG gelesen und neu berechnet
  * werden (nicht: einmal berechnen, in beide schreiben) - store und work
  * können für dieselbe Zeile unterschiedliche Ausgangswerte haben, da work
  * laufend fortgeschrieben, store aber nur bei project_save() komplett
- * nachgezogen wird (Diskussion 03.09.2026). */
+ * nachgezogen wird. */
 static gint dbase_zond_update_section_schema(sqlite3 *db, gchar const *schema,
 		DisplayedDocument *dd, GError **error) {
 	gint rc = 0;
@@ -268,7 +266,7 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 		/* Nur prefix_old selbst und was darunter liegt ("/" bzw. "//") -
 		 * ohne WHERE traf das Ersetzen auch Pfade, die nur zufällig mit
 		 * prefix_old beginnen ("Akte" -> auch "Akte_alt"). SUBSTR statt
-		 * LIKE, weil "%" und "_" in Pfaden vorkommen (ToDo.c #193). */
+		 * LIKE, weil "%" und "_" in Pfaden vorkommen. */
 		sql = g_strdup_printf("UPDATE %s.knoten SET file_part = "
 				"?2 || SUBSTR( file_part, LENGTH( ?1 ) + 1 ) "
 				"WHERE file_part = ?1 OR "
@@ -313,7 +311,7 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 		 * beim Verschieben in die Mail) 0 - beim Einfügen an Position 0 wurde
 		 * der Platzhalter sonst mitgezählt und das anschließende
 		 * "alpha" -> "0" fand nichts mehr. SUBSTR statt LIKE ("_" und "%"
-		 * im Namen). S. ToDo.c #194. */
+		 * im Namen). */
 		sql = g_strdup_printf(
 				"UPDATE %s.knoten "
 				"SET file_part = ?1 || " //?1 ist prefix
@@ -413,9 +411,8 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 	 * Projekt offen UND dessen Wurzel (BAUM_FS) tatsächlich ein SeaDrive-
 	 * Verzeichnis ist - sond_treeviewfm_set_root() (weiter oben in diesem
 	 * bzw. dem aufrufenden Codepfad) hat is_seadrive_path zu diesem
-	 * Zeitpunkt bereits aktuell gesetzt. Nutzer-Feedback 11.09.2026: ohne
-	 * SeaDrive-Projekt sollen die Punkte ausgegraut statt nur wirkungslos
-	 * sein. */
+	 * Zeitpunkt bereits aktuell gesetzt. Ohne SeaDrive-Projekt sollen die
+	 * Punkte ausgegraut statt nur wirkungslos sein. */
 	seadrive_active = active &&
 			sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
 	sond_treeviewfm_seadrive_set_contextmenu_sensitive(
@@ -480,8 +477,7 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	 * mehr fatale) CREATE INDEX auf "store" gerade funktioniert hat.
 	 * "work" liegt bewusst lokal (s.o., project_get_local_tmp_path()),
 	 * ein Fehlschlagen hier ist also ein echter, unerwarteter lokaler
-	 * I/O-Fehler und bleibt daher fatal. Hintergrund: Nutzer-Fund
-	 * 09/2026, ZIP-Anbinden-Performance (s. zond_dbase.c/ToDo.c). */
+	 * I/O-Fehler und bleibt daher fatal (s. zond_dbase.c). */
 	rc = zond_dbase_ensure_performance_indexes(zond_dbase_work, error);
 	if (rc) {
 		g_free(path_tmp);
@@ -490,8 +486,8 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 		return -1;
 	}
 
-	/* work zusätzlich als zweites Schema an store anhängen (ToDo.c,
-	 * Architektur-Plan Atomarität store/work, Punkt 2): work behält
+	/* work zusätzlich als zweites Schema an store anhängen (Atomarität
+	 * store/work): work behält
 	 * daneben seine eigene, unten registrierte Verbindung für alle
 	 * "normalen" Einzel-DB-Operationen - die angehängte Verbindung wird
 	 * nur von den Dual-Write-Funktionen (dbase_zond_update_sections()/
@@ -917,26 +913,23 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	}
 
 #ifdef _WIN32
-	/* Nutzer-Fund 18.09.2026: "Wenn die Index-DB nicht hydriert ist,
-	 * öffnet das Projekt nicht." - sond_process_file_create_wctx() unten
-	 * ruft über sond_index_ctx_new() (sond_index.c) sqlite3_open() auf
-	 * die eigene Volltextindex-Datenbank (.sond_index.db) auf. SQLite
-	 * nutzt dafür SEINE EIGENE Windows-VFS - anders als bei der
-	 * .sond_index.db-shm-Begleitdatei (s. ToDo.c, sond_fopen()) greift
-	 * hier also weder sond_fopen() noch dessen dort eingebaute
-	 * Hydrierung-und-Retry-Logik, das schlägt bei einem nicht
-	 * hydrierten SeaDrive-Platzhalter einfach mit "unable to open
-	 * database file" fehl. Da SQLite grundsätzlich keinen
-	 * partiellen/gestreamten Zugriff auf eine Cloud-Datei unterstützt,
-	 * MUSS die Datei vollständig lokal vorliegen, bevor sqlite3_open()
-	 * überhaupt versucht wird - anders als beim Öffnen einer einzelnen
-	 * Nutzer-Datei (dort Fire-and-forget + sofortige Rückkehr an die UI
-	 * möglich, s. sond_treeviewfm_open()) gibt es hier keine Alternative
-	 * zu synchronem (blockierendem) Warten: ohne geöffnete Index-DB kann
-	 * das Projekt nicht sinnvoll weiterladen. Geprüft werden alle drei
-	 * möglichen Dateien (.sond_index.db selbst sowie die SQLite-eigenen
-	 * WAL-Begleitdateien -wal/-shm, die nur existieren, wenn beim
-	 * letzten Schließen kein Checkpoint durchlief) - für ein neues
+	/* sond_process_file_create_wctx() unten ruft über sond_index_ctx_new()
+	 * (sond_index.c) sqlite3_open() auf die eigene Volltextindex-Datenbank
+	 * (.sond_index.db) auf. SQLite nutzt dafür SEINE EIGENE Windows-VFS -
+	 * anders als bei der .sond_index.db-shm-Begleitdatei (s. sond_fopen())
+	 * greift hier also weder sond_fopen() noch dessen eingebaute
+	 * Hydrierung-und-Retry-Logik, das schlägt bei einem nicht hydrierten
+	 * SeaDrive-Platzhalter einfach mit "unable to open database file" fehl.
+	 * Da SQLite grundsätzlich keinen partiellen/gestreamten Zugriff auf eine
+	 * Cloud-Datei unterstützt, MUSS die Datei vollständig lokal vorliegen,
+	 * bevor sqlite3_open() überhaupt versucht wird - anders als beim Öffnen
+	 * einer einzelnen Nutzer-Datei (dort Fire-and-forget + sofortige Rückkehr
+	 * an die UI möglich, s. sond_treeviewfm_open()) gibt es hier keine
+	 * Alternative zu synchronem (blockierendem) Warten: ohne geöffnete
+	 * Index-DB kann das Projekt nicht sinnvoll weiterladen. Geprüft werden
+	 * alle drei möglichen Dateien (.sond_index.db selbst sowie die
+	 * SQLite-eigenen WAL-Begleitdateien -wal/-shm, die nur existieren, wenn
+	 * beim letzten Schließen kein Checkpoint durchlief) - für ein neues
 	 * Projekt (Datei existiert noch nicht) liefert sond_seadrive_needs_
 	 * hydration() dabei einfach FALSE, kein Sonderfall nötig. */
 	if (sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]))) {
@@ -1021,18 +1014,13 @@ static gint project_confirm_switch(Projekt *zond) {
 }
 
 /*
- * filepart_oeffnen() (23.09.2026, Nutzer-Vorgabe im Zusammenhang mit
- * XJustiz-Import): container-bewusste Alternative zu filename_oeffnen()
+ * filepart_oeffnen(): container-bewusste Alternative zu filename_oeffnen()
  * (misc.c) - der normale GTK-Dateiauswahldialog (GtkFileChooserDialog)
  * kann nicht in einen noch nicht entpackten Container (ZIP etc.)
- * hinabsteigen.
- *
- * Ursprünglich vorgesehene Alternative ("vorher im Dateiverzeichnis
- * markieren, dann im Bestandsverzeichnis die Zielposition markieren")
- * war nicht praktikabel: die Selektion in BAUM_FS geht verloren, sobald
- * anschließend im Bestandsverzeichnis die Zielposition markiert wird
- * (Nutzer-Fund 23.09.2026) - wenig intuitiv, zwei Selektionen gleichzeitig
- * "lebendig" zu halten.
+ * hinabsteigen. Eine vorherige Markierung im Dateiverzeichnis wäre keine
+ * Alternative: die Selektion in BAUM_FS geht verloren, sobald im
+ * Bestandsverzeichnis die Zielposition markiert wird - zwei Selektionen
+ * gleichzeitig "lebendig" zu halten ist wenig intuitiv.
  *
  * Löst das statt dessen mit einem eigenen modalen Dialog, der einen
  * frischen ZondTreeviewFM einbettet - dieselbe Baum-Komponente wie das
@@ -1082,8 +1070,8 @@ SondFilePart* filepart_oeffnen(Projekt *zond, GError **error) {
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
 			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	/* Ohne min-content-height/-width fällt GtkScrolledWindow auf die
-	 * (sehr kleine) natürliche Größe des GtkTreeView zurück - Nutzer-Fund
-	 * 28.09.2026: "ScrolledWindow ist nur ca. zwei Zeilen hoch". Explizit
+	 * (sehr kleine) natürliche Größe des GtkTreeView zurück (der
+	 * Scrollbereich wäre nur ca. zwei Zeilen hoch). Explizit
 	 * gesetzt statt sich auf gtk_window_set_default_size() allein zu
 	 * verlassen (setzt nur die Fenster-Startgröße, erzwingt aber keine
 	 * Mindestgröße des Scroll-Bereichs selbst). */
@@ -1147,15 +1135,13 @@ gint project_load(Projekt* zond, GError** error) {
 	if (rc)
 		return 0;
 
-	/* Nutzer-Fund 18.09.2026: "der Zeitverlust ist der gleiche, bis
-	 * Öffnen das Verzeichnis anzeigt" - s. ausführlichen Kommentar an
-	 * filename_oeffnen() (misc.c). Das noch (project_close() läuft erst
-	 * gleich in project_open()) geöffnete Projekt kennt sein eigenes
-	 * project_dir (das komplette, ggf. riesige SeaDrive-Fallakten-
-	 * verzeichnis) - dessen ELTERNverzeichnis (typischerweise nur eine
-	 * Handvoll Fallakten-Ordner) ist ein deutlich günstigerer Startpunkt
-	 * für den Dateiauswahldialog als das zufällige aktuelle
-	 * Arbeitsverzeichnis. */
+	/* Das noch geöffnete Projekt (project_close() läuft erst gleich in
+	 * project_open()) kennt sein eigenes project_dir (das komplette, ggf.
+	 * riesige SeaDrive-Fallakten-verzeichnis) - dessen ELTERNverzeichnis
+	 * (typischerweise nur eine Handvoll Fallakten-Ordner) ist ein deutlich
+	 * günstigerer Startpunkt für den Dateiauswahldialog als das zufällige
+	 * aktuelle Arbeitsverzeichnis (s. ausführlichen Kommentar an
+	 * filename_oeffnen(), misc.c). */
 	if (zond->project_dir)
 		start_dir = g_path_get_dirname(zond->project_dir);
 

@@ -262,30 +262,18 @@ filename_speichern(GtkWindow *window, const gchar *titel, const gchar *ext) {
 	return filename; //muß g_freed werden
 }
 
-/* Nutzer-Fund 18.09.2026: "Aber: der Zeitverlust ist der gleiche, bis
- * Öffnen das Verzeichnis anzeigt." - per Eclipse/gdb-Suspend lokalisiert:
- * der Hänger beim Öffnen eines neuen Projekts saß gar nicht in
- * sond/zond selbst, sondern in my_dialog_run() -> choose_file() ->
- * filename_oeffnen() -> project_load() - also im GTK-Dateiauswahldialog
- * (GtkFileChooserDialog) selbst. Ursache: choose_file() startete bisher
- * IMMER ohne expliziten Pfad (path==NULL), fiel also auf
- * g_get_current_dir() zurück - und das Arbeitsverzeichnis des Prozesses
- * war noch auf das zuletzt geöffnete (und ggf. gerade erst geschlossene)
- * SeaDrive-Projektverzeichnis gesetzt (g_chdir() in
- * sond_treeviewfm_set_root(), root!=NULL-Zweig; project_close() setzt
- * das nirgends zurück). GtkFileChooserDialog musste also genau das
- * potentiell riesige SeaDrive-Projektverzeichnis (alle Fallakten-Dateien)
- * einlesen, um seine Dateiliste zu füllen - das ist derselbe
- * "Cloud-Filtertreiber pro Datei langsam"-Effekt wie beim SeaDrive-
- * Watcher-Scan, nur diesmal in GTKs eigenem Dialog statt in unserem
- * Code, und deshalb von uns nicht direkt beschleunigbar.
- *
- * Fix: neuer Parameter start_path - der Aufrufer kann jetzt einen
- * sinnvolleren (kleineren) Startordner vorgeben, statt sich auf das
- * zufällige aktuelle Arbeitsverzeichnis zu verlassen. project_load()
- * nutzt dafür das Elternverzeichnis des zuletzt geöffneten Projekts
- * (typischerweise nur eine Handvoll Fallakten-Ordner, nicht deren
- * Inhalt) statt dessen - im Regelfall erheblich schneller einzulesen. */
+/* Öffnet den Dateiauswahldialog. start_path (kann NULL sein) ist der Ordner,
+ * in dem er initial öffnet. Ohne expliziten Pfad fällt choose_file() auf
+ * g_get_current_dir() zurück, und das Arbeitsverzeichnis des Prozesses ist
+ * nach dem Öffnen eines Projekts das SeaDrive-Projektverzeichnis
+ * (g_chdir() in sond_treeviewfm_set_root(), root!=NULL-Zweig;
+ * project_close() setzt es nicht zurück). Der GtkFileChooserDialog müsste
+ * dann das potentiell riesige Projektverzeichnis (alle Fallakten-Dateien)
+ * einlesen, um seine Dateiliste zu füllen - der Cloud-Filtertreiber ist pro
+ * Datei langsam, und das liegt in GTKs eigenem Dialog, nicht in unserem
+ * Code. project_load() übergibt deshalb das Elternverzeichnis des zuletzt
+ * geöffneten Projekts (typischerweise nur eine Handvoll Fallakten-Ordner,
+ * nicht deren Inhalt). */
 gchar*
 filename_oeffnen(GtkWindow *window, const gchar *start_path) {
 	gchar* filename = NULL;
@@ -382,13 +370,10 @@ void info_window_set_progress_bar_fraction(InfoWindow *info_window,
 	return;
 }
 
-/* Nutzer-Fund 16.09.2026: ersetzt die frühere size-allocate-basierte
- * Scroll-Klimmzug-Lösung (die brauchte es, weil bei einer wachsenden
- * GtkBox aus einzelnen Labels erst NACH dem nächsten Layout-Durchlauf klar
- * war, wie weit runter zu scrollen ist). Ein GtkTextMark mit
- * left_gravity=FALSE am Textende bleibt automatisch am Ende, während Text
- * eingefügt wird (s. end_mark in InfoWindow) - gtk_text_view_scroll_mark_
- * onscreen() dafür ist der dafür vorgesehene, robuste GTK-Weg. */
+/* Scrollt ans Textende: ein GtkTextMark mit left_gravity=FALSE am Textende
+ * bleibt automatisch am Ende, während Text eingefügt wird (s. end_mark in
+ * InfoWindow) - gtk_text_view_scroll_mark_onscreen() dafür ist der
+ * vorgesehene, robuste GTK-Weg (kein Warten auf einen Layout-Durchlauf). */
 static void info_window_scroll(InfoWindow *info_window) {
 	gtk_text_view_scroll_mark_onscreen(GTK_TEXT_VIEW(info_window->text_view),
 			info_window->end_mark);
@@ -547,9 +532,8 @@ info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 	swindow = gtk_scrolled_window_new( NULL, NULL);
 	gtk_box_pack_start(GTK_BOX(content), swindow, TRUE, TRUE, 0);
 
-	/* Nutzer-Fund 16.09.2026: statt einer GtkBox mit einem GtkLabel PRO
-	 * Nachricht (s. ausführlichen Kommentar an InfoWindow.text_view in
-	 * misc.h) jetzt ein einzelnes GtkTextView - Text anhängen bleibt auch
+	/* Ein einzelnes GtkTextView statt eines GtkLabel pro Nachricht (s.
+	 * Kommentar an InfoWindow.text_view in misc.h) - Text anhängen bleibt auch
 	 * bei sehr vielen Zeilen (z.B. eine pro Datei beim Anbinden) günstig. */
 	info_window->text_view = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(info_window->text_view), FALSE);

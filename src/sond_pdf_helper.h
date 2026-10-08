@@ -70,7 +70,7 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		fz_buffer* buf, gchar const* filename,
 		gchar const* mime_type, GError** error);
 
-/* Adressierung eingebetteter Dateien (ToDo.c #193), als UTF-8 mit "%" ->
+/* Adressierung eingebetteter Dateien, als UTF-8 mit "%" ->
  * "%25" und "/" -> "%2F" kodiert: der Dateiname (/UF bzw. /F), wenn kein
  * anderer Eintrag denselben Dateinamen hat und keiner ihn als Schlüssel im
  * EmbeddedFiles-Namensbaum trägt; sonst der (eindeutige) Schlüssel.

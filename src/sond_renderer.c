@@ -818,28 +818,17 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     return viewer->window;
 }
 
-/* Nutzer-Fund 18.09.2026: eine Rohdatei mit .eml-Inhalt, aber ohne von
- * der MIME-Erkennung erkannte Header (Dateiname "Message", ohne
- * Erweiterung) wurde als text/plain statt message/rfc822 eingestuft und
- * lief deshalb über render_plain_text() -> render_text_to_surface()
- * statt über render_gmessage(). Das Öffnen fror die UI daraufhin
- * komplett ein - Stack-Trace (Nutzer, per Debugger-Suspend) zeigte den
- * Hänger NICHT in der Dateierkennung, sondern in
- * pango_layout_get_pixel_size() unten: Base64-kodierte Anhänge im
- * Rohtext ergeben extrem lange, leerzeichen-/umbruchpunktfreie
- * "Wörter" - für so etwas brauchen Pango/HarfBuzz beim Zeilenumbruch/
- * Shaping pathologisch lange (praktisch nie endende) Zeit. Die
- * bestehende max_height-Begrenzung weiter unten greift erst NACH dieser
- * Berechnung und schützt daher nicht davor.
- *
- * Fix: text hier hart auf eine Zeichen-Obergrenze kappen, BEVOR er an
- * Pango geht - unabhängig von der eigentlichen Ursache (Fehlerkennung
- * als Plaintext, ein wirklich riesiger Logfile, o.ä.). Zentral hier statt
- * in den einzelnen Aufrufern (render_html/_plain_text/_doc/...), damit
- * alle Aufrufer einheitlich geschützt sind. searchable_text bleibt bei
- * allen Aufrufern bewusst der volle, ungekappte Text (analog zur schon
- * bestehenden max_height-Kappung, die ebenfalls nur die Anzeige, nicht
- * die Volltextsuche einschränkt). */
+/* Obergrenze für den Text, der an Pango geht. Base64-kodierte Anhänge im
+ * Rohtext (z.B. eine als Plaintext erkannte Mail) ergeben extrem lange,
+ * leerzeichen-/umbruchpunktfreie "Wörter" - dafür brauchen Pango/HarfBuzz
+ * beim Zeilenumbruch/Shaping pathologisch lange Zeit (pango_layout_get_
+ * pixel_size()). Die max_height-Begrenzung weiter unten greift erst NACH
+ * dieser Berechnung und schützt daher nicht davor. Der Text wird deshalb
+ * hier hart gekappt, BEVOR er an Pango geht - zentral statt in den einzelnen
+ * Aufrufern (render_html/_plain_text/_doc/...), damit alle einheitlich
+ * geschützt sind. searchable_text bleibt bei allen Aufrufern der volle,
+ * ungekappte Text (wie bei der max_height-Kappung, die ebenfalls nur die
+ * Anzeige, nicht die Volltextsuche einschränkt). */
 #define SOND_RENDER_TEXT_MAX_CHARS 300000
 
 static cairo_surface_t* render_text_to_surface(

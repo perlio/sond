@@ -43,9 +43,8 @@ gint string_to_guint(const gchar*, guint*);
 gchar* filename_speichern(GtkWindow*, const gchar*, const gchar*);
 
 /* start_path (kann NULL sein): Ordner, in dem der Dialog initial öffnet -
- * s. ausführlichen Kommentar an choose_file()/filename_oeffnen() (misc.c)
- * zum Hintergrund (Nutzer-Fund 18.09.2026, langsames Öffnen des Datei-
- * Dialogs bei SeaDrive-Projekten). */
+ * s. Kommentar an filename_oeffnen() (misc.c) zum Hintergrund (langsames
+ * Öffnen des Datei-Dialogs bei SeaDrive-Projekten). */
 gchar* filename_oeffnen(GtkWindow*, const gchar *start_path);
 
 GtkWidget* result_listbox_new(GtkWindow*, const gchar*);
@@ -53,16 +52,14 @@ GtkWidget* result_listbox_new(GtkWindow*, const gchar*);
 /*  info_window  */
 typedef struct _Info_Window {
 	GtkWidget *dialog;
-	/* Nutzer-Fund 16.09.2026: früher eine GtkBox mit einem GtkLabel PRO
-	 * Nachricht (info_window_set_message() je Aufruf ein neues Label
-	 * gepackt) - bei sehr vielen Nachrichten (z.B. eine Zeile pro Datei
-	 * beim Anbinden tausender Dateien) macht das GtkBox-Größenberechnung
-	 * O(Anzahl Kinder) PRO neuer Nachricht, verschärft durch das
-	 * UI-Pumping (gtk_main_iteration() nach jeder Nachricht erzwingt den
-	 * Resize sofort statt ihn zu bündeln) - in Summe O(n²) für n
-	 * Nachrichten. Jetzt ein GtkTextView/GtkTextBuffer (text_view/
-	 * end_mark) - Text anhängen ist dafür gebaut und bleibt trotz vieler
-	 * Zeilen günstig. */
+	/* Ein GtkTextView/GtkTextBuffer (text_view/end_mark) statt eines
+	 * GtkLabels pro Nachricht: bei sehr vielen Nachrichten (z.B. eine Zeile
+	 * pro Datei beim Anbinden tausender Dateien) wäre die
+	 * GtkBox-Größenberechnung O(Anzahl Kinder) pro neuer Nachricht,
+	 * verschärft durch das UI-Pumping (gtk_main_iteration() nach jeder
+	 * Nachricht erzwingt den Resize sofort statt ihn zu bündeln) - in Summe
+	 * O(n²). Text anhängen ist beim GtkTextView dafür gebaut und bleibt auch
+	 * bei vielen Zeilen günstig. */
 	GtkWidget *text_view;
 	GtkTextMark *end_mark;
 	GtkWidget *progress_bar;

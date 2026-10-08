@@ -321,7 +321,7 @@ static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
 /* TODO (geplant): Auswahl des OCR-Modus, analog "Index erstellen".
  *   1. OCR neu (bestehenden Text verwerfen, Seite neu erkennen) statt
  *      pauschal überspringen bei bereits vorhandenem verstecktem Text -
- *      UMGESETZT (24.08.2026): Rückfrage je Seite mit verstecktem Text
+ *      UMGESETZT: Rückfrage je Seite mit verstecktem Text
  *      (seiten_ocr_abfrage_hidden_text(), s.u.), inkl. "für alle weiteren
  *      Seiten übernehmen" (mode_remembered, s.u.).
  *   2. Bisherigen und neu erkannten Tesseract-Text gegenüberstellen und

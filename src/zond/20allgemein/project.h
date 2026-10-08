@@ -55,8 +55,7 @@ gchar* resolve_model_path(Projekt *zond, gchar const *settings_key,
  * Cloud-Sync-Laufwerken (SeaDrive etc.) liegen kann - eine dort laufend
  * gelesene/geschriebene SQLite-Datei kollidiert mit der Sync-Aktivität
  * des Cloud-Clients und verlangsamt jeden einzelnen Datenbankzugriff
- * erheblich (siehe Untersuchung Performance-Problem großer Projekte,
- * 09/2026). Der Pfad wird deterministisch aus dem vollen (absoluten)
+ * erheblich). Der Pfad wird deterministisch aus dem vollen (absoluten)
  * Projektpfad abgeleitet (SHA-256-Hash) - derselbe project_path liefert
  * immer denselben lokalen Pfad, sowohl beim Anlegen
  * (project_create_dbase_zond()) als auch bei der Absturz-Wiederherstellung
@@ -69,7 +68,7 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error);
  * einen modalen Dialog mit einem eigenen, frischen Dateiverzeichnis-Baum
  * (ZondTreeviewFM), der - anders als der normale GTK-Dateiauswahldialog -
  * auch in ZIP-Archive hinabsteigen kann. s. ausführlichen Kommentar an
- * der Definition (project.c, 23.09.2026).
+ * der Definition (project.c).
  *
  * Rückgabe: neue Referenz auf das ausgewählte SondFilePart (Aufrufer muss
  * g_object_unref()en), oder NULL (*error == NULL: Nutzer hat

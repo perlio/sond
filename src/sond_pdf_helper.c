@@ -498,8 +498,8 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 		return NULL;
 	}
 
-	/* Schlüssel eingebetteter Dateien an ihre Dateinamen angleichen (ToDo.c
-	 * #193) - ein Fehler verhindert das Schreiben nicht */
+	/* Schlüssel eingebetteter Dateien an ihre Dateinamen angleichen - ein
+	 * Fehler verhindert das Schreiben nicht */
 	{
 		GError* error_norm = NULL;
 

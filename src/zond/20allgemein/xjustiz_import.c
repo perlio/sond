@@ -141,8 +141,7 @@ static gchar* xjustiz_format_zeitpunkt(gchar const *roh) {
  * kann) wird bewußt dieselbe "//"+local-name()-Suche wie oben verwendet,
  * unabhängig von der genauen Verschachtelung.
  *
- * *out_is_xjustiz (23.09.2026, Nutzer-Vorgabe "Prüfung, ob xjustiz-
- * Datensatz, sonst Meldung" - optional, NULL-Pointer wird übergangen):
+ * *out_is_xjustiz (optional, NULL-Pointer wird übergangen):
  * TRUE, wenn die XML mindestens ein Element "schriftgutobjekte" enthält -
  * unabhängig davon, ob darin referenzierte PDF-Dokumente gefunden wurden
  * (ein XJustiz-Datensatz ohne Dokumente ist laut Spezifikation zulässig
@@ -359,14 +358,12 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	//Nutzer-Vorgabe (23.09.2026): Ausgangspunkt ist die xjustiz_nachricht.xml,
-	//ausgewählt über den container-bewussten Dialog filepart_oeffnen()
-	//(project.c/.h) - kann, anders als der normale GTK-Dateiauswahldialog,
-	//auch in eine noch nicht entpackte ZIP hineinsehen. Ursprünglich war
-	//statt dessen die Selektion im Dateiverzeichnis (BAUM_FS) vorgesehen -
-	//das erwies sich aber als nicht praktikabel, da diese Selektion
-	//verloren geht, sobald im Bestandsverzeichnis die Zielposition markiert
-	//wird (Nutzer-Fund 23.09.2026).
+	//Ausgangspunkt ist die xjustiz_nachricht.xml, ausgewählt über den
+	//container-bewussten Dialog filepart_oeffnen() (project.c/.h) - kann,
+	//anders als der normale GTK-Dateiauswahldialog, auch in eine noch nicht
+	//entpackte ZIP hineinsehen. Eine Vorauswahl im Dateiverzeichnis (BAUM_FS)
+	//wäre nicht praktikabel, da diese Selektion verloren geht, sobald im
+	//Bestandsverzeichnis die Zielposition markiert wird.
 	sfp_xml = filepart_oeffnen(zond, error);
 	if (!sfp_xml)
 		return (error && *error) ? -1 : 1; //1: Dialog abgebrochen
@@ -393,8 +390,8 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	//Nutzer-Vorgabe (23.09.2026): "Prüfung, ob xjustiz-Datensatz, sonst
-	//Meldung" - statt stillschweigend 0 Dokumente anzubinden.
+	//Prüfung, ob xjustiz-Datensatz, sonst Meldung - statt
+	//stillschweigend 0 Dokumente anzubinden.
 	if (!is_xjustiz) {
 		g_free(produktname);
 		g_free(zeitpunkt_roh);
@@ -417,9 +414,9 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	/* Verzeichnis/Container von xjustiz_nachricht.xml bestimmen - Nutzer-
-	 * Vorgabe (23.09.2026): "die im gleichen Verzeichnis/Container
-	 * befindlichen Dateien lt. xml-Datensatz [werden] angebunden". Die
+	/* Verzeichnis/Container von xjustiz_nachricht.xml bestimmen - die im
+	 * gleichen Verzeichnis/Container befindlichen Dateien laut
+	 * xml-Datensatz werden angebunden. Die
 	 * PDF-Dokumente werden weiter unten als GESCHWISTER von
 	 * xjustiz_nachricht.xml gesucht: sfp_parent_xml (Elternteil von
 	 * sfp_xml - NULL, wenn xjustiz_nachricht.xml direkt im Projekt-
@@ -440,9 +437,9 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 				g_strndup(xml_path, last_slash - xml_path) : g_strdup("");
 	}
 
-	/* Benennung des gleich anzulegenden Strukturpunkts (s.u.) - Nutzer-
-	 * Vorgabe (22.09.2026): "Zur Benennung: Aus dem Nachrichtenkopf: Name
-	 * des Produkts und Erstellungszeitpunkt." Beide Felder laut
+	/* Benennung des gleich anzulegenden Strukturpunkts (s.u.): aus dem
+	 * Nachrichtenkopf, Name des Produkts und Erstellungszeitpunkt.
+	 * Beide Felder laut
 	 * Spezifikation optional - Fallback auf das jeweils vorhandene Feld,
 	 * oder falls beide fehlen ein fester Platzhalter statt einer leeren
 	 * Beschriftung. */
@@ -472,14 +469,13 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	/* Nutzer-Vorgabe (22.09.2026): "daß in das Bestandsverzeichnis an der
-	 * gewählten Stelle ein Strukturpunkt eingefügt wird, in den die
-	 * einzelnen Dateien eingefügt werden" - statt die Dokumente direkt an
-	 * der markierten Stelle anzubinden, wird hier zuerst EIN neuer
-	 * Strukturpunkt dort eingefügt; anchor_id/child werden anschließend so
-	 * umgebogen, daß alle folgenden Dokumente als dessen Kinder (erstes
-	 * Dokument) bzw. dessen Geschwister (weitere Dokumente, wie schon
-	 * bisher) landen. */
+	/* In das Bestandsverzeichnis wird an der gewählten Stelle ein
+	 * Strukturpunkt eingefügt, in den die einzelnen Dateien eingefügt
+	 * werden - statt die Dokumente direkt an der markierten Stelle
+	 * anzubinden, wird hier zuerst EIN neuer Strukturpunkt dort eingefügt;
+	 * anchor_id/child werden anschließend so umgebogen, daß alle folgenden
+	 * Dokumente als dessen Kinder (erstes Dokument) bzw. dessen Geschwister
+	 * (weitere Dokumente) landen. */
 	struktur_id = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
 			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
 			zond->icon[ICON_ORDNER].icon_name, struktur_label, NULL, error);

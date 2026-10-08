@@ -348,7 +348,7 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 		 * werden kann. Sonst bliebe nach Seiten-Einfügen/-Löschen eine
 		 * veraltete Zahl stehen, die z.B. sond_index_ctx_delete_index()
 		 * beim Rekonstruieren der übrigen Seiten fälschlich zugrunde
-		 * legen würde (11.09.2026, Nutzerentscheidung). */
+		 * legen würde. */
 		if (!sond_index_ctx_set_page_count(index_ctx, filename, n_live, &error)) {
 			LOG_WARN("%s\n", error->message);
 			g_clear_error(&error);

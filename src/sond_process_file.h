@@ -77,13 +77,12 @@ typedef struct _SondProcessFileCtx {
  *         Seitenbereich beschreibt, sondern den "Message"-Knoten einer
  *         E-Mail - dort soll (statt der ganzen Mail) nur der Header
  *         (Von/An/CC/BCC/Betreff/Datum) indiziert werden. von/bis sind in
- *         diesem Fall irrelevant (-1/-1). S. ToDo.c, 17.09.2026,
- *         E-Mail-Coverage-Redesign (Schritt 2/6).
+ *         diesem Fall irrelevant (-1/-1).
  * @pdf_pagetree_only: TRUE, wenn nur die Seiten (PageTree) einer PDF
  *         gemeint sind, ohne die eingebetteten Dateien (die sind eigene
  *         Fileparts "x.pdf//anhang.pdf"). von/bis = -1/-1. Abgedeckt wird
  *         unter dem Coverage-Schlüssel "x.pdf//", Chunks/pages bleiben
- *         unter "x.pdf". S. ToDo.c #191.
+ *         unter "x.pdf".
  *
  * Seitenbereich, auf den Indizierung/OCR für eine Datei beschränkt werden
  * soll (z.B. weil nur eine an einen Baum-Punkt angebundene Teilstrecke
@@ -106,7 +105,7 @@ typedef struct _SondPageRange {
     /* angebundene Mail in BAUM_INHALT/_AUSWERTUNG: Header + Inline-Teile
      * (Mimeparts ohne Content-Disposition "attachment"), von/bis -1/-1.
      * Kein eigener Coverage-Schlüssel - Header ("x.eml//header") und
-     * Inline-Teile ("x.eml//N") werden einzeln abgedeckt. S. ToDo.c #197. */
+     * Inline-Teile ("x.eml//N") werden einzeln abgedeckt. */
     gboolean gmessage_message;
 } SondPageRange;
 
@@ -164,8 +163,7 @@ gboolean sond_file_name_not_indexable(gchar const* path);
 
 /* Struktur eines Containers in der Index-DB festhalten: Anhänge einer PDF
  * (pdf_embedded) bzw. Mimeparts einer Mail (container_entrycount,
- * gmessage_inline). Andere Typen: nichts zu tun. Liest die Datei. ToDo.c
- * #199. */
+ * gmessage_inline). Andere Typen: nichts zu tun. Liest die Datei. */
 typedef struct _SondFilePart SondFilePart;
 gint sond_process_file_record_structure(SondIndexCtx* index_ctx,
 		SondFilePart* container, GError** error);

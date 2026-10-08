@@ -25,7 +25,7 @@ gboolean anbindung_is_pdf_punkt(Anbindung);
  * also entweder redundant die ganze Seite mit indizieren, oder beim
  * Löschen versehentlich den Index einer ggf. von einer ANDEREN
  * Anbindung noch benötigten ganzen Seite mit entfernen - deshalb dort
- * bewusst nicht zugelassen (11.09.2026, Nutzerentscheidung, s. ToDo.c). */
+ * bewusst nicht zugelassen. */
 gboolean anbindung_ist_unterseitig(Anbindung);
 
 gboolean anbindung_1_vor_2(Anbindung, Anbindung);

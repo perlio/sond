@@ -38,37 +38,25 @@
 /*  Minimaler CF-API-Ausschnitt für Cloud-Hydrierung bei Bedarf         */
 /* ------------------------------------------------------------------ */
 
-/* Nutzer-Fund 18.09.2026: Nachdem sond_fopen() (s.u.) auf CreateFileW()
- * umgestellt wurde, kam für .sond_index.db-shm (zonds eigene, im
- * Projektverzeichnis liegende SQLite-WAL-Begleitdatei) plötzlich statt
- * der bisherigen (irreführenden) "Invalid argument"-Meldung die
- * spezifischere "Der Zugriff auf die Clouddatei wurde verweigert"
- * (ERROR_CLOUD_FILE_ACCESS_DENIED, 395) - exakt derselbe Fehler, der
- * schon beim SeaDrive-Doppelklick-Hydrieren aufgetreten war (s.
- * sond_seadrive_hydrate(), sond_treeviewfm_seadrive.c, 18.09.2026): die
- * Datei war ein noch nicht hydrierter SeaDrive-Platzhalter, und ein
- * roher Lesezugriff (egal ob über _wfopen() - das mappt diesen Fall nur
- * unspezifisch auf errno=EINVAL statt ihn eigens zu erkennen - oder über
- * CreateFileW(GENERIC_READ)) schlägt dafür fehl; nötig ist stattdessen
- * die offizielle Cloud-Filter-API. D.h. die ursprüngliche "führender
- * Punkt"-Theorie zur .sond_index.db-shm-Regression war vermutlich falsch
- * bzw. unvollständig - es handelte sich von Anfang an um genau dieses
- * Hydrierungsproblem, nur von _wfopen() irreführend als generisches
- * EINVAL gemeldet.
+/* Eine .sond_index.db-shm oder andere noch nicht hydrierte SeaDrive-Datei
+ * (Platzhalter) lässt sich per rohem Lesezugriff (CreateFileW(GENERIC_READ),
+ * _wfopen()) nicht öffnen: Windows meldet "Der Zugriff auf die Clouddatei
+ * wurde verweigert" (ERROR_CLOUD_FILE_ACCESS_DENIED, 395), _wfopen() nur
+ * unspezifisch als errno=EINVAL. Nötig ist die offizielle Cloud-Filter-API
+ * (Hydrierung, s. sond_seadrive_hydrate(), sond_treeviewfm_seadrive.c).
  *
- * Allgemeine Lösung (statt SeaDrive-Sonderfall-Prüfung vor jedem
- * sond_fopen()-Aufruf im ganzen Code): bei genau diesem Fehler einmalig
- * Hydrierung anstoßen und den Öffnen-Versuch wiederholen - unabhängig
- * davon, ob der Pfad überhaupt auf einem SeaDrive-Laufwerk liegt (für
- * gewöhnliche lokale Dateien tritt dieser Fehler nie auf, die Prüfung
- * ist also ein reiner No-Op-Fall dort). Absichtlich hier in
- * sond_file_helper.c dupliziert statt sond_treeviewfm_seadrive.h
- * einzubinden: Letzteres hängt (über sond_treeviewfm.h) von GTK ab,
- * sond_file_helper.c ist bewusst eine GTK-freie, niedrige Utility-Ebene
- * (die umgekehrt schon von sond_treeviewfm_seadrive.c genutzt wird -
- * ein Rückbezug wäre ein Include-Zirkel). Mittelfristig wäre eine
- * gemeinsame, GTK-freie CF-API-Basis (eigene kleine Datei) sauberer als
- * diese Duplizierung - hier aus Zeitgründen zurückgestellt. */
+ * Allgemeine Lösung statt SeaDrive-Sonderfall-Prüfung vor jedem
+ * sond_fopen()-Aufruf im ganzen Code: bei genau diesem Fehler einmalig
+ * Hydrierung anstoßen und den Öffnen-Versuch wiederholen - unabhängig davon,
+ * ob der Pfad überhaupt auf einem SeaDrive-Laufwerk liegt (für gewöhnliche
+ * lokale Dateien tritt dieser Fehler nie auf, die Prüfung ist dort ein
+ * No-Op). Absichtlich hier in sond_file_helper.c dupliziert statt
+ * sond_treeviewfm_seadrive.h einzubinden: Letzteres hängt (über
+ * sond_treeviewfm.h) von GTK ab, sond_file_helper.c ist bewusst eine
+ * GTK-freie, niedrige Utility-Ebene (die umgekehrt schon von
+ * sond_treeviewfm_seadrive.c genutzt wird - ein Rückbezug wäre ein
+ * Include-Zirkel). Eine gemeinsame, GTK-freie CF-API-Basis (eigene kleine
+ * Datei) wäre sauberer als diese Duplizierung. */
 #ifndef ERROR_CLOUD_FILE_ACCESS_DENIED
 #define ERROR_CLOUD_FILE_ACCESS_DENIED 395L
 #endif
@@ -412,16 +400,8 @@ sond_rmdir_r(const gchar *path, GError **error)
     return success;
 }
 
-/* Nutzer-Entscheidung 09/2026 (nach zwei Regressionen in Folge - erst
- * "invalid argument" beim Laden durch ZIP-Sonderzeichen im Dateinamen,
- * dann "Datei von anderem Prozeß verwendet" bei praktisch jedem Projekt,
- * weil der CreateFileW-Ersatz einen zu engen Freigabemodus setzte):
- * versuchsweiser Umstieg von _wfopen() auf CreateFileW()/_open_osfhandle()/
- * _fdopen() (s. Versionsgeschichte) wieder VOLLSTÄNDIG zurückgenommen -
- * zurück zu _wfopen(), trotz der bekannten, seltenen Einschränkung bei
- * ZIP-Dateinamen mit Leerzeichen/Punkt am Ende einer Pfadkomponente (löst
- * dort weiterhin errno=EINVAL aus, s. ToDo.c). Stabilität hat Vorrang vor
- * diesem Randfall. */
+/* Öffnet eine Datei wie fopen(), mit Long-Path-Support und Cloud-
+ * Hydrierung unter Windows (CreateFileW, s. unten). */
 FILE*
 sond_fopen(const gchar *path, const gchar *mode, GError **error)
 {
@@ -429,24 +409,16 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     g_return_val_if_fail(mode != NULL, NULL);
 
 #ifdef G_OS_WIN32
-    /* Nutzer-Fund 18.09.2026 (s. ausführl. Doc-Kommentar bei sond_stat()
-     * oben, ToDo.c): _wfopen() validiert Dateinamen zusätzlich zu dem,
-     * was Win32 mit dem \\?\-Langpfad-Präfix verlangt, und lehnt dabei
-     * u.a. Namen mit Leerzeichen/Punkt am Ende sowie Namen ab, die nur
-     * aus einem führenden Punkt + Text bestehen. Allgemeine Lösung
-     * (Nutzer-Entscheidung 18.09.2026: "Das muß man doch allgemein
-     * lösen" - statt die konkret betroffene Datei zu verstecken):
-     * CreateFileW() statt _wfopen(), zweiter Versuch nach dem am
-     * 16.09.2026 wegen zu engem Freigabemodus zurückgenommenen ersten
-     * Versuch (s. ToDo.c, Task #105) - diesmal mit demselben großzügigen
-     * Freigabemodus (FILE_SHARE_READ|WRITE|DELETE), der bereits in
-     * sond_seadrive_hydrate()/hydrate_progress_update()
-     * (sond_treeviewfm_seadrive.c) erfolgreich verwendet wird. Das war
-     * die eigentliche Ursache der Vorgänger-Regression ("Datei von
-     * anderem Prozeß verwendet"), nicht der Wechsel auf CreateFileW an
-     * sich. Über _open_osfhandle()/_fdopen() wird daraus wieder ein
-     * normales FILE*, mit dem der Rest des Codes unverändert
-     * weiterarbeiten kann.
+    /* CreateFileW() statt _wfopen(): _wfopen() validiert Dateinamen
+     * zusätzlich zu dem, was Win32 mit dem \?\-Langpfad-Präfix verlangt,
+     * und lehnt dabei u.a. Namen mit Leerzeichen/Punkt am Ende sowie Namen
+     * ab, die nur aus einem führenden Punkt + Text bestehen (s. auch
+     * sond_stat() unten). Der Freigabemodus ist bewusst großzügig
+     * (FILE_SHARE_READ|WRITE|DELETE, wie in sond_seadrive_hydrate()/
+     * hydrate_progress_update() in sond_treeviewfm_seadrive.c); ein engerer
+     * führt zu "Datei von anderem Prozeß verwendet". Über
+     * _open_osfhandle()/_fdopen() wird daraus wieder ein normales FILE*,
+     * mit dem der Rest des Codes unverändert weiterarbeiten kann.
      *
      * Deckt die in dieser Codebasis tatsächlich verwendeten Modi ab
      * ("rb", "wb", "w") sowie generisch "r"/"w"/"a" mit optionalem "+" -
@@ -490,7 +462,7 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     if (h == INVALID_HANDLE_VALUE &&
             GetLastError() == (DWORD) ERROR_CLOUD_FILE_ACCESS_DENIED) {
         /* S. ausführlichen Doc-Kommentar bei hydrate_if_cloud_placeholder()
-         * oben (18.09.2026) - noch nicht hydrierter SeaDrive-Platzhalter,
+         * oben - noch nicht hydrierter SeaDrive-Platzhalter,
          * einmalig Hydrierung anstoßen und erneut versuchen. */
         hydrate_if_cloud_placeholder(long_path);
         h = CreateFileW(long_path, desired_access,
@@ -553,27 +525,22 @@ sond_stat(const gchar *path, GStatBuf *buf, GError **error)
     g_return_val_if_fail(buf != NULL, -1);
 
 #ifdef G_OS_WIN32
-    /* Nutzer-Fund 18.09.2026 ("Fehler beim Laden des Projekts: Invalid
-     * argument" bei .sond_index.db-shm, s. ToDo.c): _wstat64() (wie
-     * _wfopen(), s. sond_fopen() unten) validiert Dateinamen ZUSÄTZLICH
-     * über das hinaus, was Win32 mit dem \\?\-Langpfad-Präfix verlangt,
-     * und lehnt dabei u.a. Namen ab, die nur aus einem führenden Punkt +
-     * Text bestehen (analog zur schon dokumentierten Ablehnung von
-     * Leerzeichen/Punkt am Ende einer Pfadkomponente). Allgemeine Lösung
-     * statt Einzelfall-Workaround (Nutzer-Entscheidung 18.09.2026): auf
-     * GetFileAttributesExW() umgestellt - eine reine Win32-Metadaten-
-     * Abfrage ohne CRT-eigene Namensprüfung UND ohne Handle/Freigabe-
-     * Verhandlung (im Gegensatz zu CreateFileW/_wfopen() also strukturell
-     * gar nicht erst anfällig für "Datei von anderem Prozeß verwendet").
+    /* _wstat64() (wie _wfopen()) validiert Dateinamen ZUSÄTZLICH über das
+     * hinaus, was Win32 mit dem \?\-Langpfad-Präfix verlangt, und lehnt
+     * dabei u.a. Namen ab, die nur aus einem führenden Punkt + Text bestehen
+     * (z.B. .sond_index.db-shm) oder mit Leerzeichen/Punkt enden. Deshalb
+     * GetFileAttributesExW(): eine reine Win32-Metadaten-Abfrage ohne
+     * CRT-eigene Namensprüfung UND ohne Handle/Freigabe-Verhandlung (also
+     * strukturell nicht anfällig für "Datei von anderem Prozeß verwendet").
      *
-     * Bekannter Unterschied zu _wstat64(): _wstat64() löst Reparse-Points/
-     * Symlinks auf (liefert Infos über das ZIEL, wie POSIX stat()),
-     * GetFileAttributesExW() dagegen nicht (wie POSIX lstat() - liefert
-     * Infos über den Reparse-Point selbst). Für Verzeichnis-Junctions/
-     * -Symlinks bleibt S_ISDIR() trotzdem korrekt (das Verzeichnis-Bit
-     * sitzt unter NTFS auch auf dem Link-Eintrag selbst) - nur bei
-     * Datei-Symlinks mit abweichendem Zieltyp könnte sich das Verhalten
-     * unterscheiden; im bisherigen Code nirgends als relevant erkennbar. */
+     * Unterschied zu _wstat64(): _wstat64() löst Reparse-Points/Symlinks auf
+     * (liefert Infos über das ZIEL, wie POSIX stat()), GetFileAttributesExW()
+     * dagegen nicht (wie POSIX lstat() - liefert Infos über den Reparse-Point
+     * selbst). Für Verzeichnis-Junctions/-Symlinks bleibt S_ISDIR()
+     * trotzdem korrekt (das Verzeichnis-Bit sitzt unter NTFS auch auf dem
+     * Link-Eintrag selbst) - nur bei Datei-Symlinks mit abweichendem
+     * Zieltyp könnte sich das Verhalten unterscheiden; im Code nirgends als
+     * relevant erkennbar. */
     wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return -1;

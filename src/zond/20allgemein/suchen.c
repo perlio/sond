@@ -175,21 +175,16 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
  * zond_treeview_jump_to_iter() (zond_treeview.c) bzw. spiegelbildlich in
  * app_window.c (cb_jump_button_clicked). node_id==0 hat kein Sprungziel.
  *
- * Lookup+Sprung jetzt wie überall sonst im Code über zond_tree_store_get_
+ * Lookup+Sprung wie überall sonst im Code über zond_tree_store_get_
  * iter_by_node_id() (O(1)-Hashtable) + sond_treeview_expand_to_row() +
- * sond_treeview_set_cursor() (Nutzer-Hinweis 22.09.2026, im Anschluß an
- * den analogen BAUM_FS-Sprung: "Und der Sprung zum Knoten in den anderen
- * beiden Bäumen? Kannst Du da nicht auch etwas wiederverwenden?") - vorher
- * per zond_treeview_get_path(), dem einzigen verbliebenen Aufrufer des
- * älteren O(n) gtk_tree_model_foreach()-Ansatzes, den Task #39-41 überall
- * sonst schon ersetzt hatten. Das manuelle, temporäre Verbinden/Trennen
+ * sond_treeview_set_cursor(). Ein manuelles, temporäres Verbinden/Trennen
  * von "cursor-changed" (um Label/Textview auch ohne bestehenden Fokus zu
- * aktualisieren) entfällt dabei ersatzlos: sond_treeview_set_cursor()
- * ruft am Ende gtk_widget_grab_focus() auf, was über cb_treeview_focus_in()
+ * aktualisieren) ist dabei nicht nötig: sond_treeview_set_cursor() ruft am
+ * Ende gtk_widget_grab_focus() auf, was über cb_treeview_focus_in()
  * (app_window.c) automatisch genau dasselbe erledigt - Verbinden von
  * "cursor-changed" UND einmaliges erzwungenes Emittieren, s. dortigen
- * Code. Das ist derselbe offizielle Mechanismus, den auch der neue
- * BAUM_FS-Sprung (suchen_springe_zu_baum_fs()) und praktisch jeder andere
+ * Code. Das ist derselbe offizielle Mechanismus, den auch der BAUM_FS-Sprung
+ * (suchen_springe_zu_baum_fs()) und praktisch jeder andere
  * programmatische Tree-Sprung im Code nutzt. */
 void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 	if (!iter || (baum != BAUM_INHALT && baum != BAUM_AUSWERTUNG))
@@ -202,19 +197,17 @@ void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 			&& gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
 
-	/* Manuelles unselect_all bleibt nötig, obwohl cb_treeview_focus_in()
+	/* Manuelles unselect_all ist nötig, obwohl cb_treeview_focus_in()
 	 * (app_window.c) genau das eigentlich schon erledigt: gtk_widget_grab_
 	 * focus() (in sond_treeview_set_cursor() unten) löst focus-in-event bei
 	 * GTK3 nur dann synchron aus, wenn app_window auch tatsächlich die
 	 * Fenstermanager-Fokus hat - hier hält aber das separate Ergebnisfenster
 	 * den echten Fokus, app_window bekommt ihn dadurch nicht automatisch
-	 * zurück. cb_treeview_focus_in() feuert also nicht zuverlässig; das
-	 * Entfernen dieser Zeilen (Nachtrag #182) wurde vom Nutzer getestet und
-	 * per "Kein unselect" widerlegt - wieder eingebaut. BAUM_FS gehört mit
-	 * dazu (Nachtrag #183: "Wenn man in BAUM_FS gesprungen ist und springt
-	 * in BAUM_INHALT, wird Markierung BAUM_FS nicht gelöscht") - ursprünglich
-	 * vergessen, weil BAUM_FS hier selbst nie Sprungziel sein kann (s. Guard
-	 * oben), als Sprungherkunft aber sehr wohl in Frage kommt. */
+	 * zurück. cb_treeview_focus_in() feuert also nicht zuverlässig. BAUM_FS
+	 * gehört mit dazu: es kann hier selbst nie Sprungziel sein (s. Guard
+	 * oben), als Sprungherkunft aber sehr wohl in Frage kommen (sonst bliebe
+	 * dessen Markierung stehen, wenn man aus BAUM_FS nach BAUM_INHALT
+	 * springt). */
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_FS]);
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
@@ -222,16 +215,15 @@ void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 	sond_treeview_expand_to_row(zond->treeview[baum], iter);
 	sond_treeview_set_cursor(zond->treeview[baum], iter);
 
-	/* Label/Textview erzwungen aktualisieren (Nachtrag #184) - verläßt sich
-	 * nicht mehr (wie vor #182/#183 angenommen) darauf, daß grab_focus() in
-	 * sond_treeview_set_cursor() zuverlässig ein echtes focus-in-event
-	 * auslöst: das geschieht bei GTK3 nur, wenn app_window bereits die
-	 * echte Fenstermanager-Fokus hat, die hier aber das separate
-	 * Ergebnisfenster hält. zond_treeview_cursor_changed() (zond_treeview.c)
-	 * ist eine normale öffentliche Funktion (kein Callback-Interna) und
-	 * bricht bei bereits aktuellem Knoten selbst ab - ein Aufruf schadet
-	 * also auch dann nicht, wenn "cursor-changed" zufällig schon verbunden
-	 * ist und den Callback ohnehin ausgelöst hat. */
+	/* Label/Textview erzwungen aktualisieren: verläßt sich nicht darauf,
+	 * daß grab_focus() in sond_treeview_set_cursor() zuverlässig ein
+	 * echtes focus-in-event auslöst: das geschieht bei GTK3 nur, wenn
+	 * app_window bereits die echte Fenstermanager-Fokus hat, die hier aber
+	 * das separate Ergebnisfenster hält. zond_treeview_cursor_changed()
+	 * (zond_treeview.c) ist eine normale öffentliche Funktion (kein
+	 * Callback-Interna) und bricht bei bereits aktuellem Knoten selbst ab -
+	 * ein Aufruf schadet also auch dann nicht, wenn "cursor-changed"
+	 * zufällig schon verbunden ist und den Callback ohnehin ausgelöst hat. */
 	zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->treeview[baum]), zond);
 
 	return;
@@ -247,8 +239,8 @@ void suchen_springe_zu_knoten(Projekt *zond, gint baum, gint node_id) {
 	 * Sprungziel sein - node_id ist immer eine "knoten"-Tabellen-ID
 	 * (suchen_db()), BAUM_FS hat aber ein eigenes, dateisystembasiertes
 	 * Baummodell ohne solche IDs. Tritt das trotzdem auf, ist es ein
-	 * Verdrahtungsfehler beim Befüllen der Ergebniszeile (s. #164-Nachtrag
-	 * in ToDo.c) - kein normaler Aufruf. */
+	 * Verdrahtungsfehler beim Befüllen der Ergebniszeile - kein normaler
+	 * Aufruf. */
 	if (baum == BAUM_FS) {
 		g_warning("suchen_springe_zu_knoten: BAUM_FS als Sprungziel "
 				"angefordert (node_id=%d) - kein gültiges Sprungziel aus "
@@ -273,28 +265,23 @@ void suchen_springe_zu_knoten(Projekt *zond, gint baum, gint node_id) {
 }
 
 /* Springt in BAUM_FS zur Datei "file_part"+"section" (wie in der knoten-
- * Tabelle gespeichert) -
- * Nutzer-Vorgabe (22.09.2026): "Und jetzt noch implementieren, daß man
- * zum Knoten im BAUM_FS springen kann." Nutzt bewußt dieselbe Funktion wie
+ * Tabelle gespeichert). Nutzt bewußt dieselbe Funktion wie
  * der bestehende "Sprung zur Herkunft" (zond_treeview_jump_to_origin(),
  * zond_treeview.c, FILE_PART-Fall) statt eigener sond_treeviewfm_file_
- * part_visible()-Verdrahtung - Nutzer-Hinweis (22.09.2026): "Kanns Du da
- * nicht die Implementierung aus jump-to-origin verwenden?" zond_
+ * part_visible()-Verdrahtung. zond_
  * treeviewfm_set_cursor_on_section() berücksichtigt dabei zusätzlich die
- * section (z.B. Seitenbereich einer PDF-Datei), was die vorige,
- * file_part-only Fassung ignorierte. Schaltet BAUM_FS bei Bedarf sichtbar
- * (teilt sich die Fläche mit BAUM_AUSWERTUNG, analog zum Umschalten in
- * suchen_springe_zu_knoten() bzw. in zond_treeview_jump_to_origin()
- * selbst). Manuelles unselect_all auf BAUM_INHALT/BAUM_AUSWERTUNG bleibt
- * nötig: zwar löst zond_treeviewfm_set_cursor_on_section() intern ebenfalls
+ * section (z.B. Seitenbereich einer PDF-Datei). Schaltet BAUM_FS bei Bedarf
+ * sichtbar (teilt sich die Fläche mit BAUM_AUSWERTUNG, analog zum
+ * Umschalten in suchen_springe_zu_knoten() bzw. in
+ * zond_treeview_jump_to_origin() selbst). Das manuelle unselect_all auf
+ * BAUM_INHALT/BAUM_AUSWERTUNG bleibt nötig: zwar löst
+ * zond_treeviewfm_set_cursor_on_section() intern ebenfalls
  * sond_treeview_set_cursor()/grab_focus() aus, aber solange das separate
  * Ergebnisfenster die echte Fenstermanager-Fokus hält, bekommt app_window
  * sie dadurch nicht automatisch zurück und cb_treeview_focus_in() (app_
  * window.c) feuert nicht zuverlässig - anders als beim direkten Vorbild
  * zond_treeview_jump_to_origin(), das immer aus dem bereits fokussierten
- * BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst wird. Testweise entfernt
- * (Nachtrag #182) und vom Nutzer per "Kein unselect" widerlegt - wieder
- * eingebaut. */
+ * BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst wird. */
 void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
 		gchar const *section) {
 	GError *error = NULL;
@@ -553,8 +540,7 @@ static void suchen_ergebnisfenster(Projekt *zond, gchar const *titel,
 
 /* Baumsuche (Popup-Suchfeld): Treffer in file_part, node_text und text der
  * zond-Bäume. Ergebnis: je Ursprung der vollständige Baum wie in
- * "Herkunft und Verwendung", aufgeklappt bis zu den Treffern (s. ToDo.c
- * #188). */
+ * "Herkunft und Verwendung", aufgeklappt bis zu den Treffern. */
 gint suchen_treeviews(Projekt *zond, const gchar *text, GError **error) {
 	gint rc = 0;
 	GArray *arr_treffer = NULL;

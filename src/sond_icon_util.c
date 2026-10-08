@@ -77,7 +77,7 @@ GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size)
 	if (status == SOND_INDEX_STATUS_FULL)
 		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün */
 	if (status == SOND_INDEX_STATUS_PARTIAL)
-		return draw_circle_badge(0.55, 0.55, 0.55, size); /* Grau - wie SEADRIVE_DIR_STATUS_MIXED (11.09.2026 auf Nutzer-Feedback von Orange umgestellt: Orange wirkte wie ein Warn-/Unfertig-Signal statt eines reinen Ist-Zustands) */
+		return draw_circle_badge(0.55, 0.55, 0.55, size); /* Grau - wie SEADRIVE_DIR_STATUS_MIXED */
 
 	return NULL;
 }
@@ -87,7 +87,7 @@ GdkPixbuf* sond_icon_util_seadrive_badge_pixbuf(SondSeadriveBadge badge, gint si
 	case SOND_SEADRIVE_BADGE_OFFLINE:
 		return draw_circle_badge(0.55, 0.25, 0.75, size); /* Violett */
 	case SOND_SEADRIVE_BADGE_PENDING:
-		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange (seit 11.09.2026 nicht mehr geteilt mit INDEX_STATUS_PARTIAL, das jetzt Grau ist) */
+		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange */
 	case SOND_SEADRIVE_BADGE_PINNED:
 		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün */
 	default:
@@ -147,8 +147,7 @@ gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 	 * den Cache-Eintrag für "base_icon_name" "hineingebrannt" und danach
 	 * bei JEDER anderen Zeile mit demselben Basis-Icon (z.B. jedem anderen
 	 * Ordner - "folder") mit angezeigt, unabhängig von deren eigenem
-	 * Status (Bug "Ordner faelschlich gruen/violett", 09/2026 - vom
-	 * Nutzer aufgedeckt). Nur bei tatsächlich vorhandenen Overlays kopieren
+	 * Status (Bug "Ordner faelschlich gruen/violett"). Nur bei tatsächlich vorhandenen Overlays kopieren
 	 * (sonst unnötiger Allokations-Overhead für den Normalfall). */
 	if (n_overlays > 0) {
 		GdkPixbuf *copy = gdk_pixbuf_copy(main_pb);
