@@ -1,0 +1,9 @@
+# Textdateien im Repository immer mit LF (unabhaengig von core.autocrlf des
+# jeweiligen Git; Windows-Git und MSYS2-Git liefern so dasselbe Ergebnis).
+* text=auto eol=lf
+
+# Binaerdateien nie umwandeln
+*.png binary
+*.ico binary
+*.jpg binary
+*.compiled binary
