@@ -48,8 +48,8 @@ typedef struct {
 	 * Ground Truth für seadrive_pending_down, analog seadrive_not_in_sync.
 	 * Ohne dieses Set wäre bei einem REMOVED-Event (Datei gelöscht, während
 	 * sie noch heruntergeladen wurde) nicht feststellbar, ob sie gerade
-	 * mitgezählt wurde - der Zähler würde langfristig auseinanderlaufen
-	 * (Untersuchung SeaDrive-Coverage, 09/2026). Wird beim Initialscan und
+	 * mitgezählt wurde - der Zähler würde langfristig auseinanderlaufen.
+	 * Wird beim Initialscan und
 	 * bei einem Resync (Buffer-Overflow von ReadDirectoryChangesW) komplett
 	 * neu aufgebaut/ersetzt. */
 	GHashTable *seadrive_pending_down_paths;
@@ -57,16 +57,14 @@ typedef struct {
 	 * Pfad wie bei seadrive_pending_down_paths) -> SondSeadriveDirCounts*.
 	 * Komplett neu aufgebaut bei Initialscan/Resync (s.
 	 * sond_treeviewfm_seadrive_set_dir_counts()), inkrementell nachgezogen
-	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta(),
-	 * Untersuchung SeaDrive-Coverage, 09/2026). */
+	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta()). */
 	GHashTable *seadrive_dir_counts;
 	/* Ground-Truth-Map für den Datei-eigenen SeaDrive-Badge: voller Pfad ->
 	 * GINT_TO_POINTER(SondSeadriveBadge), Einträge mit Wert NONE werden
-	 * nicht gespeichert. ERSETZT ab 09/2026 den früheren LIVEN
+	 * nicht gespeichert. Ersetzt den früheren LIVEN
 	 * GetFileAttributesW-Aufruf pro Renderzeile in
 	 * sond_treeviewfm_render_file_icon() (Konsistenz mit seadrive_dir_
-	 * counts, das schon vorher aus der Hashtable statt live gelesen wurde -
-	 * Untersuchung "Ordner-Badges", 09/2026) UND liefert gleichzeitig die
+	 * counts, das schon vorher aus der Hashtable statt live gelesen wurde) UND liefert gleichzeitig die
 	 * Grundlage für die Ordner-Coverage-Zähler (not_hydrated/
 	 * hydrated_pinned in seadrive_dir_counts werden aus Änderungen dieser
 	 * Map abgeleitet, s. sond_treeviewfm_seadrive_update_file_badge()) -
@@ -100,22 +98,16 @@ typedef struct {
 } SondTVFMItemPrivate;
 
 /* Freund-Accessor für sond_seadrive.c, analog sond_treeviewfm_get_priv().
- * Definiert (18.09.2026: jetzt in sond_tvfm_item.c, s. dortigen Kommentar
- * zum Refactoring "stvfm_item aus sond_treeviewfm herausnehmen"). */
+ * Definiert in sond_tvfm_item.c. */
 SondTVFMItemPrivate *sond_tvfm_item_get_priv(SondTVFMItem *item);
 
 /* Modul-interne "Freund"-API zwischen sond_treeviewfm.c und
- * sond_tvfm_item.c (18.09.2026, Refactoring "stvfm_item aus
- * sond_treeviewfm herausnehmen"): diese sechs Funktionen waren vor dem
- * Refactoring STATISCH innerhalb von sond_treeviewfm.c (bzw. hießen
- * "delete_item") und wurden sowohl von der (jetzt in sond_tvfm_item.c
- * lebenden) Item-Logik selbst als auch von im sond_treeviewfm.c
- * verbliebenem Baum-Code (Rename/Kontextmenü-Löschen/Umbenennen-Handler/
- * Fileparts-Sammlung) aufgerufen. Bewusst NICHT in sond_tvfm_item.h (also
- * nicht Teil der öffentlichen SondTVFMItem-API für den Rest der
- * Anwendung) - das entspricht genau der vorherigen Sichtbarkeit
- * (file-static), nur jetzt auf zwei Übersetzungseinheiten verteilt statt
- * einer. Implementiert in sond_tvfm_item.c. */
+ * sond_tvfm_item.c: diese sechs Funktionen werden sowohl von der Item-Logik
+ * (sond_tvfm_item.c) selbst als auch vom Baum-Code in sond_treeviewfm.c
+ * (Rename/Kontextmenü-Löschen/Umbenennen-Handler/Fileparts-Sammlung)
+ * aufgerufen. Bewusst NICHT in sond_tvfm_item.h (also nicht Teil der
+ * öffentlichen SondTVFMItem-API für den Rest der Anwendung). Implementiert
+ * in sond_tvfm_item.c. */
 gchar const *sond_tvfm_item_get_basename(SondTVFMItem *stvfm_item);
 
 gint sond_tvfm_item_rename(SondTVFMItem *stvfm_item,

@@ -78,7 +78,7 @@ typedef struct {
 
 	/* PDFs/Mails, deren Anhänge bzw. Mimeparts sich durch die laufende
 	 * Aktion ändern - nach Erfolg wird ihre Struktur in der Index-DB neu
-	 * eingelesen (ToDo.c #199). Eigene Refs. */
+	 * eingelesen. Eigene Refs. */
 	GPtrArray *pending_structure;
 } ZondTreeviewFMPrivate;
 
@@ -164,7 +164,7 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 /* Index-DB-Gegenstück zu dbase_zond_update_gmessage_index(): Mimepart-
  * Nummern hinter prefix ("x.eml//", "x.eml//0/") umzählen und die
  * Strukturangaben der Mail (Teilezahl, Inline-Teile) verwerfen - sie werden
- * bei der nächsten Indizierung neu ermittelt (ToDo.c #194) */
+ * bei der nächsten Indizierung neu ermittelt */
 static gint gmessage_index_renumber(ZondTreeviewFMPrivate *priv,
 		gchar const *prefix, gint index, gboolean into, GError **error) {
 	SondIndexCtx *index_ctx = NULL;
@@ -268,8 +268,8 @@ static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
 /* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen
  * bzw. Herausverschieben (filename_new NULL) oder Umbenennen ggf. die
  * Adressen der übrigen Anhänge: wird ein doppelter Dateiname eindeutig,
- * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen (ToDo.c
- * #193). Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
+ * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen.
+ * Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
  * sie in priv->pending_sibling_* ab; nichts zu tun -> alles NULL. */
 /* Eingebettete Datei einer PDF (nicht PageTree, keine Section)? Ohne
  * Dateizugriff. */
@@ -527,7 +527,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 
 		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
 				prefix, index_from, FALSE, error);
-		if (!rc && !section) //Index-DB ebenso (ToDo.c #194)
+		if (!rc && !section) //Index-DB ebenso
 			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
 		if (rc) {
 			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
@@ -537,7 +537,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		}
 	}
 
-	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen (ToDo.c #193)
+	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen
 	if (emb_sibling_changes(priv, stvfm_item, NULL, error) ||
 			emb_sibling_apply(priv, error)) {
 		emb_sibling_pending_clear(priv);
@@ -559,7 +559,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		priv->pending_delete_path = g_strdup(path);
 	}
 
-	//Struktur der PDF/Mail nach dem Löschen neu einlesen (ToDo.c #199)
+	//Struktur der PDF/Mail nach dem Löschen neu einlesen
 	structure_pending_clear(priv);
 	structure_pending_add(priv, structure_container_of_item(stvfm_item));
 
@@ -588,9 +588,9 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
  * der umbenannt werden müsste; es genügt, die Ziel-Abdeckung aufzulösen,
  * weil dort gleich neuer, noch ungeprüfter Inhalt entsteht. Best-effort:
  * ein Fehler hier soll das eigentliche Kopieren nicht verhindern.
- * (Bug-Fix 11.09.2026: Kopieren einer nicht indizierten Datei in einen
- * als komplett indiziert markierten Ordner ließ den Ordner fälschlich
- * grün, weil dieser Pfad bislang gar nicht auf Coverage hörte.) */
+ * Ohne diesen Hook ließe das Kopieren einer nicht indizierten Datei in
+ * einen als komplett indiziert markierten Ordner den Ordner fälschlich
+ * grün, weil dieser Pfad sonst gar nicht auf Coverage hörte. */
 static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
 		gchar const* base_new, gint index_to, GError **error,
@@ -616,7 +616,7 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
 		prefix_new = add_string(prefix_new, g_strdup("alpha"));
 	else if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
-		//Adresse in einer PDF: kodierter Dateiname (ToDo.c #193)
+		//Adresse in einer PDF: kodierter Dateiname
 		prefix_new = add_string(prefix_new, pdf_emb_escape(base_new));
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
@@ -628,7 +628,7 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 		g_clear_error(&idx_err);
 	}
 
-	//Struktur der Ziel-PDF/Mail nach dem Kopieren neu einlesen (ToDo.c #199)
+	//Struktur der Ziel-PDF/Mail nach dem Kopieren neu einlesen
 	structure_pending_clear(ztvfm_priv);
 	structure_pending_add(ztvfm_priv,
 			structure_container_of_target(stvfm_item_parent));
@@ -669,9 +669,9 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 	/* Umbenennen (index_to -1, s. sond_treeviewfm_text_edited()) eines
 	 * Mimeparts: ändert nur den Anzeigenamen, der Pfad (Mimepart-Index)
-	 * bleibt. Keine Pfad- oder Index-Änderung in den Datenbanken - vorher
-	 * wurde der Teil wie beim Verschieben an Index 0 umnummeriert (ToDo.c
-	 * #195). Transaktionen und Kontext bleiben wie sonst, s.
+	 * bleibt. Keine Pfad- oder Index-Änderung in den Datenbanken (der Teil
+	 * wird nicht wie beim Verschieben an Index 0 umnummeriert).
+	 * Transaktionen und Kontext bleiben wie sonst, s.
 	 * zond_treeviewfm_after(). */
 	rename_in_gmessage = index_to == -1 && from_gmessage &&
 			SOND_IS_FILE_PART_GMESSAGE(
@@ -693,7 +693,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	else if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
 		prefix_new = add_string(prefix_new, g_strdup("alpha")); //irgendwas alphanumerisches
 	else if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
-		//Adresse in einer PDF: kodierter Dateiname (ToDo.c #193)
+		//Adresse in einer PDF: kodierter Dateiname
 		prefix_new = add_string(prefix_new, pdf_emb_escape(base_new));
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
@@ -771,7 +771,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
 				prefix_gmessage, index_from, FALSE, error);
-		if (!rc) //Index-DB ebenso (ToDo.c #194)
+		if (!rc) //Index-DB ebenso
 			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
 					index_from, FALSE, error);
 		g_free(prefix_gmessage);
@@ -795,7 +795,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		//indizes ab index_to +1
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
 				prefix_gmessage, index_to, TRUE, error);
-		if (!rc) //Index-DB ebenso (ToDo.c #194)
+		if (!rc) //Index-DB ebenso
 			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
 					index_to, TRUE, error);
 		if (rc) {
@@ -814,8 +814,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 				prefix_gmessage, error);
 
 		/* Index-DB: Platzhalter "alpha" (s. rename_file() oben) auf den
-		 * Zielindex - vorher blieb der Teil dort dauerhaft "x.eml//alpha"
-		 * (ToDo.c #194) */
+		 * Zielindex (sonst bliebe der Teil dort dauerhaft "x.eml//alpha"). */
 		if (!rc && ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
 			GError *idx_err = NULL;
 
@@ -837,8 +836,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		}
 	}
 
-	/* Anhang einer PDF: Adressen der übrigen Anhänge nachführen (ToDo.c
-	 * #193) - nach dem Element selbst, damit sich alte und neue Pfade nicht
+	/* Anhang einer PDF: Adressen der übrigen Anhänge nachführen -
+	 * nach dem Element selbst, damit sich alte und neue Pfade nicht
 	 * überschneiden. Bleibt der Anhang in derselben PDF, ist es ein
 	 * Umbenennen, sonst verlässt er sie (wie Löschen). */
 	{
@@ -873,7 +872,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
 			!sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
 
-	//Struktur von Quell- und Ziel-PDF/Mail danach neu einlesen (ToDo.c #199)
+	//Struktur von Quell- und Ziel-PDF/Mail danach neu einlesen
 	structure_pending_clear(ztvfm_priv);
 	structure_pending_add(ztvfm_priv, structure_container_of_item(stvfm_item));
 	structure_pending_add(ztvfm_priv,
@@ -1039,14 +1038,14 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		 * jetzt - und nur jetzt, weil der Knoten physisch weg ist und ein
 		 * echtes Verzeichnis-Listing ihn nicht mehr sieht - prüfen, ob das
 		 * Elternverzeichnis dadurch vollständig abgedeckt ist (die gerade
-		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Bug-Fix
-		 * 11.09.2026: sonst blieb ein Ordner nach Löschen der zuvor
-		 * hineinkopierten, nicht indizierten Datei dauerhaft "orange"
-		 * (gemischt), obwohl wieder alle verbliebenen Geschwister einzeln
-		 * abgedeckt waren - es fehlte lediglich das erneute Zusammenfassen
-		 * (Coalescing) zu einem Ordner-Eintrag. Vor dem COMMIT, damit der
-		 * evtl. neu gesetzte coverage-Eintrag Teil derselben Transaktion
-		 * ist wie das Löschen selbst. */
+		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Sonst
+		 * bliebe ein Ordner nach Löschen der zuvor hineinkopierten, nicht
+		 * indizierten Datei dauerhaft "orange" (gemischt), obwohl wieder
+		 * alle verbliebenen Geschwister einzeln abgedeckt sind - es fehlte
+		 * lediglich das erneute Zusammenfassen (Coalescing) zu einem
+		 * Ordner-Eintrag. Vor dem COMMIT, damit der evtl. neu gesetzte
+		 * coverage-Eintrag Teil derselben Transaktion ist wie das Löschen
+		 * selbst. */
 		if (priv->pending_delete_path && priv->zond->wctx &&
 				priv->zond->wctx->index_ctx) {
 			GError *collapse_error = NULL;
@@ -1067,7 +1066,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		//geöffnete Anhänge auf ihre nachgeführte Adresse setzen
 		emb_sibling_adjust_opened(priv);
 
-		//Struktur geänderter PDFs/Mails neu einlesen (ToDo.c #199)
+		//Struktur geänderter PDFs/Mails neu einlesen
 		structure_refresh(priv);
 	}
 	else {
@@ -1430,16 +1429,14 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
  * über den GObject-Typ (zond_indexsuche.c).
  *
  * In Container (ZIP/E-Mail/PDF mit Einbettungen) wird hier NICHT
- * hineingestiegen - das war beim bisherigen Weg für "Gesamtes Projekt"/
- * ordnerbasierte "Auswahl" ohnehin nie der Fall: ein frisch entdeckter
- * Container-Top-Knoten hat sond_file_part != NULL UND path_or_section ==
- * NULL, fällt unten in zond_treeviewfm_item_get_fileparts() also stets in
- * den ELSE-Zweig (ein einziger, opaker Filepart, da "application/zip" &
- * Co. ohnehin nicht indizierbar sind) - keine Verhaltensänderung. Inhalte
- * innerhalb eines Containers werden weiterhin nur über eine explizite
- * Auswahl darin erreicht (sond_file_part != NULL UND path_or_section
- * gesetzt) - dafür bleibt der bisherige, echte Weg unverändert, s.
- * zond_treeviewfm_item_get_fileparts(). ToDo.c, 12.-14.09.2026. */
+ * hineingestiegen: ein frisch entdeckter Container-Top-Knoten hat
+ * sond_file_part != NULL UND path_or_section == NULL, fällt unten in
+ * zond_treeviewfm_item_get_fileparts() also stets in den ELSE-Zweig (ein
+ * einziger, opaker Filepart, da "application/zip" & Co. ohnehin nicht
+ * indizierbar sind). Inhalte innerhalb eines Containers werden nur über
+ * eine explizite Auswahl darin erreicht (sond_file_part != NULL UND
+ * path_or_section gesetzt) - dafür dient der echte Weg in
+ * zond_treeviewfm_item_get_fileparts(). */
 gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
 		GError **error) {
@@ -1448,7 +1445,7 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 	SondDir *dir = NULL;
 	gchar const *filename = NULL;
 
-	/* Nutzer-Wunsch 16.09.2026 (Task #100): derselbe Verzeichnis-
+	/* Derselbe Verzeichnis-
 	 * Kurzschluss wie in scan_coverage_gaps_fs() (zond_indexsuche.c) - ein
 	 * bereits vollständig indizierter Ast wird gar nicht erst per readdir
 	 * aufgeschlüsselt, erneutes Indizieren wäre per Definition von
@@ -1583,8 +1580,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 
 			/* Index erstellen/löschen (Auswahl): unterseitige Anbindungen
 			 * sind dafür nicht zulässig - s. anbindung_ist_unterseitig()
-			 * (99conv/general.h) und ToDo.c (11.09.2026,
-			 * Nutzerentscheidung). */
+			 * (99conv/general.h). */
 			if (reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
 				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 						"Die Auswahl enthält eine unterseitige Anbindung "
@@ -1604,8 +1600,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			 * sofort gelöscht, s. sond_tvfm_item_create()), und sond_file_part
 			 * ist derselbe SondFilePart wie der der gesamten eml - eindeutig
 			 * unterscheidbar von "das ganze Dir/die ganze Datei" nur über
-			 * diesen Item-Typ zum Zeitpunkt der Auswahl (s. ToDo.c,
-			 * 17.09.2026, E-Mail-Coverage-Redesign, Schritt 2/6). Statt der
+			 * diesen Item-Typ zum Zeitpunkt der Auswahl. Statt der
 			 * ganzen Mail wird für diesen Eintrag nur der Header indiziert. */
 			range = sond_page_range_new_gmessage_header();
 		}
@@ -1613,7 +1608,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 				SOND_IS_FILE_PART_PDF(sond_file_part) &&
 				sond_tvfm_item_is_content_root_marker(stvfm_item)) {
 			/* "PageTree"-Knoten einer PDF mit Einbettungen: nur die Seiten,
-			 * die Einbettungen sind eigene Kind-Knoten (ToDo.c #191). Die
+			 * die Einbettungen sind eigene Kind-Knoten. Die
 			 * PDF selbst (DIR) bleibt "ganze Datei". */
 			range = sond_page_range_new_pdf_pagetree();
 		}
@@ -1685,11 +1680,10 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
  * (angelegt in ziele.c), deren path_or_section ein Seitenbereich-String
  * ist - dieselbe Auswertung wie in zond_treeviewfm_item_get_fileparts().
  *
- * Nutzer-Einwand 16.09.2026: liefert jetzt den fertigen SondIndexStatus
- * statt nur des Seitenbereichs (s. ausführlichen Doc-Kommentar an der
- * vfunc-Deklaration in sond_treeviewfm.h) - "Section = Seitenbereich" ist
+ * Liefert den fertigen SondIndexStatus (s. ausführlichen Doc-Kommentar an
+ * der vfunc-Deklaration in sond_treeviewfm.h) - "Section = Seitenbereich" ist
  * eine zond/PDF-spezifische Interpretation, die hier (in der zond-Subklasse)
- * hingehört und nicht in die generische Basisklasse gehört. Übernimmt dafür
+ * hingehört und nicht in die generische Basisklasse. Übernimmt dafür
  * auch die Mime-Type-Prüfung von sond_treeviewfm_get_index_status() (Leaf-
  * eigener, gesniffter Mime-Type bevorzugt, PDF/GMessage-Bypass) - dieselbe
  * Logik wie dort, hier auf die zugrundeliegende Datei der Section
@@ -1776,10 +1770,10 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_jump));
 	g_object_unref(sec_jump);
 
-	/* "Index"-Untermen\u00fc analog zum Hauptmen\u00fc (headerbar.c), hier aber -
-	 * wie bei "SeaDrive" im Kontextmen\u00fc - bewusst nur "Auswahl" je Aktion,
-	 * kein "Gesamtes Projekt" (Nutzerwunsch 11.09.2026: Parit\u00e4t der
-	 * Men\u00fcstruktur zwischen Index und SeaDrive). */
+	/* "Index"-Untermenü analog zum Hauptmenü (headerbar.c), hier aber -
+	 * wie bei "SeaDrive" im Kontextmenü - bewusst nur "Auswahl" je Aktion,
+	 * kein "Gesamtes Projekt" (gleiche Menüstruktur bei Index und
+	 * SeaDrive). */
 	GMenu *sec_idx = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
 	g_menu_append(sub_idx, "Erstellen",   "stv.index-erstellen-sel");

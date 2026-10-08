@@ -87,7 +87,7 @@ typedef HRESULT (WINAPI *PFN_CfGetSyncRootInfoByPath)(
     DWORD   InfoBufferLength,
     PDWORD  ReturnedLength);
 
-/* S. Doc-Kommentar an sond_seadrive_hydrate() (18.09.2026) - offizieller
+/* S. Doc-Kommentar an sond_seadrive_hydrate() - offizieller
  * Ersatz für den früheren, rohen CreateFileW+ReadFile-"Trick" in
  * sond_treeviewfm_open(). */
 typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder)(
@@ -403,25 +403,19 @@ static void watcher_rescan(SondTreeviewFM *stvfm, const gchar *root)
 /*  Watcher: Hilfsfunktionen für Thread                               */
 /* ------------------------------------------------------------------ */
 
-/* Nutzer-Fund 16.09.2026: Nach dem Kopieren mehrerer Dateien aus einem
- * ZIP-Archiv ins Dateisystem (auch schon bei nur ~20 Dateien - ein
- * Puffer-Overflow von ReadDirectoryChangesW als Ursache damit
- * ausgeschlossen) blieb die SeaDrive-Statusanzeige dauerhaft auf "✓"
- * (alles synchron) stehen, obwohl die frisch kopierten Dateien noch
- * hochgeladen werden mussten. Ursache: diese Funktion wertete jede Art
- * von Unsicherheit/Fehlschlag (CfGetPlaceholderInfo fehlt, Datei nicht
- * öffenbar, CfGetPlaceholderInfo() schlägt fehl) als "im Zweifel: in
- * sync" - TRUE. Eine gerade erst per normalem CreateFile()/fwrite() (statt
- * über die Cloud-Files-Platzhalter-APIs) neu angelegte Datei wird von
- * CfGetPlaceholderInfo() vermutlich (noch) nicht als Cloud-Datei erkannt,
- * der Aufruf schlägt fehl - und der optimistische Fallback verschleiert
- * dann dauerhaft (nicht nur kurz nach dem Anlegen), dass die Datei noch
- * hochgeladen werden muss. Für einen Indikator, der vor "Daten sind noch
- * nicht gesichert" warnen soll, ist das die falsche Default-Richtung: ein
- * fälschliches "noch nicht synchron" ist höchstens ein optisches
- * Ärgernis, ein fälschliches "alles synchron" verschleiert echten
- * Datenverlust-Risiko-Zustand. Fallback deshalb auf FALSE (not in sync,
- * Upload ausstehend) gedreht - eine Datei gilt jetzt nur noch dann als
+/* Prüft, ob die Datei bei SeaDrive als synchronisiert (hochgeladen) gilt.
+ * Jede Art von Unsicherheit/Fehlschlag (CfGetPlaceholderInfo fehlt, Datei
+ * nicht öffenbar, CfGetPlaceholderInfo() schlägt fehl) wertet diese Funktion
+ * als "nicht in sync" (FALSE): eine gerade erst per normalem
+ * CreateFile()/fwrite() (statt über die Cloud-Files-Platzhalter-APIs)
+ * neu angelegte Datei wird von CfGetPlaceholderInfo() vermutlich (noch)
+ * nicht als Cloud-Datei erkannt, der Aufruf schlägt fehl - und ein
+ * optimistischer Fallback "in sync" würde dauerhaft verschleiern, dass die
+ * Datei noch hochgeladen werden muss. Für einen Indikator, der vor "Daten
+ * sind noch nicht gesichert" warnen soll, ist die Default-Richtung
+ * "nicht synchron": ein fälschliches "noch nicht synchron" ist höchstens
+ * ein optisches Ärgernis, ein fälschliches "alles synchron" verschleiert
+ * einen echten Datenverlust-Risiko-Zustand. Eine Datei gilt nur dann als
  * synchron, wenn die Prüfung das auch tatsächlich bestätigen konnte. */
 static gboolean watcher_check_in_sync(const gchar *utf8_path)
 {
@@ -512,8 +506,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
      * FILE_NOTIFY_CHANGE_FILE_NAME zusätzlich zu ATTRIBUTES/LAST_WRITE:
      * ohne diesen Filter werden neu angelegte oder gelöschte Dateien vom
      * Watcher gar nicht bemerkt - der pending_down/pending_up-Zähler lief
-     * dadurch mit der Zeit auseinander (Untersuchung SeaDrive-Coverage,
-     * 09/2026). */
+     * dadurch mit der Zeit auseinander. */
     if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
             FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE |
                     FILE_NOTIFY_CHANGE_FILE_NAME,
@@ -547,8 +540,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                  * Ereignisse seit dem letzten erfolgreichen Read sind
                  * verloren (nicht nur die im Puffer nicht mehr unter-
                  * gebrachten). Einzige sichere Reaktion: kompletter Resync
-                 * (jetzt unproblematisch, s. Untersuchung SeaDrive-Coverage
-                 * 09/2026 - ~1,5s auch bei ~70.000 Dateien). */
+                 * (unproblematisch: ~1,5s auch bei ~70.000 Dateien). */
                 LOG_WARN("SeaDrive-Watcher('%s'): ReadDirectoryChangesW-Puffer "
                         "übergelaufen - Events verloren, erzwinge Resync",
                         root);
@@ -589,8 +581,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                              * oder die Datei nie PINNED+offline bzw. NOT_IN_
                              * SYNC war). Ohne das würden gelöschte Dateien,
                              * die gerade noch heruntergeladen wurden, ewig
-                             * mitgezählt (Untersuchung SeaDrive-Coverage,
-                             * 09/2026). delta_total=-1 zieht die Datei aus
+                             * mitgezählt. delta_total=-1 zieht die Datei aus
                              * der Ordner-Coverage-Gesamtzahl ab (auch ein
                              * No-Op über die 0-Kappung, falls es ein
                              * Verzeichnis war - dessen eigener Eintrag in
@@ -829,23 +820,17 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
  * sond_seadrive_hydrate:
  *
  * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
- * Cloud-Datei an - Ersatz für den früheren Mechanismus in
- * sond_treeviewfm_open() (Doppelklick auf einen SeaDrive-Platzhalter), der
- * dafür einfach mit CreateFileW(GENERIC_READ)+ReadFile() ein Byte gelesen
- * hat, um SeaDrive/Windows zum "Recall" zu bewegen.
- *
- * Diese Funktion stattdessen die offizielle, für genau diesen
- * Zweck vorgesehene CfHydratePlaceholder()-API (cfapi.h/cldapi.dll,
- * dynamisch geladen wie der Rest dieser Datei - s. Kommentar bei
- * cfapi_init_once(), derselbe Grund: kein cfapi.h im hier verwendeten
- * MinGW-Toolchain). Laut Microsoft-Dokumentation genügt dafür ein Handle
- * mit reinem Attribut-Zugriff (FILE_READ_ATTRIBUTES statt GENERIC_READ) -
- * das dürfte der eigentliche Unterschied sein, den das Windows-Update
- * jetzt strenger prüft. Länge bewusst auf 1 Byte begrenzt (wie beim alten
- * ReadFile(1 Byte)-Trick): reicht, um den Provider (SeaDrive) zum
- * Download der Datei zu bewegen, ohne dass dieser Aufruf selbst
- * (synchron, blockierend) auf die komplette Downloaddauer einer großen
- * Datei warten muss.
+ * Cloud-Datei an, über die offizielle, für genau diesen Zweck vorgesehene
+ * CfHydratePlaceholder()-API (cfapi.h/cldapi.dll, dynamisch geladen wie der
+ * Rest dieser Datei - s. Kommentar bei cfapi_init_once(), derselbe Grund:
+ * kein cfapi.h im hier verwendeten MinGW-Toolchain). Der Trick
+ * CreateFileW(GENERIC_READ)+ReadFile() (ein Byte lesen, um SeaDrive/Windows
+ * zum "Recall" zu bewegen) schlägt unter aktuellem Windows zuverlässig mit
+ * ERROR_CLOUD_FILE_ACCESS_DENIED fehl. Laut Microsoft-Dokumentation genügt
+ * für CfHydratePlaceholder ein Handle mit reinem Attribut-Zugriff
+ * (FILE_READ_ATTRIBUTES statt GENERIC_READ), das ist vermutlich der
+ * Unterschied, den Windows jetzt strenger prüft. Length ist auf 1 Byte
+ * begrenzt.
  *
  * Bereits lokal vorhandene Dateien (kein FILE_ATTRIBUTE_RECALL_ON_DATA_
  * ACCESS) sind ein No-Op (TRUE, kein Fehler). Gibt FALSE mit gesetztem
@@ -853,18 +838,16 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
  * oder der Aufruf selbst fehlschlägt - der Aufrufer fällt in diesem Fall
  * auf den normalen Öffnen-Weg zurück (s. sond_treeviewfm_open()).
  *
- * Korrektur 18.09.2026: Die obige Annahme, die 1-Byte-Begrenzung von
- * Length spare das Warten auf die komplette Downloaddauer, hat sich in
- * der Praxis als falsch erwiesen - Nutzer-Fund: bei einer 51-GB-Datei
- * blockierte dieser Aufruf trotzdem minutenlang (vermutlich lädt der
- * SeaDrive-Provider unabhängig von der angeforderten Länge grundsätzlich
- * die ganze Datei, bevor CfHydratePlaceholder zurückkehrt). Diese Funktion
- * bleibt deshalb synchron/blockierend - s. sond_seadrive_hydrate_async()
- * weiter unten, die sie in einem Hintergrund-Thread aufruft, und
- * sond_seadrive_needs_hydration() für einen schnellen, nicht-blockierenden
- * Vorab-Check (nur GetFileAttributesW), mit dem der Aufrufer entscheiden
- * kann, ob eine Hydrierung überhaupt nötig ist, ohne dafür einen Thread
- * zu starten.
+ * Die Begrenzung auf 1 Byte spart das Warten auf die Downloaddauer nicht:
+ * bei einer 51-GB-Datei blockierte der Aufruf trotzdem minutenlang
+ * (vermutlich lädt der SeaDrive-Provider unabhängig von der angeforderten
+ * Länge grundsätzlich die ganze Datei, bevor CfHydratePlaceholder
+ * zurückkehrt). Diese Funktion ist deshalb synchron/blockierend - s.
+ * sond_seadrive_hydrate_async() weiter unten, die sie in einem
+ * Hintergrund-Thread aufruft, und sond_seadrive_needs_hydration() für einen
+ * schnellen, nicht-blockierenden Vorab-Check (nur GetFileAttributesW), mit
+ * dem der Aufrufer entscheiden kann, ob eine Hydrierung überhaupt nötig ist,
+ * ohne dafür einen Thread zu starten.
  */
 gboolean sond_seadrive_needs_hydration(const gchar *full_path)
 {
@@ -961,21 +944,19 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
 /* Menge der Pfade, für die aktuell ein Hydrier-Hintergrund-Thread läuft -
  * verhindert, dass ein erneuter Doppelklick auf dieselbe, noch
  * herunterladende Datei einen zweiten, redundanten Thread/
- * CfHydratePlaceholder()-Aufruf auslöst. Nutzer-Fund 18.09.2026: bei
- * sehr großen Dateien (gemeldeter Fall: 51 GB) blockierte der bis dahin
- * SYNCHRONE Aufruf von sond_seadrive_hydrate() im GTK-Hauptthread das
- * gesamte Programm minutenlang ohne jede Rückmeldung oder
- * Abbrechen-Möglichkeit (s. ToDo.c). Nutzer-Entscheidung: kein
- * Info-Fenster beim ERSTEN Doppelklick (der Download läuft ohnehin im
- * Hintergrund weiter, unabhängig davon, ob die UI darauf wartet) -
- * stattdessen sofort in die UI zurückkehren (Fire-and-forget).
+ * CfHydratePlaceholder()-Aufruf auslöst. Bei sehr großen Dateien (z.B.
+ * 51 GB) würde ein SYNCHRONER Aufruf von sond_seadrive_hydrate() im
+ * GTK-Hauptthread das gesamte Programm minutenlang ohne Rückmeldung oder
+ * Abbrechen-Möglichkeit blockieren. Deshalb: kein Info-Fenster beim ERSTEN
+ * Doppelklick (der Download läuft ohnehin im Hintergrund weiter,
+ * unabhängig davon, ob die UI darauf wartet) - stattdessen sofort in die UI
+ * zurückkehren (Fire-and-forget).
  *
- * Ergänzung, ebenfalls 18.09.2026: bei einem erneuten Doppelklick auf
- * dieselbe, noch laufende Datei jetzt statt eines stillen No-Ops ein
- * Fortschritts-/Abbrechen-Dialog (sond_seadrive_show_hydrate_progress_
- * dialog(), weiter unten) - Nutzerwunsch, um bei versehentlichen
- * Großdateien den Download tatsächlich stoppen zu können, statt den
- * SeaDrive-Server unnötig weiter zu belasten.
+ * Bei einem erneuten Doppelklick auf dieselbe, noch laufende Datei wird
+ * statt eines stillen No-Ops ein Fortschritts-/Abbrechen-Dialog gezeigt
+ * (sond_seadrive_show_hydrate_progress_dialog_multi(), weiter unten), um bei
+ * versehentlichen Großdateien den Download tatsächlich stoppen zu können,
+ * statt den SeaDrive-Server unnötig weiter zu belasten.
  *
  * Wert je Pfad: HydratingEntry (unten), enthält u.a. ein
  * THREAD_TERMINATE-Handle auf den Hydrier-Thread für CancelSynchronousIo()
@@ -1067,10 +1048,10 @@ static gpointer hydrate_thread_func(gpointer data)
  *
  * Wie sond_seadrive_hydrate(), aber nicht-blockierend: startet die
  * eigentliche Hydrierung in einem eigenen Hintergrund-Thread und kehrt
- * sofort zurück (Fire-and-forget, s. Doc-Kommentar oben, 18.09.2026). Ein
+ * sofort zurück (Fire-and-forget, s. Doc-Kommentar oben). Ein
  * erneuter Aufruf für denselben full_path, während bereits ein Thread
  * dafür läuft, ist ein No-Op (Aufrufer sollte in diesem Fall stattdessen
- * sond_seadrive_show_hydrate_progress_dialog() zeigen, s.
+ * den Fortschrittsdialog zeigen, s. sond_seadrive_ensure_hydrated() und
  * sond_treeviewfm_open()). Fehler landen nur im Log (LOG_WARN in
  * hydrate_thread_func()) - ein synchroner Rückgabewert wäre ohnehin
  * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
@@ -1178,27 +1159,22 @@ void sond_seadrive_hydrate_cancel(const gchar *full_path)
 
 /* CF_PLACEHOLDER_INFO_STANDARD liefert u.a. OnDiskDataSize (bereits lokal
  * vorhandene Bytes) - Struktur-Layout 1:1 aus der offiziellen cfapi.h
- * übernommen (Recherche 18.09.2026), hier wie beim Rest der Datei manuell
- * dupliziert (kein cfapi.h im verwendeten MinGW-Toolchain, s. Kommentar
- * bei cfapi_init_once()). PinState/InSyncState hier bewusst als DWORD
- * (nicht als CF_PIN_STATE/CF_IN_SYNC_STATE-Enum) deklariert, analog
- * SeaDrivePlaceholderBasicInfo oben - nur OnDiskDataSize wird tatsächlich
- * ausgewertet.
+ * übernommen, hier wie beim Rest der Datei manuell dupliziert (kein cfapi.h
+ * im verwendeten MinGW-Toolchain, s. Kommentar bei cfapi_init_once()).
+ * PinState/InSyncState hier bewusst als DWORD (nicht als CF_PIN_STATE/
+ * CF_IN_SYNC_STATE-Enum) deklariert, analog SeaDrivePlaceholderBasicInfo
+ * oben - nur OnDiskDataSize wird tatsächlich ausgewertet.
  *
- * Regressions-Fund 18.09.2026 (Nutzer: Fortschrittsanzeige bleibt
- * durchgehend bei 0%, obwohl laut Windows-Explorer kräftig heruntergeladen
- * wird): das offizielle cfapi.h deklariert FileIdentity[] als BYTE[1] -
- * ein reiner Platzhalter für einen tatsächlich variabel langen Puffer, der
- * vom Aufrufer selbst groß genug angelegt werden muss (s. auch
- * SeaDrivePlaceholderBasicInfo oben, dort schon immer mit 256 Byte statt
- * [1] deklariert). Mit nur 1 Byte Puffer für FileIdentity liefert
- * CfGetPlaceholderInfo() bei einer nicht winzigen Identity (bei SeaDrive
- * offenbar der Normalfall) HRESULT_MORE_DATA zurück - technisch ein
- * FAILURE-HRESULT (Severity-Bit gesetzt trotz des Namens), SUCCEEDED()
- * schlägt also fehl und hydrate_progress_update() brach VOR dem
- * Auswerten von OnDiskDataSize ab, ohne die Progress-Bar je zu
- * aktualisieren - exakt das gemeldete Symptom. Fix: FileIdentity analog
- * SeaDrivePlaceholderBasicInfo auf 256 Byte vergrößert. */
+ * Das offizielle cfapi.h deklariert FileIdentity[] als BYTE[1] - ein reiner
+ * Platzhalter für einen tatsächlich variabel langen Puffer, der vom
+ * Aufrufer selbst groß genug angelegt werden muss (s. auch
+ * SeaDrivePlaceholderBasicInfo oben, ebenfalls mit 256 Byte statt [1]).
+ * Mit nur 1 Byte Puffer liefert CfGetPlaceholderInfo() bei einer nicht
+ * winzigen Identity (bei SeaDrive offenbar der Normalfall)
+ * HRESULT_MORE_DATA - technisch ein FAILURE-HRESULT (Severity-Bit gesetzt
+ * trotz des Namens), SUCCEEDED() schlüge also fehl und
+ * hydrate_progress_update() bräche VOR dem Auswerten von OnDiskDataSize ab,
+ * ohne die Progress-Bar je zu aktualisieren (Anzeige bliebe bei 0%). */
 #define CF_PLACEHOLDER_INFO_STANDARD  1
 
 typedef struct {
@@ -1214,63 +1190,30 @@ typedef struct {
     BYTE          FileIdentity[256];
 } SeaDrivePlaceholderStandardInfo;
 
-/* Nutzer-Fund 19.09.2026 ("sond_seadrive_ensure_hydrated und _multi
- * enthalten viel doppelten Code - kann man _ensure_hydrated nicht als
- * _multi mit arr->len==1 verstehen?"): der komplette Einzeldatei-
- * Fortschrittsdialog, der hier vorher stand (HydrateProgressUi,
- * hydrate_progress_update(), hydrate_progress_tick(),
- * cb_hydrate_progress_dialog_destroy(),
- * cb_hydrate_progress_abbrechen_clicked(),
- * sond_seadrive_show_hydrate_progress_dialog()), war strukturell eine
- * 1:1-Dopplung der weiter unten stehenden Multi-Variante
- * (HydrateProgressEntryMulti/HydrateProgressUiMulti und Umfeld) - nur
- * für genau einen statt beliebig viele Pfade. Ersatzlos entfernt:
- * sond_seadrive_ensure_hydrated() (s.u.) delegiert jetzt an
- * sond_seadrive_ensure_hydrated_multi() mit einem einelementigen
- * GPtrArray, und sond_seadrive_show_hydrate_progress_dialog() (nirgends
- * sonst im Projekt direkt aufgerufen, s. grep) entfällt zugunsten von
- * sond_seadrive_show_hydrate_progress_dialog_multi(). Einzige sichtbare
- * Änderung: der Dialog bei einem erneuten Doppelklick auf eine einzelne,
- * noch hydrierende Datei zeigt jetzt denselben Dialograhmen wie der
- * Auszug-Fall (Titel "Download läuft", darunter EINE Zeile mit
- * Dateiname + Fortschrittsbalken statt des Satzes "Download läuft
- * bereits: <Name>") - inhaltlich identisch, nur ohne den einleitenden
- * Satz. SeaDrivePlaceholderStandardInfo/CF_PLACEHOLDER_INFO_STANDARD
- * oben bleiben unverändert bestehen, da hydrate_progress_entry_update()
- * (Multi-Variante) sie weiterhin braucht. */
-
-/* Nutzer-Hinweis 18.09.2026: "Identischer Code in sond_treeviewfm.c und
- * zond_treeview.c - das ist ungünstig." - beide Stellen (BAUM_FS-
- * Doppelklick in sond_treeviewfm_open() bzw. BAUM_INHALT/AUSWERTUNG-
- * Doppelklick in zond_treeview_open_node()) prüften vor dem eigentlichen
- * Öffnen wortgleich needs_hydration()/is_hydrating()/hydrate_async()/
- * show_hydrate_progress_dialog() und kehrten dann sofort zurück. Diese
- * gemeinsame Sequenz hierher gezogen.
+/* Gemeinsame Check-und-Reagiere-Sequenz vor dem Öffnen einer Datei
+ * (BAUM_FS-Doppelklick in sond_treeviewfm_open() bzw. BAUM_INHALT/
+ * AUSWERTUNG-Doppelklick in zond_treeview_open_node()): needs_hydration()/
+ * is_hydrating()/hydrate_async()/show_hydrate_progress_dialog_multi(); danach
+ * kehrt der Aufrufer sofort zurück.
  *
  * Bewusst NICHT als gemeinsame Stelle gewählt: sond_file_part_open()
- * (Öffnen mit externem Programm/ShellExecute) - erreichte PDFs mit
- * internem Viewer ohnehin nicht (die laufen über
- * zond_treeview_open_single_view()/_open_auszug(), nie über
- * sond_file_part_open()). Nutzer-Test 18.09.2026 hat dabei eine
- * ursprüngliche Vermutung widerlegt: Hydrierung bei "Öffnen mit" wird
- * NICHT etwa vom gestarteten externen Programm bzw. Windows-Explorer
- * selbst übernommen, sondern ganz normal von zond ausgelöst - weil
- * beide Aufrufer (s.u.) diesen Check schon VOR der Verzweigung zu
- * open_with/sond_file_part_open() durchlaufen. Funktioniert nachweislich
- * korrekt (inkl. Dialog beim zweiten Doppelklick) - der eigentliche,
- * weiterhin gültige Grund gegen sond_file_part_open() als gemeinsame
- * Stelle ist allein die fehlende Abdeckung des internen-Viewer-Pfads.
- * Die Ermittlung des vollen Pfads der realen Datei (Container-Vorfahre
- * mit parent==NULL) bleibt bewusst beim jeweiligen Aufrufer, da sie je
- * nach Baum ein anderes Datenmodell abläuft (SondTVFMItem bzw.
- * SondFilePart) und sich dafür keine gemeinsame Stelle anbietet. */
-/* Nutzer-Fund 19.09.2026: nur noch ein dünner Wrapper um
- * sond_seadrive_ensure_hydrated_multi() mit einem einelementigen
- * GPtrArray - s. ausführl. Kommentar dort sowie den entfallenen
- * Einzeldatei-Dialog weiter oben. full_path wird nur gelesen (die
- * Multi-Variante kopiert bei Bedarf selbst), der einelementige Array
- * trägt also nur full_path als rohen Zeiger und braucht keine eigene
- * free_func. */
+ * (Öffnen mit externem Programm/ShellExecute) - erreicht PDFs mit internem
+ * Viewer nicht (die laufen über zond_treeview_open_single_view()/
+ * _open_auszug(), nie über sond_file_part_open()). Hydrierung bei "Öffnen
+ * mit" wird nicht etwa vom gestarteten externen Programm bzw.
+ * Windows-Explorer übernommen, sondern von zond ausgelöst: beide Aufrufer
+ * durchlaufen diesen Check schon VOR der Verzweigung zu open_with/
+ * sond_file_part_open(). Der Grund gegen sond_file_part_open() als
+ * gemeinsame Stelle ist die fehlende Abdeckung des internen-Viewer-Pfads.
+ * Die Ermittlung des vollen Pfads der realen Datei (Container-Vorfahre mit
+ * parent==NULL) bleibt beim jeweiligen Aufrufer, da sie je nach Baum ein
+ * anderes Datenmodell betrifft (SondTVFMItem bzw. SondFilePart) und sich
+ * dafür keine gemeinsame Stelle anbietet. */
+/* Dünner Wrapper um sond_seadrive_ensure_hydrated_multi() mit einem
+ * einelementigen GPtrArray - s. ausführl. Kommentar dort. full_path wird
+ * nur gelesen (die Multi-Variante kopiert bei Bedarf selbst), der
+ * einelementige Array trägt also nur full_path als rohen Zeiger und braucht
+ * keine eigene free_func. */
 gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
         const gchar *full_path)
 {
@@ -1294,26 +1237,23 @@ gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
 /*  Public API: sond_seadrive_ensure_hydrated_multi (Auszug-Fall)      */
 /* ------------------------------------------------------------------ */
 
-/* Nutzer-Wunsch 18.09.2026: der Auszug-Fall im Auswertungsverzeichnis
- * (mehrere Kind-Anbindungen unter einem Strukturpunkt werden zu einer
- * gemeinsamen Ansicht zusammengefasst, s. zond_treeview_open_auszug(),
- * zond_treeview.c) kann mehrere verschiedene reale PDF-Dateien
- * betreffen, die jede für sich hydriert werden müssen: "Für alle
- * betroffenen PDF muß erforderlichenfalls die Hydrierung angestoßen
- * werden. Erneuter Doppelklick muß dann halt den Download-Status für
- * alle betroffenen - das heißt noch nicht hydrierten - Dateien anzeigen.
- * Schließen und Abbruch wie gehabt."
+/* Der Auszug-Fall im Auswertungsverzeichnis (mehrere Kind-Anbindungen unter
+ * einem Strukturpunkt werden zu einer gemeinsamen Ansicht zusammengefasst,
+ * s. zond_treeview_open_auszug(), zond_treeview.c) kann mehrere verschiedene
+ * reale PDF-Dateien betreffen, die jede für sich hydriert werden müssen:
+ * für alle betroffenen PDFs wird erforderlichenfalls die Hydrierung
+ * angestoßen; ein erneuter Doppelklick zeigt den Download-Status für alle
+ * betroffenen - das heißt noch nicht hydrierten - Dateien.
  *
- * Analog zum Einzeldatei-Fall (sond_seadrive_ensure_hydrated() oben),
- * aber für eine Menge von Pfaden: pro betroffener, noch nicht
- * hydrierter Datei wird die Hydrierung angestoßen (No-Op, falls schon
- * läuft); war beim Aufruf schon mindestens eine davon in Hydrierung
- * (= zweiter Doppelklick), wird EIN gemeinsamer Dialog mit je einer
- * Fortschrittszeile pro noch nicht hydrierter Datei gezeigt (statt N
- * einzelner Dialoge). "Schließen" schließt nur den Dialog (Downloads
- * laufen unbeobachtet weiter, wie beim Einzeldatei-Dialog); "Abbrechen"
- * bricht alle noch laufenden Einträge gleichzeitig ab. Der Dialog
- * schließt sich von selbst, sobald ALLE Einträge fertig sind. */
+ * Analog zum Einzeldatei-Fall (sond_seadrive_ensure_hydrated() oben), aber
+ * für eine Menge von Pfaden: pro betroffener, noch nicht hydrierter Datei
+ * wird die Hydrierung angestoßen (No-Op, falls schon läuft); war beim
+ * Aufruf schon mindestens eine davon in Hydrierung (= zweiter Doppelklick),
+ * wird EIN gemeinsamer Dialog mit je einer Fortschrittszeile pro noch nicht
+ * hydrierter Datei gezeigt (statt N einzelner Dialoge). "Schließen"
+ * schließt nur den Dialog (Downloads laufen unbeobachtet weiter);
+ * "Abbrechen" bricht alle noch laufenden Einträge gleichzeitig ab. Der
+ * Dialog schließt sich von selbst, sobald ALLE Einträge fertig sind. */
 
 typedef struct {
     gchar     *full_path;
@@ -1513,14 +1453,13 @@ void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
             GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
     gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 460, -1);
 
-    /* Nutzer-Wunsch 18.09.2026: bei vielen betroffenen Dateien (Auszug
-     * mit entsprechend vielen Anbindungen) sollen trotzdem alle
-     * Fortschrittszeilen einsehbar bleiben, ohne dass der Dialog selbst
-     * über den Bildschirm hinaus wächst - Liste deshalb in ein
-     * GtkScrolledWindow mit fester Maximalhöhe gepackt (scrollt ab ca.
-     * 5 Zeilen; propagate_natural_height lässt den Dialog bei WENIGER
-     * Einträgen trotzdem passend klein bleiben, statt immer die volle
-     * Maximalhöhe zu belegen). */
+    /* Bei vielen betroffenen Dateien (Auszug mit entsprechend vielen
+     * Anbindungen) sollen trotzdem alle Fortschrittszeilen einsehbar
+     * bleiben, ohne dass der Dialog selbst über den Bildschirm hinaus
+     * wächst - Liste deshalb in ein GtkScrolledWindow mit fester
+     * Maximalhöhe gepackt (scrollt ab ca. 5 Zeilen; propagate_natural_height
+     * lässt den Dialog bei WENIGER Einträgen trotzdem passend klein bleiben,
+     * statt immer die volle Maximalhöhe zu belegen). */
     scrolled_window = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
             GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -1661,17 +1600,12 @@ static gchar *stvfm_item_get_full_path(SondTVFMItem *stvfm_item)
      * eigenen (bei eingebetteten Teilen ggf. rein internen/synthetischen)
      * Pfad des jeweiligen Teils her.
      *
-     * Nutzer-Fund 18.09.2026: "Anwahl von 'Immer offline verfügbar' wirkt
-     * nur bei Message, nicht bei den mimeparts" - bisher wurde genau
-     * dieser eigene sfp-Pfad direkt verwendet, was für Top-Level-Dateien
-     * (kein Parent, z.B. den Message-Knoten selbst) zufällig stimmt, für
-     * einen mit Parent (Mime-Part/ZIP-Eintrag/PDF-Seite) aber einen
-     * nicht-existenten Pfad ergibt - sond_seadrive_set_pin_state()
-     * schlägt dann für diese Zeilen wirkungslos fehl. Der Pin-/
-     * Hydrierungsstatus gehört aber ohnehin zur realen Datei als janzem,
-     * nicht zum einzelnen Teil - deshalb jetzt, analog zum selben Fund im
-     * SeaDrive-Badge (render_file_icon(), ToDo.c 18.09.2026), konsequent
-     * zum obersten Vorfahren hochgelaufen und dessen Pfad verwendet. */
+     * Pin-/Hydrierungsstatus gehören zur realen Datei als Ganzem, nicht zum
+     * einzelnen Teil: für einen Teil mit Parent (Mime-Part/ZIP-Eintrag/
+     * PDF-Seite) ergäbe der eigene sfp-Pfad einen nicht-existenten Pfad, und
+     * sond_seadrive_set_pin_state() schlüge wirkungslos fehl. Deshalb wie
+     * beim SeaDrive-Badge (render_file_icon()) zum obersten Vorfahren
+     * hochlaufen und dessen Pfad verwenden. */
     sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
     if (sfp) {
         const gchar *sfp_path;
@@ -1791,11 +1725,9 @@ static gint seadrive_pin_foreach(SondTreeview *stv, GtkTreeIter *iter,
 /*  Public: apply to root directory ("Gesamtes Projekt")               */
 /* ------------------------------------------------------------------ */
 
-/* War früher intern und wurde aus dem BAUM_FS-Kontextmenü heraus
- * aufgerufen ("Gesamtes Verzeichnis"). Seit 11.09.2026 öffentlich, da nur
- * noch vom Hauptmenü (win.sd-*-all, headerbar.c) aus erreichbar - die
- * Aktion betraf schon immer die Projekt-Wurzel unabhängig von Selektion/
- * Rechtsklick-Ziel und gehörte damit eigentlich nie in ein Kontextmenü,
+/* Öffentlich, da nur vom Hauptmenü (win.sd-*-all, headerbar.c) aus
+ * erreichbar - die Aktion betrifft immer die Projekt-Wurzel unabhängig von
+ * Selektion/Rechtsklick-Ziel und gehört damit nicht in ein Kontextmenü,
  * s. sond_seadrive.h. */
 void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
 {
@@ -1819,8 +1751,7 @@ void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
 
 /* Wendet pin_state auf die aktuelle Selektion in stvfm an (rekursiv bei
  * ausgewählten Ordnern, s. seadrive_pin_foreach()/apply_pin_state_to_item()).
- * War früher nur inline in seadrive_action_activate(); seit 11.09.2026
- * öffentlich, da auch vom globalen Hauptmenü aus genutzt ("Projekt >
+ * Öffentlich, da auch vom globalen Hauptmenü aus genutzt ("Projekt >
  * SeaDrive > .../Auswahl", win.sd-*-sel in headerbar.c), wenn BAUM_FS
  * der aktuelle Baum ist (s. zond_baum_aktuell(), app_window.c). */
 void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm,
@@ -1868,9 +1799,9 @@ static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
     guint pin_state = (guint) GPOINTER_TO_INT(
             g_object_get_data(G_OBJECT(action), "pin_state"));
 
-    /* Im Kontextmenü gibt es seit 11.09.2026 nur noch "Auswahl" - "Gesamtes
-     * Projekt" (sond_treeviewfm_seadrive_pin_root()) ist nur noch über das
-     * Hauptmenü erreichbar, s. sond_treeviewfm_seadrive_init_contextmenu(). */
+    /* Im Kontextmenü gibt es nur "Auswahl" - "Gesamtes Projekt"
+     * (sond_treeviewfm_seadrive_pin_root()) ist nur über das Hauptmenü
+     * erreichbar, s. sond_treeviewfm_seadrive_init_contextmenu(). */
     sond_treeviewfm_seadrive_pin_selection(stvfm, pin_state);
 }
 
@@ -1884,11 +1815,10 @@ void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
      * bereits in sond_treeviewfm_class_init aufgebaut. */
     GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
 
-    /* "-all"-Varianten (wirkten schon immer auf die Projekt-Wurzel,
-     * unabhängig von Selektion/Rechtsklick-Ziel) gibt es seit 11.09.2026
-     * nur noch im Hauptmenü (win.sd-*-all, headerbar.c) - hier im
-     * Kontextmenü bewusst nur noch "Auswahl", s. sond_treeviewfm.c
-     * (add_base_menu) und sond_seadrive.h. */
+    /* Die "-all"-Varianten (wirken auf die Projekt-Wurzel, unabhängig von
+     * Selektion/Rechtsklick-Ziel) gibt es nur im Hauptmenü (win.sd-*-all,
+     * headerbar.c) - hier im Kontextmenü bewusst nur "Auswahl", s.
+     * sond_treeviewfm.c (add_base_menu) und sond_seadrive.h. */
     struct { const gchar *name; guint pin_state; } actions[] = {
         { "sd-pin-sel",     STVFM_PIN_STATE_PINNED      },
         { "sd-unspec-sel",  STVFM_PIN_STATE_UNSPECIFIED },
@@ -1910,8 +1840,8 @@ void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
  * Von project_set_widgets_sensitive() (project.c) aufgerufen, wenn ein
  * Projekt geöffnet/geschlossen wird bzw. sich herausstellt, ob dessen
  * Wurzel überhaupt ein SeaDrive-Verzeichnis ist (sond_treeviewfm_is_
- * seadrive_path()) - Nutzer-Feedback 11.09.2026: ohne SeaDrive-Projekt
- * sollen die Menüpunkte nicht anwählbar sein statt wirkungslos. */
+ * seadrive_path()) - ohne SeaDrive-Projekt sollen die Menüpunkte nicht
+ * anwählbar sein statt wirkungslos. */
 void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
         gboolean sensitive)
 {
@@ -1926,11 +1856,9 @@ void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
 }
 
 /* ------------------------------------------------------------------ */
-/*  Verschoben aus sond_treeviewfm.c (Refactoring 18.09.2026, "in       */
-/*  _treeviewfm.c sind auch Funktionen, die in sond_treeviewfm_seadrive */
-/*  gehören") - Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate   */
-/*  über die Freund-Accessoren sond_treeviewfm_get_priv()/              */
-/*  sond_tvfm_item_get_priv() aus sond_treeviewfm_private.h.            */
+/*  Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate über die     */
+/*  Freund-Accessoren sond_treeviewfm_get_priv()/sond_tvfm_item_get_   */
+/*  priv() aus sond_treeviewfm_private.h.                              */
 /* ------------------------------------------------------------------ */
 
 void
@@ -2431,18 +2359,16 @@ sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
 			stvfm);
 }
 
-/* Nutzer-Fund 18.09.2026: "Schließen des Projekts bei SeaDrive-Projekten
- * dauert sehr lange (20 Sek.)". Das synchrone g_thread_join() in
- * sond_treeviewfm_seadrive_stop_watcher() blockierte den GTK-Hauptthread
- * (project_close() -> sond_treeviewfm_set_root(NULL) -> hier), bis der
- * Watcher-Thread sein CloseHandle() auf das ReadDirectoryChangesW-
- * Verzeichnis-Handle abgeschlossen hatte. Offenbar braucht SeaDrives
- * Cloud-Filtertreiber dafür regelmäßig um die 20 Sekunden (vermutlich ein
- * interner Timeout), um die dort noch ausstehende, per CancelIo() nur
- * ANGESTOSSENE (nicht sofort abgeschlossene) Directory-Change-
- * Notification wirklich abzubrechen - CloseHandle() wartet laut Windows-
- * I/O-Modell auf den Abschluss ausstehender I/O, bevor das Handle
- * wirklich freigegeben wird.
+/* Nicht-blockierende Variante von sond_treeviewfm_seadrive_stop_watcher().
+ * Das synchrone g_thread_join() würde den GTK-Hauptthread (project_close() ->
+ * sond_treeviewfm_set_root(NULL) -> hier) blockieren, bis der Watcher-Thread
+ * sein CloseHandle() auf das ReadDirectoryChangesW-Verzeichnis-Handle
+ * abgeschlossen hat. SeaDrives Cloud-Filtertreiber braucht dafür regelmäßig
+ * um die 20 Sekunden (vermutlich ein interner Timeout), um die dort noch
+ * ausstehende, per CancelIo() nur ANGESTOSSENE (nicht sofort abgeschlossene)
+ * Directory-Change-Notification wirklich abzubrechen - CloseHandle() wartet
+ * laut Windows-I/O-Modell auf den Abschluss ausstehender I/O, bevor das
+ * Handle wirklich freigegeben wird.
  *
  * Der Watcher-Thread fasst nach dem Setzen des Stop-Flags (s. sond_
  * treeviewfm_seadrive_watcher_thread(), Schleifenende) keinerlei stvfm-
@@ -2457,8 +2383,8 @@ sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
  * Anschluss der private Instanz-Speicher freigegeben, ein im Hintergrund
  * noch laufender Watcher-Thread könnte dann via sond_treeviewfm_seadrive_
  * stop_requested(stvfm) auf bereits freigegebenen Speicher zugreifen
- * (Use-after-free). Deshalb zwei Varianten: die synchrone (unverändert,
- * für finalize()) und eine neue asynchrone (für set_root()). */
+ * (Use-after-free). Deshalb zwei Varianten: die synchrone (für finalize())
+ * und die asynchrone (für set_root()). */
 static gpointer seadrive_watcher_reap(gpointer data) {
 	GThread *old_thread = (GThread*) data;
 
@@ -2537,32 +2463,23 @@ static gpointer seadrive_old_tables_reap(gpointer data) {
 
 /* Setzt die vier SeaDrive-Ground-Truth-Hashtables auf leer zurück und
  * emittiert das Status-Signal mit (0, 0) - aufgerufen von
- * sond_treeviewfm_set_root() bei Projekt-Wechsel/-Schließen. Verschoben
- * aus sond_treeviewfm.c (Refactoring 18.09.2026, "in _treeviewfm.c sind
- * auch Funktionen, die in sond_treeviewfm_seadrive gehören") - vormals
- * SeadriveOldTables/seadrive_old_tables_reap() plus ein Inline-Block in
- * sond_treeviewfm_set_root() selbst.
+ * sond_treeviewfm_set_root() bei Projekt-Wechsel/-Schließen.
  *
- * Nutzer-Fund 18.09.2026 (Folgefund - der erste Verdacht, der Watcher-
- * Thread-Join, war laut Call-Stack-Analyse per Eclipse/gdb-Suspend NICHT
- * die Ursache): der Stack zeigte den Hänger exakt HIER, in
- * g_hash_table_remove_all() auf seadrive_file_badges. Bei einem großen
- * SeaDrive-Projekt hat praktisch jede noch nicht heruntergeladene
- * (OFFLINE-)Datei einen eigenen Eintrag in dieser Tabelle - bei vielen
- * Zehn- oder Hunderttausend Dateien im Projekt entsprechend viele
- * Einträge, die remove_all() einzeln (mit je einem g_free() auf den Key-
- * String) synchron im GTK-Hauptthread abarbeiten musste. Betraf im
- * Prinzip auch die drei anderen SeaDrive-Hashtables hier, nur mit
- * typischerweise deutlich weniger Einträgen.
+ * Bei einem großen SeaDrive-Projekt hat praktisch jede noch nicht
+ * heruntergeladene (OFFLINE-)Datei einen eigenen Eintrag in
+ * seadrive_file_badges - bei Zehn- oder Hunderttausenden Dateien entsprechend
+ * viele Einträge, die g_hash_table_remove_all() einzeln (mit je einem
+ * g_free() auf den Key-String) synchron im GTK-Hauptthread abarbeiten müsste
+ * (spürbarer Hänger beim Schließen). Betrifft im Prinzip auch die drei
+ * anderen SeaDrive-Hashtables, nur mit typischerweise weniger Einträgen.
  *
- * Fix: die alten Tabellen werden hier nur noch aus stvfm_priv
- * "gestohlen" (Felder sofort auf NULL gesetzt, ein nachfolgender Zugriff
- * sieht also sofort "leer") und ihre komplette Zerstörung
- * (g_hash_table_destroy()) an einen kurzlebigen Hintergrund-Thread
- * abgegeben, analog zum Watcher-Reaper bei sond_treeviewfm_seadrive_
- * stop_watcher_async(). Die Tabellen enthalten ausschließlich
- * Strings/Zahlen ohne Rückverweis auf stvfm, ihre Zerstörung ist deshalb
- * unabhängig vom weiteren Leben des stvfm-Objekts sicher. */
+ * Deshalb werden die alten Tabellen hier nur aus stvfm_priv "gestohlen"
+ * (Felder sofort auf NULL gesetzt, ein nachfolgender Zugriff sieht also
+ * sofort "leer") und ihre komplette Zerstörung (g_hash_table_destroy()) an
+ * einen kurzlebigen Hintergrund-Thread abgegeben, analog zum Watcher-Reaper
+ * bei sond_treeviewfm_seadrive_stop_watcher_async(). Die Tabellen enthalten
+ * ausschließlich Strings/Zahlen ohne Rückverweis auf stvfm, ihre Zerstörung
+ * ist deshalb unabhängig vom weiteren Leben des stvfm-Objekts sicher. */
 void
 sond_seadrive_reset_ground_truth(SondTreeviewFM *stvfm) {
 	SondTreeviewFMPrivate *stvfm_priv = NULL;

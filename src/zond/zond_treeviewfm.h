@@ -41,10 +41,9 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
  * ganze Abfrage mit einem GError scheitern lassen soll. Für Index
  * erstellen/löschen (Auswahl) TRUE, für alle anderen Aufrufer
  * (Indexsuche) FALSE. Nur bei selected_only == TRUE relevant - bei
- * "Gesamtes Projekt" (selected_only == FALSE) wird nie geprüft, s.
- * ToDo.c (11.09.2026, Nutzerentscheidung).
+ * "Gesamtes Projekt" (selected_only == FALSE) wird nie geprüft.
  *
- * skip_fully_covered: Nutzer-Wunsch 16.09.2026, Verzeichnis-Kurzschluss
+ * skip_fully_covered: Verzeichnis-Kurzschluss
  * analog scan_coverage_gaps_fs() (zond_indexsuche.c) jetzt auch für "Index
  * erstellen (Gesamtes Projekt)". Nur bei selected_only == FALSE wirksam
  * (nur dort steigt zond_treeviewfm_item_get_fileparts_readdir() rekursiv
@@ -55,8 +54,8 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
  * dass dies NICHT gesetzt wird, wenn der OCR-Modus "erzwingen" ist (dort
  * darf kein Ast übersprungen werden) - s. do_index_erstellen_gesamt()
  * (headerbar.c), wo der OCR-Modus deshalb VOR diesem Aufruf abgefragt
- * wird (vorher danach). Für alle anderen Aufrufer (Auswahl, Indexsuche,
- * Lücken-Aufschlüsselung) bleibt es FALSE - unverändertes Verhalten. */
+ * wird. Für alle anderen Aufrufer (Auswahl, Indexsuche,
+ * Lücken-Aufschlüsselung) bleibt es FALSE. */
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
 		gboolean, gboolean, GError**);
 
@@ -70,7 +69,7 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
  * gefundenen Dateien (als SOND_TYPE_FILE_PART_LEAF, rein endungsbasierter
  * MIME-Typ, kein Dateizugriff) in ht ein (Value jeweils NULL = ganze
  * Datei) - ht muss vom Aufrufer mit passenden Destroy-Funktionen für
- * SondFilePart*-Keys angelegt sein. ToDo.c (12.-15.09.2026).
+ * SondFilePart*-Keys angelegt sein.
  *
  * skip_fully_covered: s. Kommentar an zond_treeviewfm_get_fileparts()
  * oben - bei rel_dir == NULL (Projektwurzel) ohne Wirkung (Coverage wird

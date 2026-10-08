@@ -2,17 +2,12 @@
 #define SOND_TVFM_ITEM_H_INCLUDED
 
 /*
- * sond_tvfm_item.h (18.09.2026, Refactoring "wie wäre es, wenn man
- * stvfm_item aus sond_treeviewfm herausnimmt?"): SondTVFMItem - das
- * GObject-Derivat, das EINEN Knoten im SondTreeviewFM-Baum repräsentiert
- * (Datei/Verzeichnis/Section, s. SondTVFMItemType) - war bisher komplett
- * in sond_treeviewfm.h/.c mituntergebracht, obwohl es inhaltlich ein
- * eigenständiges Modell ist (Erzeugen, Kinder laden, Umbenennen/Kopieren/
- * Verschieben/Löschen der zugrundeliegenden Datei/des Verzeichnisses).
- * Reine Verschiebung, keine Verhaltensänderung - die öffentliche API
- * bleibt exakt wie vorher, nur der Ort hat sich geändert. sond_treeviewfm.h
- * inkludiert diesen Header jetzt, damit für alle bisherigen Includer von
- * sond_treeviewfm.h transparent nichts anders aussieht.
+ * sond_tvfm_item.h: SondTVFMItem - das GObject-Derivat, das EINEN Knoten im
+ * SondTreeviewFM-Baum repräsentiert (Datei/Verzeichnis/Section, s.
+ * SondTVFMItemType) - ein eigenständiges Modell (Erzeugen, Kinder laden,
+ * Umbenennen/Kopieren/Verschieben/Löschen der zugrundeliegenden
+ * Datei/des Verzeichnisses). sond_treeviewfm.h inkludiert diesen Header,
+ * damit alle Includer von sond_treeviewfm.h ihn transparent mitbekommen.
  */
 
 #include <glib.h>
@@ -76,12 +71,10 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
  *
  * Optionaler Fortschritts-/Abbruch-Kontext für sond_tvfm_item_load_children()
  * (relevant v.a. für sond_tvfm_item_load_zip_dir() bei großen Archiven, wo
- * das Einlesen/MIME-Sniffen aller Einträge spürbar dauern kann - s.
- * ausführlichen Fund/Entwurf in ToDo.c, 16.09.2026).
+ * das Einlesen/MIME-Sniffen aller Einträge spürbar dauern kann).
  *
- * NULL als Parameter überall = altes Verhalten (kein Pumping, kein Abbruch
- * möglich) - alle bestehenden Aufrufer außer dem Anbinden-Pfad übergeben
- * weiterhin NULL.
+ * NULL als Parameter überall = kein Pumping, kein Abbruch möglich - alle
+ * Aufrufer außer dem Anbinden-Pfad übergeben NULL.
  *
  * cancel: Zeiger auf ein außen gehaltenes Flag (z.B. info_window->cancel);
  *   wird periodisch geprüft. Ist *cancel != 0, wird das Laden weiterer

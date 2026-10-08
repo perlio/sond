@@ -76,7 +76,7 @@ GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
 /*
  * Wendet pin_state (STVFM_PIN_STATE_*, s. sond_treeviewfm_seadrive.h) auf
  * alle real referenzierten Dateien der aktuellen Auswahl in ztv an. Vom
- * eigenen Kontextmenü von ztv genutzt UND seit 11.09.2026 vom globalen
+ * eigenen Kontextmenü von ztv genutzt UND vom globalen
  * Hauptmenü ("Projekt > SeaDrive > .../Auswahl", win.sd-*-sel in
  * headerbar.c), wenn dieser Baum gerade der Baum mit einer Selektion ist.
  */

@@ -244,7 +244,7 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 
 		/* label kann Nutzertext sein (Knoten umbenannt) und Zeichen wie
 		 * '&' enthalten - ohne Escaping wirft gtk_cell_renderer das als
-		 * ungültiges Pango-Markup weg (Fund 19.09.2026, analog dem
+		 * ungültiges Pango-Markup weg (analog dem
 		 * Tooltip-Fund in zond_treeview_query_tooltip()). */
 		gchar *label_escaped = g_markup_escape_text(label, -1);
 		g_free(label);
@@ -329,8 +329,7 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	/* "Index"-Untermenü: analog zum Hauptmenü (headerbar.c: "Projekt >
 	 * Index > Erstellen/Durchsuchen"), hier aber - wie bei "SeaDrive" im
 	 * Kontextmenü unten - bewusst nur "Auswahl" je Aktion, kein "Gesamtes
-	 * Projekt" (Nutzerwunsch 11.09.2026: Parität der Menüstruktur zwischen
-	 * Index und SeaDrive). Beide Aktionen brauchen eine lokale
+	 * Projekt" (gleiche Menüstruktur wie bei SeaDrive). Beide Aktionen brauchen eine lokale
 	 * stv.-Action (s. zond_treeview_action_index_erstellen_auswahl/
 	 * _indexsuche_auswahl unten), die über zond_baum_aktuell(zond) zuverlässig
 	 * weiß, ob gerade BAUM_INHALT oder BAUM_AUSWERTUNG gemeint ist - eine
@@ -346,14 +345,13 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
 	g_object_unref(sec_idx);
 
-	/* SeaDrive: eigenes Untermenü "SeaDrive" (Nutzer-Feedback 11.09.2026,
-	 * damit klar ist, dass die drei Punkte zusammengehören), analog zu
-	 * BAUM_FS (sond_treeviewfm.c) darin nur noch "Auswahl" - "Gesamtes
-	 * Projekt" gibt es nur im Hauptmenü ("Projekt > SeaDrive",
-	 * win.sd-*-all, headerbar.c), weil diese Aktion immer die ganze
+	/* SeaDrive: eigenes Untermenü "SeaDrive" (damit klar ist, dass die drei
+	 * Punkte zusammengehören), analog zu BAUM_FS (sond_treeviewfm.c) darin
+	 * nur "Auswahl" - "Gesamtes Projekt" gibt es nur im Hauptmenü ("Projekt >
+	 * SeaDrive", win.sd-*-all, headerbar.c), weil diese Aktion immer die ganze
 	 * Projekt-Wurzel betrifft, unabhängig von der aktuellen Auswahl/dem
-	 * Rechtsklick-Ziel, und daher nicht in ein Kontextmenü gehört (Nutzer-
-	 * Feedback, s. ToDo.c). Menüpunkte werden ausgegraut, wenn das Projekt
+	 * Rechtsklick-Ziel, und daher nicht in ein Kontextmenü gehört.
+	 * Menüpunkte werden ausgegraut, wenn das Projekt
 	 * nicht auf einem SeaDrive-Pfad liegt, s. zond_treeview_seadrive_
 	 * set_contextmenu_sensitive() (project.c). */
 	GMenu *sec_sd = g_menu_new();
@@ -434,8 +432,8 @@ static gboolean on_query_tooltip(GtkWidget  *widget,
 		/* file_part/anb_string sind Dateipfad bzw. Anbindungstext und
 		 * können Zeichen wie '&' enthalten - ohne Escaping bricht
 		 * gtk_tooltip_set_markup() mit "Failed to set text ... from
-		 * markup" ab und der Tooltip bleibt leer (Nutzer-Fund
-		 * 19.09.2026, Datei "AdV Arrestanordnung - A&F GmbH.pdf"). */
+	 * markup" ab und der Tooltip bleibt leer (z.B. bei der Datei
+	 * "AdV Arrestanordnung - A&F GmbH.pdf"). */
 		gchar *file_part_escaped = g_markup_escape_text(file_part, -1);
 		g_free(file_part);
 
@@ -490,7 +488,7 @@ static SondIndexStatus zond_treeview_get_index_status_for_filepart(
 	if (!sond_index_mime_type_supported(mime_from_extension(file_part)))
 		return SOND_INDEX_STATUS_NONE;
 
-	/* angebundene E-Mail: Header + Inline-Teile (ToDo.c #197) */
+	/* angebundene E-Mail: Header + Inline-Teile */
 	if (!section && !g_strcmp0(mime_from_extension(file_part), "message/rfc822"))
 		return sond_index_ctx_get_gmessage_message_status(index_ctx, file_part);
 
@@ -513,7 +511,7 @@ static SondIndexStatus zond_treeview_get_index_status_for_filepart(
  * für reale Dateien im Dateisystem geführt, deshalb nur der Teil vor einem
  * evtl. "//" verwendet. Nutzt denselben Ground-Truth-Hashtable-Lookup wie
  * BAUM_FS selbst (sond_treeviewfm_seadrive_get_file_badge()) - kein
- * zusätzlicher Dateizugriff nötig, s. Konsolidierung 09/2026. */
+ * zusätzlicher Dateizugriff nötig. */
 static SondSeadriveBadge zond_treeview_get_seadrive_badge(ZondTreeview *ztv,
 		const gchar *file_part) {
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
@@ -1104,7 +1102,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	 * bestehende Prüfung von *(info_window->cancel) am Anfang von
 	 * zond_treeview_anbinden_rekursiv() (Aufrufer) - hier wird nur dafür
 	 * gesorgt, dass das Setzen des Flags überhaupt eine Chance hat,
-	 * rechtzeitig zu passieren. Nutzer-Fund 16.09.2026. */
+	 * rechtzeitig zu passieren. */
 	while (gtk_events_pending())
 		gtk_main_iteration();
 
@@ -1431,8 +1429,8 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 	 * atomare Mehrdatei-Transaktionen per ATTACH, s.
 	 * zond_dbase_check_journal_settings()) bedeutet das einen echten
 	 * fsync() PRO Knoten. Bei mehreren tausend Dateien macht allein das
-	 * den Löwenanteil der Laufzeit aus (Nutzer-Messung: 2000 Dateien ~30s,
-	 * ToDo.c 16.09.2026). Mit einer Transaktion: ein einziger fsync für
+	 * den Löwenanteil der Laufzeit aus (gemessen: 2000 Dateien ~30s).
+	 * Mit einer Transaktion: ein einziger fsync für
 	 * die ganze Operation - analog zum bestehenden Muster in
 	 * zond_treeview_clipboard_kopieren_foreach(). */
 	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, &error);
@@ -2568,36 +2566,31 @@ static gint get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
 }
 
 #ifdef _WIN32
-/* Nutzer-Wunsch 18.09.2026: der Auszug-Fall (Klick auf einen
- * Strukturpunkt im Auswertungsverzeichnis, der mehrere Kind-Anbindungen
- * zu einer gemeinsamen Ansicht zusammenfasst - s.
- * zond_treeview_open_auszug() unten) blieb vom Hydrierungs-Check oben
- * (sfp != NULL-Fall) bewusst unberührt, weil dort ggf. mehrere
- * verschiedene reale Dateien betroffen sein können: "Für alle
- * betroffenen PDF muß erforderlichenfalls die Hydrierung angestoßen
- * werden." Sammelt dafür die vollen Pfade aller zugrundeliegenden realen
- * PDF-Dateien unter iter_parent (Dateisystem-Vorfahre mit parent==NULL
- * je Anbindung), dedupliziert - mehrere Seiten/Anbindungen derselben
- * Datei liefern denselben Pfad nur einmal.
+/* Der Auszug-Fall (Klick auf einen Strukturpunkt im Auswertungsverzeichnis,
+ * der mehrere Kind-Anbindungen zu einer gemeinsamen Ansicht zusammenfasst -
+ * s. zond_treeview_open_auszug() unten) kann mehrere verschiedene reale
+ * Dateien betreffen: für alle betroffenen PDFs muss erforderlichenfalls die
+ * Hydrierung angestoßen werden. Sammelt dafür die vollen Pfade aller
+ * zugrundeliegenden realen PDF-Dateien unter iter_parent
+ * (Dateisystem-Vorfahre mit parent==NULL je Anbindung), dedupliziert -
+ * mehrere Seiten/Anbindungen derselben Datei liefern denselben Pfad nur
+ * einmal.
  *
- * Regressions-Fund 18.09.2026 ("UI friert bei Klick auf Auszug ein!"):
- * die erste Fassung nutzte hierfür get_filepart_from_iter() - genau wie
- * zond_treeview_open_auszug() selbst - und rief damit
- * sond_file_part_from_filepart() auf. Diese Funktion liest aber pro
- * Segment tatsächlich die ersten 2048 Bytes der Datei (echte
+ * Bewusst NICHT get_filepart_from_iter() (wie zond_treeview_open_auszug()
+ * selbst): das ruft sond_file_part_from_filepart() auf, das pro Segment
+ * tatsächlich die ersten 2048 Bytes der Datei liest (echte
  * Inhaltserkennung statt Endungsraten, s. Doc-Kommentar an
- * sond_file_part_from_filepart_leaf(), sond_fileparts.c) - bei einer
- * noch nicht hydrierten SeaDrive-Datei löst schon DIESER Lesezugriff
- * über sond_fopen() dessen (für den .sond_index.db-shm-Fall bewusst
- * eingebaute, s. ToDo.c) synchrone Hydrierung-und-Retry-Logik aus und
- * blockiert damit genau an der Stelle, die eigentlich erst noch geprüft
- * werden sollte, ob sie blockieren würde. Fix: wie schon in
- * zond_treeview_get_selected_fileparts_foreach() weiter unten (Task
- * #93, "hydrierungsfreie Fileparts-Sammlung") auf
- * sond_file_part_from_filepart_leaf() umgestellt - rein endungsbasiert,
- * kein Dateizugriff. Liefert dafür immer SOND_TYPE_FILE_PART_LEAF-
- * Objekte (nie SOND_TYPE_FILE_PART_PDF), PDF-Erkennung deshalb über den
- * (endungsbasiert gesetzten) MIME-Typ-String statt SOND_IS_FILE_PART_PDF().
+ * sond_file_part_from_filepart_leaf(), sond_fileparts.c) - bei einer noch
+ * nicht hydrierten SeaDrive-Datei löst schon DIESER Lesezugriff über
+ * sond_fopen() dessen synchrone Hydrierung-und-Retry-Logik aus und
+ * blockiert damit genau an der Stelle, die eigentlich erst prüfen soll, ob
+ * sie blockieren würde. Stattdessen wie in
+ * zond_treeview_get_selected_fileparts_foreach() weiter unten (hydrierungsfreie
+ * Fileparts-Sammlung) sond_file_part_from_filepart_leaf():
+ * rein endungsbasiert, kein Dateizugriff. Liefert dafür immer
+ * SOND_TYPE_FILE_PART_LEAF-Objekte (nie SOND_TYPE_FILE_PART_PDF),
+ * PDF-Erkennung deshalb über den (endungsbasiert gesetzten) MIME-Typ-String
+ * statt SOND_IS_FILE_PART_PDF().
  *
  * Rückgabe: neu allokiertes GPtrArray* mit g_free-baren gchar*-
  * Einträgen (auch bei 0 Treffern nie NULL), vom Aufrufer per
@@ -3347,18 +3340,15 @@ static void zond_treeview_action_paste_link_up(GSimpleAction *a, GVariant *p, gp
 static void zond_treeview_action_loeschen(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d; gint rc = 0; gint rc_commit = 0; GError *error = NULL;
 
-	/* Nutzer-Fund 16.09.2026: L\u00f6schen mehrerer hundert Unterknoten dauerte
-	 * >20 Sek. Ursache (analog zum fr\u00fcheren Anbinden-Fund, s. ToDo.c):
-	 * jeder einzelne zond_dbase_remove_node()-Aufruf committet f\u00fcr sich
+	/* Das Löschen mehrerer hundert Unterknoten würde >20 Sek. dauern:
+	 * jeder einzelne zond_dbase_remove_node()-Aufruf committet für sich
 	 * (SAVEPOINT/RELEASE) - bei erzwungenem synchronous=FULL ein echter
-	 * fsync() PRO gel\u00f6schtem Knoten. Fix: die ganze L\u00f6sch-Operation in
-	 * eine Transaktion einpacken - ein einziger fsync f\u00fcr alles.
-	 * Nutzer-Entscheidung (anders als beim Anbinden-Fix, der bei Abbruch/
-	 * Fehler bewusst trotzdem committet, um das bisherige Verhalten nicht
-	 * zu \u00e4ndern): bei rc == -1 (echter DB-Fehler, kommt praktisch nie vor)
-	 * hier ein echtes ROLLBACK - kein halb gel\u00f6schter Baum bei einem
-	 * echten DB-Fehler, auch wenn das ein Verhaltensunterschied zum
-	 * bisherigen (nicht-transaktionalen) Zustand ist. */
+	 * fsync() PRO gelöschtem Knoten (wie beim Anbinden). Deshalb ist die
+	 * ganze Lösch-Operation in eine Transaktion eingepackt - ein einziger
+	 * fsync für alles. Anders als beim Anbinden (das bei Abbruch/Fehler
+	 * bewusst trotzdem committet) gibt es bei rc == -1 (echter DB-Fehler,
+	 * kommt praktisch nie vor) ein echtes ROLLBACK - kein halb gelöschter
+	 * Baum bei einem echten DB-Fehler. */
 	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, &error);
 	if (rc) {
 		display_message(zond->app_window, "Transaktion konnte nicht gestartet werden\n\n", error->message, NULL);
@@ -3967,7 +3957,7 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		/* _leaf-Variante statt sond_file_part_from_filepart(): rein
 		 * endungsbasiert, kein Dateizugriff (SeaDrive-Hydrierung) - s.
 		 * Doc-Kommentar an sond_file_part_from_filepart_leaf()
-		 * (sond_fileparts.c) und ToDo.c (12.-15.09.2026). Diese Funktion
+		 * (sond_fileparts.c). Diese Funktion
 		 * sammelt ausschließlich für Index erstellen/durchsuchen/löschen
 		 * (Auswahl); andere Aufrufer der Anbindung (z.B. Datei öffnen)
 		 * laufen über eigene Wege mit echter Inhaltserkennung. */
@@ -3996,7 +3986,7 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 			 * (beginnen/enden nicht an Seitengrenzen, oder sind ein reiner
 			 * Punkt) sind dafür nicht zulässig - Indizierung/Löschen
 			 * arbeitet nur seitenweise, s. anbindung_ist_unterseitig()
-			 * (general.c) und ToDo.c (11.09.2026, Nutzerentscheidung). */
+			 * (general.c). */
 			if (gfd->reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
 				g_object_unref(sfp);
 				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -4013,14 +4003,14 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		}
 		/* Eine angebundene PDF steht hier für ihre Seiten (PageTree) -
 		 * eingebettete Dateien sind eigene Fileparts "x.pdf//anhang.pdf"
-		 * und werden eigens angebunden (ToDo.c #191). Sonst range == NULL
+		 * und werden eigens angebunden. Sonst range == NULL
 		 * -> ganze Datei. */
 		else if (SOND_IS_FILE_PART_PDF(sfp) || (SOND_IS_FILE_PART_LEAF(sfp) &&
 				!g_strcmp0(sond_file_part_leaf_get_mime_type(
 						SOND_FILE_PART_LEAF(sfp)), "application/pdf")))
 			range = sond_page_range_new_pdf_pagetree();
 		/* Eine angebundene E-Mail steht für Header + Inline-Teile, Anhänge
-		 * sind eigene Fileparts (ToDo.c #197) */
+		 * sind eigene Fileparts */
 		else if (SOND_IS_FILE_PART_GMESSAGE(sfp) || (SOND_IS_FILE_PART_LEAF(sfp) &&
 				!g_strcmp0(sond_file_part_leaf_get_mime_type(
 						SOND_FILE_PART_LEAF(sfp)), "message/rfc822")))

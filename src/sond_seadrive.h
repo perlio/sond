@@ -49,10 +49,9 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
 
 /*
  * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
- * Cloud-Datei über die offizielle CfHydratePlaceholder()-API an - Ersatz
- * für den früheren CreateFileW(GENERIC_READ)+ReadFile()-Trick, der nach
- * dem Windows-Update KB5124008 (09/2026) zuverlässig mit
- * ERROR_CLOUD_FILE_ACCESS_DENIED fehlschlägt (s. ausführlichen
+ * Cloud-Datei über die offizielle CfHydratePlaceholder()-API an. Der Trick
+ * CreateFileW(GENERIC_READ)+ReadFile() schlägt unter aktuellem Windows
+ * zuverlässig mit ERROR_CLOUD_FILE_ACCESS_DENIED fehl (s. ausführlichen
  * Doc-Kommentar an der Implementierung, sond_treeviewfm_seadrive.c).
  * TRUE (No-Op), wenn die Datei schon lokal ist. FALSE mit gesetztem error
  * bei echtem Fehlschlag (z.B. CF-API nicht verfügbar).
@@ -74,11 +73,10 @@ gboolean sond_seadrive_needs_hydration(const gchar *full_path);
  * Hydrierung in einem Hintergrund-Thread an und kehrt sofort zurück
  * (Fire-and-forget). Ein erneuter Aufruf für denselben full_path,
  * während bereits ein Thread dafür läuft, ist ein No-Op. Fehler landen
- * nur im Log. Hintergrund: bei sehr großen Dateien blockierte der
- * synchrone Aufruf von sond_seadrive_hydrate() im GTK-Hauptthread das
- * gesamte Programm ohne Rückmeldung/Abbrechen-Möglichkeit (Nutzer-Fund
- * 18.09.2026, s. ausführlichen Doc-Kommentar an der Implementierung,
- * sond_treeviewfm_seadrive.c, und ToDo.c).
+ * nur im Log. Hintergrund: der synchrone Aufruf von sond_seadrive_hydrate()
+ * blockierte bei sehr großen Dateien den GTK-Hauptthread ohne
+ * Rückmeldung/Abbrechen-Möglichkeit (s. ausführlichen Doc-Kommentar an der
+ * Implementierung, sond_treeviewfm_seadrive.c).
  */
 void sond_seadrive_hydrate_async(const gchar *full_path);
 
@@ -109,21 +107,17 @@ void sond_seadrive_hydrate_cancel(const gchar *full_path);
  * soll normal öffnen. FALSE = Hydrierung wurde angestoßen bzw. Dialog
  * gezeigt, Aufrufer soll sofort zurückkehren statt zu öffnen.
  *
- * Nutzer-Fund 19.09.2026: nur noch ein dünner Wrapper um
- * sond_seadrive_ensure_hydrated_multi() (s.u.) mit einem einelementigen
- * Array - der vormals eigenständige Einzeldatei-Fortschrittsdialog
- * (sond_seadrive_show_hydrate_progress_dialog()) war eine reine
- * Dopplung der Multi-Variante und wurde entfernt.
+ * Dünner Wrapper um sond_seadrive_ensure_hydrated_multi() (s.u.) mit einem
+ * einelementigen Array.
  */
 gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
         const gchar *full_path);
 
 /*
- * Wie sond_seadrive_show_hydrate_progress_dialog(), aber für mehrere
- * gleichzeitig betroffene Dateien (Auszug-Fall im Auswertungsverzeichnis,
- * s. ausführl. Doc-Kommentar an der Implementierung,
- * sond_treeviewfm_seadrive.c) - eine Fortschrittszeile pro Datei in
- * full_paths, ein gemeinsamer Abbrechen-Button (bricht alle noch
+ * Fortschrittsdialog für mehrere gleichzeitig betroffene Dateien
+ * (Auszug-Fall im Auswertungsverzeichnis, s. ausführl. Doc-Kommentar an der
+ * Implementierung, sond_treeviewfm_seadrive.c) - eine Fortschrittszeile pro
+ * Datei in full_paths, ein gemeinsamer Abbrechen-Button (bricht alle noch
  * laufenden Einträge ab) und ein gemeinsamer Schließen-Button.
  */
 void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
@@ -149,21 +143,20 @@ void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm);
 
 /*
  * Setzt den Pin-State rekursiv auf dem gesamten Projektverzeichnis (Root
- * von stvfm) und zeigt bei Fehlern selbst einen Dialog. Ehemals "Gesamtes
- * Verzeichnis" im Kontextmenü von BAUM_FS (stv.sd-*-all) - seit 11.09.2026
- * nur noch über das Hauptmenü ("Extras > SeaDrive", win.sd-*-all in
- * headerbar.c) erreichbar: die Aktion betraf schon immer die Projekt-
- * Wurzel, unabhängig von Rechtsklick-Ziel oder Selektion, und gehörte
- * damit eigentlich nie in ein Kontextmenü (das ja "dieser Punkt"/"diese
- * Auswahl" suggeriert) - Nutzer-Feedback, s. ToDo.c.
+ * von stvfm) und zeigt bei Fehlern selbst einen Dialog. Nur über das
+ * Hauptmenü ("Extras > SeaDrive", win.sd-*-all in headerbar.c) erreichbar,
+ * nicht im Kontextmenü von BAUM_FS: die Aktion betrifft immer die
+ * Projekt-Wurzel, unabhängig von Rechtsklick-Ziel oder Selektion, und
+ * gehört damit nicht in ein Kontextmenü (das "dieser Punkt"/"diese
+ * Auswahl" suggeriert).
  */
 void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state);
 
 /*
  * Setzt den Pin-State auf der aktuellen Selektion in stvfm (rekursiv bei
  * ausgewählten Ordnern). Vom Kontextmenü von BAUM_FS selbst genutzt UND
- * seit 11.09.2026 vom Hauptmenü ("Projekt > SeaDrive > .../Auswahl",
- * win.sd-*-sel in headerbar.c), wenn BAUM_FS gerade der Baum mit einer
+ * vom Hauptmenü ("Projekt > SeaDrive > .../Auswahl", win.sd-*-sel in
+ * headerbar.c), wenn BAUM_FS gerade der Baum mit einer
  * Selektion ist.
  */
 void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm, guint pin_state);
@@ -282,9 +275,8 @@ sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
  * seadrive_pending_down_paths/-pending_down (das bleibt die engere Frage
  * "wie viele gepinnte Dateien werden gerade heruntergeladen" für die
  * Projekt-weite Zähleranzeige) - hier geht es um die tatsächliche lokale
- * Verfügbarkeit (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026,
- * nachdem die vorherige, auf "gepinnt+pending" basierende Definition
- * Ordner ohne jedes Pin fälschlich badge-los erscheinen ließ). */
+ * Verfügbarkeit (nicht auf "gepinnt+pending" basierend, was Ordner ohne
+ * jedes Pin fälschlich badge-los erscheinen ließe). */
 typedef struct {
 	guint not_hydrated;    /* Dateien im Teilbaum, die NICHT lokal vorhanden sind (unabhängig vom Pin-Status) */
 	guint hydrated_pinned; /* Dateien im Teilbaum, die lokal vorhanden UND gepinnt sind */
@@ -296,7 +288,7 @@ typedef struct {
  * aufgenommen (Zähler nur erhöht, wenn er noch nicht drin war);
  * delta_down<0: Pfad wird aus dem Set entfernt (Zähler nur verringert,
  * wenn er tatsächlich drin war) - verhindert Drift bei doppelten/
- * verpassten Events (s. Untersuchung SeaDrive-Coverage, 09/2026). Betrifft
+ * verpassten Events. Betrifft
  * NUR den Projekt-weiten "wird gerade heruntergeladen"-Zähler
  * (seadrive_pending_down) - für den Ordner-Coverage-Badge s.
  * sond_treeviewfm_seadrive_update_dir_coverage(). */
@@ -323,9 +315,8 @@ void     sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM*,
  * file_full_path (voller Pfad), oder NONE, wenn kein Eintrag existiert.
  * Ersetzt einen früheren LIVEN GetFileAttributesW-Aufruf pro Renderzeile
  * durch einen reinen O(1)-Hashtable-Lookup - der Watcher hält die Map
- * ohnehin schon aktuell (Untersuchung "Ordner-Badges", 09/2026: der
- * Ordner-Status nutzte das Muster schon, der Datei-Badge inkonsistenter-
- * weise noch nicht). Auch von anderen Bäumen nutzbar (z.B. ZondTreeview),
+ * ohnehin schon aktuell (der Ordner-Status nutzt das Muster schon,
+ * dieser Datei-Badge soll konsistent dazu sein). Auch von anderen Bäumen nutzbar (z.B. ZondTreeview),
  * die auf dieselben Datei-Pfade verweisen - dafür stvfm auf die FS-Baum-
  * Instanz des Projekts (BAUM_FS) beziehen. */
 SondSeadriveBadge sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM*,
@@ -381,12 +372,10 @@ void     sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM*);
  * Pending-Sets) sowie die Pending-Zähler zurück und emittiert das Status-
  * Signal mit (0, 0) - aufgerufen von sond_treeviewfm_set_root() bei
  * Projekt-Wechsel/-Schließen, MUSS dort passieren, sonst bleiben Pfade/
- * Zähler einer vorigen Projekt-Session stehen (Nutzer-Fund 18.09.2026,
- * "Schließen dauert 20 Sek." - die eigentliche Zerstörung der Tabellen
- * lief bis dahin synchron im GTK-Hauptthread, s. ausführlichen Kommentar
- * bei der Implementierung in sond_seadrive.c). Verschoben aus
- * sond_treeviewfm.c (Refactoring 18.09.2026, "in _treeviewfm.c sind auch
- * Funktionen, die in sond_treeviewfm_seadrive gehören"). */
+ * Zähler einer vorigen Projekt-Session stehen. Die Zerstörung der Tabellen
+ * läuft nicht synchron im GTK-Hauptthread (sonst dauerte das Schließen
+ * Sekunden, s. ausführlichen Kommentar bei der Implementierung in
+ * sond_seadrive.c). */
 void     sond_seadrive_reset_ground_truth(SondTreeviewFM*);
 #endif
 

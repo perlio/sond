@@ -528,7 +528,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 	/* Pfade bereits geöffneter Dateien darin nachführen - vorher wurde
 	 * der schon neue Pfad als alter und nur der Name als neuer übergeben,
-	 * die Objekte blieben auf dem alten Pfad (ToDo.c #196) */
+	 * die Objekte blieben auf dem alten Pfad */
 	if (path_old && stvfm_item_priv->path_or_section)
 		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
 				stvfm_item_priv->sond_file_part, path_old,
@@ -630,14 +630,12 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_search));
 	g_object_unref(sec_search);
 
-	/* SeaDrive-Section: eigenes Untermen\u00fc "SeaDrive" (Nutzer-Feedback
-	 * 11.09.2026, damit klar ist, dass die drei Punkte zusammengeh\u00f6ren),
-	 * darin nur noch "Auswahl". "Gesamtes Projekt" (wirkte schon immer auf
-	 * die Projekt-Wurzel, unabh\u00e4ngig von Selektion/Rechtsklick-Ziel) ist
-	 * seit 11.09.2026 ins Hauptmen\u00fc gewandert ("Projekt > SeaDrive",
-	 * win.sd-*-all in headerbar.c) - das geh\u00f6rte eigentlich nie in ein
-	 * Kontextmen\u00fc, das ja "dieser Punkt"/"diese Auswahl" suggeriert
-	 * (Nutzer-Feedback, s. ToDo.c). */
+	/* SeaDrive-Section: eigenes Untermenü "SeaDrive" (damit klar ist,
+	 * dass die drei Punkte zusammengehören), darin nur "Auswahl".
+	 * "Gesamtes Projekt" (wirkt immer auf die Projekt-Wurzel, unabhängig
+	 * von Selektion/Rechtsklick-Ziel) steht im Hauptmenü ("Projekt >
+	 * SeaDrive", win.sd-*-all in headerbar.c) - das gehört nicht in ein
+	 * Kontextmenü, das "dieser Punkt"/"diese Auswahl" suggeriert. */
 	GMenu *sec_sd = g_menu_new();
 	GMenu *sub_sd = g_menu_new();
 	g_menu_append(sub_sd, "Immer offline verf\u00fcgbar",
@@ -690,7 +688,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_POINTER);  /* der von before-* gelieferte Kontext */
 
 	/* Gegenstück zu before-insert beim Kopieren: before-insert öffnet keine
-	 * Transaktion, "after" passt deshalb nicht (ToDo.c #199) */
+	 * Transaktion, "after" passt deshalb nicht */
 	klass->signal_after_insert = g_signal_new("after-insert",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1,
 			G_TYPE_BOOLEAN);
@@ -962,10 +960,10 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 			 * selbst emittiert kein Signal (anders als sond_tvfm_item_move(),
 			 * das "before-move" nutzt) - deshalb hier "before-insert" senden,
 			 * damit z.B. die Index-Coverage am Zielort aufgelöst werden kann,
-			 * bevor dort neuer, ungeprüfter Inhalt entsteht (Bug-Fix
-			 * 11.09.2026: Kopieren einer nicht indizierten Datei in einen als
-			 * komplett indiziert markierten Ordner ließ den Ordner fälschlich
-			 * grün, weil dieser Pfad bislang gar nicht auf Coverage hörte). */
+			 * bevor dort neuer, ungeprüfter Inhalt entsteht (Kopieren einer nicht
+			 * indizierten Datei in einen als komplett indiziert markierten Ordner
+			 * ließe den Ordner sonst fälschlich grün, weil dieser Pfad sonst gar
+			 * nicht auf Coverage hörte). */
 			gint res = 0;
 
 			g_signal_emit(stvfm_item_parent_priv->stvfm,
@@ -1249,30 +1247,27 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 									"/" : "",
 									s_paste_sel->base_inserted, NULL);
 
-	/* Nutzer-Fund 16.09.2026: stvfm_item_priv->path_or_section gesetzt heißt
-	 * hier: das kopierte Element ist ein Verzeichnis-Marker INNERHALB eines
-	 * Containers (ZIP/PDF/GMessage) - sein sond_file_part ist der
-	 * umschließende Container selbst, keine eigenständige Identität (s.
-	 * Erzeugung z.B. in sond_tvfm_item_load_zip_dir(): Verzeichnis-Einträge
-	 * bekommen das sond_file_part des Eltern-Containers, nur
-	 * path_or_section unterscheidet den Unterpfad). Landet so ein
-	 * Verzeichnis per Kopie in einem Ziel OHNE eigenen sond_file_part (also
-	 * im echten Dateisystem - genau das, was
-	 * copy_dir_across_sfps()/copy_container_dir_to_fs() tatsächlich
-	 * anlegen), ist ein geklontes sond_file_part witzlos bis kaputt: die
-	 * neue Instanz (hier z.B. eine SondFilePartZip) bekommt weder Pfad
+	/* stvfm_item_priv->path_or_section gesetzt heißt hier: das kopierte
+	 * Element ist ein Verzeichnis-Marker INNERHALB eines Containers
+	 * (ZIP/PDF/GMessage) - sein sond_file_part ist der umschließende
+	 * Container selbst, keine eigenständige Identität (s. Erzeugung z.B. in
+	 * sond_tvfm_item_load_zip_dir(): Verzeichnis-Einträge bekommen das
+	 * sond_file_part des Eltern-Containers, nur path_or_section
+	 * unterscheidet den Unterpfad). Landet so ein Verzeichnis per Kopie in
+	 * einem Ziel OHNE eigenen sond_file_part (also im echten Dateisystem -
+	 * genau das, was copy_dir_across_sfps()/copy_container_dir_to_fs()
+	 * tatsächlich anlegen), wäre ein geklontes sond_file_part kaputt: die
+	 * neue Instanz (hier z.B. eine SondFilePartZip) bekäme weder Pfad
 	 * (sond_file_part_set_path() läuft nur für !path_or_section) noch ein
-	 * Eltern-Archiv (Ziel-Parent hat ja keins) und versucht beim ersten
-	 * Kinder-Check trotzdem, sich selbst als Archiv zu öffnen - scheitert
-	 * mit "No such file or directory" (Projektwurzel + "/" landet als
-	 * Dateiname in fopen(), weil sond_file_part_get_path() NULL liefert und
-	 * g_strconcat() dort abbricht). Der Fehler zeigte sich erst beim
-	 * tatsächlichen Aufklappen (nicht schon beim Einfügen), weil
-	 * sond_tvfm_item_load_zip_dir(...) ? TRUE : FALSE einen Fehler (-1)
-	 * fälschlich als "hat Kinder" wertet. Fix: in diesem Fall gar nicht
-	 * klonen - das neue Element ist ein ganz normales
-	 * Dateisystem-Verzeichnis (sond_file_part bleibt NULL), was ohnehin dem
-	 * entspricht, was auf der Platte real angelegt wurde; der bestehende
+	 * Eltern-Archiv (Ziel-Parent hat ja keins) und versuchte beim ersten
+	 * Kinder-Check trotzdem, sich selbst als Archiv zu öffnen - das
+	 * scheitert mit "No such file or directory" (Projektwurzel + "/" landet
+	 * als Dateiname in fopen(), weil sond_file_part_get_path() NULL liefert
+	 * und g_strconcat() dort abbricht). Der Fehler zeigte sich erst beim
+	 * tatsächlichen Aufklappen (nicht schon beim Einfügen). Deshalb in
+	 * diesem Fall gar nicht klonen - das neue Element ist ein ganz
+	 * normales Dateisystem-Verzeichnis (sond_file_part bleibt NULL), was
+	 * ohnehin dem entspricht, was auf der Platte real angelegt wurde; der
 	 * NULL-sichere Zweig unten (sond_tvfm_item_create() mit
 	 * sond_file_part == NULL) übernimmt das korrekt. Alle anderen Fälle
 	 * (Dateien; Kopien innerhalb von ZIP/PDF/GMessage) bleiben unverändert. */
@@ -1303,7 +1298,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	/* sfp_new bleibt NULL, wenn ein "echtes" Dateisystem-Verzeichnis
 	 * (kein sond_file_part) kopiert/verschoben wird - g_object_unref(NULL)
 	 * würde dann nur eine GLib-CRITICAL auslösen (bzw. bei
-	 * G_DEBUG=fatal-warnings abstürzen), s. Code-Review 09/2026. */
+	 * G_DEBUG=fatal-warnings abstürzen). */
 	if (sfp_new)
 		g_object_unref(sfp_new);
 
@@ -1564,20 +1559,16 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	 * CfHydratePlaceholder()-API anstoßen (sond_seadrive_hydrate_async(),
 	 * sond_treeviewfm_seadrive.c/h). Den Pin-State nicht ändern.
 	 *
-	 * Bis 17.09.2026 stand hier ein roher CreateFileW(GENERIC_READ)+
-	 * ReadFile()-"Trick". Regressions-Fund 18.09.2026 (s. ToDo.c): nach
-	 * dem Windows-Update KB5124008 (09/2026) schlägt dieser Trick
-	 * zuverlässig mit ERROR_CLOUD_FILE_ACCESS_DENIED fehl (auch nach
-	 * KB5129195 und komplettem Neu-Build von zond - kein zond-Bug).
-	 * Ersetzt durch sond_seadrive_hydrate(), das stattdessen die dafür
-	 * vorgesehene CF-API verwendet.
+	 * Der Trick CreateFileW(GENERIC_READ)+ReadFile() (ein Byte lesen) zum
+	 * Auslösen des "Recall" schlägt unter aktuellem Windows zuverlässig mit
+	 * ERROR_CLOUD_FILE_ACCESS_DENIED fehl (kein zond-Bug). Deshalb
+	 * sond_seadrive_hydrate(), das die dafür vorgesehene CF-API verwendet.
 	 *
-	 * Weiterer Nutzer-Fund, ebenfalls 18.09.2026: sond_seadrive_hydrate()
-	 * blockiert synchron bis die Datei (bzw. der angeforderte Bereich)
-	 * lokal verfügbar ist - bei einer 51-GB-Datei fror das Programm
-	 * dadurch minutenlang komplett ein, ohne Rückmeldung oder Abbrechen-
-	 * Möglichkeit. Nutzer-Entscheidung: beim ERSTEN Doppelklick kein
-	 * Info-Fenster (der Download läuft ohnehin im Hintergrund weiter) -
+	 * sond_seadrive_hydrate() blockiert synchron bis die Datei (bzw. der
+	 * angeforderte Bereich) lokal verfügbar ist - bei einer 51-GB-Datei
+	 * fröre das Programm minutenlang ein, ohne Rückmeldung oder
+	 * Abbrechen-Möglichkeit. Deshalb: beim ERSTEN Doppelklick kein
+	 * Info-Fenster (der Download läuft ohnehin im Hintergrund weiter),
 	 * stattdessen sofort in die UI zurückkehren und die eigentliche
 	 * Hydrierung in einem Hintergrund-Thread erledigen
 	 * (sond_seadrive_hydrate_async(), Fire-and-forget). Vorab ein
@@ -1585,40 +1576,31 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	 * hydration()), ob überhaupt hydriert werden muss - schon lokale
 	 * Dateien fallen unten auf den normalen Öffnen-Weg durch.
 	 *
-	 * Ergänzung, ebenfalls 18.09.2026: bei einem erneuten Doppelklick auf
-	 * dieselbe, noch laufende Datei (sond_seadrive_is_hydrating() ==
-	 * TRUE) jetzt statt eines stillen No-Ops ein Fortschritts-/Abbrechen-
-	 * Dialog (sond_seadrive_show_hydrate_progress_dialog(),
-	 * sond_treeviewfm_seadrive.c/h) - Nutzerwunsch, um den SeaDrive-Server
-	 * bei versehentlichen Großdatei-Downloads nicht unnötig weiter zu
-	 * belasten.
+	 * Bei einem erneuten Doppelklick auf dieselbe, noch laufende Datei
+	 * (sond_seadrive_is_hydrating() == TRUE) erscheint statt eines stillen
+	 * No-Ops ein Fortschritts-/Abbrechen-Dialog, um den SeaDrive-Server bei
+	 * versehentlichen Großdatei-Downloads nicht unnötig weiter zu belasten.
 	 *
-	 * Nutzer-Hinweis 18.09.2026: dieselbe Check-und-Reagiere-Sequenz war
-	 * wortgleich auch in zond_treeview_open_node() (zond_treeview.c, für
-	 * BAUM_INHALT/BAUM_AUSWERTUNG) nötig geworden - in
-	 * sond_seadrive_ensure_hydrated() (sond_treeviewfm_seadrive.c/h)
-	 * konsolidiert. */
+	 * Die Check-und-Reagiere-Sequenz ist auch in zond_treeview_open_node()
+	 * (zond_treeview.c, für BAUM_INHALT/BAUM_AUSWERTUNG) nötig und deshalb
+	 * in sond_seadrive_ensure_hydrated() (sond_seadrive.c/h) konsolidiert. */
 	{
 		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
 		if (sond_treeviewfm_is_seadrive_path(stvfm)) {
 			const gchar *root = sond_treeviewfm_get_root(stvfm);
-			/* Nutzer-Fund 19.09.2026: DIR-Knoten sind oben schon
-			 * ausgeschlossen (return 0) - alles, was hier ankommt (LEAF
-			 * wie LEAF_SECTION, unabhängig davon, ob der jeweilige
-			 * sond_file_part vom Typ Leaf/PDF/ZIP/GMessage ist), steckt
-			 * letztlich in GENAU EINER echten Datei auf der Platte.
-			 * Vormals wurde hier per SOND_IS_FILE_PART_LEAF() +
-			 * fehlendem Parent nur der Sonderfall "direkte, unverschach-
-			 * telte Leaf-Datei" abgedeckt - eine PDF-/GMessage-Section
-			 * (LEAF_SECTION, sond_file_part bleibt vom Container-Typ,
-			 * s. sond_tvfm_item_create()) fiel dadurch komplett durch
-			 * und bekam nie eine Hydrierungsprüfung. Statt die Typen zu
-			 * unterscheiden: immer zum obersten Vorfahren (ohne Parent)
-			 * hochlaufen - nur der trägt in seinem path-Feld den echten,
-			 * projektrelativen Pfad (s. sond_file_part_do_create()); bei
-			 * verschachtelten Parts (ZIP-Eintrag, PDF-Embedded-File,
-			 * GMessage-Mimepart) ist path nur ein container-interner
-			 * Bezeichner, den man nicht naiv an root anhängen darf. */
+			/* DIR-Knoten sind oben schon ausgeschlossen (return 0) - alles,
+			 * was hier ankommt (LEAF wie LEAF_SECTION, unabhängig davon, ob
+			 * der jeweilige sond_file_part vom Typ Leaf/PDF/ZIP/GMessage
+			 * ist), steckt letztlich in GENAU EINER echten Datei auf der
+			 * Platte. Statt die Typen zu unterscheiden (eine PDF-/GMessage-
+			 * Section, LEAF_SECTION, behält den Container-Typ, s.
+			 * sond_tvfm_item_create()): immer zum obersten Vorfahren
+			 * (ohne Parent) hochlaufen - nur der trägt in seinem path-Feld
+			 * den echten, projektrelativen Pfad (s.
+			 * sond_file_part_do_create()); bei verschachtelten Parts
+			 * (ZIP-Eintrag, PDF-Embedded-File, GMessage-Mimepart) ist path
+			 * nur ein container-interner Bezeichner, den man nicht naiv an
+			 * root anhängen darf. */
 			SondFilePart *sfp_root = stvfm_item_priv->sond_file_part;
 			SondFilePart *sfp_parent = NULL;
 			while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
@@ -2404,8 +2386,8 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 	 * ist - z.B. weil sein letztes Kind gelöscht oder verschoben wurde,
 	 * ohne dass dabei re-kollabiert wurde. iter_child wäre dann
 	 * uninitialisiert; die Schleife darf in diesem Fall gar nicht erst
-	 * laufen (Bug-Fix 09/2026, Absturz-Untersuchung: vorher lief hier
-	 * unbedingt ein erster do-while-Durchlauf mit ungültigem Iterator). */
+	 * laufen (ein erster do-while-Durchlauf mit ungültigem Iterator
+	 * wäre ein Absturz). */
 	while (has_child)
 		has_child = gtk_tree_store_remove(
 				GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),
@@ -2456,22 +2438,19 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 	return 0;
 }
 
-/* Nutzer-Fund 18.09.2026: Verzeichnis mit "Invalid argument" nicht
- * expandierbar (bekannte CRT-_wfopen()-Einschränkung bei Pfadkomponenten
- * mit Leerzeichen/Punkt am Ende - s. ausführliche Doku in ToDo.c,
- * Einträge 11./16.09.2026 - "Stabilität hat Vorrang", bewusst nicht
- * behoben). Bislang blieb die Zeile trotz des Fehlschlags GTK-seitig
- * "expandiert" (der Expander-Pfeil war schon umgeschaltet, bevor dieser
- * Handler überhaupt lief) - mit der (nie entfernten) Dummy-Zeile als
+/* Verzeichnis, das mit "Invalid argument" nicht expandierbar ist (bekannte
+ * CRT-_wfopen()-Einschränkung bei Pfadkomponenten mit Leerzeichen/Punkt am
+ * Ende, bewusst nicht behoben - Stabilität hat Vorrang): GTK-seitig bleibt
+ * die Zeile "expandiert" (der Expander-Pfeil ist schon umgeschaltet, bevor
+ * dieser Handler überhaupt läuft) - mit der (nie entfernten) Dummy-Zeile als
  * einzigem sichtbaren Kind. Dieses Dummy-Kind hat bewusst KEIN
  * SondTVFMItem (Spalte 0 bleibt NULL - dient nur dazu, den Expander-Pfeil
  * anzuzeigen, bevor die echten Kinder geladen sind); beim Rendern dieser
- * jetzt sichtbaren Zeile liefen deshalb dauerhaft "Keine Objekt im
+ * sichtbaren Zeile liefen deshalb dauerhaft "Keine Objekt im
  * Baum"/"Kein SondTVFMItem"-Warnungen aus den Cell-Renderern auf - auch
- * beim bloßen Vorbeiscrollen an dieser Zeile, ohne dass das ursächliche
- * Verzeichnis selbst je wieder angeklickt wurde. Separat gefundener,
- * unabhängiger Leak auf demselben Fehlerpfad: stvfm_item (oben per
- * gtk_tree_model_get() gereffet) wurde nie wieder unreffed. */
+ * beim bloßen Vorbeiscrollen an dieser Zeile. Deshalb wird die Zeile
+ * wieder eingeklappt. stvfm_item (oben per gtk_tree_model_get() gereffet)
+ * wird auf diesem Fehlerpfad wieder unreffed. */
 static gboolean row_expand_failed_collapse_idle(gpointer data) {
 	GtkTreeView *tree_view = ((gpointer *) data)[0];
 	GtkTreePath *path = ((gpointer *) data)[1];
@@ -2512,8 +2491,7 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 
 		/* error kann NULL sein, wenn der Fehlerpfad (z.B. ein
 		 * g_return_val_if_fail() tiefer im Aufrufbaum) keinen GError setzt -
-		 * error->message wäre dann ein Absturz statt nur einer fehlenden
-		 * Fehlermeldung (Absturz-Untersuchung 09/2026). */
+		 * Fehlermeldung). */
 		display_message(SOND_GET_TOPLEVEL(tree_view),
 				"Zeile konnte nicht expandiert werden\n\n",
 				error ? error->message : "(keine Fehlermeldung verfügbar)",
@@ -2521,7 +2499,7 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		if (error)
 			g_error_free(error);
 
-		/* S. ausführlichen Doc-Kommentar oben (18.09.2026) - Zeile wieder
+		/* S. ausführlichen Doc-Kommentar oben - Zeile wieder
 		 * einklappen statt sie mit sichtbarer, item-loser Dummy-Zeile
 		 * "expandiert" zu belassen. */
 		idle_data = g_new0(gpointer, 2);
@@ -2673,15 +2651,10 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 		return SOND_INDEX_STATUS_NONE;
 
 	/* Section (Anbindung o.ä.): komplett an die Unterklasse delegiert.
-	 * Nutzer-Einwand 16.09.2026: früher lieferte die Unterklasse hier nur
-	 * zwei Ints (von_seite/bis_seite), die DIESE Basisklasse dann selbst
-	 * als PDF-artigen Seitenbereich interpretierte und an
-	 * sond_index_ctx_get_file_status() weiterreichte - eine Vermischung,
-	 * da "Section = Seitenbereich" eine zond/PDF-spezifische Annahme ist
-	 * (bei zond zufällig immer zutreffend), die die generische
-	 * Basisklasse nicht voraussetzen darf (s. ausführlichen Kommentar an
-	 * get_section_index_status(), sond_treeviewfm.h). Die Unterklasse
-	 * bekommt jetzt den bereits ermittelten index_ctx übergeben und
+	 * "Section = Seitenbereich" ist eine zond/PDF-spezifische Annahme, die
+	 * die generische Basisklasse nicht voraussetzen darf (s. ausführlichen
+	 * Kommentar an get_section_index_status(), sond_treeviewfm.h). Die
+	 * Unterklasse bekommt den bereits ermittelten index_ctx übergeben und
 	 * liefert den fertigen Status direkt. */
 	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_index_status)
@@ -2702,36 +2675,32 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 		 * erst prüfen - sonst zeigt jede solche Datei dauerhaft "nicht
 		 * indiziert" an, obwohl sie nie indiziert werden wird.
 		 *
-		 * Nutzer-Fund 16.09.2026: der MIME-Typ wird jetzt bevorzugt vom
-		 * SondFilePart selbst geholt statt ihn hier ein zweites Mal (und
-		 * unzuverlässig) aus der Endung von coverage_path zu raten. Bei
-		 * einem SondFilePartLeaf ist das der beim Erzeugen per echtem
+		 * Der MIME-Typ wird bevorzugt vom SondFilePart selbst geholt statt
+		 * ihn aus der Endung von coverage_path zu raten. Bei einem
+		 * SondFilePartLeaf ist das der beim Erzeugen per echtem
 		 * Content-Sniffing ermittelte und gespeicherte Typ (s.
-		 * sond_file_part_create()). Betraf v.a. eingebettete
+		 * sond_file_part_create()). Das betrifft v.a. eingebettete
 		 * Container-Einträge ohne aussagekräftige Endung - z.B. einzelne
 		 * MIME-Parts einer E-Mail (eine HTML-Alternative, ein
 		 * Inline-Bild): deren "Pfad" ist ein interner, von der
 		 * MIME-Bibliothek vergebener Name ohne (oder mit irreführender)
-		 * Endung - der echte Typ ("text/html" etc.) steht aber längst auf
-		 * dem SondFilePartLeaf. PDF und GMessage (E-Mail) als LEAF (kein
+		 * Endung - der echte Typ ("text/html" etc.) steht aber auf dem
+		 * SondFilePartLeaf. PDF und GMessage (E-Mail) als LEAF (kein
 		 * Multipart/keine Einbettungen) sind unabhängig von der Endung
-		 * immer unterstützt - analog zur schon bestehenden PDF-Ausnahme,
-		 * jetzt auch für GMessage ergänzt. */
-		/* Message-Knoten einer E-Mail: eindeutig erkennbar wie schon in
-		 * zond_treeviewfm_item_get_fileparts() (Schritt 2, E-Mail-Coverage-
-		 * Redesign, 17.09.2026) - LEAF ohne path_or_section, dessen
-		 * sond_file_part derselbe wie der der ganzen eml ist (kein eigener
-		 * Mimepart-Kind-sfp). coverage_path ist dafür bewusst der BARE
-		 * Dateiname ("mail.eml", s. sond_treeviewfm_get_coverage_path()) -
-		 * der Header wird aber seit Schritt 3 gezielt unter
-		 * "mail.eml//header" abgedeckt, nicht unter "mail.eml" selbst.
-		 * Badge zeigt FULL, wenn ENTWEDER der Header gezielt indiziert ist
-		 * ODER die ganze Mail als ein Block/per Collapse (Schritt 4)
-		 * unter "mail.eml" selbst abgedeckt ist - beides bedeutet "Header
-		 * ist durchsucht". Sonst der jeweils bessere Teilstatus (NONE <
-		 * PARTIAL < FULL), damit ein begonnener, aber noch nicht
-		 * abgeschlossener Zustand nicht fälschlich als "gar nichts"
-		 * erscheint. */
+		 * immer unterstützt. */
+		/* Message-Knoten einer E-Mail: eindeutig erkennbar wie in
+		 * zond_treeviewfm_item_get_fileparts() - LEAF ohne path_or_section,
+		 * dessen sond_file_part derselbe wie der der ganzen eml ist (kein
+		 * eigener Mimepart-Kind-sfp). coverage_path ist dafür bewusst der
+		 * BARE Dateiname ("mail.eml", s. sond_treeviewfm_get_coverage_path()) -
+		 * der Header wird aber gezielt unter "mail.eml//header" abgedeckt,
+		 * nicht unter "mail.eml" selbst. Badge zeigt FULL, wenn ENTWEDER
+		 * der Header gezielt indiziert ist ODER die ganze Mail als ein
+		 * Block/per Collapse unter "mail.eml" selbst abgedeckt ist - beides
+		 * bedeutet "Header ist durchsucht". Sonst der jeweils bessere
+		 * Teilstatus (NONE < PARTIAL < FULL), damit ein begonnener, aber
+		 * noch nicht abgeschlossener Zustand nicht fälschlich als "gar
+		 * nichts" erscheint. */
 		if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF && !priv->path_or_section &&
 				SOND_IS_FILE_PART_GMESSAGE(priv->sond_file_part)) {
 			gchar *header_path = g_strconcat(coverage_path, "//header", NULL);
@@ -2793,23 +2762,15 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 		/* Dateien (LEAF) und Filesystem-Verzeichnisse erhalten Overlay-Icons.
 		 *
-		 * Nutzer-Fund 18.09.2026: eine als "immer verfügbar" (gepinnt)
-		 * markierte .eml bekam selbst das grüne Badge, ihre Mime-Parts
-		 * (Anhänge/Inline-Teile, als eigene LEAF-Kindzeilen mit
-		 * sond_file_part_get_parent() != NULL dargestellt) aber nicht.
-		 * Ursache: hier wurde bisher per !sond_file_part_get_parent(...)
-		 * genau auf Top-Level-Objekte ohne Parent eingeschränkt - Mime-
-		 * Parts (und ebenso ZIP-Einträge, PDF-Seiten als eigene Zeilen
-		 * usw.) fielen dadurch grundsätzlich raus. Der SeaDrive-Pin-/
-		 * Hydrierungsstatus gehört aber zur realen Datei im Dateisystem,
-		 * nicht zum einzelnen (virtuellen) Teil - alle Kinder EINER realen
-		 * Datei müssen also dasselbe Badge zeigen wie die Datei selbst.
-		 * Fix: statt die Top-Level-Bedingung zu prüfen, wird jetzt immer
-		 * zum obersten Vorfahren hochgelaufen (Schleife wie in
+		 * Der SeaDrive-Pin-/Hydrierungsstatus gehört zur realen Datei im
+		 * Dateisystem, nicht zum einzelnen (virtuellen) Teil - alle Kinder
+		 * EINER realen Datei (Mime-Parts, ZIP-Einträge, PDF-Seiten als
+		 * eigene Zeilen usw., mit sond_file_part_get_parent() != NULL)
+		 * müssen also dasselbe Badge zeigen wie die Datei selbst. Deshalb
+		 * wird immer zum obersten Vorfahren hochgelaufen (Schleife wie in
 		 * sond_file_part_get_filepart()/zond_treeview_get_seadrive_badge())
-		 * und dessen Pfad für den full_path/Hashtable-Lookup verwendet -
-		 * bei einem Top-Level-Objekt (kein Parent) macht die Schleife
-		 * nichts, verhält sich also für den bisherigen Fall unverändert. */
+		 * und dessen Pfad für den full_path/Hashtable-Lookup verwendet - bei
+		 * einem Top-Level-Objekt (kein Parent) macht die Schleife nichts. */
 		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
 				// stvfm_item_priv->sond_file_part && - überflüssig?!
 				//PDF mit children - Pagetree
@@ -2826,20 +2787,17 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			if (!stvfm_item_priv->sond_file_part) //DIR im Filesystem
 				rel = stvfm_item_priv->path_or_section;
 			else {
-				/* Nutzer-Fund 18.09.2026: "Die (virtuellen) Verzeichnisse
-				 * in einem Container (zip-Verzeichnis, multipart) werden
-				 * nicht mit badge markiert." - der bisherige zusätzliche
-				 * !path_or_section-Check schloss genau diesen Fall aus:
-				 * ein bereits aufgeklapptes ZIP-Unterverzeichnis oder ein
+				/* Auch die (virtuellen) Verzeichnisse in einem Container
+				 * (ZIP-Verzeichnis, Multipart) bekommen das Badge: ein
+				 * bereits aufgeklapptes ZIP-Unterverzeichnis oder ein
 				 * Multipart-Verzeichnis einer E-Mail hat sond_file_part
 				 * (dasselbe Objekt wie das Container-Top-Level-Item) UND
 				 * path_or_section (den internen Pfad/die Kennung
 				 * innerhalb des Containers) gesetzt - beides sind aber
 				 * virtuelle Ansichten EINER realen Datei, für die
 				 * genauso das Badge der realen Datei gelten muss (s.
-				 * Mime-Part-Fix oben, gleicher Tag). Deshalb jetzt ohne
-				 * die path_or_section-Bedingung immer zum obersten
-				 * Vorfahren hochgelaufen. */
+				 * Mime-Part-Kommentar oben). Deshalb immer zum obersten
+				 * Vorfahren hochlaufen. */
 				SondFilePart *top = stvfm_item_priv->sond_file_part;
 
 				while (sond_file_part_get_parent(top))
@@ -2858,8 +2816,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 				/* Reiner Hashtable-Lookup statt live GetFileAttributesW -
 				 * der Watcher hält seadrive_file_badges ohnehin schon
 				 * aktuell (Konsistenz mit dir_status, das schon vorher aus
-				 * der Hashtable las - Untersuchung "Ordner-Badges",
-				 * 09/2026). */
+				 * der Hashtable las). */
 				seadrive_badge = sond_treeviewfm_seadrive_get_file_badge(
 						stvfm, full_path);
 			} else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
@@ -2913,8 +2870,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	 * Pixelgroesse (s. sond_icon_util_renderer_get_size()) zuverlässig
 	 * funktioniert. Dateien fielen das vorher nicht auf, weil sie fast
 	 * immer schon ein Overlay-Badge hatten und damit ohnehin über
-	 * render_with_overlays liefen (Untersuchung "Ordner ohne Icon",
-	 * 09/2026). */
+	 * render_with_overlays liefen. */
 	{
 		SondIconOverlay overlays[3];
 		guint n_overlays = 0;
@@ -2954,8 +2910,8 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			}
 		}
 
-		/* Attachment-Badge oben rechts (16.09.2026, Nutzerwunsch: Attachment/
-		 * Inline im Baum unterscheidbar machen) - unabhängig von DIR/LEAF,
+		/* Attachment-Badge oben rechts (Attachment/Inline im Baum
+		 * unterscheidbar) - unabhängig von DIR/LEAF,
 		 * da ein Attachment je nach Inhalt auch ein Container (ZIP/PDF/
 		 * verschachtelte E-Mail, dann als DIR dargestellt) sein kann; das
 		 * Attribut hängt am sond_file_part selbst (s. Doc-Kommentar an
@@ -3074,13 +3030,10 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher_async(stvfm);
 	/* Setzt Zähler zurück und leert (im Hintergrund, s. dortigen
-	 * ausführlichen Kommentar zum "Schließen dauert 20 Sek."-Fund
-	 * 18.09.2026) die vier SeaDrive-Ground-Truth-Hashtables - MUSS hier
-	 * passieren, sonst bleiben Pfade/Zähler einer vorigen Projekt-Session
-	 * stehen und verfälschen die Anzeige beim nächsten Öffnen desselben
-	 * Projekts. Jetzt in sond_seadrive.c (Refactoring 18.09.2026, "in
-	 * _treeviewfm.c sind auch Funktionen, die in sond_treeviewfm_seadrive
-	 * gehören"). */
+	 * ausführlichen Kommentar) die vier SeaDrive-Ground-Truth-Hashtables -
+	 * MUSS hier passieren, sonst bleiben Pfade/Zähler einer vorigen
+	 * Projekt-Session stehen und verfälschen die Anzeige beim nächsten
+	 * Öffnen desselben Projekts. Implementiert in sond_seadrive.c. */
 	sond_seadrive_reset_ground_truth(stvfm);
 #endif
 

@@ -277,7 +277,7 @@ static char const* mime_type_to_icon_name_manual(const char *mime_type)
         // Text
         {"text/plain", "text-x-generic"},
         {"text/html", "text-html"},
-        {"text/xml", "text-x-generic"}, //"text-xml" existiert nicht in jedem Icon-Theme (Nutzer-Fund 28.09.2026, Warnung sond_icon_util_load_pixbuf) - "text-x-generic" ist der bereits als Fallback genutzte, garantiert vorhandene Name
+        {"text/xml", "text-x-generic"}, //"text-xml" existiert nicht in jedem Icon-Theme (Warnung sond_icon_util_load_pixbuf) - "text-x-generic" ist der bereits als Fallback genutzte, garantiert vorhandene Name
 
         // Code
         {"text/x-c", "text-x-script"},
@@ -377,17 +377,16 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		else if (SOND_IS_FILE_PART_ZIP(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 
-			/* Nutzer-Fund 16.09.2026: für path_or_section == NULL (das
-			 * ZIP-File selbst, noch nicht hineinexpandiert) NICHT
-			 * load_zip_dir() aufrufen - das erzwingt über
-			 * sond_file_part_zip_list_dir() beim allerersten Zugriff auf
-			 * dieses Archiv den kompletten dir_index-Aufbau (ALLE
-			 * Einträge, alle Ebenen, s. sfp_zip_build_dir_index()), nur
-			 * um zu prüfen ob überhaupt ein Eintrag existiert. Bei
-			 * großen Archiven (mehrere Tausend Einträge) macht allein
-			 * das bloße AUFLISTEN eines Verzeichnisses mit mehreren
+			/* Für path_or_section == NULL (das ZIP-File selbst, noch nicht
+			 * hineinexpandiert) NICHT load_zip_dir() aufrufen - das
+			 * erzwingt über sond_file_part_zip_list_dir() beim allerersten
+			 * Zugriff auf dieses Archiv den kompletten dir_index-Aufbau
+			 * (ALLE Einträge, alle Ebenen, s. sfp_zip_build_dir_index()),
+			 * nur um zu prüfen ob überhaupt ein Eintrag existiert. Bei
+			 * großen Archiven (mehrere Tausend Einträge) macht allein das
+			 * bloße AUFLISTEN eines Verzeichnisses mit mehreren
 			 * ZIP-Dateien darin (noch ohne sie zu öffnen) spürbar Zeit
-			 * aus. Stattdessen die von sond_file_part_zip_test_for_files()
+			 * aus. Stattdessen das von sond_file_part_zip_test_for_files()
 			 * (läuft schon in sond_file_part_create_from_mime_type() beim
 			 * Erzeugen des SondFilePart) günstig gesetzte has_children-
 			 * Flag wiederverwenden - analog zum PDF/GMessage-Zweig oben.
@@ -399,14 +398,12 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 				stvfm_item_priv->has_children =
 						sond_file_part_get_has_children(sond_file_part);
 			else
-				/* Nutzer-Fund 16.09.2026: Rückgabewert ist -1 (Fehler), 0
-				 * (keine Kinder) oder 1 (Kinder) - der frühere Vergleich
-				 * "? TRUE : FALSE" wertete auch -1 (Fehler, z.B. defektes/
-				 * pfadloses sond_file_part nach fehlerhafter Kopie aus
-				 * einem Container) fälschlich als "hat Kinder", wodurch ein
-				 * Dummy-Kind eingefügt wurde, obwohl das Verzeichnis beim
-				 * echten Aufklappen dann mit einer Fehlermeldung
-				 * fehlschlägt. Jetzt: nur 1 zählt als "hat Kinder". */
+				/* Rückgabewert ist -1 (Fehler), 0 (keine Kinder) oder 1
+				 * (Kinder): nur 1 zählt als "hat Kinder". -1 (z.B. defektes/
+				 * pfadloses sond_file_part nach fehlerhafter Kopie aus einem
+				 * Container) würde sonst ein Dummy-Kind einfügen, obwohl das
+				 * Verzeichnis beim echten Aufklappen mit einer Fehlermeldung
+				 * fehlschlägt. */
 				stvfm_item_priv->has_children =
 						(sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL, NULL) == 1) ?
 								TRUE : FALSE;
@@ -611,13 +608,12 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		SondZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
-		/* Nutzer-Fund 16.09.2026: Bei großen Archiven (>30000 Einträge)
-		 * lief diese Schleife bisher komplett unbeobachtbar und
-		 * unabbrechbar durch (jede Iteration ruft sond_file_part_create()
-		 * auf, das per libmagic den MIME-Typ sniffed - je nach Puffergröße
-		 * spürbar Zeit pro Eintrag). progress ist rein lesend eingesetzt:
-		 * Abbruch hier verwirft nur noch nicht geladene Kinder, keine
-		 * Rollback-Problematik (im Unterschied zu SondProcessFileCtx). */
+		/* Bei großen Archiven (>30000 Einträge) läuft diese Schleife lange
+		 * (jede Iteration ruft sond_file_part_create() auf, das per libmagic
+		 * den MIME-Typ sniffed). Deshalb Fortschritt und Abbruch: progress
+		 * ist rein lesend eingesetzt, Abbruch verwirft nur noch nicht
+		 * geladene Kinder, keine Rollback-Problematik (im Unterschied zu
+		 * SondProcessFileCtx). */
 		if (progress && (i % 200) == 0) {
 			if (progress->progress_func)
 				progress->progress_func(progress->progress_func_data, NULL);
@@ -689,7 +685,7 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 				sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp, NULL);
 
 		/* Pfad des Kindes ist die Adresse (ggf. der Schlüssel im
-		 * Namensbaum), angezeigt wird der Dateiname (ToDo.c #193) */
+		 * Namensbaum), angezeigt wird der Dateiname */
 		{
 			SondTVFMItemPrivate* child_priv =
 					sond_tvfm_item_get_instance_private(stvfm_item_child);
@@ -766,13 +762,11 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 			GMimeContentDisposition* disp = NULL;
 			gboolean is_attachment = FALSE;
 
-			/* Content-Disposition unabhängig vom konkreten GMime-Typ einmal
-			 * einheitlich lesen (Nutzerwunsch 16.09.2026: Attachment/Inline
-			 * im Baum unterscheidbar machen) - vorher wurde disp nur im
-			 * GMimeMessagePart-Zweig (für den Dateinamen) geholt, im
-			 * GMIME_IS_PART-Zweig lieferte das schon g_mime_part_get_filename()
-			 * intern mit, der Disposition-WERT selbst ("attachment"/"inline")
-			 * aber nirgends. */
+			/* Content-Disposition unabhängig vom konkreten GMime-Typ
+			 * einheitlich einmal lesen, damit Attachment/Inline im Baum
+			 * unterscheidbar sind (der Disposition-WERT "attachment"/
+			 * "inline" steht nur hier, nicht schon in
+			 * g_mime_part_get_filename()). */
 			disp = g_mime_object_get_content_disposition(mime_child);
 			if (disp) {
 				gchar const* dval = g_mime_content_disposition_get_disposition(disp);
@@ -1033,7 +1027,7 @@ gint sond_tvfm_item_delete(SondTVFMItem* stvfm_item, GError** error) {
  * rohen Bytes über sond_file_part_copy(), wie beim normalen Datei-Kopieren
  * aus einem Container ins Filesystem) - NICHT in ihre interne Struktur
  * (PageTree, Anhänge etc.) aufgelöst; das entspricht dem, was der Nutzer
- * beim Herauskopieren erwartet (Nutzer-Entscheidung, 16.09.2026). Kriterium
+ * beim Herauskopieren erwartet. Kriterium
  * dafür: ein Kind zählt nur dann als "echtes" Unterverzeichnis desselben
  * Archivs (und wird rekursiv weiter aufgeschlüsselt), wenn es denselben
  * SondFilePart wie der Quellknoten trägt (s. sond_tvfm_item_load_zip_dir():
@@ -1084,7 +1078,7 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 		 * die gesamte PDF/E-Mail-Datei unter dem Namen 'PageTree'/
 		 * 'Message' duplizieren - daher hier klar als (noch) nicht
 		 * unterstützt abgebrochen, statt ein falsches Ergebnis zu
-		 * erzeugen (Nutzeranfrage betraf nur ZIP, 16.09.2026). */
+		 * erzeugen. */
 		if (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part
 				&& child_priv->type != SOND_TVFM_ITEM_TYPE_DIR) {
 			g_set_error(error, SOND_ERROR, 0,
