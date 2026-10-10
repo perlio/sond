@@ -494,3 +494,24 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
    sond_process_fileparts (~200). Keine automatischen Tests im Repository:
    sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
    aus dem Review liegen nur im Scratchpad).
+
+## Befehl "Dauerhaft entsperren" (10.10.2026)
+
+```text
+ #221 Kontextmenübefehl "Dauerhaft entsperren" für passwortgeschützte ZIP-
+ Einträge und PDFs (Variante A: die Datei wird an Ort und Stelle ersetzt, ohne
+ Sicherung). Nach dem Entsperren ist die Datei nicht mehr verschlüsselt und
+ verliert das Schloss-Badge.
+ - Bestätigungsdialog, der klar sagt, daß der Passwortschutz entfällt.
+ - Auf einem ZIP-Eintrag: nur dieser Eintrag. Auf dem ZIP selbst: alle Einträge,
+   deren Passwort bekannt ist. Das ZIP wird dafür einmal neu geschrieben.
+ - PDF: wird ohne Verschlüsselung gespeichert (PDF_ENCRYPT_NONE).
+ - PDF in einem verschlüsselten ZIP-Eintrag: beide Schichten getrennt
+   (Eintrag und PDF-Passwort), jeweils einzeln entsperrbar.
+ - Pfad und Anbindungen bleiben erhalten. Der Index hängt nicht vom
+   Zeitstempel ab (coverage u. ä.), eine Neuindizierung ist nicht nötig.
+ - PDF-Berechtigungsbits werden nicht beachtet.
+ Voraussetzung: das Passwort muß bekannt sein (Passwort-Cache und
+ Entsperr-Zustand, noch nicht gebaut). Bisher gebaut: nur die Anzeige
+ gesperrter ZIP-Einträge mit Schloss (HISTORY.md, 10.10.2026).
+```

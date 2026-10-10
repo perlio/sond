@@ -5307,3 +5307,48 @@ Nur Syntaxprüfung; der Cursor selbst ist nur in der Oberfläche prüfbar.
  Der Cursor zeigt nur, daß gearbeitet wird; die Oberfläche reagiert währenddessen
  weiter nicht und es gibt keinen Abbrechen-Button (s. TODO.md #220).
 ```
+
+## Verschlüsselte ZIP-Einträge anzeigen, Ordner in ZIP, Mail-Anhang-Typen (10.10.2026)
+
+Commit 1f14e64. Getestet mit Testprojekt: zipcrypto.zip (ZipCrypto), sub38.zip
+(AES-256), problematisch.zip, Mail mit sub38.zip als Anhang.
+
+```text
+ - Mail-Anhänge: sond_tvfm_item_load_gmessage_dir() übernahm den im Header
+   deklarierten Typ; sond_file_part_create_from_mime_type() kannte nur
+   "application/zip". Ein als application/x-zip-compressed deklariertes ZIP
+   wurde deshalb als normale Datei angelegt (kein Pfeil, Icon "sonstige
+   Datei"). Jetzt: Aliasse (x-zip-compressed, x-zip, x-pdf) werden auf zip/pdf
+   abgebildet; bei application/octet-stream wird der Inhalt untersucht
+   (sond_file_part_create()). Kein zusätzlicher Dateizugriff auf die .eml.
+ - Verschlüsselte ZIP-Einträge (ZipCrypto, AES) verschwanden beim Aufklappen,
+   weil sond_file_part_create() die ersten 2 KB lesen wollte ("No password
+   provided") und der Fehler nur geloggt wurde. Jetzt: sfp_zip_build_dir_index()
+   liest per zip_stat_index() die Verschlüsselungsmethode (nur Central
+   Directory, SondZipDirEntry.encrypted); sond_tvfm_item_load_zip_dir() legt
+   solche Einträge als Leaf nach Endung an und markiert sie mit
+   SondFilePart.is_locked. Schloss-Badge oben links
+   (sond_icon_util_locked_badge_pixbuf(), Theme-Symbol changes-prevent-symbolic).
+   Beim Verschieben im Archiv wird das Flag auf das neue SondFilePart
+   übernommen. Aktionen auf gesperrte Einträge (Anbinden, Index, OCR, Viewer,
+   Export, Kopieren) sind noch unverändert und scheitern wie bisher.
+ - ZIP-Verzeichnisse: Umbenennen und Verschieben im selben Archiv
+   (sond_file_part_zip_rename_dir(), benennt alle Einträge unterhalb samt
+   Ordnereintrag um, ein Neuschreiben des Archivs); Anlegen von Ordnern
+   (sond_file_part_zip_mkdir(), "Neues Verzeichnis", bei Namensgleichheit
+   " (n)"). Kein Passwort nötig, verschlüsselte Einträge bleiben unverändert
+   (mit ZipCrypto und AES-256 geprüft; 7z t ohne Fehler). Verschieben in ein
+   anderes Archiv oder ins Dateisystem bleibt nicht unterstützt.
+ - Einfügen im Baum: ein ZIP-Verzeichnis im selben Archiv behält sein
+   SondFilePart (kein Klon). Der alte Pfad wird vor dem Verschieben gesichert,
+   damit adjust_sfps_in_dir() Pfade geöffneter Einträge nachführt - dadurch
+   werden jetzt auch beim Verschieben von Dateisystem-Ordnern die Pfade
+   geöffneter Dateien darunter nachgeführt.
+ - Fix: sond_tvfm_item_set_basename() setzte bei verschachtelten Ordnern einen
+   falschen Pfad (a/b -> a/c ergab a/a/c). Die Funktion entfällt, rename setzt
+   path_or_section direkt auf den vollen neuen Pfad.
+ - Fix: "Punkt einfügen - Gleiche Ebene" (sond_treeviewfm_create_dir()) las
+   das Element des Cursors statt dessen Elternelement. Auf einer Datei geschah
+   nichts, auf einem Ordner entstand der neue Ordner im markierten Ordner, im
+   Baum aber als Geschwister. Gilt auch im Dateisystem.
+```
