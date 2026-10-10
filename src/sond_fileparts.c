@@ -54,6 +54,8 @@ typedef struct {
 	gboolean has_children;
 	/* s. Doc-Kommentar an sond_file_part_get_is_attachment() (sond_fileparts.h) */
 	gboolean is_attachment;
+	/* s. Doc-Kommentar an sond_file_part_get_is_locked() (sond_fileparts.h) */
+	gboolean is_locked;
 } SondFilePartPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
@@ -190,6 +192,13 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	//NULL ist erlaubt (z.B. leere Datei ohne erkennbaren Typ) und wird wie
 	//sond_file_part_create_leaf() auf application/octet-stream abgebildet
 	mime_type = mime_type ? mime_type : "application/octet-stream";
+
+	//von Mailprogrammen gesetzte Aliasse auf den Standardtyp abbilden
+	if (!g_strcmp0(mime_type, "application/x-zip-compressed") ||
+			!g_strcmp0(mime_type, "application/x-zip"))
+		mime_type = "application/zip";
+	else if (!g_strcmp0(mime_type, "application/x-pdf"))
+		mime_type = "application/pdf";
 
 	if (!g_strcmp0(mime_type, "application/pdf"))
 		type = SOND_TYPE_FILE_PART_PDF;
@@ -367,6 +376,28 @@ void sond_file_part_set_is_attachment(SondFilePart *sfp, gboolean is_attachment)
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	sfp_priv->is_attachment = is_attachment;
+
+	return;
+}
+
+gboolean sond_file_part_get_is_locked(SondFilePart *sfp) {
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_val_if_fail(sfp, FALSE);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	return sfp_priv->is_locked;
+}
+
+void sond_file_part_set_is_locked(SondFilePart *sfp, gboolean is_locked) {
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_if_fail(sfp);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	sfp_priv->is_locked = is_locked;
 
 	return;
 }
@@ -1389,6 +1420,7 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 	for (zip_int64_t i = 0; i < num_entries; i++) {
 		gchar const* name = zip_get_name(archive, (zip_uint64_t) i, ZIP_FL_ENC_UTF_8);
 		gboolean ends_with_slash = FALSE;
+		gboolean encrypted = FALSE;
 		gsize clean_len = 0;
 		gsize pos = 0;
 
@@ -1397,6 +1429,15 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 
 		ends_with_slash = (name[strlen(name) - 1] == '/');
 		clean_len = ends_with_slash ? strlen(name) - 1 : strlen(name);
+
+		//nur Metadaten aus dem Central Directory, kein Zugriff auf den Inhalt
+		if (!ends_with_slash) {
+			zip_stat_t zstat = { 0 };
+
+			encrypted = (zip_stat_index(archive, (zip_uint64_t) i, 0, &zstat) == 0
+					&& (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD)
+					&& zstat.encryption_method != ZIP_EM_NONE);
+		}
 
 		while (pos < clean_len) {
 			gchar const* rest = name + pos;
@@ -1424,6 +1465,7 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 
 				e->path = g_strdup(child_path);
 				e->is_dir = child_is_dir;
+				e->encrypted = is_last_component && !child_is_dir && encrypted;
 
 				bucket = g_hash_table_lookup(index, parent_prefix);
 				if (!bucket) {
@@ -1817,6 +1859,182 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 	sond_file_part_zip_invalidate_dir_index(sfp_zip);
 
 	return 0;
+}
+
+/* Benennt ein Verzeichnis im Archiv um (alle Einträge unterhalb samt dem
+ * Verzeichniseintrag selbst). Nur die Namen ändern sich; verschlüsselte
+ * Einträge werden dabei nicht gelesen. */
+gint sond_file_part_zip_rename_dir(SondFilePartZip* sfp_zip,
+		gchar const* path_old, gchar const* path_new, GError** error) {
+	zip_t* archive = NULL;
+	zip_source_t* src = NULL;
+	zip_int64_t num_entries = 0;
+	gsize len_old = 0;
+	guint count = 0;
+	gint rc = 0;
+	g_autofree gchar* prefix_old = NULL;
+	g_autofree gchar* prefix_new = NULL;
+
+	g_return_val_if_fail(sfp_zip, -1);
+	g_return_val_if_fail(path_old && path_new, -1);
+
+	prefix_old = g_strconcat(path_old, "/", NULL);
+	prefix_new = g_strconcat(path_new, "/", NULL);
+	len_old = strlen(prefix_old);
+
+	//Verschieben in sich selbst
+	if (g_str_has_prefix(prefix_new, prefix_old)) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+				"%s\nVerzeichnis kann nicht in sich selbst verschoben werden",
+				__func__);
+		return -1;
+	}
+
+	archive = sond_file_part_zip_open_archive(sfp_zip, TRUE, &src, error);
+	if (!archive)
+		return -1;
+
+	num_entries = zip_get_num_entries(archive, 0);
+
+	//Ziel darf noch nicht vorhanden sein (weder als Datei noch als Verzeichnis)
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const* name = zip_get_name(archive, (zip_uint64_t) i,
+				ZIP_FL_ENC_UTF_8);
+
+		if (name && (!g_strcmp0(name, path_new) ||
+				g_str_has_prefix(name, prefix_new))) {
+			zip_source_free(src);
+			zip_discard(archive);
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+					"%s\n'%s' existiert bereits im ZIP-Archiv", __func__,
+					path_new);
+			return -1;
+		}
+	}
+
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const* name = zip_get_name(archive, (zip_uint64_t) i,
+				ZIP_FL_ENC_UTF_8);
+		g_autofree gchar* name_new = NULL;
+
+		if (!name || !g_str_has_prefix(name, prefix_old))
+			continue;
+
+		name_new = g_strconcat(prefix_new, name + len_old, NULL);
+		if (zip_file_rename(archive, (zip_uint64_t) i, name_new,
+				ZIP_FL_ENC_UTF_8) != 0) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nzip_file_rename('%s'): %s", __func__, name,
+					zip_error_strerror(zip_get_error(archive)));
+			zip_source_free(src);
+			zip_discard(archive);
+			return -1;
+		}
+		count++;
+	}
+
+	if (count == 0) {
+		zip_source_free(src);
+		zip_discard(archive);
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nVerzeichnis '%s' nicht im ZIP-Archiv gefunden", __func__,
+				path_old);
+		return -1;
+	}
+
+	GBytes* bytes_out = sond_file_part_zip_archive_to_bytes_with_src(archive, src, error);
+	zip_source_free(src); /* extra ref freigeben */
+	if (!bytes_out)
+		return -1;
+
+	rc = sond_file_part_replace(SOND_FILE_PART(sfp_zip), bytes_out, error);
+	g_bytes_unref(bytes_out);
+	if (rc)
+		return -1;
+
+	//s. Kommentar in sond_file_part_zip_mod_zip_file()
+	sond_file_part_zip_invalidate_dir_index(sfp_zip);
+
+	return 0;
+}
+
+/* Legt im Archiv ein leeres Verzeichnis an: dir_parent/base (dir_parent NULL =
+ * Archivwurzel), bei Namensgleichheit mit " (n)". Liefert den vollen Pfad des
+ * neuen Verzeichnisses (ohne abschließendes '/'). */
+gint sond_file_part_zip_mkdir(SondFilePartZip* sfp_zip, gchar const* dir_parent,
+		gchar const* base, gchar** path_new, GError** error) {
+	zip_t* archive = NULL;
+	zip_source_t* src = NULL;
+	zip_int64_t num_entries = 0;
+	guint max_tries = 100;
+
+	g_return_val_if_fail(sfp_zip, -1);
+	g_return_val_if_fail(base && path_new, -1);
+
+	archive = sond_file_part_zip_open_archive(sfp_zip, TRUE, &src, error);
+	if (!archive)
+		return -1;
+
+	num_entries = zip_get_num_entries(archive, 0);
+
+	for (guint n = 0; n <= max_tries; n++) {
+		g_autofree gchar* trial_base = (n == 0) ? g_strdup(base) :
+				g_strdup_printf("%s (%u)", base, n);
+		g_autofree gchar* trial = dir_parent ?
+				g_strconcat(dir_parent, "/", trial_base, NULL) :
+				g_strdup(trial_base);
+		g_autofree gchar* trial_prefix = g_strconcat(trial, "/", NULL);
+		gboolean exists = FALSE;
+		GBytes* bytes_out = NULL;
+		gint rc = 0;
+
+		//Name schon belegt - als Datei oder als (auch nur implizites) Verzeichnis
+		for (zip_int64_t i = 0; i < num_entries && !exists; i++) {
+			gchar const* name = zip_get_name(archive, (zip_uint64_t) i,
+					ZIP_FL_ENC_UTF_8);
+
+			exists = name && (!g_strcmp0(name, trial) ||
+					g_str_has_prefix(name, trial_prefix));
+		}
+		if (exists)
+			continue;
+
+		if (zip_dir_add(archive, trial_prefix, ZIP_FL_ENC_UTF_8) < 0) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nzip_dir_add('%s'): %s", __func__, trial_prefix,
+					zip_error_strerror(zip_get_error(archive)));
+			zip_source_free(src);
+			zip_discard(archive);
+			return -1;
+		}
+
+		bytes_out = sond_file_part_zip_archive_to_bytes_with_src(archive, src, error);
+		zip_source_free(src); /* extra ref freigeben */
+		if (!bytes_out)
+			return -1;
+
+		rc = sond_file_part_replace(SOND_FILE_PART(sfp_zip), bytes_out, error);
+		g_bytes_unref(bytes_out);
+		if (rc)
+			return -1;
+
+		//Archiv hat jetzt in jedem Fall mindestens einen Eintrag
+		sond_file_part_set_has_children(SOND_FILE_PART(sfp_zip), TRUE);
+
+		//s. Kommentar in sond_file_part_zip_mod_zip_file()
+		sond_file_part_zip_invalidate_dir_index(sfp_zip);
+
+		*path_new = g_strdup(trial);
+
+		return 0;
+	}
+
+	zip_source_free(src);
+	zip_discard(archive);
+	g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+			"%s\nKein eindeutiger Name nach %u Versuchen", __func__, max_tries);
+
+	return -1;
 }
 
 static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,

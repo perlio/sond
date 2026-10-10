@@ -83,6 +83,13 @@ gboolean sond_file_part_get_is_attachment(SondFilePart*);
 
 void sond_file_part_set_is_attachment(SondFilePart*, gboolean);
 
+/* Basisklassen-Attribut: Inhalt ist passwortgeschützt und ohne Passwort nicht
+ * lesbar (aktuell: verschlüsselter ZIP-Eintrag). Ein solcher sfp wird ohne
+ * Inhaltszugriff als Leaf angelegt (Typ nur aus der Endung). Default FALSE. */
+gboolean sond_file_part_get_is_locked(SondFilePart*);
+
+void sond_file_part_set_is_locked(SondFilePart*, gboolean);
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);
@@ -130,6 +137,18 @@ struct _SondFilePartZipClass {
 zip_t* sond_file_part_zip_open_archive(SondFilePartZip*, gboolean writeable,
 		zip_source_t**, GError**);
 
+/* Benennt das Verzeichnis path_old im Archiv in path_new um (beide ohne
+ * abschließendes '/'). G_IO_ERROR_EXISTS, wenn path_new schon vorhanden ist.
+ * Verschlüsselte Einträge werden nicht gelesen, kein Passwort nötig. */
+gint sond_file_part_zip_rename_dir(SondFilePartZip*, gchar const* path_old,
+		gchar const* path_new, GError**);
+
+/* Legt ein leeres Verzeichnis dir_parent/base im Archiv an (dir_parent NULL =
+ * Wurzel). Ist der Name belegt, wird " (n)" angehängt. *path_new: voller Pfad
+ * des neuen Verzeichnisses (ohne '/'), Freigabe durch Aufrufer. */
+gint sond_file_part_zip_mkdir(SondFilePartZip*, gchar const* dir_parent,
+		gchar const* base, gchar** path_new, GError**);
+
 /* Ein direktes Kind (Datei oder Unterverzeichnis) innerhalb eines ZIP-
  * Archivs, wie von sond_file_part_zip_list_dir() geliefert. path: bei
  * Verzeichnissen der volle Pfad inkl. abschließendem '/', sonst der volle
@@ -137,6 +156,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip*, gboolean writeable,
 typedef struct {
 	gchar* path;
 	gboolean is_dir;
+	gboolean encrypted; //Datei ist passwortgeschützt (laut Central Directory)
 } SondZipDirEntry;
 
 /* Liefert die direkten Kinder von prefix (ohne abschließendes '/', NULL =

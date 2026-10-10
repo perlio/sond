@@ -55,6 +55,11 @@ GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size)
  * im Fehlerfall). */
 GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size);
 
+/* Schloss-Badge für passwortgeschützte Einträge (s.
+ * sond_file_part_get_is_locked()); wie das Attachment-Badge ein Symbol aus
+ * dem Icon-Theme, NULL wenn das Theme es nicht kennt. */
+GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size);
+
 /* SeaDrive-Cloud-Status, per Cairo als einfacher, voll gefüllter Farbkreis
  * gezeichnet (wie SondIndexStatus) statt über Icon-Theme-Namen
  * ("view-refresh", "process-stop", "emblem-default") oder feinere Formen
@@ -114,7 +119,8 @@ GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status
 /* Ecke, in der ein Overlay-Icon auf dem Basis-Icon plaziert wird
  * (gdk_pixbuf_composite). Unten rechts steht der SeaDrive-Status, unten
  * links der Indizierungsstatus; TOP_RIGHT ist für das Attachment-Badge
- * (E-Mail-Mimeparts, s. sond_file_part_get_is_attachment()) da - unten wären
+ * (E-Mail-Mimeparts, s. sond_file_part_get_is_attachment()) da, TOP_LEFT für
+ * das Schloss (s. sond_file_part_get_is_locked()) - unten wären
  * beide Ecken für Dateien mit SeaDrive-Status UND Indizierungsstatus schon
  * belegt. */
 typedef enum {

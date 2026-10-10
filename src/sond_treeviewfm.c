@@ -770,11 +770,11 @@ static gint insert_dir_in_fs(SondTVFMItemPrivate* stvfm_item_priv,
 }
 
 static gint insert_dir_in_zip(SondTVFMItemPrivate* stvfm_item_priv, gboolean child,
-		gchar** base, GError** error) {
-	if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-			"Einfügen in ZIP noch nicht implementiert");
-
-	return -1;
+		gchar** path, GError** error) {
+	return sond_file_part_zip_mkdir(
+			SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
+			stvfm_item_priv->path_or_section, "Neues Verzeichnis", path, error) ?
+			-1 : 0;
 }
 
 static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
@@ -798,6 +798,9 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 			&iter))
 				stvfm_item_parent =
 						sond_tvfm_item_create(stvfm,  NULL, NULL); //Root
+		else //gleiche Ebene: das Elternelement des Cursors
+			gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+					&iter_parent, 0, &stvfm_item_parent, -1);
 	}
 
 	if (!stvfm_item_parent)
@@ -1191,6 +1194,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	SondTVFMItemPrivate* stvfm_item_new_priv = NULL;
 	SondFilePart* sfp_new = NULL;
 	gchar* path_new = NULL;
+	g_autofree gchar* path_old = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_priv(s_paste_sel->stvfm_item_parent);
@@ -1221,6 +1225,9 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 			if (!s_paste_sel->iter_parent)
 				return 0;
 	}
+
+	//Verschieben kann path_or_section des Quellelements auf den neuen Pfad setzen
+	path_old = g_strdup(stvfm_item_priv->path_or_section);
 
 	rc = process_stvfm_item_move_or_copy(stvfm_item,
 			s_paste_sel, clipboard->ausschneiden, error);
@@ -1271,7 +1278,14 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	 * NULL-sichere Zweig unten (sond_tvfm_item_create() mit
 	 * sond_file_part == NULL) übernimmt das korrekt. Alle anderen Fälle
 	 * (Dateien; Kopien innerhalb von ZIP/PDF/GMessage) bleiben unverändert. */
-	if (stvfm_item_priv->sond_file_part &&
+	/* ZIP-Verzeichnis im selben Archiv: keine neue Instanz, das Archiv ist
+	 * dasselbe sond_file_part, nur path_or_section ändert sich. */
+	if (stvfm_item_priv->sond_file_part && stvfm_item_priv->path_or_section &&
+			SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part) &&
+			stvfm_item_parent_priv->sond_file_part ==
+					stvfm_item_priv->sond_file_part)
+		sfp_new = g_object_ref(stvfm_item_priv->sond_file_part);
+	else if (stvfm_item_priv->sond_file_part &&
 			!(stvfm_item_priv->path_or_section &&
 					!stvfm_item_parent_priv->sond_file_part)) {
 		sfp_new = g_object_new(G_OBJECT_TYPE(stvfm_item_priv->sond_file_part), NULL);
@@ -1286,6 +1300,9 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 		sond_file_part_set_has_children(sfp_new,
 				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part));
+
+		sond_file_part_set_is_locked(sfp_new,
+				sond_file_part_get_is_locked(stvfm_item_priv->sond_file_part));
 
 		sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 	}
@@ -1304,10 +1321,10 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	stvfm_item_new_priv = sond_tvfm_item_get_priv(stvfm_item_new);
 
-	if (clipboard->ausschneiden && stvfm_item_priv->path_or_section) //stvfm_item ist jedenfalls ein DIR
+	if (clipboard->ausschneiden && path_old) //stvfm_item ist jedenfalls ein DIR
 		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
 				stvfm_item_parent_priv->sond_file_part,
-				stvfm_item_priv->path_or_section,
+				path_old,
 				path_new);
 
 	g_free(path_new);
@@ -2872,12 +2889,13 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	 * immer schon ein Overlay-Badge hatten und damit ohnehin über
 	 * render_with_overlays liefen. */
 	{
-		SondIconOverlay overlays[3];
+		SondIconOverlay overlays[4];
 		guint n_overlays = 0;
 		gint overlay_px = MAX(sond_icon_util_renderer_get_size(renderer) / 2, 8);
 		GdkPixbuf *seadrive_pb = NULL;
 		GdkPixbuf *index_pb = NULL;
 		GdkPixbuf *attachment_pb = NULL;
+		GdkPixbuf *locked_pb = NULL;
 
 		if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE) {
 			/* SeaDrive-Status unten rechts (einzelne Datei/Ordner selbst) */
@@ -2927,9 +2945,22 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			}
 		}
 
+		//Schloss oben links: Inhalt passwortgeschützt, nicht lesbar
+		if (stvfm_item_priv->sond_file_part &&
+				sond_file_part_get_is_locked(stvfm_item_priv->sond_file_part)) {
+			locked_pb = sond_icon_util_locked_badge_pixbuf(GTK_WIDGET(stvfm),
+					overlay_px);
+			if (locked_pb) {
+				overlays[n_overlays].pixbuf = locked_pb;
+				overlays[n_overlays].corner = SOND_ICON_CORNER_TOP_LEFT;
+				n_overlays++;
+			}
+		}
+
 		sond_icon_util_render_with_overlays(GTK_WIDGET(stvfm), renderer,
 				stvfm_item_priv->icon_name, overlays, n_overlays);
 
+		if (locked_pb) g_object_unref(locked_pb);
 		if (seadrive_pb) g_object_unref(seadrive_pb);
 		if (index_pb) g_object_unref(index_pb);
 		if (attachment_pb) g_object_unref(attachment_pb);

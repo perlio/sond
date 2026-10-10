@@ -112,6 +112,10 @@ GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size) 
 	return sond_icon_util_load_pixbuf(widget, "mail-attachment-symbolic", size);
 }
 
+GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size) {
+	return sond_icon_util_load_pixbuf(widget, "changes-prevent-symbolic", size);
+}
+
 gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {
 	gint icon_size = 0;
 	gint px = 0;

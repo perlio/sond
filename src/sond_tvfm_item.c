@@ -630,8 +630,19 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		} else {
 			SondFilePart* sfp_child = NULL;
 
-			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
-					e->path, error);
+			if (e->encrypted) {
+				//Inhalt nicht lesbar: Leaf nur nach Endung, als gesperrt markiert
+				sfp_child = sond_file_part_is_open(
+						stvfm_item_priv->sond_file_part, e->path);
+				if (!sfp_child)
+					sfp_child = sond_file_part_create_leaf(e->path,
+							stvfm_item_priv->sond_file_part,
+							mime_from_extension(e->path));
+				sond_file_part_set_is_locked(sfp_child, TRUE);
+			}
+			else
+				sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
+						e->path, error);
 
 			if (!sfp_child) {
 				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
@@ -781,6 +792,18 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 				filename = g_mime_content_disposition_get_parameter(disp, "filename");
 
 			sfp_child = sond_file_part_is_open(stvfm_item_priv->sond_file_part, path);
+			//deklarierter Typ ohne Aussage: Inhalt untersuchen
+			if (!sfp_child && !g_strcmp0(mime_string, "application/octet-stream")) {
+				GError* error_sniff = NULL;
+
+				sfp_child = sond_file_part_create(
+						stvfm_item_priv->sond_file_part, path, &error_sniff);
+				if (!sfp_child) {
+					LOG_WARN("%s: Typ von '%s' nicht ermittelbar: %s", __func__,
+							path, error_sniff ? error_sniff->message : "?");
+					g_clear_error(&error_sniff);
+				}
+			}
 			if (!sfp_child)
 				sfp_child = sond_file_part_create_from_mime_type(path,
 						stvfm_item_priv->sond_file_part, mime_string);
@@ -849,37 +872,6 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
-/**
- * Ändert stvfm_item_priv->path_or_section
- */
-static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
-		gchar const* new_basename) {
-	gchar const* path = NULL;
-	gchar const* dir = NULL;
-	gchar* path_new = NULL;
-
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (!stvfm_item_priv->path_or_section)
-		LOG_WARN("STVFMItem ist Leaf oder root-dir ('%s')",
-				sond_file_part_get_path(stvfm_item_priv->sond_file_part));
-
-	path = stvfm_item_priv->path_or_section;
-
-	dir = strrchr(path, '/');
-
-	if (!dir)
-		path_new = g_strdup(new_basename);
-	else
-		path_new = g_strdup_printf("%.*s/%s", (int)(dir - path), path, new_basename);
-
-	g_free(stvfm_item_priv->path_or_section);
-	stvfm_item_priv->path_or_section = g_strdup(path_new);
-
-	return;
-}
-
 gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base_new,
 		GError** error) {
@@ -909,14 +901,28 @@ gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
 			if (!sond_rename(stvfm_item_priv->path_or_section, path_new, error))
 				return -1;
 
-			sond_tvfm_item_set_basename(stvfm_item, path_new);
+			//path_new ist der volle neue Pfad (Eltern + Name)
+			g_free(stvfm_item_priv->path_or_section);
+			stvfm_item_priv->path_or_section = g_strdup(path_new);
 		}
 		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			//ToDo: zip-Verzeichnis-Namen ändern
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nrename zip-dir noch nicht implementiert", __func__);
+			//nur innerhalb desselben Archivs
+			if (stvfm_item_parent_priv->sond_file_part !=
+					stvfm_item_priv->sond_file_part) {
+				if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+						"%s\nVerzeichnis kann nur innerhalb desselben "
+						"ZIP-Archivs umbenannt bzw. verschoben werden", __func__);
 
-			return -1;
+				return -1;
+			}
+
+			if (sond_file_part_zip_rename_dir(
+					SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
+					stvfm_item_priv->path_or_section, path_new, error))
+				return -1;
+
+			g_free(stvfm_item_priv->path_or_section);
+			stvfm_item_priv->path_or_section = g_strdup(path_new);
 		}
 		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
 			//ToDo: Multipart umbenennen
@@ -1273,6 +1279,7 @@ gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 		gint index_to, GError** error) {
 	gint rc = 0;
 	gint res = 0;
+	gboolean in_place = FALSE;
 	gpointer ctx = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
@@ -1301,14 +1308,23 @@ gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 	if (res)
 		return -1;
 
+	//ZIP-Verzeichnis: trägt das sfp des Archivs selbst, nicht eines eigenen
+	//Eintrags - Umbenennen, wenn das Ziel im selben Archiv liegt
+	if (stvfm_item_priv->path_or_section && stvfm_item_priv->sond_file_part &&
+			SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part))
+		in_place = (stvfm_item_parent_priv->sond_file_part ==
+				stvfm_item_priv->sond_file_part);
 	//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
-	if (stvfm_item_parent_priv->sond_file_part ==
-			sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
-			!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
-			//außer wenn PageTree
-			!(stvfm_item_priv->sond_file_part &&
-					SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
+	else
+		in_place = stvfm_item_parent_priv->sond_file_part ==
+				sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
+				!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
+				//außer wenn PageTree
+				!(stvfm_item_priv->sond_file_part &&
+						SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+						sond_file_part_get_has_children(stvfm_item_priv->sond_file_part));
+
+	if (in_place)
 		rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, base, error);
 	else
 		rc = move_item(stvfm_item, stvfm_item_parent, base, index_to, error);
