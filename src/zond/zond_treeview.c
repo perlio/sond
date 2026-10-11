@@ -2559,6 +2559,29 @@ static gint get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
 	if (!(*sfp))
 		return -1;
 
+	//gesperrt (verschlüsselter ZIP-Eintrag, PDF mit Passwort): entsperren
+	//(Dialog); danach hat das Element seinen echten Typ
+	if (sond_file_part_needs_unlock(*sfp)) {
+		SondFilePart* sfp_new = sond_file_part_unlock(*sfp, error);
+
+		g_object_unref(*sfp);
+		*sfp = sfp_new;
+		if (!sfp_new)
+			return -1;
+	}
+
+	/* Elemente im Dateibaum auf den aktuellen Stand bringen: das Ziel selbst
+	 * und seine Vorfahren (eine PDF oder ein ZIP-Eintrag, die bei from_filepart()
+	 * entsperrt wurden, haben jetzt ihren echten Typ bzw. Anhänge). */
+	{
+		ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private(ztv);
+
+		for (SondFilePart* part = *sfp; part;
+				part = sond_file_part_get_parent(part))
+			sond_treeviewfm_refresh_file_part(
+					SOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]), part);
+	}
+
 	if (node_id)
 		*node_id = ret;
 
@@ -3407,8 +3430,10 @@ static void zond_treeview_action_oeffnen(GSimpleAction *a,
 
 	rc = zond_treeview_open_node(zond, &iter, open_with, &error);
 	if (rc) {
-		display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n",
-				error->message, NULL);
+		//Abbruch des Passwortdialogs ist kein Fehler
+		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+			display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n",
+					error->message, NULL);
 		g_error_free(error);
 	}
 

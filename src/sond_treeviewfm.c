@@ -1565,9 +1565,78 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	return 0;
 }
 
+/* Ersetzt das Baumelement an iter durch ein neues für sfp_new (nach dem
+ * Entsperren hat das Element einen anderen Typ, ggf. Kinder). Rückgabe: das
+ * neue Element, der Aufrufer gibt seine Referenz frei. */
+static SondTVFMItem* sond_treeviewfm_replace_item(SondTreeviewFM *stvfm,
+		GtkTreeIter *iter, SondFilePart *sfp_new) {
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
+	SondTVFMItemPrivate *new_priv = sond_tvfm_item_get_priv(stvfm_item_new);
+
+	gtk_tree_store_set(GTK_TREE_STORE(model), iter, 0, stvfm_item_new, -1);
+
+	//Kinder möglich: Dummy für den Aufklapp-Pfeil
+	if (new_priv->has_children && !gtk_tree_model_iter_has_child(model, iter)) {
+		GtkTreeIter iter_dummy = { 0 };
+
+		gtk_tree_store_insert(GTK_TREE_STORE(model), &iter_dummy, iter, -1);
+	}
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+
+	return stvfm_item_new;
+}
+
+void sond_treeviewfm_refresh_file_part(SondTreeviewFM *stvfm,
+		SondFilePart *sfp) {
+	GtkTreeIter iter = { 0 };
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItem *stvfm_item_new = NULL;
+	gboolean plain = FALSE;
+	g_autofree gchar *filepart = NULL;
+
+	g_return_if_fail(stvfm && sfp);
+
+	filepart = sond_file_part_get_filepart(sfp);
+	if (!filepart || sond_treeviewfm_file_part_visible(stvfm, NULL, filepart,
+			FALSE, &iter, NULL) != 1)
+		return; //nicht sichtbar: wird beim Aufklappen korrekt geladen
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter, 0,
+			&stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+	{
+		SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(stvfm_item);
+
+		//nur Dateien, und nur wenn das Element nicht mehr zu sfp passt: anderes
+		//Objekt (Platzhalter ersetzt) oder jetzt Container, aber noch als Blatt
+		plain = !item_priv->path_or_section &&
+				(item_priv->sond_file_part != sfp ||
+				(item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
+						sond_file_part_get_has_children(sfp)));
+	}
+	g_object_unref(stvfm_item);
+
+	if (!plain)
+		return;
+
+	stvfm_item_new = sond_treeviewfm_replace_item(stvfm, &iter, sfp);
+	g_object_unref(stvfm_item_new);
+
+	return;
+}
+
+//Nutzer hat einen Passwortdialog abgebrochen: kein Fehler, nichts melden
+static gboolean error_is_cancelled(GError *error) {
+	return g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+}
+
 static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
+	SondTVFMItem *stvfm_item_new = NULL;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
@@ -1642,8 +1711,37 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	}
 #endif
 
+	/* Gesperrtes Element (verschlüsselter ZIP-Eintrag, PDF mit Passwort):
+	 * entsperren (Dialog) und das Baumelement durch eines mit dem echten Typ
+	 * ersetzen. Mit externem Programm (open_with) nur ein Platzhalter-Eintrag -
+	 * die PDF-Passwortabfrage übernimmt dann das Programm selbst. */
+	if (!stvfm_item_priv->path_or_section && stvfm_item_priv->sond_file_part &&
+			(open_with ? sond_file_part_is_placeholder(stvfm_item_priv->sond_file_part) :
+			sond_file_part_needs_unlock(stvfm_item_priv->sond_file_part))) {
+		SondFilePart *sfp_new = sond_file_part_unlock(
+				stvfm_item_priv->sond_file_part, error);
+
+		if (!sfp_new)
+			return -1;
+
+		stvfm_item_new = sond_treeviewfm_replace_item(
+				sond_tvfm_item_get_stvfm(stvfm_item), iter, sfp_new);
+		g_object_unref(sfp_new);
+		stvfm_item = stvfm_item_new;
+		stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
+
+		//jetzt ein Container: der Nutzer klappt ihn auf
+		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+			g_object_unref(stvfm_item_new);
+
+			return 0;
+		}
+	}
+
 	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
 			open_stvfm_item(iter, stvfm_item, open_with, error);
+	if (stvfm_item_new)
+		g_object_unref(stvfm_item_new);
 	if (rc)
 		return -1;
 
@@ -1665,8 +1763,9 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 	rc = sond_treeviewfm_open(&iter, stvfm_item, open_with, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(tree_view), "Fehler beim Öffnen\n\n",
-				error->message, NULL);
+		if (!error_is_cancelled(error))
+			display_message(SOND_GET_TOPLEVEL(tree_view), "Fehler beim Öffnen\n\n",
+					error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -2384,8 +2483,9 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	rc = sond_treeviewfm_open(&iter, stvfm_item, FALSE, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(tree_view),
-				"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
+		if (!error_is_cancelled(error))
+			display_message(SOND_GET_TOPLEVEL(tree_view),
+					"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 

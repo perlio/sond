@@ -637,6 +637,50 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		return NULL;
 	}
 
+	//geschützte PDF: ohne Authentifizierung liefert MuPDF Datenmüll
+	{
+		gint needs_pw = 0;
+
+		fz_try(priv->ctx)
+			needs_pw = pdf_needs_password(priv->ctx, priv->doc);
+		fz_catch(priv->ctx) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nPasswortprüfung fehlgeschlagen:\n%s", __func__,
+						fz_caught_message(priv->ctx));
+			needs_pw = -1;
+		}
+
+		if (needs_pw > 0) {
+			rc = sond_file_part_pdf_authenticate(sfp_pdf, priv->ctx, priv->doc,
+					TRUE, error);
+			if (rc == 1) {
+				if (error)
+					*error = g_error_new(G_IO_ERROR, G_IO_ERROR_CANCELLED,
+							"%s\nabgebrochen", __func__);
+				needs_pw = -1;
+			}
+			else if (rc == -1)
+				needs_pw = -1;
+		}
+
+		if (needs_pw == -1) {
+			GError* error_rem = NULL;
+
+			pdf_drop_document(priv->ctx, priv->doc);
+			priv->doc = NULL;
+			if (!sond_remove(filename, &error_rem)) {
+				LOG_WARN("Datei '%s' konnte nicht gelöscht werden: %s",
+						filename, error_rem->message);
+				g_error_free(error_rem);
+			}
+			g_free(filename);
+			g_object_unref(zond_pdf_document);
+
+			return NULL;
+		}
+	}
+
 	number_of_pages = pdf_count_pages(priv->ctx, priv->doc);
 	if (number_of_pages == 0) {
 		if (error)

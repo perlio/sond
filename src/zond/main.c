@@ -22,6 +22,8 @@
 #include "../sond_log_and_error.h"
 #include "zond_init.h"
 #include "20allgemein/project.h"
+#include "20allgemein/password_dialog.h"
+#include "../sond_password.h"
 
 /**
  * Callback: Application startup
@@ -33,6 +35,9 @@ static void cb_startup(GApplication *app, gpointer user_data) {
     Projekt *zond = (Projekt*) user_data;
 
 	zond_init(GTK_APPLICATION(app), zond);
+
+	//Passwortdialog für geschützte ZIP-Einträge und PDFs (Hauptthread)
+	sond_password_set_prompt_func(zond_password_dialog, zond);
 
 	LOG_INFO("zond gestartet");
 

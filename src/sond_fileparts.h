@@ -110,6 +110,24 @@ void sond_file_part_set_lock_content(SondFilePart*, SondLock);
  * sonst UNLOCKED, wenn eine Schicht entsperrt ist, sonst NONE. */
 SondLock sond_file_part_get_lock(SondFilePart*);
 
+/* TRUE, wenn das Element vor der Nutzung entsperrt werden muss: Platzhalter
+ * (als Leaf nach Endung angelegt, echter Typ unbekannt) oder eine Schicht
+ * gesperrt. */
+gboolean sond_file_part_needs_unlock(SondFilePart*);
+
+/* TRUE für einen Platzhalter: als Leaf nach Endung angelegt, weil der Inhalt
+ * eines verschlüsselten ZIP-Eintrags nicht lesbar war. */
+gboolean sond_file_part_is_placeholder(SondFilePart*);
+
+/* Entsperrt ein gesperrtes Element mit Dialog (nur im Hauptthread). Rückgabe
+ * ein SondFilePart mit echtem Typ (Freigabe durch den Aufrufer): bei einem
+ * verschlüsselten ZIP-Eintrag ein neues Objekt, bei einer PDF mit
+ * Dokumentpasswort dasselbe mit nun bekannten Anhängen, bei einem nicht
+ * gesperrten Element dasselbe. NULL: Nutzer hat abgebrochen (error ist dann
+ * G_IO_ERROR_CANCELLED) oder Fehler. Der Aufrufer ersetzt danach ggf. das
+ * Baumelement. */
+SondFilePart* sond_file_part_unlock(SondFilePart*, GError**);
+
 /* Prüft, ob der Eintrag path im ZIP-Archiv sfp_zip verschlüsselt ist (nur
  * Verzeichnisdaten, kein Inhaltszugriff). FALSE bei Verzeichnissen, fehlendem
  * Eintrag oder wenn das Archiv nicht zu öffnen ist. */
@@ -218,6 +236,12 @@ struct _SondFilePartPDFClass {
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
 		SondFilePartPDF*, gboolean prompt_for_path,
 		GError **);
+
+/* Schaltet ein geöffnetes Dokument frei (ohne Passwort, mit dem gemerkten oder
+ * - bei prompt und im Hauptthread - mit Dialog). 0 freigeschaltet, 1 Passwort
+ * fehlt oder Nutzer hat abgebrochen, -1 Fehler. */
+gint sond_file_part_pdf_authenticate(SondFilePartPDF*, fz_context*,
+		pdf_document*, gboolean prompt, GError**);
 
 fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
 

@@ -68,6 +68,29 @@ static gchar* parent_of(gchar const *filepart) {
 	return sep ? g_strndup(filepart, sep - filepart) : NULL;
 }
 
+//Abfrage beim Nutzer, s. sond_password.h
+static SondPasswordPromptFunc prompt_func = NULL;
+static gpointer prompt_data = NULL;
+static GThread *prompt_thread = NULL;
+
+void sond_password_set_prompt_func(SondPasswordPromptFunc func,
+		gpointer user_data) {
+	prompt_func = func;
+	prompt_data = user_data;
+	prompt_thread = g_thread_self();
+}
+
+gboolean sond_password_can_prompt(void) {
+	return prompt_func && g_thread_self() == prompt_thread;
+}
+
+gchar* sond_password_prompt(gchar const *what, gboolean wrong) {
+	if (!sond_password_can_prompt())
+		return NULL;
+
+	return prompt_func(what, wrong, prompt_data);
+}
+
 void sond_password_set(gchar const *filepart, SondPasswordRole role,
 		gchar const *password) {
 	g_return_if_fail(filepart);

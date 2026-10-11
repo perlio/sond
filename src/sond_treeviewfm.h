@@ -80,6 +80,12 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu);
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);
 
+/* Baut das Baumelement der Datei sfp neu auf, falls es sichtbar ist (nicht
+ * aufklappen): Typ, Icon und Kinder richten sich nach dem aktuellen Stand von
+ * sfp. Nötig, wenn eine Datei außerhalb dieses Baums entsperrt wurde und
+ * dadurch ihren echten Typ bzw. ihre Anhänge erst jetzt kennt. */
+void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart*);
+
 typedef enum {
 	SOND_TVFM_SEARCH_CONTAINS, //Name enthält Text
 	SOND_TVFM_SEARCH_WHOLE_NAME, //Name ist gleich Text

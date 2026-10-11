@@ -38,6 +38,7 @@
 #include "sond_gmessage_helper.h"
 #include "sond_file_helper.h"
 #include "sond_mime.h"
+#include "sond_password.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -57,6 +58,10 @@ typedef struct {
 	/* s. Doc-Kommentar an SondLock (sond_fileparts.h) */
 	SondLock lock_entry;
 	SondLock lock_content;
+	/* Platzhalter: als Leaf nach Endung angelegt, weil der Inhalt nicht lesbar
+	 * war; der echte Typ steht erst nach dem Entsperren fest
+	 * (sond_file_part_unlock()) */
+	gboolean placeholder;
 } SondFilePartPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
@@ -232,7 +237,8 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 }
 
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
-		gchar const* path, gssize max_len, gint const* cancel, GError** error);
+		gchar const* path, gssize max_len, gint const* cancel, gboolean prompt,
+		GError** error);
 
 //TRUE, wenn der Fehler von einem fehlenden oder falschen ZIP-Passwort stammt
 static gboolean zip_error_is_locked(zip_error_t* ze) {
@@ -241,35 +247,24 @@ static gboolean zip_error_is_locked(zip_error_t* ze) {
 	return code == ZIP_ER_NOPASSWD || code == ZIP_ER_WRONGPASSWD;
 }
 
-SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
-		GError** error) {
+/* Verschlüsselte ZIP-Einträge bis zu dieser Größe werden beim Anlegen still
+ * mit bekannten Passwörtern entsperrt (vollständiges Lesen, s.
+ * sond_file_part_create()), größere bleiben bis zum ausdrücklichen Öffnen
+ * gesperrt. */
+#define SOND_UNLOCK_SILENT_MAX ((guint64) 64 << 20)
+
+static gboolean zip_entry_info(SondFilePart* sfp_zip, gchar const* path,
+		gboolean* encrypted, guint64* size);
+
+/* Legt das SondFilePart anhand der ersten Bytes (Typerkennung) an. */
+static SondFilePart* sond_file_part_create_from_data(SondFilePart* sfp_parent,
+		gchar const* path, gconstpointer data, gsize len, GError** error) {
 	SondFilePart* sfp = NULL;
 	gchar* content_type = NULL;
 
-	g_return_val_if_fail(path, NULL);
-
-	sfp = sond_file_part_is_open(sfp_parent, path);
-	if (sfp)
-		return sfp;
-
-	//verschlüsselter ZIP-Eintrag: nicht lesbar, Leaf nach Endung, gesperrt
-	if (sfp_parent && sond_file_part_zip_entry_is_encrypted(sfp_parent, path)) {
-		sfp = sond_file_part_create_leaf(path, sfp_parent,
-				mime_from_extension(path));
-		sond_file_part_set_lock_entry(sfp, SOND_LOCK_LOCKED);
-
-		return sfp;
-	}
-
-	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, NULL, error);
-	if (!bytes)
-		return NULL;
-
-	gsize len = 0;
-	gconstpointer data = g_bytes_get_data(bytes, &len);
 	if (len > 0)
-		content_type = mime_guess_content_type(data, len, path, error);
-	g_bytes_unref(bytes);
+		content_type = mime_guess_content_type(data, MIN(len, (gsize) 2048),
+				path, error);
 	if (!content_type && len > 0) /* mime_guess_content_type hat Fehler gesetzt */
 		return NULL;
 	//bei leerer Datei bleibt content_type NULL - den Fallback auf
@@ -279,6 +274,182 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	g_free(content_type);
 
 	return sfp;
+}
+
+SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
+		GError** error) {
+	SondFilePart* sfp = NULL;
+	gboolean encrypted = FALSE;
+	guint64 size = 0;
+
+	g_return_val_if_fail(path, NULL);
+
+	sfp = sond_file_part_is_open(sfp_parent, path);
+	if (sfp)
+		return sfp;
+
+	//verschlüsselter ZIP-Eintrag: mit bekannten Passwörtern still entsperren
+	//(vollständig lesen, nur so ist ein ZipCrypto-Passwort bestätigt), sonst
+	//ein gesperrtes Leaf nach Endung
+	if (sfp_parent && zip_entry_info(sfp_parent, path, &encrypted, &size) &&
+			encrypted) {
+		GBytes* bytes = NULL;
+
+		if (size <= SOND_UNLOCK_SILENT_MAX) {
+			GError* error_silent = NULL;
+
+			bytes = sond_file_part_read_bytes_internal(sfp_parent, path, -1,
+					NULL, FALSE, &error_silent);
+			g_clear_error(&error_silent);
+		}
+
+		if (bytes) {
+			gsize len = 0;
+			gconstpointer data = g_bytes_get_data(bytes, &len);
+
+			sfp = sond_file_part_create_from_data(sfp_parent, path, data, len,
+					error);
+			g_bytes_unref(bytes);
+			if (sfp)
+				sond_file_part_set_lock_entry(sfp, SOND_LOCK_UNLOCKED);
+
+			return sfp;
+		}
+
+		sfp = sond_file_part_create_leaf(path, sfp_parent,
+				mime_from_extension(path));
+		sond_file_part_set_lock_entry(sfp, SOND_LOCK_LOCKED);
+		((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->placeholder = TRUE;
+
+		return sfp;
+	}
+
+	{
+		GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path,
+				2048, NULL, FALSE, error);
+		gsize len = 0;
+		gconstpointer data = NULL;
+
+		if (!bytes)
+			return NULL;
+
+		data = g_bytes_get_data(bytes, &len);
+		sfp = sond_file_part_create_from_data(sfp_parent, path, data, len,
+				error);
+		g_bytes_unref(bytes);
+	}
+
+	return sfp;
+}
+
+/* Entsperrt ein gesperrtes Element, mit Dialog (nur im Hauptthread). Rückgabe
+ * ein SondFilePart mit echtem Typ (Freigabe durch den Aufrufer): bei einem
+ * verschlüsselten ZIP-Eintrag ein neues Objekt (Typerkennung am entschlüsselten
+ * Inhalt), bei einer PDF mit Dokumentpasswort dasselbe Objekt mit nun
+ * bekannten Anhängen. NULL: Nutzer hat abgebrochen (error ist dann
+ * G_IO_ERROR_CANCELLED) oder es ist ein Fehler aufgetreten. */
+SondFilePart* sond_file_part_unlock(SondFilePart* sfp, GError** error) {
+	SondFilePart* result = NULL;
+
+	g_return_val_if_fail(sfp, NULL);
+
+	if (!sond_file_part_needs_unlock(sfp))
+		return g_object_ref(sfp);
+
+	result = g_object_ref(sfp);
+
+	if (((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->placeholder) {
+		SondFilePart* sfp_parent = sond_file_part_get_parent(sfp);
+		g_autofree gchar* path = g_strdup(sond_file_part_get_path(sfp));
+		GPtrArray* arr_opened = NULL;
+		GBytes* bytes = NULL;
+		SondFilePart* sfp_new = NULL;
+		gsize len = 0;
+		gconstpointer data = NULL;
+
+		if (!sfp_parent || !SOND_IS_FILE_PART_ZIP(sfp_parent)) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nGesperrter Eintrag liegt in keinem ZIP-Archiv", __func__);
+			g_object_unref(result);
+
+			return NULL;
+		}
+
+		bytes = sond_file_part_read_bytes_internal(sfp_parent, path, -1, NULL,
+				TRUE, error);
+		if (!bytes) {
+			g_object_unref(result);
+
+			return NULL;
+		}
+
+		//das gesperrte Leaf aus der Liste nehmen, sonst gibt create() es zurück
+		arr_opened = sond_file_part_get_arr_opened_files(sfp_parent);
+		if (arr_opened)
+			g_ptr_array_remove_fast(arr_opened, sfp);
+
+		data = g_bytes_get_data(bytes, &len);
+		sfp_new = sond_file_part_create_from_data(sfp_parent, path, data, len,
+				error);
+		g_bytes_unref(bytes);
+		if (!sfp_new) {
+			if (arr_opened)
+				g_ptr_array_add(arr_opened, sfp);
+			g_object_unref(result);
+
+			return NULL;
+		}
+
+		sond_file_part_set_lock_entry(sfp_new, SOND_LOCK_UNLOCKED);
+		g_object_unref(result);
+		result = sfp_new;
+	}
+
+	//PDF mit Dokumentpasswort: Passwort holen und Anhänge neu ermitteln
+	if (SOND_IS_FILE_PART_PDF(result) &&
+			sond_file_part_get_lock_content(result) == SOND_LOCK_LOCKED) {
+		fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+		pdf_document* doc = NULL;
+		GError* error_open = NULL;
+
+		if (!ctx) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nfz_new_context fehlgeschlagen", __func__);
+			g_object_unref(result);
+
+			return NULL;
+		}
+
+		doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(result),
+				TRUE, &error_open);
+		if (!doc) {
+			fz_drop_context(ctx);
+			if (g_error_matches(error_open, g_quark_from_static_string("sond"), 1)) {
+				g_clear_error(&error_open);
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+						"%s\nabgebrochen", __func__);
+			}
+			else
+				g_propagate_error(error, error_open);
+			g_object_unref(result);
+
+			return NULL;
+		}
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+
+		{
+			GError* error_children = NULL;
+
+			if (sond_file_part_test_for_children(result, &error_children)) {
+				LOG_WARN("%s\n%s", __func__, error_children ?
+						error_children->message : "(kein Fehler gesetzt)");
+				g_clear_error(&error_children);
+			}
+		}
+	}
+
+	return result;
 }
 
 SondFilePart* sond_file_part_create_leaf(gchar const* path,
@@ -425,6 +596,23 @@ void sond_file_part_set_lock_content(SondFilePart *sfp, SondLock lock) {
 	return;
 }
 
+gboolean sond_file_part_is_placeholder(SondFilePart *sfp) {
+	g_return_val_if_fail(sfp, FALSE);
+
+	return ((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->placeholder;
+}
+
+gboolean sond_file_part_needs_unlock(SondFilePart *sfp) {
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_val_if_fail(sfp, FALSE);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	return sfp_priv->placeholder || sfp_priv->lock_entry == SOND_LOCK_LOCKED ||
+			sfp_priv->lock_content == SOND_LOCK_LOCKED;
+}
+
 SondLock sond_file_part_get_lock(SondFilePart *sfp) {
 	SondFilePartPrivate* sfp_priv = NULL;
 
@@ -505,6 +693,295 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(SondFilePartGMes
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 		SondFilePartPDF*, gchar const*, GError**);
 
+typedef enum {
+	ZIP_READ_OK,
+	ZIP_READ_NEEDPW,  //Eintrag verlangt ein Passwort, keines angegeben
+	ZIP_READ_WRONGPW, //Passwort passt nicht
+	ZIP_READ_ERROR    //anderer Fehler, error ist gesetzt
+} ZipReadResult;
+
+/* Verschlüsselung und Größe eines Eintrags laut Central Directory (kein
+ * Zugriff auf den Inhalt). FALSE, wenn der Eintrag nicht gefunden wird. */
+static gboolean zip_entry_info(SondFilePart* sfp_zip, gchar const* path,
+		gboolean* encrypted, guint64* size) {
+	zip_t* archive = NULL;
+	zip_stat_t zstat = { 0 };
+	gboolean ok = FALSE;
+
+	if (!sfp_zip || !SOND_IS_FILE_PART_ZIP(sfp_zip))
+		return FALSE;
+
+	archive = sond_file_part_zip_open_archive(SOND_FILE_PART_ZIP(sfp_zip),
+			FALSE, NULL, NULL);
+	if (!archive)
+		return FALSE;
+
+	ok = (zip_stat(archive, path, 0, &zstat) == 0);
+	if (ok) {
+		*encrypted = (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
+				zstat.encryption_method != ZIP_EM_NONE;
+		*size = (zstat.valid & ZIP_STAT_SIZE) ? zstat.size : 0;
+	}
+
+	sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_zip), archive);
+
+	return ok;
+}
+
+/* Ein Leseversuch eines ZIP-Eintrags, mit password oder ohne (NULL). Bei
+ * max_len == -1 wird der ganze Eintrag gelesen (size Byte). Mit Passwort gilt
+ * ein Lesefehler oder eine falsche Prüfsumme als falsches Passwort - nur so ist
+ * ein ZipCrypto-Passwort (Prüfbyte nur 1 von 256) bestätigt. */
+static ZipReadResult zip_read_attempt(zip_t* archive, gchar const* path,
+		guint64 size, gssize max_len, gint const* cancel,
+		gchar const* password, GBytes** out, GError** error) {
+	zip_file_t* zf = NULL;
+	guchar* data = NULL;
+	zip_uint64_t done = 0;
+
+	zf = password ? zip_fopen_encrypted(archive, path, 0, password) :
+			zip_fopen(archive, path, 0);
+	if (!zf) {
+		if (zip_error_is_locked(zip_get_error(archive)))
+			return password ? ZIP_READ_WRONGPW : ZIP_READ_NEEDPW;
+
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nzip_fopen('%s'): %s", __func__, path,
+				zip_error_strerror(zip_get_error(archive)));
+
+		return ZIP_READ_ERROR;
+	}
+
+	if (max_len == -1) {
+		/* Größe steht im Archiv und kann beschädigt oder gefälscht sein:
+		 * g_malloc() würde das Programm beenden */
+		data = g_try_malloc(size);
+		if (!data && size > 0) {
+			zip_fclose(zf);
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nDatei '%s' (%" G_GUINT64_FORMAT " Byte): nicht "
+					"genug Speicher", __func__, path, size);
+
+			return ZIP_READ_ERROR;
+		}
+
+		/* blockweise, damit ein Abbruch bald wirkt */
+		while (done < size) {
+			zip_uint64_t want = MIN(size - done, (zip_uint64_t) 4 << 20);
+			zip_int64_t n = 0;
+
+			if (cancel && g_atomic_int_get(cancel)) {
+				zip_fclose(zf);
+				g_free(data);
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+						"%s\nabgebrochen", __func__);
+
+				return ZIP_READ_ERROR;
+			}
+			n = zip_fread(zf, data + done, want);
+			if (n <= 0)
+				break;
+			done += (zip_uint64_t) n;
+		}
+
+		{
+			gint close_rc = zip_fclose(zf);
+
+			if (done != size || (password && close_rc != 0)) {
+				g_free(data);
+				if (password)
+					return ZIP_READ_WRONGPW;
+
+				g_set_error(error, SOND_ERROR, 0,
+						"%s\nzip_fread('%s'): unvollständig gelesen", __func__,
+						path);
+
+				return ZIP_READ_ERROR;
+			}
+		}
+
+		*out = g_bytes_new_take(data, (gsize) size);
+
+		return ZIP_READ_OK;
+	}
+	else {
+		zip_int64_t n = 0;
+
+		data = g_malloc((gsize) max_len);
+		n = zip_fread(zf, data, (zip_uint64_t) max_len);
+		zip_fclose(zf);
+		if (n < 0) {
+			g_free(data);
+			if (password)
+				return ZIP_READ_WRONGPW;
+
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nzip_fread('%s') fehlgeschlagen", __func__, path);
+
+			return ZIP_READ_ERROR;
+		}
+		*out = g_bytes_new_take(data, (gsize) n);
+
+		return ZIP_READ_OK;
+	}
+}
+
+/* Ein bestätigtes Passwort merken: das erste eines Archivs wird dessen
+ * Standardpasswort, ein abweichendes gehört nur zu diesem Eintrag. Der
+ * Eintrag gilt danach als entsperrt. */
+static void zip_commit_password(SondFilePartZip* sfp_zip, gchar const* path,
+		gchar const* password) {
+	g_autofree gchar* archive_fp = NULL;
+	g_autofree gchar* entry_fp = NULL;
+	gchar* standard = NULL;
+	SondFilePart* sfp_entry = NULL;
+
+	archive_fp = sond_file_part_get_filepart(SOND_FILE_PART(sfp_zip));
+	entry_fp = g_strconcat(archive_fp, "//", path, NULL);
+
+	standard = sond_password_get(archive_fp, SOND_PASSWORD_CONTENT);
+	if (!standard)
+		sond_password_set(archive_fp, SOND_PASSWORD_CONTENT, password);
+	else if (g_strcmp0(standard, password))
+		sond_password_set(entry_fp, SOND_PASSWORD_ENTRY, password);
+	sond_password_free(standard);
+
+	sfp_entry = sond_file_part_is_open(SOND_FILE_PART(sfp_zip), path);
+	if (sfp_entry) {
+		sond_file_part_set_lock_entry(sfp_entry, SOND_LOCK_UNLOCKED);
+		g_object_unref(sfp_entry);
+	}
+}
+
+/* Liest einen Eintrag eines ZIP-Archivs, auch einen verschlüsselten:
+ * erst ohne Passwort, dann mit den bekannten (sond_password.h), dann - wenn
+ * prompt gesetzt ist und gefragt werden darf (nur Hauptthread) - mit Dialog,
+ * bis das Passwort passt oder der Nutzer abbricht. Ein bestätigtes Passwort
+ * wird gemerkt. Fehler: SOND_ERROR_LOCKED (Passwort fehlt), G_IO_ERROR_
+ * CANCELLED (Nutzer hat abgebrochen), sonst Lese-/Archivfehler. */
+static GBytes* sond_file_part_zip_read_entry(SondFilePartZip* sfp_zip,
+		gchar const* path, gssize max_len, gint const* cancel, gboolean prompt,
+		GError** error) {
+	zip_t* archive = NULL;
+	zip_stat_t zstat = { 0 };
+	gboolean encrypted = FALSE;
+	gboolean aes = FALSE;
+	guint64 size = 0;
+	GBytes* bytes = NULL;
+	ZipReadResult res = ZIP_READ_ERROR;
+	g_autofree gchar* entry_fp = NULL;
+	GPtrArray* candidates = NULL;
+	gchar* pw_ok = NULL;
+
+	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
+	if (!archive)
+		return NULL;
+
+	if (zip_stat(archive, path, 0, &zstat) != 0 ||
+			!(zstat.valid & ZIP_STAT_SIZE)) {
+		sond_file_part_zip_release_archive(sfp_zip, archive);
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nDatei '%s' nicht im ZIP oder Größe unbekannt",
+				__func__, path);
+
+		return NULL;
+	}
+	size = zstat.size;
+	encrypted = (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
+			zstat.encryption_method != ZIP_EM_NONE;
+	aes = encrypted && zstat.encryption_method != ZIP_EM_TRAD_PKWARE;
+
+	if (!encrypted) {
+		res = zip_read_attempt(archive, path, size, max_len, cancel, NULL,
+				&bytes, error);
+		sond_file_part_zip_release_archive(sfp_zip, archive);
+		if (res == ZIP_READ_OK)
+			return bytes;
+
+		if (res != ZIP_READ_ERROR)
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nzip_fopen('%s') fehlgeschlagen", __func__, path);
+
+		return NULL;
+	}
+
+	{
+		g_autofree gchar* archive_fp = sond_file_part_get_filepart(
+				SOND_FILE_PART(sfp_zip));
+
+		entry_fp = g_strconcat(archive_fp, "//", path, NULL);
+	}
+
+	//bekannte Passwörter, still
+	candidates = sond_password_candidates_entry(entry_fp);
+	for (guint i = 0; i < candidates->len && !bytes; i++) {
+		res = zip_read_attempt(archive, path, size, max_len, cancel,
+				g_ptr_array_index(candidates, i), &bytes, error);
+		if (res == ZIP_READ_OK)
+			pw_ok = g_strdup(g_ptr_array_index(candidates, i));
+		else if (res == ZIP_READ_ERROR) {
+			sond_password_array_free(candidates);
+			sond_file_part_zip_release_archive(sfp_zip, archive);
+
+			return NULL;
+		}
+	}
+	sond_password_array_free(candidates);
+
+	//Nutzer fragen
+	if (!bytes && prompt && sond_password_can_prompt()) {
+		gboolean wrong = FALSE;
+		g_autofree gchar* base_entry = g_path_get_basename(path);
+		g_autofree gchar* base_zip = g_path_get_basename(
+				sond_file_part_get_path(SOND_FILE_PART(sfp_zip)));
+		g_autofree gchar* what = g_strdup_printf(
+				"Passwort für den Eintrag '%s' im Archiv '%s'",
+				base_entry, base_zip);
+
+		while (!bytes) {
+			gchar* pw = sond_password_prompt(what, wrong);
+
+			if (!pw) {
+				sond_file_part_zip_release_archive(sfp_zip, archive);
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+						"%s\nabgebrochen", __func__);
+
+				return NULL;
+			}
+
+			res = zip_read_attempt(archive, path, size, max_len, cancel, pw,
+					&bytes, error);
+			if (res == ZIP_READ_OK)
+				pw_ok = pw;
+			else {
+				sond_password_free(pw);
+				if (res == ZIP_READ_ERROR) {
+					sond_file_part_zip_release_archive(sfp_zip, archive);
+
+					return NULL;
+				}
+				wrong = TRUE;
+			}
+		}
+	}
+
+	sond_file_part_zip_release_archive(sfp_zip, archive);
+
+	if (!bytes) {
+		g_set_error(error, SOND_ERROR, SOND_ERROR_LOCKED,
+				"%s\nEintrag '%s' ist passwortgeschützt", __func__, path);
+
+		return NULL;
+	}
+
+	//bestätigt: vollständig gelesen (CRC), bei AES schon durch den Prüfwert
+	if (max_len == -1 || aes)
+		zip_commit_password(sfp_zip, path, pw_ok);
+	sond_password_free(pw_ok);
+
+	return bytes;
+}
+
 /*
  * Liest Bytes aus dem Quell-Kontext von 'path' in 'sfp_parent'.
  * sfp_parent == NULL: Filesystem
@@ -516,7 +993,8 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
  * Gibt GBytes* zurück, oder NULL bei Fehler.
  */
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
-		gchar const* path, gssize max_len, gint const* cancel, GError** error) {
+		gchar const* path, gssize max_len, gint const* cancel, gboolean prompt,
+		GError** error) {
 	if (!sfp_parent) {
 		gchar* full_path = NULL;
 
@@ -552,96 +1030,9 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		}
 	}
 	else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) {
-		/* ZIP */
-		zip_t* archive = sond_file_part_zip_open_archive(
-				SOND_FILE_PART_ZIP(sfp_parent), FALSE, NULL, error);
-		if (!archive)
-			return NULL;
-
-		if (max_len == -1) {
-			/* Vollständig lesen: Größe via zip_stat ermitteln */
-			zip_stat_t zstat = { 0 };
-			if (zip_stat(archive, path, 0, &zstat) != 0 ||
-					!(zstat.valid & ZIP_STAT_SIZE)) {
-				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-				g_set_error(error, SOND_ERROR, 0,
-						"%s\nDatei '%s' nicht im ZIP oder Größe unbekannt",
-						__func__, path);
-				return NULL;
-			}
-			zip_file_t* zf = zip_fopen(archive, path, 0);
-			if (!zf) {
-				g_set_error(error, SOND_ERROR,
-						zip_error_is_locked(zip_get_error(archive)) ?
-								SOND_ERROR_LOCKED : 0,
-						"%s\nzip_fopen('%s'): %s", __func__, path,
-						zip_error_strerror(zip_get_error(archive)));
-				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-				return NULL;
-			}
-			/* Größe steht im Archiv und kann beschädigt oder gefälscht sein:
-			 * g_malloc() würde das Programm beenden */
-			guchar* data = g_try_malloc(zstat.size);
-			if (!data && zstat.size > 0) {
-				zip_fclose(zf);
-				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-				g_set_error(error, SOND_ERROR, 0,
-						"%s\nDatei '%s' (%" G_GUINT64_FORMAT " Byte): nicht "
-						"genug Speicher", __func__, path,
-						(guint64) zstat.size);
-				return NULL;
-			}
-			/* blockweise, damit ein Abbruch bald wirkt */
-			zip_uint64_t done = 0;
-			while (done < zstat.size) {
-				zip_uint64_t want = MIN(zstat.size - done, (zip_uint64_t) 4 << 20);
-				zip_int64_t n = 0;
-
-				if (cancel && g_atomic_int_get(cancel)) {
-					zip_fclose(zf);
-					sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-					g_free(data);
-					g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
-							"%s\nabgebrochen", __func__);
-					return NULL;
-				}
-				n = zip_fread(zf, data + done, want);
-				if (n <= 0)
-					break;
-				done += (zip_uint64_t) n;
-			}
-			zip_fclose(zf);
-			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-			if (done != zstat.size) {
-				g_free(data);
-				g_set_error(error, SOND_ERROR, 0,
-						"%s\nzip_fread('%s'): unvollständig gelesen", __func__, path);
-				return NULL;
-			}
-			return g_bytes_new_take(data, (gsize)zstat.size);
-		} else {
-			zip_file_t* zf = zip_fopen(archive, path, 0);
-			if (!zf) {
-				g_set_error(error, SOND_ERROR,
-						zip_error_is_locked(zip_get_error(archive)) ?
-								SOND_ERROR_LOCKED : 0,
-						"%s\nzip_fopen('%s'): %s", __func__, path,
-						zip_error_strerror(zip_get_error(archive)));
-				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-				return NULL;
-			}
-			guchar* buf = g_malloc((gsize)max_len);
-			zip_int64_t n = zip_fread(zf, buf, (zip_uint64_t)max_len);
-			zip_fclose(zf);
-			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
-			if (n < 0) {
-				g_free(buf);
-				g_set_error(error, SOND_ERROR, 0,
-						"%s\nzip_fread('%s') fehlgeschlagen", __func__, path);
-				return NULL;
-			}
-			return g_bytes_new_take(buf, (gsize)n);
-		}
+		/* ZIP, ggf. mit Passwort */
+		return sond_file_part_zip_read_entry(SOND_FILE_PART_ZIP(sfp_parent),
+				path, max_len, cancel, prompt, error);
 	}
 	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
 		/* PDF embedded file: MuPDF */
@@ -781,6 +1172,21 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 			return NULL;
 		}
 
+		//Das nächste Segment liegt IN diesem Element: ein gesperrtes (PDF mit
+		//Passwort, verschlüsselter ZIP-Eintrag) zuerst entsperren - Dialog im
+		//Hauptthread, sonst Fehler
+		if (v_string[zaehler + 1] && sond_file_part_needs_unlock(sfp_child)) {
+			SondFilePart* sfp_unlocked = sond_file_part_unlock(sfp_child, error);
+
+			g_object_unref(sfp_child);
+			sfp_child = sfp_unlocked;
+			if (!sfp_child) {
+				g_strfreev(v_string);
+
+				return NULL;
+			}
+		}
+
 		if (sfp)
 			g_object_unref(sfp);
 		sfp = sfp_child;
@@ -851,7 +1257,7 @@ GBytes* sond_file_part_get_bytes_cancellable(SondFilePart* sfp,
 	return sond_file_part_read_bytes_internal(
 			sond_file_part_get_parent(sfp),
 			sond_file_part_get_path(sfp),
-			-1, cancel, error);
+			-1, cancel, TRUE, error);
 }
 
 GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
@@ -1420,28 +1826,13 @@ static void sond_file_part_zip_release_archive(SondFilePartZip* sfp_zip,
 
 gboolean sond_file_part_zip_entry_is_encrypted(SondFilePart *sfp_zip,
 		gchar const *path) {
-	zip_t *archive = NULL;
-	zip_stat_t zstat = { 0 };
 	gboolean encrypted = FALSE;
+	guint64 size = 0;
 
 	g_return_val_if_fail(sfp_zip, FALSE);
 	g_return_val_if_fail(path, FALSE);
 
-	if (!SOND_IS_FILE_PART_ZIP(sfp_zip))
-		return FALSE;
-
-	archive = sond_file_part_zip_open_archive(SOND_FILE_PART_ZIP(sfp_zip),
-			FALSE, NULL, NULL);
-	if (!archive)
-		return FALSE;
-
-	if (zip_stat(archive, path, 0, &zstat) == 0)
-		encrypted = (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
-				zstat.encryption_method != ZIP_EM_NONE;
-
-	sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_zip), archive);
-
-	return encrypted;
+	return zip_entry_info(sfp_zip, path, &encrypted, &size) && encrypted;
 }
 
 static void sond_file_part_zip_finalize(GObject *self) {
@@ -2173,64 +2564,105 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
  * PDFs
  */
 typedef struct {
-	gchar* passwd;
 	gint auth;
 } SondFilePartPDFPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartPDF, sond_file_part_pdf, SOND_TYPE_FILE_PART)
 
-static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* ctx,
+/* Ein Authentifizierungsversuch; Rückgabe wie pdf_authenticate_password()
+ * (0 = Passwort passt nicht), -1 bei MuPDF-Fehler. */
+static gint pdf_try_password(fz_context* ctx, pdf_document* doc,
+		gchar const* password, GError** error) {
+	gint res = 0;
+
+	fz_try(ctx)
+		res = pdf_authenticate_password(ctx, doc, password);
+	fz_catch(ctx) {
+		g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	return res;
+}
+
+/* Schaltet das Dokument frei: erst ohne Passwort (ein leeres Benutzerpasswort
+ * probiert MuPDF schon beim Laden), dann mit dem gemerkten Dokumentpasswort
+ * (sond_password.h), dann - wenn prompt gesetzt ist und gefragt werden darf
+ * (nur Hauptthread) - mit Dialog, bis es passt oder der Nutzer abbricht.
+ * Rückgabe: 0 freigeschaltet, 1 Passwort fehlt oder Nutzer hat abgebrochen,
+ * -1 Fehler. Ein bewährtes Passwort wird gemerkt, der Inhalt gilt dann als
+ * entsperrt. */
+gint sond_file_part_pdf_authenticate(SondFilePartPDF* sfp_pdf, fz_context* ctx,
 		pdf_document* doc, gboolean prompt, GError** error) {
-	gchar *password_try = NULL;
+	g_autofree gchar* filepart = NULL;
+	gchar* password = NULL;
+	gint res = 0;
 
 	SondFilePartPDFPrivate* sfp_pdf_priv = sond_file_part_pdf_get_instance_private(sfp_pdf);
 
-	/* eigene Kopie, NICHT sfp_pdf_priv->passwd selbst - dialog_with_buttons()
-	 * (s. misc.c) gibt den String, auf den sein gchar**-Parameter zeigt, per
-	 * g_free() frei und ersetzt ihn. Würde password_try hier denselben
-	 * Pointer wie sfp_pdf_priv->passwd halten, würde genau dieser Aufruf
-	 * sfp_pdf_priv->passwd freigeben, ohne das Feld zu aktualisieren -
-	 * dangling pointer / Use-after-free, sobald das gecachte Passwort erneut
-	 * fehlschlägt (Dialog abgebrochen oder falsch eingegeben). */
-	if (sfp_pdf_priv->passwd)
-		password_try = g_strdup(sfp_pdf_priv->passwd);
+	res = pdf_try_password(ctx, doc, NULL, error);
+	if (res == -1)
+		return -1;
+	if (res) {
+		sfp_pdf_priv->auth = res;
 
-	do {
-		gint res_auth = 0;
-		gint res_dialog = 0;
+		return 0;
+	}
 
-		fz_try(ctx)
-			res_auth = pdf_authenticate_password(ctx, doc, password_try);
-		fz_catch(ctx) {
-			g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
-					"%s\n%s", __func__, fz_caught_message(ctx));
-			g_free(password_try);
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
 
+	//gemerktes Passwort
+	password = sond_password_get(filepart, SOND_PASSWORD_CONTENT);
+	if (password) {
+		res = pdf_try_password(ctx, doc, password, error);
+		sond_password_free(password);
+		if (res == -1)
 			return -1;
+		if (res) {
+			sfp_pdf_priv->auth = res;
+			sond_file_part_set_lock_content(SOND_FILE_PART(sfp_pdf),
+					SOND_LOCK_UNLOCKED);
+
+			return 0;
 		}
-		if (res_auth) //erfolgreich!
-		{
-			sfp_pdf_priv->auth = res_auth;
-			if (password_try) { //Passwort überhaupt erforderlich
-				g_free(sfp_pdf_priv->passwd);
-				sfp_pdf_priv->passwd = password_try;
+	}
+
+	if (!prompt || !sond_password_can_prompt())
+		return 1;
+
+	{
+		g_autofree gchar* base = g_path_get_basename(filepart);
+		g_autofree gchar* what = g_strdup_printf("Passwort für das PDF '%s'",
+				base);
+		gboolean wrong = FALSE;
+
+		while (1) {
+			password = sond_password_prompt(what, wrong);
+			if (!password)
+				return 1;
+
+			res = pdf_try_password(ctx, doc, password, error);
+			if (res == -1) {
+				sond_password_free(password);
+
+				return -1;
 			}
-			break;
-		} else if (!prompt) {
-			g_free(password_try);
-			return 1;
-		}
+			if (res) {
+				sond_password_set(filepart, SOND_PASSWORD_CONTENT, password);
+				sond_password_free(password);
+				sfp_pdf_priv->auth = res;
+				sond_file_part_set_lock_content(SOND_FILE_PART(sfp_pdf),
+						SOND_LOCK_UNLOCKED);
 
-		res_dialog = dialog_with_buttons(NULL, "PDF verschlüsselt", "Passwort eingeben:",
-				&password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
-				GTK_RESPONSE_CANCEL, NULL);
-		if (res_dialog != GTK_RESPONSE_OK) {
-			g_free(password_try);
-			return 1;
-		}
-	} while (1);
+				return 0;
+			}
 
-	return 0;
+			sond_password_free(password);
+			wrong = TRUE;
+		}
+	}
 }
 
 /**
@@ -2302,7 +2734,7 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 		return NULL; //Fehler beim Öffnen des PDF-Dokuments
 	}
 
-	rc = sond_file_part_pdf_authen_doc(sfp_pdf, ctx, doc, prompt_for_passwd, error);
+	rc = sond_file_part_pdf_authenticate(sfp_pdf, ctx, doc, prompt_for_passwd, error);
 	if (rc) {
 		if (rc == -1)
 			g_prefix_error(error, "%s\n", __func__);
@@ -2376,6 +2808,11 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 			address, error);
 	if (!sfp_embedded_file)
 		return -1;
+
+	//Anhänge einer entsperrten PDF sind mit deren Schlüssel verschlüsselt
+	if (sond_file_part_get_lock_content(SOND_FILE_PART(load->sfp_pdf)) ==
+			SOND_LOCK_UNLOCKED)
+		sond_file_part_set_lock_entry(sfp_embedded_file, SOND_LOCK_UNLOCKED);
 
 	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
 	g_ptr_array_add(load->arr_display_names,
@@ -2508,11 +2945,6 @@ gint sond_file_part_pdf_emb_address_changes(SondFilePartPDF* sfp_pdf,
 }
 
 static void sond_file_part_pdf_finalize(GObject *self) {
-	SondFilePartPDFPrivate *sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(self));
-
-	g_free(sfp_pdf_priv->passwd);
-
 	G_OBJECT_CLASS(sond_file_part_pdf_parent_class)->finalize(self);
 
 	return;

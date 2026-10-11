@@ -72,6 +72,26 @@ void sond_password_forget_prefix(gchar const *prefix);
 /* Alles vergessen und überschreiben - beim Schließen des Projekts. */
 void sond_password_clear(void);
 
+/* Abfrage beim Nutzer. Die Oberfläche (zond) meldet beim Start eine Funktion
+ * an, die einen Passwortdialog zeigt: what beschreibt, wofür das Passwort
+ * gebraucht wird ("Passwort für den Eintrag x.pdf in a.zip"), wrong ist TRUE,
+ * wenn das zuvor eingegebene Passwort nicht passte. Rückgabe: das Passwort
+ * (Freigabe mit sond_password_free()) oder NULL bei Abbruch. */
+typedef gchar* (*SondPasswordPromptFunc)(gchar const *what, gboolean wrong,
+		gpointer user_data);
+
+/* Meldet die Dialogfunktion an. Muss im Hauptthread aufgerufen werden; dieser
+ * gilt danach als der einzige Thread, der fragen darf. */
+void sond_password_set_prompt_func(SondPasswordPromptFunc func,
+		gpointer user_data);
+
+/* TRUE, wenn gefragt werden darf: Dialogfunktion angemeldet und Aufruf aus
+ * dem Hauptthread. Hintergrund-Threads (Indexlauf) fragen nie. */
+gboolean sond_password_can_prompt(void);
+
+/* Fragt den Nutzer; NULL bei Abbruch oder wenn nicht gefragt werden darf. */
+gchar* sond_password_prompt(gchar const *what, gboolean wrong);
+
 /* Überschreibt den String mit Nullen und gibt ihn frei (NULL erlaubt). Für
  * jede Kopie, die sond_password_get() oder der Dialog geliefert hat. */
 void sond_password_free(gchar *password);

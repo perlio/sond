@@ -1433,6 +1433,19 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			continue;
 		}
 
+		/* verschlüsselter ZIP-Eintrag: auch mit gemerktem Passwort nicht lesen.
+		 * Indiziert wird erst nach dem dauerhaften Entsperren (TODO.md #228),
+		 * sonst stünde der Klartext im Index, die Datei bliebe aber geschützt. */
+		if (sond_file_part_get_parent(sfp) &&
+				sond_file_part_zip_entry_is_encrypted(sond_file_part_get_parent(sfp),
+						sond_file_part_get_path(sfp))) {
+			process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY);
+			if (coverage_key != file_part) g_free(coverage_key);
+			g_free(file_part);
+
+			continue;
+		}
+
 		bytes = sond_file_part_get_bytes_cancellable(sfp, &wctx->cancel, &error);
 		if (!bytes) {
 			gboolean cancelled = g_error_matches(error, G_IO_ERROR,
