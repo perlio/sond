@@ -56,9 +56,12 @@ typedef enum {
 	SOND_LOCKED_PDF
 } SondLockedKind;
 
+typedef struct _SondPageRange SondPageRange;
+
 typedef struct _SondLockedItem {
 	gchar *filepart;
 	SondLockedKind kind;
+	SondPageRange *range; /* angeforderter Seitenbereich (Kopie) oder NULL */
 } SondLockedItem;
 
 typedef struct _SondProcessFileCtx {

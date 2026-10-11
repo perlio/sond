@@ -249,13 +249,15 @@ static void sond_locked_item_free(gpointer p) {
 	SondLockedItem* item = (SondLockedItem*) p;
 
 	g_free(item->filepart);
+	sond_page_range_free(item->range);
 	g_free(item);
 }
 
 /* Vermerkt einen wegen Passwortschutzes übersprungenen Teil (je Filepart und
  * Schicht einmal) und meldet das im Info-Fenster. */
 static void process_add_locked(SondProcessFileCtx* wctx,
-		gchar const* filepart, SondLockedKind kind) {
+		gchar const* filepart, SondLockedKind kind,
+		SondPageRange const* range) {
 	SondLockedItem* item = NULL;
 
 	if (!wctx->locked)
@@ -271,6 +273,7 @@ static void process_add_locked(SondProcessFileCtx* wctx,
 	item = g_new0(SondLockedItem, 1);
 	item->filepart = g_strdup(filepart);
 	item->kind = kind;
+	item->range = range ? sond_page_range_copy(range) : NULL;
 	g_ptr_array_add(wctx->locked, item);
 
 	if (wctx->log_func)
@@ -365,7 +368,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 			gchar* entry_locked = g_strdup_printf("%s//%s", filename,
 					entry_name);
 
-			process_add_locked(wctx, entry_locked, SOND_LOCKED_ZIP_ENTRY);
+			process_add_locked(wctx, entry_locked, SOND_LOCKED_ZIP_ENTRY, NULL);
 			g_free(entry_locked);
 
 			continue;
@@ -934,7 +937,6 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	}
 	if (locked) {
 		pdf_drop_document(wctx->ctx, doc);
-		process_add_locked(wctx, filename, SOND_LOCKED_PDF);
 		*out_n_emb = 0;
 
 		return PROCESS_LOCKED;
@@ -1073,6 +1075,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 				whole, &n_emb, &error);
 		if (rc == PROCESS_LOCKED) {
 			//übersprungen und vermerkt: kein Text, keine Coverage
+			process_add_locked(wctx, filename, SOND_LOCKED_PDF, range);
 			if (batch)
 				sond_index_ctx_batch_end(wctx->index_ctx, TRUE);
 			g_free(mime_type);
@@ -1439,7 +1442,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		if (sond_file_part_get_parent(sfp) &&
 				sond_file_part_zip_entry_is_encrypted(sond_file_part_get_parent(sfp),
 						sond_file_part_get_path(sfp))) {
-			process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY);
+			process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY, range);
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
 
@@ -1453,7 +1456,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 			//verschlüsselter ZIP-Eintrag: vermerken statt als Fehler loggen
 			if (g_error_matches(error, SOND_ERROR, SOND_ERROR_LOCKED)) {
-				process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY);
+				process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY, range);
 				g_clear_error(&error);
 				if (coverage_key != file_part) g_free(coverage_key);
 				g_free(file_part);

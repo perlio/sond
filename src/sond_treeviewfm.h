@@ -91,6 +91,17 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
  * dadurch ihren echten Typ bzw. ihre Anhänge erst jetzt kennt. */
 void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart*);
 
+/* Entfernt den Passwortschutz der Dateien in items (GPtrArray von
+ * SondLockedItem*, s. sond_process_file.h) dauerhaft, als Aktion mit
+ * Passwortabfragen (Überspringen/Alle überspringen/Abbrechen). Nur Hauptthread.
+ * Eine Bestätigung vom Nutzer muss der Aufrufer vorher einholen. *decrypted
+ * (Filepart-Strings der nun entsperrten Dateien) und *skipped (der
+ * übersprungenen) sind anschließend vom Aufrufer mit g_ptr_array_unref() zu
+ * lösen; *aborted ist TRUE, wenn der Nutzer abgebrochen hat. Rückgabe: Zahl der
+ * entsperrten Dateien. */
+gint sond_treeviewfm_decrypt_fileparts(SondTreeviewFM*, GPtrArray *items,
+		GPtrArray **decrypted, GPtrArray **skipped, gboolean *aborted);
+
 typedef enum {
 	SOND_TVFM_SEARCH_CONTAINS, //Name enthält Text
 	SOND_TVFM_SEARCH_WHOLE_NAME, //Name ist gleich Text

@@ -495,87 +495,11 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
    sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
    aus dem Review liegen nur im Scratchpad).
 
-## Befehl "Dauerhaft entsperren" (10.10.2026)
+## Passwortschutz ZIP/PDF: Rest (Konzept 11.10.2026)
+
+Schritte 1 bis 6 (#221-#228) sind erledigt (HISTORY.md, 11.10.2026).
 
 ```text
- #221 Kontextmenübefehl "Dauerhaft entsperren" für passwortgeschützte ZIP-
- Einträge und PDFs (Variante A: die Datei wird an Ort und Stelle ersetzt, ohne
- Sicherung). Nach dem Entsperren ist die Datei nicht mehr verschlüsselt und
- verliert das Schloss-Badge.
- - Bestätigungsdialog, der klar sagt, daß der Passwortschutz entfällt.
- - Auf einem ZIP-Eintrag: nur dieser Eintrag. Auf dem ZIP selbst: alle Einträge,
-   deren Passwort bekannt ist. Das ZIP wird dafür einmal neu geschrieben.
- - PDF: wird ohne Verschlüsselung gespeichert (PDF_ENCRYPT_NONE).
- - PDF in einem verschlüsselten ZIP-Eintrag: beide Schichten getrennt
-   (Eintrag und PDF-Passwort), jeweils einzeln entsperrbar.
- - Pfad und Anbindungen bleiben erhalten. Der Index hängt nicht vom
-   Zeitstempel ab (coverage u. ä.), eine Neuindizierung ist nicht nötig.
- - PDF-Berechtigungsbits werden nicht beachtet.
- Voraussetzung: das Passwort muß bekannt sein (Passwort-Cache und
- Entsperr-Zustand, noch nicht gebaut). Bisher gebaut: nur die Anzeige
- gesperrter ZIP-Einträge mit Schloss (HISTORY.md, 10.10.2026).
-```
-
-## Passwortschutz ZIP/PDF: Umsetzung (Konzept 11.10.2026)
-
-Vorgesehene Reihenfolge (jeder Schritt für sich baubar und prüfbar). Bisher
-gebaut: Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md, 10.10.2026)
-und Schritte 1 und 2 (#222, #223, erledigt 11.10.2026); #221 (Dauerhaft entsperren) gehört in Schritt 5.
-
-```text
- Grundsätze: Zustände nicht verschlüsselt (kein Badge) / gesperrt (Schloß) /
- entsperrt (grünes Schloß, in der Sitzung erfolgreich entschlüsselt). Badge nur,
- wenn ein Passwort nötig ist. Passwörter nur im RAM (sond_password.c, Mutex,
- Schlüssel Filepart-String + Rolle Eintrag/Inhalt, Standardpasswort je ZIP plus
- Ausnahmen je Eintrag), nie in DB, Index oder Log; beim Schließen des Projekts
- überschreiben. Dialog per Callback von zond, nie aus dem Hintergrund-Thread.
- Eingefügte/kopierte/exportierte Dateien sind immer unverschlüsselt (Ausnahme:
- Anhänge in verschlüsselter PDF). PDF-Berechtigungsbits werden ignoriert.
-
- #224 Schritt 3 - Entsperr-Hook und Dialog, zuerst Öffnen/Viewer:
- Nach dem Entsperren das SondFilePart mit echtem Typ neu anlegen (Sniffen) und das
- Baumelement ersetzen. Das Öffnen einer geschützten PDF im Viewer zeigt heute eine
- leere Seite und MuPDF-Syntaxfehler (zond_pdf_document_open ohne Authentifizierung).
- read_bytes_internal() (ZIP-Zweig, zip_fopen_encrypted), zip_open_archive(),
- sond_file_part_pdf_open_document() und zond_pdf_document_open() (dort fehlt
- die Authentifizierung ganz). Dialog (Callback): falsches Passwort -> erneut mit
- Hinweis; Überspringen / Alle überspringen / Abbrechen. Grün erst nach
- bestandenem AES-Prüfwert bzw. vollständigem Lesen mit stimmender CRC (ZipCrypto).
- Öffnen mit externem Programm bei geschützter PDF im Dateisystem: das Programm
- fragt selbst. Temp-Dateien mit entschlüsseltem Inhalt bleiben wie bisher.
-
- #225 Schritt 4a - Anbinden: gesperrter Container-Kandidat (.zip/.pdf/.eml,
- auch geschützte PDF) -> sofort fragen; bei Überspringen NICHT anbinden (Hinweis
- im Info-Fenster). Gesperrte Blätter ohne Container-Endung ohne Passwort
- anbinden. (zond_treeview_anbinden_rekursiv, Hauptthread, eine DB-Transaktion.)
-
- #226 Schritt 4b - Kopieren/Verschieben (BAUM_FS): Vorab-Phase, alle gesperrten
- Einträge der Auswahl vor dem Start entsperren. Kopieren: Übersprungenes fehlt
- am Ziel (Hinweis). Verschieben: wird einer übersprungen/abgebrochen, wird
- nichts verschoben. Einfügen in geschützte, noch nicht entsperrte PDF: nach
- deren Passwort fragen. Ohne Passwort: Umbenennen/Verschieben im selben ZIP,
- Löschen eines Eintrags, Dateioperationen an ganzen Dateien.
-
- #227 Schritt 4c - Export, XJustiz-Import, Renderer-Navigation:
- Export nach Bedarf beim ersten Zugriff auf die Quelle (quelle_holen), Dialog
- mit Überspringen (Hinweis im Export, weiter) und Export abbrechen. XJustiz:
- gesperrte xjustiz_nachricht.xml interaktiv entsperren (Abbruch = still beenden),
- gesperrte PDFs im Datensatz ohne Passwort als einfache Blätter anbinden.
- Renderer-Navigation (prev/next) auf gesperrtes Geschwister: Dialog, Abbruch =
- im aktuellen Dokument bleiben. Nicht gelesen: Mail-Renderer (Anhänge öffnen),
- filepart_oeffnen() in project.c.
-
- Schritt 5 - #221 Dauerhaft entsperren (s. dort), danach
-
- #228 Schritt 6 - Indexlauf-Schleife: Index-Thread nur erkennen/sammeln (erledigt, HISTORY.md "Indexlauf: passwortgeschützte Teile überspringen");
- nach dem Lauf im Hauptthread Dialog mit der Sperrliste, einmalige Bestätigung
- "Passwortschutz wird entfernt" je Dialog, dauerhaftes Entsperren (#221; ZIP-
- Einträge eines Archivs gesammelt in einem Neuschreiben), gezielter Nachlauf nur
- dieser Dateien, erneut Dialog bei neu sichtbaren inneren Schichten (mit
- Abbrechen). Gleiche Schleife für Nachindizieren aus der Indexsuche
- (zond_indexsuche.c) und OCR. Übersprungene Dateien im selben Zyklus nicht
- erneut melden, beim nächsten Indexlauf wieder. Index darf Klartext enthalten.
-
  #229 Schritt 7 (später) - Badges (Schloß rot/grün) in BAUM_INHALT und
  BAUM_AUSWERTUNG; diese Bäume zeichnen heute keine Overlays.
 ```

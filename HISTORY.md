@@ -5412,3 +5412,40 @@ Modul sond_password.c zusätzlich mit einem eigenen Testprogramm (inkl. Threads)
  - Bekannt, bis #224: Öffnen einer geschützten PDF im Viewer zeigt eine leere
    Seite mit MuPDF-Syntaxfehlern (zond_pdf_document_open ohne Authentifizierung).
 ```
+
+## Passwortschutz: Entsperren, Anbinden, Kopieren, Export, Dauerhaft entsperren, Indexschleife (#224-#228, #221, 11.10.2026)
+
+Schritte 3 bis 6 des Konzepts "Passwortschutz ZIP/PDF" (TODO.md #229 offen).
+Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
+
+```text
+ - #224 Öffnen/Viewer: sond_file_part_create() entsperrt still (bis 64 MB) oder
+   legt einen Platzhalter an; sond_file_part_unlock() fragt per Dialog (falsches
+   Passwort: erneut mit Hinweis; Überspringen/Alle überspringen/Abbrechen).
+   Nach dem Entsperren wird das SondFilePart mit echtem Typ neu angelegt und das
+   Baumelement ersetzt (sond_treeviewfm_replace_item/refresh_file_part).
+   zond_pdf_document_open() authentifiziert (Viewer zeigt keine leere Seite
+   mehr). Anhänge einer entsperrten PDF bekommen das grüne Schloss; gebundene
+   Anhänge gesperrter PDFs werden beim Neuladen entsperrt (from_filepart).
+ - #225 Anbinden: gesperrte Container-Kandidaten (.zip/.pdf/.eml) werden sofort
+   abgefragt, bei Überspringen nicht angebunden; Aktionsmechanismus
+   sond_password_action_begin/end (Alle überspringen gilt je Aktion).
+ - #226 Kopieren/Verschieben in BAUM_FS: Vorab-Phase entsperrt alle gesperrten
+   Einträge; Kopieren lässt Übersprungenes aus (Hinweis), Verschieben bricht
+   dann ab.
+ - #227 Export (Quelle beim ersten Zugriff), XJustiz-Import (gesperrte
+   Nachricht interaktiv, Abbruch still) und Renderer-Navigation (Abbruch =
+   im Dokument bleiben).
+ - #221 Befehl "Dauerhaft entsperren" im Dateibaum (stv.dauerhaft-entsperren):
+   ZIP-Einträge gesammelt in einem Neuschreiben je Archiv, PDFs ohne
+   Verschlüsselung gespeichert; Pfad bleibt, Anhänge/Kinder werden neu ermittelt
+   und das Baumelement aktualisiert (PDF im ZIP wird zum Ordner).
+ - #228 Indexlauf: nach dem Lauf Dialog mit den übersprungenen Teilen, nach
+   einmaliger Bestätigung dauerhaft entsperren (sond_treeviewfm_decrypt_fileparts)
+   und gezielter Nachlauf nur dieser Dateien; wiederholt sich bei neu sichtbaren
+   inneren Schichten. Übersprungenes wird im Zyklus nicht erneut gemeldet,
+   Abschlussmeldung "N Datei(en) sind weiterhin passwortgeschützt".
+ - Beobachtet, nicht geklärt: einmaliger Absturz (Heap-Beschädigung, Thread
+   ocr-doc, pdf_drop_document) im Gesamtlauf; mit und ohne OCR danach nicht
+   reproduzierbar.
+```

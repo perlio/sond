@@ -2144,6 +2144,17 @@ gint sond_file_part_pdf_decrypt(SondFilePart *sfp, GError **error) {
 
 	sond_file_part_set_lock_content(sfp, SOND_LOCK_NONE);
 
+	//Anhänge neu ermitteln: war die PDF bisher gesperrt, kannte sie keine
+	{
+		GError *error_children = NULL;
+
+		if (sond_file_part_test_for_children(sfp, &error_children)) {
+			LOG_WARN("%s\n%s", __func__, error_children ?
+					error_children->message : "(kein Fehler gesetzt)");
+			g_clear_error(&error_children);
+		}
+	}
+
 	//Anhänge waren mit dem Schlüssel der PDF verschlüsselt (grünes Schloss)
 	{
 		GPtrArray *arr_opened = sond_file_part_get_arr_opened_files(sfp);

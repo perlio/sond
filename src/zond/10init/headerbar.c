@@ -218,8 +218,8 @@ static gint ask_ocr_mode(GtkWindow *parent) {
  * Fileparts-Sammlung feststehen (Verzeichnis-Kurzschluss, s.
  * dortigen Kommentar), wird also vorher abgefragt und hier direkt
  * durchgereicht statt erneut nachgefragt zu werden. */
-static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
-		GHashTable *ht_index, gint ocr_mode) {
+static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
+		gint ocr_mode) {
 	InfoWindow *info_window = NULL;
 
 	zond->wctx->ocr_mode = ocr_mode;
@@ -265,6 +265,174 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 	zond->wctx->log_func_data = NULL;
 	return TRUE;
 }
+
+/* Passwortgeschützte Teile des letzten Laufs (Sperrliste, s. sond_process_file.h)
+ * ohne die in diesem Zyklus schon ignorierten. Die Zeiger gehören der Sperrliste
+ * und gelten nur bis zum nächsten Lauf. */
+static GPtrArray* index_locked_items(SondProcessFileCtx *wctx,
+		GHashTable *ignored) {
+	GPtrArray *arr = g_ptr_array_new();
+
+	for (guint i = 0; wctx->locked && i < wctx->locked->len; i++) {
+		SondLockedItem *item = g_ptr_array_index(wctx->locked, i);
+
+		if (!g_hash_table_contains(ignored, item->filepart))
+			g_ptr_array_add(arr, item);
+	}
+
+	return arr;
+}
+
+static gchar* index_locked_text(GPtrArray *items) {
+	GString *text = g_string_new(NULL);
+
+	g_string_append_printf(text, "%u Datei(en) wurden nicht indiziert, weil sie "
+			"passwortgeschützt sind:\n", items->len);
+	for (guint i = 0; i < MIN(items->len, 10); i++)
+		g_string_append_printf(text, "\n%s",
+				((SondLockedItem*) g_ptr_array_index(items, i))->filepart);
+	if (items->len > 10)
+		g_string_append_printf(text, "\n... und %u weitere", items->len - 10);
+	g_string_append(text, "\n\nPasswortschutz jetzt dauerhaft entfernen und dann "
+			"indizieren?\nDie Dateien werden dabei verändert, eine Sicherung "
+			"gibt es nicht.");
+
+	return g_string_free(text, FALSE);
+}
+
+//Index-Auftrag für die gerade entsperrten Dateien (mit dem ursprünglichen Bereich)
+static GHashTable* index_ht_from_decrypted(GPtrArray *items,
+		GPtrArray *decrypted) {
+	GHashTable *ht = g_hash_table_new_full(NULL, NULL, g_object_unref,
+			sond_page_range_free);
+
+	for (guint i = 0; i < items->len; i++) {
+		SondLockedItem *item = g_ptr_array_index(items, i);
+		gboolean found = FALSE;
+		SondFilePart *sfp = NULL;
+		GError *error = NULL;
+
+		for (guint k = 0; k < decrypted->len && !found; k++)
+			found = !g_strcmp0(g_ptr_array_index(decrypted, k), item->filepart);
+		if (!found)
+			continue;
+
+		sfp = sond_file_part_from_filepart(item->filepart, &error);
+		if (!sfp) {
+			g_clear_error(&error);
+
+			continue;
+		}
+
+		if (g_hash_table_contains(ht, sfp))
+			g_object_unref(sfp);
+		else
+			g_hash_table_insert(ht, sfp,
+					item->range ? sond_page_range_copy(item->range) : NULL);
+	}
+
+	return ht;
+}
+
+/* Indexlauf, danach die Schleife für passwortgeschützte Teile: die
+ * übersprungenen Teile anzeigen, auf Wunsch (eine Bestätigung je Runde) ihren
+ * Passwortschutz dauerhaft entfernen und nur sie nachindizieren. Das wiederholt
+ * sich, solange der Nachlauf neue gesperrte Teile (innere Schichten) findet.
+ * Übersprungene Teile werden im selben Zyklus nicht erneut gemeldet. */
+static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
+		GHashTable *ht_index, gint ocr_mode) {
+	GHashTable *ignored = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+			NULL);
+	gboolean ok = zond_index_lauf(zond, ht_index, ocr_mode);
+	gboolean declined = FALSE;
+
+	while (ok) {
+		GPtrArray *items = index_locked_items(zond->wctx, ignored);
+		GPtrArray *decrypted = NULL;
+		GPtrArray *skipped = NULL;
+		gboolean aborted = FALSE;
+		g_autofree gchar *text = NULL;
+
+		if (items->len == 0) {
+			g_ptr_array_unref(items);
+
+			break;
+		}
+
+		text = index_locked_text(items);
+		if (abfrage_frage(zond->app_window, "Passwortgeschützte Dateien", text,
+				NULL) != GTK_RESPONSE_YES) {
+			declined = TRUE;
+			g_ptr_array_unref(items);
+
+			break;
+		}
+
+		sond_treeviewfm_decrypt_fileparts(
+				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), items, &decrypted,
+				&skipped, &aborted);
+
+		//alles, was nicht entsperrt wurde, in diesem Zyklus nicht erneut melden
+		for (guint i = 0; i < items->len; i++) {
+			SondLockedItem *item = g_ptr_array_index(items, i);
+			gboolean found = FALSE;
+
+			for (guint k = 0; k < decrypted->len && !found; k++)
+				found = !g_strcmp0(g_ptr_array_index(decrypted, k),
+						item->filepart);
+			if (!found && !g_hash_table_contains(ignored, item->filepart))
+				g_hash_table_add(ignored, g_strdup(item->filepart));
+		}
+
+		if (!aborted && decrypted->len > 0) {
+			GHashTable *ht_nachlauf = index_ht_from_decrypted(items, decrypted);
+
+			g_ptr_array_unref(items); //Zeiger in die Sperrliste, nicht mehr nötig
+			items = NULL;
+			if (g_hash_table_size(ht_nachlauf) > 0)
+				ok = zond_index_lauf(zond, ht_nachlauf, ocr_mode);
+			else
+				g_hash_table_destroy(ht_nachlauf);
+		}
+		else
+			ok = FALSE; //Abbruch oder nichts entsperrt: Zyklus beenden
+
+		if (items)
+			g_ptr_array_unref(items);
+		g_ptr_array_unref(decrypted);
+		g_ptr_array_unref(skipped);
+	}
+
+	//Was am Ende gesperrt bleibt, dem Nutzer nennen - außer er hat die Frage
+	//selbst verneint
+	if (!declined) {
+		GHashTable *remaining = g_hash_table_new_full(g_str_hash, g_str_equal,
+				g_free, NULL);
+		GHashTableIter it;
+		gpointer key = NULL;
+
+		g_hash_table_iter_init(&it, ignored);
+		while (g_hash_table_iter_next(&it, &key, NULL))
+			g_hash_table_add(remaining, g_strdup((gchar const*) key));
+		for (guint i = 0; zond->wctx->locked && i < zond->wctx->locked->len; i++)
+			g_hash_table_add(remaining, g_strdup(((SondLockedItem*)
+					g_ptr_array_index(zond->wctx->locked, i))->filepart));
+
+		if (g_hash_table_size(remaining) > 0) {
+			g_autofree gchar *msg = g_strdup_printf("%u Datei(en) sind weiterhin "
+					"passwortgeschützt und nicht indiziert.",
+					g_hash_table_size(remaining));
+
+			display_message(zond->app_window, "Index erstellen\n\n", msg, NULL);
+		}
+		g_hash_table_destroy(remaining);
+	}
+
+	g_hash_table_destroy(ignored);
+
+	return TRUE;
+}
+
 
 gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	gint ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
