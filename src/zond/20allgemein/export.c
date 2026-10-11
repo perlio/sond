@@ -20,6 +20,7 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
+#include "../../sond_password.h"
 
 #include "export.h"
 #include "export_selection.h"
@@ -88,12 +89,15 @@ gint export_activate(Projekt *zond, GError **error) {
 		return -1;
 	}
 
+	//Passwortabfragen dieses Exports: Überspringen/Alle überspringen/Abbrechen
+	sond_password_action_begin(TRUE);
 	if (optionen.format == EXPORT_FORMAT_PDF)
 		rc = export_pdf_schreiben(zond, eintraege, &optionen, filename, error);
 	else if (optionen.format == EXPORT_FORMAT_DOCX)
 		rc = export_docx_schreiben(zond, eintraege, &optionen, filename, error);
 	else
 		rc = export_odt_schreiben(zond, eintraege, &optionen, filename, error);
+	sond_password_action_end();
 
 	g_ptr_array_unref(eintraege);
 	g_free(filename);

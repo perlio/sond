@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_log_and_error.h"
+#include "../../sond_password.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_pdf_helper.h"
 
@@ -191,8 +192,20 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 	ht_maps = g_hash_table_new(NULL, NULL);
 
 	for (guint i = 0; i < eintraege->len; i++) {
-		ExportEintrag *e = g_ptr_array_index(eintraege, i);
-		GString *html = g_string_new(NULL);
+		ExportEintrag *e = NULL;
+		GString *html = NULL;
+
+		//Nutzer hat im Passwortdialog abgebrochen: nichts schreiben
+		if (sond_password_action_cancelled()) {
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+					"%s\nabgebrochen", __func__);
+			rc = -1;
+
+			goto aufraeumen;
+		}
+
+		e = g_ptr_array_index(eintraege, i);
+		html = g_string_new(NULL);
 		gchar *hinweis = NULL;
 		pdf_document *src = NULL;
 		ZondPdfDocument *zpdfd = NULL;
@@ -286,6 +299,14 @@ gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 	}
 
 	if (export_pdf_satz_schliessen(satz, error)) {
+		rc = -1;
+
+		goto aufraeumen;
+	}
+
+	if (sond_password_action_cancelled()) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+				"%s\nabgebrochen", __func__);
 		rc = -1;
 
 		goto aufraeumen;

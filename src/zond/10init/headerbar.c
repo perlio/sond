@@ -122,7 +122,9 @@ static void cb_win_export(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	GError* error = NULL;
 	if (export_activate(zond, &error)) {
-		display_message(zond->app_window, "Export fehlgeschlagen\n", error->message, NULL);
+		//Abbruch des Passwortdialogs: es wurde nichts geschrieben
+		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+			display_message(zond->app_window, "Export fehlgeschlagen\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -957,8 +959,10 @@ static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 	if (rc == 1)
 		return; //Auswahldialog abgebrochen - keine Meldung
 	if (rc == -1) {
-		display_message(zond->app_window, "XJustiz-Import fehlgeschlagen\n\n",
-				error ? error->message : NULL, NULL);
+		//Abbruch des Passwortdialogs ist kein Fehler
+		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+			display_message(zond->app_window, "XJustiz-Import fehlgeschlagen\n\n",
+					error ? error->message : NULL, NULL);
 		g_clear_error(&error);
 		return;
 	}

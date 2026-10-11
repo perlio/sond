@@ -156,7 +156,7 @@ void free_rendered_document(RenderedDocument *doc) {
  * Lädt eine neue Datei in denselben Viewer.
  * Gibt TRUE zurück bei Erfolg.
  */
-static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
+static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp) {
     GError *error = NULL;
     GBytes *bytes = NULL;
     RenderedDocument *rd = NULL;
@@ -231,6 +231,35 @@ static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
     update_statusbar(viewer, sond_file_part_get_path(new_sfp));
 
     return TRUE;
+}
+
+/* Wie navigate_to_sfp_do(), entsperrt ein gesperrtes Geschwister vorher (Dialog;
+ * ein Platzhalter bekommt dabei seinen echten Typ). Bei Abbruch bleibt das
+ * aktuelle Dokument stehen. */
+static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
+    SondFilePart *sfp_unlocked = NULL;
+    gboolean ret = FALSE;
+
+    if (sond_file_part_needs_unlock(new_sfp)) {
+        GError *error = NULL;
+
+        sfp_unlocked = sond_file_part_unlock(new_sfp, &error);
+        if (!sfp_unlocked) {
+            if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
+            g_clear_error(&error);
+
+            return FALSE;
+        }
+        new_sfp = sfp_unlocked;
+    }
+
+    ret = navigate_to_sfp_do(viewer, new_sfp);
+
+    if (sfp_unlocked)
+        g_object_unref(sfp_unlocked);
+
+    return ret;
 }
 
 static void on_nav_prev(GtkWidget *widget, gpointer data) {

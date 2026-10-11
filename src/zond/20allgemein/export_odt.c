@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_log_and_error.h"
+#include "../../sond_password.h"
 
 #include "export_odt.h"
 #include "export_dokument.h"
@@ -387,7 +388,14 @@ gint export_odt_schreiben(Projekt *zond, GPtrArray *eintraege,
 	odt_content(content, zond, eintraege, opt, dctx, bilder);
 	odt_manifest(manifest, bilder);
 
-	rc = odt_zip_schreiben(filename, content->str, styles->str, manifest->str,
+	//Nutzer hat im Passwortdialog abgebrochen: nichts schreiben
+	if (sond_password_action_cancelled()) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+				"%s\nabgebrochen", __func__);
+		rc = -1;
+	}
+	else
+		rc = odt_zip_schreiben(filename, content->str, styles->str, manifest->str,
 			bilder, error);
 
 	export_dokument_ctx_free(dctx);

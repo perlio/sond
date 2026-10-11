@@ -118,6 +118,9 @@ SondPromptResult sond_password_last_result(void);
 void sond_password_action_begin(gboolean allow_skip);
 void sond_password_action_end(void);
 
+/* TRUE, wenn der Nutzer die laufende Aktion im Passwortdialog abgebrochen hat. */
+gboolean sond_password_action_cancelled(void);
+
 /* Teile (Filepart-Strings), die in der laufenden Aktion wegen fehlenden
  * Passworts übersprungen werden: vormerken, abfragen, alle holen (Kopie, der
  * Aufrufer gibt sie mit g_ptr_array_unref() frei; Elemente g_free). */

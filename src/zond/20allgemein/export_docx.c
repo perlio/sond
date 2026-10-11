@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_log_and_error.h"
+#include "../../sond_password.h"
 
 #include "export_docx.h"
 #include "export_dokument.h"
@@ -369,7 +370,14 @@ gint export_docx_schreiben(Projekt *zond, GPtrArray *eintraege,
 	docx_content_types(types);
 	docx_rels_dokument(rels, bilder);
 
-	rc = docx_zip_schreiben(filename, types, content, styles, rels, bilder,
+	//Nutzer hat im Passwortdialog abgebrochen: nichts schreiben
+	if (sond_password_action_cancelled()) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+				"%s\nabgebrochen", __func__);
+		rc = -1;
+	}
+	else
+		rc = docx_zip_schreiben(filename, types, content, styles, rels, bilder,
 			error);
 
 	export_dokument_ctx_free(dctx);

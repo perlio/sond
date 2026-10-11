@@ -113,6 +113,10 @@ void sond_password_action_end(void) {
 	}
 }
 
+gboolean sond_password_action_cancelled(void) {
+	return action_depth > 0 && action_cancelled;
+}
+
 void sond_password_action_skip_add(gchar const *filepart) {
 	g_return_if_fail(filepart);
 

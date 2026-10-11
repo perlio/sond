@@ -106,6 +106,16 @@ void export_dokument_ctx_free(ExportDokumentCtx *dctx) {
 	g_free(dctx);
 }
 
+//Hinweis im Export, wenn eine Quelle nicht geöffnet werden konnte: hat der
+//Nutzer den Passwortdialog verlassen, ist sie übersprungen
+static gchar* hinweis_nicht_geoeffnet(const gchar *datei, GError *error) {
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+		return g_strdup_printf("%s - passwortgeschützt, übersprungen", datei);
+
+	return g_strdup_printf("%s - konnte nicht geöffnet werden: %s", datei,
+			error ? error->message : "?");
+}
+
 static Quelle* quelle_holen(ExportDokumentCtx *dctx, const gchar *datei) {
 	Quelle *q = g_hash_table_lookup(dctx->ht_quellen, datei);
 	GError *error = NULL;
@@ -118,11 +128,25 @@ static Quelle* quelle_holen(ExportDokumentCtx *dctx, const gchar *datei) {
 
 	q->sfp = sond_file_part_from_filepart(datei, &error);
 	if (!q->sfp) {
-		q->hinweis = g_strdup_printf("%s - konnte nicht geöffnet werden: %s",
-				datei, error ? error->message : "?");
+		q->hinweis = hinweis_nicht_geoeffnet(datei, error);
 		g_clear_error(&error);
 
 		return q;
+	}
+
+	//gesperrte Quelle (verschlüsselter ZIP-Eintrag, PDF mit Passwort):
+	//entsperren (Dialog), nach Bedarf und nur einmal je Quelle
+	if (sond_file_part_needs_unlock(q->sfp)) {
+		SondFilePart *sfp_unlocked = sond_file_part_unlock(q->sfp, &error);
+
+		g_object_unref(q->sfp);
+		q->sfp = sfp_unlocked;
+		if (!q->sfp) {
+			q->hinweis = hinweis_nicht_geoeffnet(datei, error);
+			g_clear_error(&error);
+
+			return q;
+		}
 	}
 
 	if (!SOND_IS_FILE_PART_PDF(q->sfp))
@@ -144,8 +168,7 @@ static Quelle* quelle_holen(ExportDokumentCtx *dctx, const gchar *datei) {
 	q->doc = sond_file_part_pdf_open_document(dctx->zond->ctx,
 			SOND_FILE_PART_PDF(q->sfp), TRUE, &error);
 	if (!q->doc) {
-		q->hinweis = g_strdup_printf("%s - konnte nicht geöffnet werden: %s",
-				datei, error ? error->message : "?");
+		q->hinweis = hinweis_nicht_geoeffnet(datei, error);
 		g_clear_error(&error);
 	}
 
