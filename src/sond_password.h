@@ -111,11 +111,19 @@ gchar* sond_password_prompt(gchar const *what, gboolean wrong);
 SondPromptResult sond_password_last_result(void);
 
 /* Eine Aktion über mehrere Dateien (Anbinden, Kopieren, Export, ...) klammern:
- * begin setzt "Alle überspringen" und "Abbrechen" zurück und lässt im Dialog
- * die Knöpfe Überspringen/Alle überspringen zu, end hebt das wieder auf.
- * Schachtelbar, nur der äußerste Aufruf zählt. Nur im Hauptthread. */
-void sond_password_action_begin(void);
+ * begin setzt "Alle überspringen" und "Abbrechen" und die Liste der
+ * übersprungenen Teile zurück; allow_skip lässt im Dialog die Knöpfe
+ * Überspringen/Alle überspringen zu (sonst nur OK und Abbrechen). end hebt das
+ * wieder auf. Schachtelbar, nur der äußerste Aufruf zählt. Nur im Hauptthread. */
+void sond_password_action_begin(gboolean allow_skip);
 void sond_password_action_end(void);
+
+/* Teile (Filepart-Strings), die in der laufenden Aktion wegen fehlenden
+ * Passworts übersprungen werden: vormerken, abfragen, alle holen (Kopie, der
+ * Aufrufer gibt sie mit g_ptr_array_unref() frei; Elemente g_free). */
+void sond_password_action_skip_add(gchar const *filepart);
+gboolean sond_password_action_is_skipped(gchar const *filepart);
+GPtrArray* sond_password_action_skipped(void);
 
 /* Überschreibt den String mit Nullen und gibt ihn frei (NULL erlaubt). Für
  * jede Kopie, die sond_password_get() oder der Dialog geliefert hat. */

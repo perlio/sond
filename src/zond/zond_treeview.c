@@ -1555,7 +1555,7 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 	}
 
 	//Passwortabfragen dieser Aktion: Überspringen/Alle überspringen/Abbrechen
-	sond_password_action_begin();
+	sond_password_action_begin(TRUE);
 	rc = sond_treeview_clipboard_foreach(
 			zond_treeview_clipboard_anbinden_foreach, &s_selection, &error);
 	sond_password_action_end();

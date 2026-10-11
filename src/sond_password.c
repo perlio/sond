@@ -75,8 +75,10 @@ static GThread *prompt_thread = NULL;
 
 //Aktion über mehrere Dateien (nur im Hauptthread benutzt)
 static gint action_depth = 0;
+static gboolean action_allow_skip = FALSE;
 static gboolean action_skip_all = FALSE;
 static gboolean action_cancelled = FALSE;
+static GHashTable *action_skipped = NULL;
 static SondPromptResult last_result = SOND_PROMPT_OK;
 
 void sond_password_set_prompt_func(SondPasswordPromptFunc func,
@@ -90,19 +92,54 @@ gboolean sond_password_can_prompt(void) {
 	return prompt_func && g_thread_self() == prompt_thread;
 }
 
-void sond_password_action_begin(void) {
+void sond_password_action_begin(gboolean allow_skip) {
 	if (action_depth++ == 0) {
+		action_allow_skip = allow_skip;
 		action_skip_all = FALSE;
 		action_cancelled = FALSE;
 		last_result = SOND_PROMPT_OK;
+		if (action_skipped)
+			g_hash_table_remove_all(action_skipped);
 	}
 }
 
 void sond_password_action_end(void) {
 	if (action_depth > 0 && --action_depth == 0) {
+		action_allow_skip = FALSE;
 		action_skip_all = FALSE;
 		action_cancelled = FALSE;
+		if (action_skipped)
+			g_hash_table_remove_all(action_skipped);
 	}
+}
+
+void sond_password_action_skip_add(gchar const *filepart) {
+	g_return_if_fail(filepart);
+
+	if (!action_skipped)
+		action_skipped = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+				NULL);
+	g_hash_table_add(action_skipped, g_strdup(filepart));
+}
+
+gboolean sond_password_action_is_skipped(gchar const *filepart) {
+	return filepart && action_skipped &&
+			g_hash_table_contains(action_skipped, filepart);
+}
+
+GPtrArray* sond_password_action_skipped(void) {
+	GPtrArray *arr = g_ptr_array_new_with_free_func(g_free);
+	GHashTableIter iter = { 0 };
+	gpointer key = NULL;
+
+	if (action_skipped) {
+		g_hash_table_iter_init(&iter, action_skipped);
+		while (g_hash_table_iter_next(&iter, &key, NULL))
+			g_ptr_array_add(arr, g_strdup((gchar const*) key));
+	}
+	g_ptr_array_sort(arr, (GCompareFunc) g_strcmp0);
+
+	return arr;
 }
 
 SondPromptResult sond_password_last_result(void) {
@@ -127,7 +164,8 @@ gchar* sond_password_prompt(gchar const *what, gboolean wrong) {
 		return NULL;
 	}
 
-	res = prompt_func(what, wrong, action_depth > 0, &password, prompt_data);
+	res = prompt_func(what, wrong, action_depth > 0 && action_allow_skip,
+			&password, prompt_data);
 	last_result = res;
 
 	if (res == SOND_PROMPT_OK)

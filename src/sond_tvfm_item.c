@@ -50,6 +50,7 @@
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
 #include "sond_mime.h"
+#include "sond_password.h"
 #include "sond_treeviewfm.h"
 #include "sond_treeviewfm_private.h"
 
@@ -1062,6 +1063,15 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 		gchar* child_base_clean = NULL;
 		gchar* child_name = NULL;
 		gboolean is_real_subdir = FALSE;
+
+		//wegen fehlenden Passworts übersprungener Eintrag (Vorab-Phase)
+		if (child_priv->sond_file_part && !child_priv->path_or_section) {
+			g_autofree gchar* filepart_skip =
+					sond_file_part_get_filepart(child_priv->sond_file_part);
+
+			if (sond_password_action_is_skipped(filepart_skip))
+				continue;
+		}
 
 		/* Sonderfall PDF/"PageTree" bzw. GMessage/"Message": dieser
 		 * synthetische Pseudo-Knoten trägt denselben SondFilePart wie der

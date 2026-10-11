@@ -1835,6 +1835,83 @@ gboolean sond_file_part_zip_entry_is_encrypted(SondFilePart *sfp_zip,
 	return zip_entry_info(sfp_zip, path, &encrypted, &size) && encrypted;
 }
 
+GPtrArray* sond_file_part_zip_locked_entries(SondFilePart *sfp_zip,
+		gchar const *prefix) {
+	GPtrArray *arr = g_ptr_array_new_with_free_func(g_free);
+	zip_t *archive = NULL;
+	zip_int64_t num_entries = 0;
+	g_autofree gchar *prefix_slash = NULL;
+
+	g_return_val_if_fail(sfp_zip, arr);
+
+	if (!SOND_IS_FILE_PART_ZIP(sfp_zip))
+		return arr;
+
+	archive = sond_file_part_zip_open_archive(SOND_FILE_PART_ZIP(sfp_zip),
+			FALSE, NULL, NULL);
+	if (!archive)
+		return arr;
+
+	if (prefix)
+		prefix_slash = g_strconcat(prefix, "/", NULL);
+
+	num_entries = zip_get_num_entries(archive, 0);
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const *name = zip_get_name(archive, (zip_uint64_t) i,
+				ZIP_FL_ENC_UTF_8);
+		zip_stat_t zstat = { 0 };
+
+		if (!name || !*name || name[strlen(name) - 1] == '/')
+			continue;
+		if (prefix_slash && !g_str_has_prefix(name, prefix_slash))
+			continue;
+
+		if (zip_stat_index(archive, (zip_uint64_t) i, 0, &zstat) == 0 &&
+				(zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
+				zstat.encryption_method != ZIP_EM_NONE)
+			g_ptr_array_add(arr, g_strdup(name));
+	}
+
+	sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_zip), archive);
+
+	return arr;
+}
+
+gboolean sond_file_part_zip_probe_entry(SondFilePart *sfp_zip,
+		gchar const *path, GError **error) {
+	GBytes *bytes = NULL;
+	GError *error_silent = NULL;
+	gboolean encrypted = FALSE;
+	guint64 size = 0;
+
+	g_return_val_if_fail(sfp_zip, FALSE);
+	g_return_val_if_fail(path, FALSE);
+
+	if (!zip_entry_info(sfp_zip, path, &encrypted, &size) || !encrypted)
+		return TRUE;
+
+	//still: nur ein Byte lesen - öffnet der Eintrag mit einem gemerkten
+	//Passwort, genügt das (bei ZipCrypto nur ein Prüfbyte)
+	bytes = sond_file_part_zip_read_entry(SOND_FILE_PART_ZIP(sfp_zip), path,
+			1, NULL, FALSE, &error_silent);
+	g_clear_error(&error_silent);
+	if (bytes) {
+		g_bytes_unref(bytes);
+
+		return TRUE;
+	}
+
+	//Dialog; vollständiges Lesen bestätigt und merkt das eingegebene Passwort
+	bytes = sond_file_part_zip_read_entry(SOND_FILE_PART_ZIP(sfp_zip), path,
+			-1, NULL, TRUE, error);
+	if (!bytes)
+		return FALSE;
+	g_bytes_unref(bytes);
+
+	return TRUE;
+}
+
+
 static void sond_file_part_zip_finalize(GObject *self) {
 	sond_file_part_zip_invalidate_dir_index(SOND_FILE_PART_ZIP(self));
 

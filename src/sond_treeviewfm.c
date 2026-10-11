@@ -38,6 +38,7 @@
 #include "sond_index.h"
 #include "sond_mime.h"
 #include "sond_process_file.h"
+#include "sond_password.h"
 #include "sond_seadrive.h"
 #include "sond_icon_util.h"
 #include "sond_treeviewfm_private.h"
@@ -1208,6 +1209,15 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 			sond_tvfm_item_get_priv(stvfm_item);
 	g_object_unref(stvfm_item); //keine Angst - tree_store hält ref
 
+	//wegen fehlenden Passworts übersprungen (Vorab-Phase beim Kopieren)
+	if (!stvfm_item_priv->path_or_section && stvfm_item_priv->sond_file_part) {
+		g_autofree gchar *filepart_skip = sond_file_part_get_filepart(
+				stvfm_item_priv->sond_file_part);
+
+		if (sond_password_action_is_skipped(filepart_skip))
+			return 0;
+	}
+
 	//Verschieben im selben Verzeichnis?
 	if (clipboard->ausschneiden && (SOND_TREEVIEWFM(stv) == stvfm_item_parent_priv->stvfm)) {
 		GtkTreeIter parent_iter = { 0 };
@@ -1406,6 +1416,111 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	return 0;
 }
 
+/* Vorab-Phase von Kopieren/Verschieben (s. sond_treeviewfm_paste_clipboard()):
+ * Stellt für jedes gesperrte ZIP-Element der Auswahl, dessen Inhalt gelesen
+ * werden muss, das Passwort sicher (still mit gemerkten, sonst Dialog), bevor
+ * irgendetwas kopiert wird. Nicht lesbare Elemente werden beim Kopieren
+ * vorgemerkt (sond_password_action_skip_add()), beim Verschieben bricht die
+ * Aktion ab. */
+typedef struct {
+	SFMPasteSelection *sel;
+	gboolean move;
+	gboolean aborted; //Nutzer hat abgebrochen bzw. beim Verschieben übersprungen
+	gchar *failure;   //Fehlermeldung, wenn nicht gefragt werden konnte
+} SFMPreflight;
+
+//Ein Eintrag prüfen; FALSE = Aktion abbrechen
+static gboolean preflight_entry(SFMPreflight *pf, SondFilePart *sfp_zip,
+		gchar const *path) {
+	GError *error = NULL;
+	g_autofree gchar *archive_fp = NULL;
+
+	if (sond_file_part_zip_probe_entry(sfp_zip, path, &error))
+		return TRUE;
+
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		g_clear_error(&error);
+
+		if (sond_password_last_result() == SOND_PROMPT_CANCEL || pf->move) {
+			pf->aborted = TRUE;
+
+			return FALSE;
+		}
+
+		//übersprungen: beim Kopieren auslassen
+		archive_fp = sond_file_part_get_filepart(sfp_zip);
+		{
+			g_autofree gchar *entry_fp = g_strconcat(archive_fp, "//", path, NULL);
+
+			sond_password_action_skip_add(entry_fp);
+		}
+
+		return TRUE;
+	}
+
+	//nicht gefragt werden konnte oder anderer Fehler
+	g_free(pf->failure);
+	pf->failure = g_strdup(error ? error->message : "Eintrag nicht lesbar");
+	g_clear_error(&error);
+
+	return FALSE;
+}
+
+static gint sond_treeviewfm_preflight_foreach(SondTreeview *stv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	SFMPreflight *pf = (SFMPreflight*) data;
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItemPrivate *item_priv = NULL;
+	SondTVFMItemPrivate *parent_priv = NULL;
+	SondFilePart *sfp = NULL;
+	SondFilePart *sfp_target = NULL;
+	gboolean ok = TRUE;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
+			&stvfm_item, -1);
+	if (!stvfm_item)
+		return 0;
+	item_priv = sond_tvfm_item_get_priv(stvfm_item);
+	g_object_unref(stvfm_item); //der Baum hält die Referenz
+
+	sfp = item_priv->sond_file_part;
+	if (!sfp)
+		return 0; //Dateisystem: nichts zu entsperren
+
+	parent_priv = sond_tvfm_item_get_priv(pf->sel->stvfm_item_parent);
+	sfp_target = parent_priv->sond_file_part;
+
+	if (!item_priv->path_or_section) {
+		//einzelne Datei: gesperrter Eintrag in einem ZIP?
+		SondFilePart *sfp_zip = sond_file_part_get_parent(sfp);
+
+		if (!sfp_zip || !SOND_IS_FILE_PART_ZIP(sfp_zip) ||
+				!(sond_file_part_is_placeholder(sfp) ||
+				sond_file_part_get_lock_entry(sfp) != SOND_LOCK_NONE))
+			return 0;
+
+		//Verschieben im selben Archiv ist ein Umbenennen, ohne Lesen
+		if (pf->move && sfp_target == sfp_zip)
+			return 0;
+
+		ok = preflight_entry(pf, sfp_zip, sond_file_part_get_path(sfp));
+	}
+	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
+		//Verzeichnis im ZIP: alle gesperrten Einträge darunter
+		GPtrArray *arr = NULL;
+
+		if (pf->move && sfp_target == sfp)
+			return 0;
+
+		arr = sond_file_part_zip_locked_entries(sfp, item_priv->path_or_section);
+		for (guint i = 0; i < arr->len && ok; i++)
+			ok = preflight_entry(pf, sfp, g_ptr_array_index(arr, i));
+		g_ptr_array_unref(arr);
+	}
+
+	return ok ? 0 : 1;
+}
+
 static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind,
 		GError **error) {
 	gint rc = 0;
@@ -1456,7 +1571,31 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 
 	stvfm_item_parent_priv = sond_tvfm_item_get_priv(stvfm_item_parent);
 
+	//Ziel ist eine geschützte PDF: zuerst entsperren (Dialog) und das Baum-
+	//element aktualisieren, sie kann Anhänge haben, die erst jetzt bekannt sind
+	if (!parent_is_root && stvfm_item_parent_priv->sond_file_part &&
+			SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part) &&
+			sond_file_part_needs_unlock(stvfm_item_parent_priv->sond_file_part)) {
+		SondFilePart *sfp_unlocked = sond_file_part_unlock(
+				stvfm_item_parent_priv->sond_file_part, error);
+
+		if (!sfp_unlocked) {
+			g_object_unref(stvfm_item_parent);
+
+			return -1;
+		}
+
+		sond_treeviewfm_refresh_file_part(stvfm, sfp_unlocked);
+		g_object_unref(sfp_unlocked);
+
+		g_object_unref(stvfm_item_parent);
+		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+				&iter_parent, 0, &stvfm_item_parent, -1);
+		stvfm_item_parent_priv = sond_tvfm_item_get_priv(stvfm_item_parent);
+	}
+
 	//index der einzufügenden Stelle ermitteln, falls !kind
+
 	//denn wenn kind == TRUE ist index_to 0
 	if (!s_paste_sel.kind) {
 		GtkTreePath* path = NULL;
@@ -1500,9 +1639,59 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 
 	s_paste_sel.stvfm_item_parent = stvfm_item_parent;
 
-	rc = sond_treeview_clipboard_foreach(
-			sond_treeviewfm_paste_clipboard_foreach,
-			(gpointer) &s_paste_sel, error);
+	/* Passwörter gesperrter Einträge vorab einholen (Aktion: Überspringen/
+	 * Alle überspringen nur beim Kopieren, ein übersprungener Eintrag würde
+	 * beim Verschieben verloren gehen). Abbruch oder Fehler: nichts kopieren
+	 * oder verschieben. */
+	{
+		SFMPreflight pf = { &s_paste_sel, clipboard->ausschneiden, FALSE, NULL };
+		GPtrArray *arr_skipped = NULL;
+
+		sond_password_action_begin(!clipboard->ausschneiden);
+
+		rc = sond_treeview_clipboard_foreach(sond_treeviewfm_preflight_foreach,
+				(gpointer) &pf, error);
+		if (rc == -1 || pf.aborted || pf.failure) {
+			if (rc != -1 && pf.failure) {
+				if (error)
+					*error = g_error_new(g_quark_from_static_string("sond"), 0,
+							"%s\nEs wurde nichts %s:\n%s", __func__,
+							clipboard->ausschneiden ? "verschoben" : "kopiert",
+							pf.failure);
+				rc = -1;
+			}
+			else if (rc != -1)
+				rc = 0; //Nutzer hat abgebrochen: still nichts tun
+		}
+		else
+			rc = sond_treeview_clipboard_foreach(
+					sond_treeviewfm_paste_clipboard_foreach,
+					(gpointer) &s_paste_sel, error);
+		g_free(pf.failure);
+
+		//übersprungene Einträge dem Nutzer nennen
+		arr_skipped = sond_password_action_skipped();
+		if (!clipboard->ausschneiden && arr_skipped->len > 0 && !pf.aborted) {
+			GString *text = g_string_new(NULL);
+
+			g_string_append_printf(text, "%u passwortgeschützte%s übersprungen:\n",
+					arr_skipped->len, (arr_skipped->len == 1) ? "r Eintrag" :
+					" Einträge");
+			for (guint i = 0; i < MIN(arr_skipped->len, 5); i++)
+				g_string_append_printf(text, "\n%s",
+						(gchar const*) g_ptr_array_index(arr_skipped, i));
+			if (arr_skipped->len > 5)
+				g_string_append_printf(text, "\n... und %u weitere",
+						arr_skipped->len - 5);
+			sond_password_action_end();
+			display_message(SOND_GET_TOPLEVEL(stvfm), "Kopieren\n\n", text->str,
+					NULL);
+			g_string_free(text, TRUE);
+		}
+		else
+			sond_password_action_end();
+		g_ptr_array_unref(arr_skipped);
+	}
 
 	if (s_paste_sel.index_to) { //heißt: entweder !kind oder mind. 1 node eingefügt
 		//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
@@ -2135,8 +2324,9 @@ static void sond_treeviewfm_action_paste_ge(GSimpleAction *a, GVariant *p,
 				NULL);
 	rc = sond_treeviewfm_paste_clipboard(stvfm, FALSE, &error);
 	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
+		if (!error_is_cancelled(error))
+			display_message(SOND_GET_TOPLEVEL(stvfm),
+					"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -2152,8 +2342,9 @@ static void sond_treeviewfm_action_paste_up(GSimpleAction *a, GVariant *p,
 				NULL);
 	rc = sond_treeviewfm_paste_clipboard(stvfm, TRUE, &error);
 	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
+		if (!error_is_cancelled(error))
+			display_message(SOND_GET_TOPLEVEL(stvfm),
+					"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 }

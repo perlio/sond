@@ -134,6 +134,21 @@ SondFilePart* sond_file_part_unlock(SondFilePart*, GError**);
 gboolean sond_file_part_zip_entry_is_encrypted(SondFilePart *sfp_zip,
 		gchar const *path);
 
+/* Die verschlüsselten Dateieinträge unter prefix (NULL = ganzes Archiv,
+ * sonst Verzeichnis ohne abschließendes '/'): GPtrArray mit den Pfaden im
+ * Archiv (g_free). Nur Verzeichnisdaten, kein Inhaltszugriff. */
+GPtrArray* sond_file_part_zip_locked_entries(SondFilePart *sfp_zip,
+		gchar const *prefix);
+
+/* Stellt sicher, dass der Eintrag lesbar ist, ohne ihn vollständig zu lesen:
+ * erst still mit gemerkten Passwörtern, sonst mit Dialog (der das Passwort
+ * bestätigt und merkt). FALSE bei Überspringen/Abbruch (error:
+ * G_IO_ERROR_CANCELLED, die Wahl liefert sond_password_last_result()) oder
+ * wenn nicht gefragt werden darf (SOND_ERROR_LOCKED). TRUE auch, wenn der
+ * Eintrag gar nicht verschlüsselt ist. */
+gboolean sond_file_part_zip_probe_entry(SondFilePart *sfp_zip,
+		gchar const *path, GError **error);
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);
