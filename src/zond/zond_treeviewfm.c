@@ -14,6 +14,7 @@
 #include "../sond_mime.h"
 #include "../sond_pdf_helper.h"
 #include "zond_indexsuche.h"
+#include "zond_pdf_document.h"
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
@@ -1742,6 +1743,12 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }
 
+//PDF ist im Viewer geöffnet
+static gboolean zond_treeviewfm_file_part_busy(SondFilePart *sfp) {
+	return SOND_IS_FILE_PART_PDF(sfp) &&
+			zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp)) != NULL;
+}
+
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = zond_treeviewfm_finalize;
 
@@ -1752,6 +1759,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->results_row_activated =
 			zond_treeviewfm_results_row_activated;
 	SOND_TREEVIEWFM_CLASS(klass)->open_stvfm_item = zond_treeviewfm_open_stvfm_item;
+	SOND_TREEVIEWFM_CLASS(klass)->file_part_busy = zond_treeviewfm_file_part_busy;
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;

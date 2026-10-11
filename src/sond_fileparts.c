@@ -1911,6 +1911,255 @@ gboolean sond_file_part_zip_probe_entry(SondFilePart *sfp_zip,
 	return TRUE;
 }
 
+static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t*,
+		zip_source_t*, GError**);
+
+gint sond_file_part_zip_decrypt_entries(SondFilePart *sfp_zip_base,
+		GPtrArray *paths, GPtrArray **new_sfps, GError **error) {
+	SondFilePartZip *sfp_zip = NULL;
+	zip_t *archive = NULL;
+	zip_source_t *src = NULL;
+	g_autofree gchar *archive_fp = NULL;
+	GPtrArray *done = NULL; //Pfade, die tatsächlich entschlüsselt wurden
+	gint rc = 0;
+
+	g_return_val_if_fail(sfp_zip_base && SOND_IS_FILE_PART_ZIP(sfp_zip_base), -1);
+	g_return_val_if_fail(paths, -1);
+
+	sfp_zip = SOND_FILE_PART_ZIP(sfp_zip_base);
+	if (new_sfps)
+		*new_sfps = NULL;
+
+	archive = sond_file_part_zip_open_archive(sfp_zip, TRUE, &src, error);
+	if (!archive)
+		return -1;
+
+	archive_fp = sond_file_part_get_filepart(sfp_zip_base);
+	done = g_ptr_array_new_with_free_func(g_free);
+
+	for (guint i = 0; i < paths->len; i++) {
+		gchar const *path = g_ptr_array_index(paths, i);
+		g_autofree gchar *entry_fp = NULL;
+		zip_stat_t zstat = { 0 };
+		GPtrArray *candidates = NULL;
+		GBytes *bytes = NULL;
+		zip_source_t *src_entry = NULL;
+		zip_int64_t idx = 0;
+		gsize len = 0;
+		gconstpointer data = NULL;
+		gpointer copy = NULL;
+
+		if (zip_stat(archive, path, 0, &zstat) != 0 ||
+				!(zstat.valid & ZIP_STAT_SIZE) ||
+				!(zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) ||
+				zstat.encryption_method == ZIP_EM_NONE)
+			continue; //nicht verschlüsselt: nichts zu tun
+
+		entry_fp = g_strconcat(archive_fp, "//", path, NULL);
+		candidates = sond_password_candidates_entry(entry_fp);
+		for (guint k = 0; k < candidates->len && !bytes; k++) {
+			GError *error_attempt = NULL;
+			ZipReadResult res = zip_read_attempt(archive, path, zstat.size, -1,
+					NULL, g_ptr_array_index(candidates, k), &bytes,
+					&error_attempt);
+
+			if (res == ZIP_READ_ERROR) {
+				g_propagate_error(error, error_attempt);
+				sond_password_array_free(candidates);
+				rc = -1;
+
+				goto fehler;
+			}
+			g_clear_error(&error_attempt);
+		}
+		sond_password_array_free(candidates);
+
+		if (!bytes) {
+			g_set_error(error, SOND_ERROR, SOND_ERROR_LOCKED,
+					"%s\nEintrag '%s' ist passwortgeschützt, das Passwort ist "
+					"nicht bekannt", __func__, path);
+			rc = -1;
+
+			goto fehler;
+		}
+
+		data = g_bytes_get_data(bytes, &len);
+		copy = len ? g_memdup2(data, len) : NULL;
+		g_bytes_unref(bytes);
+
+		src_entry = zip_source_buffer(archive, copy, len, 1 /*freep*/);
+		if (!src_entry) {
+			g_free(copy);
+			g_set_error(error, SOND_ERROR, 0, "%s\nzip_source_buffer: %s",
+					__func__, zip_error_strerror(zip_get_error(archive)));
+			rc = -1;
+
+			goto fehler;
+		}
+
+		idx = zip_name_locate(archive, path, 0);
+		if (idx < 0 || zip_file_replace(archive, (zip_uint64_t) idx, src_entry,
+				ZIP_FL_ENC_UTF_8) != 0) {
+			zip_source_free(src_entry);
+			g_set_error(error, SOND_ERROR, 0, "%s\nzip_file_replace('%s'): %s",
+					__func__, path,
+					zip_error_strerror(zip_get_error(archive)));
+			rc = -1;
+
+			goto fehler;
+		}
+
+		if (zip_file_set_encryption(archive, (zip_uint64_t) idx, ZIP_EM_NONE,
+				NULL) != 0) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nzip_file_set_encryption('%s'): %s", __func__, path,
+					zip_error_strerror(zip_get_error(archive)));
+			rc = -1;
+
+			goto fehler;
+		}
+
+		g_ptr_array_add(done, g_strdup(path));
+	}
+
+	if (done->len == 0) { //nichts verschlüsselt
+		zip_source_free(src);
+		zip_discard(archive);
+		g_ptr_array_unref(done);
+
+		return 0;
+	}
+
+	{
+		GBytes *bytes_out = sond_file_part_zip_archive_to_bytes_with_src(archive,
+				src, error);
+
+		zip_source_free(src);
+		if (!bytes_out) {
+			g_ptr_array_unref(done);
+
+			return -1;
+		}
+
+		rc = sond_file_part_replace(sfp_zip_base, bytes_out, error);
+		g_bytes_unref(bytes_out);
+		if (rc) {
+			g_ptr_array_unref(done);
+
+			return -1;
+		}
+	}
+
+	//s. Kommentar in sond_file_part_zip_mod_zip_file()
+	sond_file_part_zip_invalidate_dir_index(sfp_zip);
+
+	//Die Einträge sind jetzt lesbar: Platzhalter durch Elemente mit echtem Typ
+	//ersetzen (Typerkennung am Inhalt)
+	for (guint i = 0; i < done->len; i++) {
+		gchar const *path = g_ptr_array_index(done, i);
+		SondFilePart *sfp_old = sond_file_part_is_open(sfp_zip_base, path);
+		SondFilePart *sfp_new = NULL;
+
+		if (sfp_old) {
+			GPtrArray *arr_opened = sond_file_part_get_arr_opened_files(sfp_zip_base);
+
+			if (arr_opened)
+				g_ptr_array_remove_fast(arr_opened, sfp_old);
+			g_object_unref(sfp_old);
+		}
+
+		sfp_new = sond_file_part_create(sfp_zip_base, path, NULL);
+		if (sfp_new) {
+			if (new_sfps) {
+				if (!*new_sfps)
+					*new_sfps = g_ptr_array_new_with_free_func(g_object_unref);
+				g_ptr_array_add(*new_sfps, sfp_new);
+			}
+			else
+				g_object_unref(sfp_new);
+		}
+	}
+
+	g_ptr_array_unref(done);
+
+	return 0;
+
+fehler:
+	zip_source_free(src);
+	zip_discard(archive);
+	g_ptr_array_unref(done);
+
+	return rc;
+}
+
+gint sond_file_part_pdf_decrypt(SondFilePart *sfp, GError **error) {
+	fz_context *ctx = NULL;
+	pdf_document *doc = NULL;
+	fz_buffer *buf = NULL;
+	GBytes *bytes = NULL;
+	GError *error_open = NULL;
+	gint rc = 0;
+
+	g_return_val_if_fail(sfp && SOND_IS_FILE_PART_PDF(sfp), -1);
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		g_set_error(error, SOND_ERROR, 0, "%s\nfz_new_context fehlgeschlagen",
+				__func__);
+
+		return -1;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(sfp), TRUE,
+			&error_open);
+	if (!doc) {
+		fz_drop_context(ctx);
+		if (g_error_matches(error_open, g_quark_from_static_string("sond"), 1)) {
+			g_clear_error(&error_open);
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+					"%s\nabgebrochen", __func__);
+		}
+		else
+			g_propagate_error(error, error_open);
+
+		return -1;
+	}
+
+	buf = pdf_doc_to_buf_decrypted(ctx, doc, error);
+	pdf_drop_document(ctx, doc);
+	if (!buf) {
+		fz_drop_context(ctx);
+
+		return -1;
+	}
+
+	bytes = g_bytes_new(buf->data, buf->len);
+	fz_drop_buffer(ctx, buf);
+	fz_drop_context(ctx);
+
+	rc = sond_file_part_replace(sfp, bytes, error);
+	g_bytes_unref(bytes);
+	if (rc)
+		return -1;
+
+	sond_file_part_set_lock_content(sfp, SOND_LOCK_NONE);
+
+	//Anhänge waren mit dem Schlüssel der PDF verschlüsselt (grünes Schloss)
+	{
+		GPtrArray *arr_opened = sond_file_part_get_arr_opened_files(sfp);
+
+		for (guint i = 0; arr_opened && i < arr_opened->len; i++) {
+			SondFilePart *child = g_ptr_array_index(arr_opened, i);
+
+			if (sond_file_part_get_lock_entry(child) == SOND_LOCK_UNLOCKED)
+				sond_file_part_set_lock_entry(child, SOND_LOCK_NONE);
+		}
+	}
+
+	return 0;
+}
+
+
 
 static void sond_file_part_zip_finalize(GObject *self) {
 	sond_file_part_zip_invalidate_dir_index(SOND_FILE_PART_ZIP(self));

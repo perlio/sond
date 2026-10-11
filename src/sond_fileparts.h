@@ -149,6 +149,22 @@ GPtrArray* sond_file_part_zip_locked_entries(SondFilePart *sfp_zip,
 gboolean sond_file_part_zip_probe_entry(SondFilePart *sfp_zip,
 		gchar const *path, GError **error);
 
+/* Entfernt den Passwortschutz der Einträge paths (Pfade im Archiv) dauerhaft:
+ * entschlüsselt sie mit den gemerkten Passwörtern (vorher z.B. mit
+ * sond_file_part_zip_probe_entry() sicherstellen) und schreibt das Archiv
+ * einmal neu; nicht verschlüsselte Pfade werden übersprungen, andere Einträge
+ * bleiben unverändert verschlüsselt. Im Erfolgsfall ersetzt *new_sfps (darf
+ * NULL sein; GPtrArray, Freigabe durch den Aufrufer) die bisherigen
+ * Platzhalter durch Elemente mit echtem Typ. Fehler: SOND_ERROR_LOCKED, wenn
+ * ein Passwort nicht bekannt ist (dann bleibt das Archiv unverändert). */
+gint sond_file_part_zip_decrypt_entries(SondFilePart *sfp_zip,
+		GPtrArray *paths, GPtrArray **new_sfps, GError **error);
+
+/* Entfernt den Passwortschutz einer PDF dauerhaft: öffnet sie (gemerktes
+ * Passwort, sonst Dialog) und schreibt sie unverschlüsselt an Ort und Stelle
+ * zurück. Bei Abbruch des Dialogs G_IO_ERROR_CANCELLED. */
+gint sond_file_part_pdf_decrypt(SondFilePart *sfp, GError **error);
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);

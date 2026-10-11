@@ -469,7 +469,10 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 	return 0;
 }
 
-fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
+/* decrypt: ohne Verschlüsselung schreiben (nur bei authentifiziertem Dokument),
+ * sonst bleibt sie erhalten. */
+static fz_buffer* pdf_doc_to_buf_opt(fz_context* ctx, pdf_document* doc,
+		gboolean decrypt, GError** error) {
 	fz_output* out = NULL;
 	fz_buffer* buf = NULL;
 	pdf_write_options in_opts =
@@ -477,6 +480,8 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 
 	//	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
 	in_opts.do_garbage = 4;
+	if (decrypt)
+		in_opts.do_encrypt = PDF_ENCRYPT_NONE;
 
 	fz_try(ctx) {
 		buf = fz_new_buffer(ctx, 4096);
@@ -549,6 +554,15 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 	}
 
 	return buf;
+}
+
+fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
+	return pdf_doc_to_buf_opt(ctx, doc, FALSE, error);
+}
+
+fz_buffer* pdf_doc_to_buf_decrypted(fz_context* ctx, pdf_document* doc,
+		GError** error) {
+	return pdf_doc_to_buf_opt(ctx, doc, TRUE, error);
 }
 
 gchar* pdf_emb_escape(gchar const* name) {

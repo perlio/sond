@@ -60,6 +60,11 @@ gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
 fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
 
+/* Wie pdf_doc_to_buf(), schreibt aber ohne Verschlüsselung. Das Dokument muss
+ * authentifiziert sein (Passwort bekannt). */
+fz_buffer* pdf_doc_to_buf_decrypted(fz_context* ctx, pdf_document* doc,
+		GError** error);
+
 pdf_obj* pdf_get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error);
 
 gint pdf_walk_embedded_files(fz_context*, pdf_document*,

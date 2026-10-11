@@ -44,6 +44,11 @@ struct _SondTreeviewFMClass {
 	gint (*delete_section) (SondTVFMItem*, GError**);
 	SondProcessFileCtx* (*get_wctx) (SondTreeviewFM*);
 
+	/* Optional: TRUE, wenn die Datei gerade in Benutzung ist (z.B. in einem
+	 * Viewer geöffnet) und deshalb nicht verändert werden darf - "Dauerhaft
+	 * entsperren" lässt sie dann aus. NULL = nie in Benutzung. */
+	gboolean (*file_part_busy) (SondFilePart*);
+
 	/* Liefert den Indizierungsstatus für einen LEAF_SECTION-Knoten
 	 * (Anbindung), für das Indizierungsstatus-Overlay.
 	 *

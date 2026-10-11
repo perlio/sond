@@ -620,6 +620,12 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_loeschen));
 	g_object_unref(sec_loeschen);
 
+	GMenu *sec_entsperren = g_menu_new();
+	g_menu_append(sec_entsperren, "Dauerhaft entsperren",
+			"stv.dauerhaft-entsperren");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_entsperren));
+	g_object_unref(sec_entsperren);
+
 	GMenu *sec_oeffnen = g_menu_new();
 	g_menu_append(sec_oeffnen, "\u00d6ffnen",     "stv.oeffnen");
 	g_menu_append(sec_oeffnen, "\u00d6ffnen mit", "stv.oeffnen-mit");
@@ -2349,6 +2355,316 @@ static void sond_treeviewfm_action_paste_up(GSimpleAction *a, GVariant *p,
 	}
 }
 
+/* ------------------------------------------------------------------------
+ * Dauerhaft entsperren: den Passwortschutz von ZIP-Einträgen und PDFs der
+ * Auswahl entfernen (die Dateien werden dabei verändert)
+ * ---------------------------------------------------------------------- */
+typedef struct {
+	SondFilePart *zip; //Ref
+	GPtrArray *paths;  //Pfade der verschlüsselten Einträge im Archiv (g_free)
+} SFMZipJob;
+
+typedef struct {
+	GPtrArray *zips; //SFMZipJob*
+	GPtrArray *pdfs; //SondFilePart* (Ref), PDF mit Passwort
+} SFMDecryptJobs;
+
+static void zip_job_free(gpointer p) {
+	SFMZipJob *job = (SFMZipJob*) p;
+
+	g_object_unref(job->zip);
+	g_ptr_array_unref(job->paths);
+	g_free(job);
+}
+
+static SFMZipJob* decrypt_zip_job(SFMDecryptJobs *jobs, SondFilePart *zip) {
+	SFMZipJob *job = NULL;
+
+	for (guint i = 0; i < jobs->zips->len; i++) {
+		job = g_ptr_array_index(jobs->zips, i);
+		if (job->zip == zip)
+			return job;
+	}
+
+	job = g_new0(SFMZipJob, 1);
+	job->zip = g_object_ref(zip);
+	job->paths = g_ptr_array_new_with_free_func(g_free);
+	g_ptr_array_add(jobs->zips, job);
+
+	return job;
+}
+
+static void decrypt_job_add_path(SFMZipJob *job, gchar const *path) {
+	for (guint i = 0; i < job->paths->len; i++)
+		if (!g_strcmp0(g_ptr_array_index(job->paths, i), path))
+			return;
+
+	g_ptr_array_add(job->paths, g_strdup(path));
+}
+
+//Pfade der verschlüsselten Einträge unter prefix (NULL = ganzes Archiv) dazu
+static void decrypt_job_add_locked(SFMDecryptJobs *jobs, SondFilePart *zip,
+		gchar const *prefix) {
+	GPtrArray *arr = sond_file_part_zip_locked_entries(zip, prefix);
+
+	if (arr->len) {
+		SFMZipJob *job = decrypt_zip_job(jobs, zip);
+
+		for (guint i = 0; i < arr->len; i++)
+			decrypt_job_add_path(job, g_ptr_array_index(arr, i));
+	}
+	g_ptr_array_unref(arr);
+}
+
+static gint sond_treeviewfm_collect_decrypt_foreach(SondTreeview *stv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	SFMDecryptJobs *jobs = (SFMDecryptJobs*) data;
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItemPrivate *item_priv = NULL;
+	SondFilePart *sfp = NULL;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
+			&stvfm_item, -1);
+	if (!stvfm_item)
+		return 0;
+	item_priv = sond_tvfm_item_get_priv(stvfm_item);
+	g_object_unref(stvfm_item); //der Baum hält die Referenz
+
+	sfp = item_priv->sond_file_part;
+	if (!sfp)
+		return 0; //Dateisystem-Verzeichnis, nichts zu entsperren
+
+	if (!item_priv->path_or_section) {
+		SondFilePart *parent = sond_file_part_get_parent(sfp);
+
+		//selbst ein verschlüsselter Eintrag eines ZIP-Archivs
+		if (parent && SOND_IS_FILE_PART_ZIP(parent) &&
+				sond_file_part_zip_entry_is_encrypted(parent,
+						sond_file_part_get_path(sfp)))
+			decrypt_job_add_path(decrypt_zip_job(jobs, parent),
+					sond_file_part_get_path(sfp));
+
+		//ein ZIP-Archiv als Ganzes: alle verschlüsselten Einträge
+		if (SOND_IS_FILE_PART_ZIP(sfp))
+			decrypt_job_add_locked(jobs, sfp, NULL);
+
+		//eine PDF mit Passwort
+		if (SOND_IS_FILE_PART_PDF(sfp) &&
+				sond_file_part_get_lock_content(sfp) != SOND_LOCK_NONE)
+			g_ptr_array_add(jobs->pdfs, g_object_ref(sfp));
+	}
+	else if (SOND_IS_FILE_PART_ZIP(sfp))
+		decrypt_job_add_locked(jobs, sfp, item_priv->path_or_section);
+
+	return 0;
+}
+
+//lokal verfügbar (SeaDrive-Platzhalter werden geladen); FALSE: später erneut
+static gboolean decrypt_ensure_local(SondTreeviewFM *stvfm, SondFilePart *sfp) {
+#ifdef _WIN32
+	if (sond_treeviewfm_is_seadrive_path(stvfm)) {
+		SondFilePart *root = sfp;
+		SondFilePart *parent = NULL;
+		gchar const *root_dir = sond_treeviewfm_get_root(stvfm);
+
+		while ((parent = sond_file_part_get_parent(root)))
+			root = parent;
+
+		if (root_dir && sond_file_part_get_path(root)) {
+			g_autofree gchar *full_path = g_strconcat(root_dir, "/",
+					sond_file_part_get_path(root), NULL);
+
+			return sond_seadrive_ensure_hydrated(
+					GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
+		}
+	}
+#endif
+
+	return TRUE;
+}
+
+//Ergebnis eines Entsperrversuchs mit Dialog: TRUE = weiter, FALSE = Aktion beenden
+static gboolean decrypt_handle_failure(SondTreeviewFM *stvfm, GError *error,
+		guint *n_skipped, gboolean *aborted) {
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		if (sond_password_last_result() == SOND_PROMPT_CANCEL) {
+			*aborted = TRUE;
+
+			return FALSE;
+		}
+		(*n_skipped)++;
+
+		return TRUE; //übersprungen
+	}
+
+	display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+			error ? error->message : "Fehler", NULL);
+	*aborted = TRUE;
+
+	return FALSE;
+}
+
+static void sond_treeviewfm_action_entsperren(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
+	SFMDecryptJobs jobs = { g_ptr_array_new_with_free_func(zip_job_free),
+			g_ptr_array_new_with_free_func(g_object_unref) };
+	GError *error = NULL;
+	guint n_total = 0;
+	guint n_done = 0;
+	guint n_skipped = 0;
+	gboolean aborted = FALSE;
+	g_autofree gchar *text = NULL;
+
+	if (sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+			sond_treeviewfm_collect_decrypt_foreach, &jobs, &error) == -1) {
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+				error->message, NULL);
+		g_error_free(error);
+
+		goto ende;
+	}
+
+	for (guint i = 0; i < jobs.zips->len; i++)
+		n_total += ((SFMZipJob*) g_ptr_array_index(jobs.zips, i))->paths->len;
+	n_total += jobs.pdfs->len;
+
+	if (n_total == 0) {
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+				"Die Auswahl enthält keine passwortgeschützten Dateien.", NULL);
+
+		goto ende;
+	}
+
+	//eine im Viewer geöffnete PDF nicht anfassen
+	if (klass->file_part_busy)
+		for (guint i = 0; i < jobs.pdfs->len; i++) {
+			SondFilePart *sfp = g_ptr_array_index(jobs.pdfs, i);
+
+			if (klass->file_part_busy(sfp)) {
+				g_autofree gchar *fp = sond_file_part_get_filepart(sfp);
+				g_autofree gchar *msg = g_strdup_printf(
+						"Die Datei '%s' ist geöffnet. Bitte zuerst schließen.", fp);
+
+				display_message(SOND_GET_TOPLEVEL(stvfm),
+						"Dauerhaft entsperren\n\n", msg, NULL);
+
+				goto ende;
+			}
+		}
+
+	//lokal verfügbar?
+	for (guint i = 0; i < jobs.zips->len; i++)
+		if (!decrypt_ensure_local(stvfm,
+				((SFMZipJob*) g_ptr_array_index(jobs.zips, i))->zip)) {
+			display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+					"Die Datei wird noch geladen. Bitte danach erneut versuchen.",
+					NULL);
+
+			goto ende;
+		}
+	for (guint i = 0; i < jobs.pdfs->len; i++)
+		if (!decrypt_ensure_local(stvfm, g_ptr_array_index(jobs.pdfs, i))) {
+			display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+					"Die Datei wird noch geladen. Bitte danach erneut versuchen.",
+					NULL);
+
+			goto ende;
+		}
+
+	//einmal bestätigen lassen
+	text = g_strdup_printf("Der Passwortschutz von %u Datei(en) wird dauerhaft "
+			"entfernt.\nDie Dateien werden dabei verändert, eine Sicherung "
+			"gibt es nicht.\n\nFortfahren?", n_total);
+	if (abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren", text,
+			NULL) != GTK_RESPONSE_YES)
+		goto ende;
+
+	sond_password_action_begin(TRUE);
+
+	//Einträge in ZIP-Archiven: Passwörter sicherstellen, dann je Archiv einmal
+	//schreiben. Aus entschlüsselten PDF-Einträgen werden PDFs mit Passwort
+	//der zweiten Schicht, die gleich folgen.
+	for (guint i = 0; i < jobs.zips->len && !aborted; i++) {
+		SFMZipJob *job = g_ptr_array_index(jobs.zips, i);
+		GPtrArray *ok_paths = g_ptr_array_new_with_free_func(g_free);
+		GPtrArray *new_sfps = NULL;
+
+		for (guint k = 0; k < job->paths->len && !aborted; k++) {
+			gchar const *path = g_ptr_array_index(job->paths, k);
+			GError *error_probe = NULL;
+
+			if (sond_file_part_zip_probe_entry(job->zip, path, &error_probe))
+				g_ptr_array_add(ok_paths, g_strdup(path));
+			else
+				decrypt_handle_failure(stvfm, error_probe, &n_skipped, &aborted);
+			g_clear_error(&error_probe);
+		}
+
+		if (!aborted && ok_paths->len) {
+			GError *error_dec = NULL;
+
+			if (sond_file_part_zip_decrypt_entries(job->zip, ok_paths, &new_sfps,
+					&error_dec)) {
+				decrypt_handle_failure(stvfm, error_dec, &n_skipped, &aborted);
+				g_clear_error(&error_dec);
+			}
+			else {
+				n_done += ok_paths->len;
+
+				for (guint k = 0; new_sfps && k < new_sfps->len; k++) {
+					SondFilePart *sfp_new = g_ptr_array_index(new_sfps, k);
+
+					sond_treeviewfm_refresh_file_part(stvfm, sfp_new);
+					if (SOND_IS_FILE_PART_PDF(sfp_new) &&
+							sond_file_part_get_lock_content(sfp_new) !=
+									SOND_LOCK_NONE)
+						g_ptr_array_add(jobs.pdfs, g_object_ref(sfp_new));
+				}
+			}
+		}
+
+		if (new_sfps)
+			g_ptr_array_unref(new_sfps);
+		g_ptr_array_unref(ok_paths);
+	}
+
+	//PDFs mit Passwort (auch die gerade aus ZIP-Einträgen entstandenen)
+	for (guint i = 0; i < jobs.pdfs->len && !aborted; i++) {
+		SondFilePart *sfp = g_ptr_array_index(jobs.pdfs, i);
+		GError *error_pdf = NULL;
+
+		if (sond_file_part_pdf_decrypt(sfp, &error_pdf))
+			decrypt_handle_failure(stvfm, error_pdf, &n_skipped, &aborted);
+		else
+			n_done++;
+		g_clear_error(&error_pdf);
+	}
+
+	sond_password_action_end();
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+
+	{
+		GString *msg = g_string_new(NULL);
+
+		g_string_append_printf(msg, "%u Datei(en) entsperrt", n_done);
+		if (n_skipped)
+			g_string_append_printf(msg, ", %u übersprungen", n_skipped);
+		if (aborted)
+			g_string_append(msg, "\n\nAbgebrochen.");
+
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+				msg->str, NULL);
+		g_string_free(msg, TRUE);
+	}
+
+ende:
+	g_ptr_array_unref(jobs.zips);
+	g_ptr_array_unref(jobs.pdfs);
+}
+
 static void sond_treeviewfm_action_loeschen(GSimpleAction *a, GVariant *p,
 		gpointer d) {
 	gint rc = 0;
@@ -2636,6 +2952,12 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 			G_CALLBACK(sond_treeviewfm_action_loeschen), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_loeschen));
 	g_object_unref(act_loeschen);
+
+	GSimpleAction *act_entsperren = g_simple_action_new("dauerhaft-entsperren", NULL);
+	g_signal_connect(act_entsperren, "activate",
+			G_CALLBACK(sond_treeviewfm_action_entsperren), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_entsperren));
+	g_object_unref(act_entsperren);
 
 	GSimpleAction *act_oeffnen = g_simple_action_new("oeffnen", NULL);
 	g_signal_connect(act_oeffnen, "activate",
