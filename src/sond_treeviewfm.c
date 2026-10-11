@@ -1301,8 +1301,10 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		sond_file_part_set_has_children(sfp_new,
 				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part));
 
-		sond_file_part_set_is_locked(sfp_new,
-				sond_file_part_get_is_locked(stvfm_item_priv->sond_file_part));
+		sond_file_part_set_lock_entry(sfp_new,
+				sond_file_part_get_lock_entry(stvfm_item_priv->sond_file_part));
+		sond_file_part_set_lock_content(sfp_new,
+				sond_file_part_get_lock_content(stvfm_item_priv->sond_file_part));
 
 		sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 	}
@@ -2945,11 +2947,13 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			}
 		}
 
-		//Schloss oben links: Inhalt passwortgeschützt, nicht lesbar
+		//Schloss oben links: passwortgeschützt (schwarz) bzw. entsperrt (grün)
 		if (stvfm_item_priv->sond_file_part &&
-				sond_file_part_get_is_locked(stvfm_item_priv->sond_file_part)) {
+				sond_file_part_get_lock(stvfm_item_priv->sond_file_part)
+						!= SOND_LOCK_NONE) {
 			locked_pb = sond_icon_util_locked_badge_pixbuf(GTK_WIDGET(stvfm),
-					overlay_px);
+					overlay_px, sond_file_part_get_lock(
+							stvfm_item_priv->sond_file_part) == SOND_LOCK_UNLOCKED);
 			if (locked_pb) {
 				overlays[n_overlays].pixbuf = locked_pb;
 				overlays[n_overlays].corner = SOND_ICON_CORNER_TOP_LEFT;

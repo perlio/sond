@@ -520,7 +520,7 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 
 Vorgesehene Reihenfolge (jeder Schritt für sich baubar und prüfbar). Bisher
 gebaut: Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md, 10.10.2026)
-und Schritt 1 (#222, erledigt 11.10.2026); #221 (Dauerhaft entsperren) gehört in Schritt 5.
+und Schritte 1 und 2 (#222, #223, erledigt 11.10.2026); #221 (Dauerhaft entsperren) gehört in Schritt 5.
 
 ```text
  Grundsätze: Zustände nicht verschlüsselt (kein Badge) / gesperrt (Schloß) /
@@ -532,15 +532,10 @@ und Schritt 1 (#222, erledigt 11.10.2026); #221 (Dauerhaft entsperren) gehört i
  Eingefügte/kopierte/exportierte Dateien sind immer unverschlüsselt (Ausnahme:
  Anhänge in verschlüsselter PDF). PDF-Berechtigungsbits werden ignoriert.
 
- #223 Schritt 2 - Modul sond_password.c/.h (src/) und Zustandsmodell:
- Cache (Nachschlagen Eintrag, dann Standardpasswort; Pfade bei Umbenennen
- mitführen; Leeren beim Schließen), Zustand in SondFilePart (statt is_locked:
- nicht verschlüsselt / gesperrt / entsperrt), gesperrte PDFs schon beim Anlegen
- erkennen (Badge). sond_file_part_create() und sond_file_part_from_filepart()
- dürfen an gesperrten ZIP-Einträgen nicht am Sniffen scheitern (Typ nach Endung,
- gesperrt); Wiederanlegen mit echtem Typ nach dem Entsperren.
-
  #224 Schritt 3 - Entsperr-Hook und Dialog, zuerst Öffnen/Viewer:
+ Nach dem Entsperren das SondFilePart mit echtem Typ neu anlegen (Sniffen) und das
+ Baumelement ersetzen. Das Öffnen einer geschützten PDF im Viewer zeigt heute eine
+ leere Seite und MuPDF-Syntaxfehler (zond_pdf_document_open ohne Authentifizierung).
  read_bytes_internal() (ZIP-Zweig, zip_fopen_encrypted), zip_open_archive(),
  sond_file_part_pdf_open_document() und zond_pdf_document_open() (dort fehlt
  die Authentifizierung ganz). Dialog (Callback): falsches Passwort -> erneut mit

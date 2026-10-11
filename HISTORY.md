@@ -5379,3 +5379,36 @@ mit geschuetzt.pdf (AES-256), pdf_im_zip.zip, zipcrypto.zip und sub38.zip.
    - übersprungen" je Teil, am Ende "N passwortgeschützte Datei(en)
    übersprungen". Die Liste wertet noch niemand aus (TODO.md #228).
 ```
+
+## Passwortschutz: Passwort-Speicher und Zustandsmodell (#223, 11.10.2026)
+
+Schritt 2 des Konzepts "Passwortschutz ZIP/PDF" (TODO.md #221, #224-#229).
+Getestet mit geschuetzt.pdf, pdf_im_zip.zip, zipcrypto.zip, sub38.zip; das
+Modul sond_password.c zusätzlich mit einem eigenen Testprogramm (inkl. Threads).
+
+```text
+ - Neues Modul sond_password.c/.h (src/, nur GLib): sitzungsweiter Speicher für
+   Passwörter, nur im RAM, Mutex, Schlüssel Filepart-String + Rolle (Eintrag:
+   Passwort, mit dem das Element als ZIP-Eintrag entschlüsselt wird; Inhalt:
+   PDF-Dokumentpasswort bzw. Standardpasswort der Einträge eines ZIP).
+   Kandidatenliste für einen Eintrag (eigenes, Standardpasswort des Archivs,
+   andere Einträge desselben Archivs), Präfix umbenennen/vergessen, alles
+   überschreiben und leeren (project_close()). Im Makefile nur beim Ziel zond.
+   Noch ohne Verbraucher - gefüllt wird der Speicher ab #224.
+ - SondFilePart: statt is_locked zwei Schichten lock_entry und lock_content mit
+   SondLock (NONE/LOCKED/UNLOCKED), kombinierter Getter sond_file_part_get_lock().
+   Beim Einfügen im Baum werden beide Felder übernommen.
+ - sond_file_part_create() erkennt verschlüsselte ZIP-Einträge per zip_stat
+   (sond_file_part_zip_entry_is_encrypted()) und legt sie ohne Sniffen als Leaf
+   nach Endung mit Eintrags-Zustand LOCKED an; gilt damit auch für
+   sond_file_part_from_filepart(). Die Prüfung in load_zip_dir() und das Feld
+   SondZipDirEntry.encrypted entfallen.
+ - sond_file_part_pdf_test_for_embedded_files(): eine PDF, die ein Passwort
+   braucht, bekommt Inhalt LOCKED (kein Fehler, keine Log-Warnung mehr), ihre
+   Anhänge bleiben unbekannt.
+ - Schloss-Badge: gesperrt in Theme-Farbe, entsperrt grün
+   (sond_icon_util_locked_badge_pixbuf(..., unlocked), gtk_icon_info_load_symbolic).
+   Das grüne Schloss ist erst mit #224 sichtbar.
+ - Bekannt, bis #224: Öffnen einer geschützten PDF im Viewer zeigt eine leere
+   Seite mit MuPDF-Syntaxfehlern (zond_pdf_document_open ohne Authentifizierung).
+```

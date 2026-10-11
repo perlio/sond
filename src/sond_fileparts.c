@@ -54,8 +54,9 @@ typedef struct {
 	gboolean has_children;
 	/* s. Doc-Kommentar an sond_file_part_get_is_attachment() (sond_fileparts.h) */
 	gboolean is_attachment;
-	/* s. Doc-Kommentar an sond_file_part_get_is_locked() (sond_fileparts.h) */
-	gboolean is_locked;
+	/* s. Doc-Kommentar an SondLock (sond_fileparts.h) */
+	SondLock lock_entry;
+	SondLock lock_content;
 } SondFilePartPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
@@ -251,6 +252,15 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	if (sfp)
 		return sfp;
 
+	//verschlüsselter ZIP-Eintrag: nicht lesbar, Leaf nach Endung, gesperrt
+	if (sfp_parent && sond_file_part_zip_entry_is_encrypted(sfp_parent, path)) {
+		sfp = sond_file_part_create_leaf(path, sfp_parent,
+				mime_from_extension(path));
+		sond_file_part_set_lock_entry(sfp, SOND_LOCK_LOCKED);
+
+		return sfp;
+	}
+
 	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, NULL, error);
 	if (!bytes)
 		return NULL;
@@ -387,26 +397,50 @@ void sond_file_part_set_is_attachment(SondFilePart *sfp, gboolean is_attachment)
 	return;
 }
 
-gboolean sond_file_part_get_is_locked(SondFilePart *sfp) {
-	SondFilePartPrivate* sfp_priv = NULL;
+SondLock sond_file_part_get_lock_entry(SondFilePart *sfp) {
+	g_return_val_if_fail(sfp, SOND_LOCK_NONE);
 
-	g_return_val_if_fail(sfp, FALSE);
-
-	sfp_priv = sond_file_part_get_instance_private(sfp);
-
-	return sfp_priv->is_locked;
+	return ((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->lock_entry;
 }
 
-void sond_file_part_set_is_locked(SondFilePart *sfp, gboolean is_locked) {
+void sond_file_part_set_lock_entry(SondFilePart *sfp, SondLock lock) {
+	g_return_if_fail(sfp);
+
+	((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->lock_entry = lock;
+
+	return;
+}
+
+SondLock sond_file_part_get_lock_content(SondFilePart *sfp) {
+	g_return_val_if_fail(sfp, SOND_LOCK_NONE);
+
+	return ((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->lock_content;
+}
+
+void sond_file_part_set_lock_content(SondFilePart *sfp, SondLock lock) {
+	g_return_if_fail(sfp);
+
+	((SondFilePartPrivate*) sond_file_part_get_instance_private(sfp))->lock_content = lock;
+
+	return;
+}
+
+SondLock sond_file_part_get_lock(SondFilePart *sfp) {
 	SondFilePartPrivate* sfp_priv = NULL;
 
-	g_return_if_fail(sfp);
+	g_return_val_if_fail(sfp, SOND_LOCK_NONE);
 
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
-	sfp_priv->is_locked = is_locked;
+	if (sfp_priv->lock_entry == SOND_LOCK_LOCKED ||
+			sfp_priv->lock_content == SOND_LOCK_LOCKED)
+		return SOND_LOCK_LOCKED;
 
-	return;
+	if (sfp_priv->lock_entry == SOND_LOCK_UNLOCKED ||
+			sfp_priv->lock_content == SOND_LOCK_UNLOCKED)
+		return SOND_LOCK_UNLOCKED;
+
+	return SOND_LOCK_NONE;
 }
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart* sfp) {
@@ -1384,6 +1418,32 @@ static void sond_file_part_zip_release_archive(SondFilePartZip* sfp_zip,
 	return;
 }
 
+gboolean sond_file_part_zip_entry_is_encrypted(SondFilePart *sfp_zip,
+		gchar const *path) {
+	zip_t *archive = NULL;
+	zip_stat_t zstat = { 0 };
+	gboolean encrypted = FALSE;
+
+	g_return_val_if_fail(sfp_zip, FALSE);
+	g_return_val_if_fail(path, FALSE);
+
+	if (!SOND_IS_FILE_PART_ZIP(sfp_zip))
+		return FALSE;
+
+	archive = sond_file_part_zip_open_archive(SOND_FILE_PART_ZIP(sfp_zip),
+			FALSE, NULL, NULL);
+	if (!archive)
+		return FALSE;
+
+	if (zip_stat(archive, path, 0, &zstat) == 0)
+		encrypted = (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
+				zstat.encryption_method != ZIP_EM_NONE;
+
+	sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_zip), archive);
+
+	return encrypted;
+}
+
 static void sond_file_part_zip_finalize(GObject *self) {
 	sond_file_part_zip_invalidate_dir_index(SOND_FILE_PART_ZIP(self));
 
@@ -1431,7 +1491,6 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 	for (zip_int64_t i = 0; i < num_entries; i++) {
 		gchar const* name = zip_get_name(archive, (zip_uint64_t) i, ZIP_FL_ENC_UTF_8);
 		gboolean ends_with_slash = FALSE;
-		gboolean encrypted = FALSE;
 		gsize clean_len = 0;
 		gsize pos = 0;
 
@@ -1440,15 +1499,6 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 
 		ends_with_slash = (name[strlen(name) - 1] == '/');
 		clean_len = ends_with_slash ? strlen(name) - 1 : strlen(name);
-
-		//nur Metadaten aus dem Central Directory, kein Zugriff auf den Inhalt
-		if (!ends_with_slash) {
-			zip_stat_t zstat = { 0 };
-
-			encrypted = (zip_stat_index(archive, (zip_uint64_t) i, 0, &zstat) == 0
-					&& (zstat.valid & ZIP_STAT_ENCRYPTION_METHOD)
-					&& zstat.encryption_method != ZIP_EM_NONE);
-		}
 
 		while (pos < clean_len) {
 			gchar const* rest = name + pos;
@@ -1476,7 +1526,6 @@ static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
 
 				e->path = g_strdup(child_path);
 				e->is_dir = child_is_dir;
-				e->encrypted = is_last_component && !child_is_dir && encrypted;
 
 				bucket = g_hash_table_lookup(index, parent_prefix);
 				if (!bucket) {
@@ -2491,6 +2540,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 	pdf_document* doc = NULL;
 	SondFilePartPrivate* sfp_priv = NULL;
 	gboolean has_emb_file = FALSE;
+	GError* error_open = NULL;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
@@ -2500,9 +2550,24 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, &error_open);
 	if (!doc) {
 		fz_drop_context(ctx);
+
+		//Passwort nötig (Code 1, s. sond_file_part_pdf_open_document()):
+		//kein Fehler, die PDF ist gesperrt und ihre Anhänge sind unbekannt
+		if (g_error_matches(error_open, g_quark_from_static_string("sond"), 1)) {
+			g_clear_error(&error_open);
+			sond_file_part_set_lock_content(SOND_FILE_PART(sfp_pdf),
+					SOND_LOCK_LOCKED);
+			sfp_priv = sond_file_part_get_instance_private(SOND_FILE_PART(sfp_pdf));
+			sfp_priv->has_children = FALSE;
+
+			return 0;
+		}
+
+		g_propagate_error(error, error_open);
+
 		return -1;
 	}
 

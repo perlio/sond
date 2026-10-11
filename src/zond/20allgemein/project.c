@@ -28,6 +28,7 @@
 #include "../../sond_tvfm_item.h"
 #include "../../sond_seadrive.h"
 #include "../../sond_process_file.h"
+#include "../../sond_password.h"
 #include "../../misc.h"
 
 #include "../zond_init.h"
@@ -646,6 +647,9 @@ gint project_close(Projekt *zond, GError **error) {
 	// Close all viewer windows
 	for (gint i = 0; i < zond->arr_pv->len; i++)
 		viewer_save_and_close(g_ptr_array_index(zond->arr_pv, i));
+
+	// Gemerkte Passwörter vergessen und überschreiben
+	sond_password_clear();
 
 	// Disable menus and widgets
 	project_set_widgets_sensitive(zond, FALSE);

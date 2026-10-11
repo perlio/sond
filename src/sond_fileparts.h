@@ -83,12 +83,38 @@ gboolean sond_file_part_get_is_attachment(SondFilePart*);
 
 void sond_file_part_set_is_attachment(SondFilePart*, gboolean);
 
-/* Basisklassen-Attribut: Inhalt ist passwortgeschützt und ohne Passwort nicht
- * lesbar (aktuell: verschlüsselter ZIP-Eintrag). Ein solcher sfp wird ohne
- * Inhaltszugriff als Leaf angelegt (Typ nur aus der Endung). Default FALSE. */
-gboolean sond_file_part_get_is_locked(SondFilePart*);
+/* Passwortschutz, Basisklassen-Attribut mit zwei Schichten:
+ * - Eintrag:  das Element ist ein verschlüsselter Eintrag seines ZIP-Archivs.
+ *             Ein solcher sfp wird ohne Inhaltszugriff als Leaf angelegt (Typ
+ *             nur aus der Endung).
+ * - Inhalt:   das Element ist selbst passwortgeschützt (PDF, die ein
+ *             Benutzerpasswort verlangt).
+ * Zustände: NONE (nicht verschlüsselt), LOCKED (Passwort nötig, noch nicht
+ * bekannt), UNLOCKED (verschlüsselt, in dieser Sitzung erfolgreich
+ * entschlüsselt). Default beider Schichten NONE. */
+typedef enum {
+	SOND_LOCK_NONE = 0,
+	SOND_LOCK_LOCKED,
+	SOND_LOCK_UNLOCKED
+} SondLock;
 
-void sond_file_part_set_is_locked(SondFilePart*, gboolean);
+SondLock sond_file_part_get_lock_entry(SondFilePart*);
+
+void sond_file_part_set_lock_entry(SondFilePart*, SondLock);
+
+SondLock sond_file_part_get_lock_content(SondFilePart*);
+
+void sond_file_part_set_lock_content(SondFilePart*, SondLock);
+
+/* Für die Anzeige: LOCKED, solange irgendeine Schicht ein Passwort braucht,
+ * sonst UNLOCKED, wenn eine Schicht entsperrt ist, sonst NONE. */
+SondLock sond_file_part_get_lock(SondFilePart*);
+
+/* Prüft, ob der Eintrag path im ZIP-Archiv sfp_zip verschlüsselt ist (nur
+ * Verzeichnisdaten, kein Inhaltszugriff). FALSE bei Verzeichnissen, fehlendem
+ * Eintrag oder wenn das Archiv nicht zu öffnen ist. */
+gboolean sond_file_part_zip_entry_is_encrypted(SondFilePart *sfp_zip,
+		gchar const *path);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
@@ -156,7 +182,6 @@ gint sond_file_part_zip_mkdir(SondFilePartZip*, gchar const* dir_parent,
 typedef struct {
 	gchar* path;
 	gboolean is_dir;
-	gboolean encrypted; //Datei ist passwortgeschützt (laut Central Directory)
 } SondZipDirEntry;
 
 /* Liefert die direkten Kinder von prefix (ohne abschließendes '/', NULL =

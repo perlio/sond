@@ -112,8 +112,26 @@ GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size) 
 	return sond_icon_util_load_pixbuf(widget, "mail-attachment-symbolic", size);
 }
 
-GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size) {
-	return sond_icon_util_load_pixbuf(widget, "changes-prevent-symbolic", size);
+GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size,
+		gboolean unlocked) {
+	GtkIconInfo *info = NULL;
+	GdkPixbuf *pixbuf = NULL;
+	GdkRGBA green = { 0.20, 0.66, 0.33, 1.0 };
+
+	if (!unlocked)
+		return sond_icon_util_load_pixbuf(widget, "changes-prevent-symbolic", size);
+
+	//dasselbe Symbol, grün eingefärbt
+	info = gtk_icon_theme_lookup_icon(SOND_ICON_THEME_FOR_WIDGET(widget),
+			"changes-prevent-symbolic", size, GTK_ICON_LOOKUP_USE_BUILTIN);
+	if (!info)
+		return NULL;
+
+	pixbuf = gtk_icon_info_load_symbolic(info, &green, NULL, NULL, NULL, NULL,
+			NULL);
+	g_object_unref(info);
+
+	return pixbuf;
 }
 
 gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {

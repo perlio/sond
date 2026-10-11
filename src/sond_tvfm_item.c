@@ -630,19 +630,8 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		} else {
 			SondFilePart* sfp_child = NULL;
 
-			if (e->encrypted) {
-				//Inhalt nicht lesbar: Leaf nur nach Endung, als gesperrt markiert
-				sfp_child = sond_file_part_is_open(
-						stvfm_item_priv->sond_file_part, e->path);
-				if (!sfp_child)
-					sfp_child = sond_file_part_create_leaf(e->path,
-							stvfm_item_priv->sond_file_part,
-							mime_from_extension(e->path));
-				sond_file_part_set_is_locked(sfp_child, TRUE);
-			}
-			else
-				sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
-						e->path, error);
+			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
+					e->path, error);
 
 			if (!sfp_child) {
 				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
