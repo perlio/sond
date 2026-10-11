@@ -1046,6 +1046,7 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 	// Content Stream mit korrekten Koordinaten erstellen
 	task->content = tesseract_to_content_stream(iter,
 			&task->ocr_transform, &error);
+	TessResultIteratorDelete(iter);
 	if (!task->content) {
 		if (task->log_func)
 			task->log_func(task->log_func_data,
