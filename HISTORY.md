@@ -5352,3 +5352,30 @@ Commit 1f14e64. Getestet mit Testprojekt: zipcrypto.zip (ZipCrypto), sub38.zip
    nichts, auf einem Ordner entstand der neue Ordner im markierten Ordner, im
    Baum aber als Geschwister. Gilt auch im Dateisystem.
 ```
+
+## Indexlauf: passwortgeschützte Teile überspringen (#222, 11.10.2026)
+
+Teil des Konzepts "Passwortschutz ZIP/PDF" (TODO.md #221, #223-#229). Getestet
+mit geschuetzt.pdf (AES-256), pdf_im_zip.zip, zipcrypto.zip und sub38.zip.
+
+```text
+ Bisher lief eine PDF mit Benutzerpasswort ohne Authentifizierung durch OCR und
+ Index (MuPDF lieferte Datenmüll, Seiten wurden geOCRt, es entstanden keine
+ Chunks, aber ein Coverage-Eintrag und ein pdf_embedded-Eintrag mit zerstückeltem
+ Namen). Verschlüsselte ZIP-Einträge wurden nur mit einer Logmeldung übersprungen.
+ - process_pdf_for_ocr() (sond_process_file.c) prüft nach dem Öffnen
+   pdf_needs_password() und kehrt vor Anhängen, OCR und sond_index() mit
+   PROCESS_LOCKED zurück: keine OCR, keine Coverage, kein pdf_embedded.
+   Gilt auch für Anhänge in PDF, ZIP und Mail (laufen durch do_rec()). PDFs mit
+   leerem Benutzerpasswort sind unberührt (MuPDF schaltet sie beim Laden frei).
+ - process_zip_for_ocr() erkennt verschlüsselte Einträge per zip_stat_index()
+   und überspringt sie; das ZIP bleibt ohne Coverage.
+ - sond_file_part_read_bytes_internal() setzt bei fehlendem/falschem ZIP-Passwort
+   den Fehlercode SOND_ERROR_LOCKED (neu in sond_log_and_error.h);
+   sond_process_fileparts() vermerkt solche Einträge der Dateiliste statt sie
+   als Fehler zu loggen.
+ - Neue Sperrliste wctx->locked (SondLockedItem: Filepart + Schicht ZIP-Eintrag/
+   PDF), zu Beginn jedes Laufs geleert. Info-Fenster: "'...': passwortgeschützt
+   - übersprungen" je Teil, am Ende "N passwortgeschützte Datei(en)
+   übersprungen". Die Liste wertet noch niemand aus (TODO.md #228).
+```

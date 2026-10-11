@@ -233,6 +233,13 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		gchar const* path, gssize max_len, gint const* cancel, GError** error);
 
+//TRUE, wenn der Fehler von einem fehlenden oder falschen ZIP-Passwort stammt
+static gboolean zip_error_is_locked(zip_error_t* ze) {
+	gint code = zip_error_code_zip(ze);
+
+	return code == ZIP_ER_NOPASSWD || code == ZIP_ER_WRONGPASSWD;
+}
+
 SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 		GError** error) {
 	SondFilePart* sfp = NULL;
@@ -530,7 +537,9 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			}
 			zip_file_t* zf = zip_fopen(archive, path, 0);
 			if (!zf) {
-				g_set_error(error, SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR,
+						zip_error_is_locked(zip_get_error(archive)) ?
+								SOND_ERROR_LOCKED : 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
@@ -579,7 +588,9 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		} else {
 			zip_file_t* zf = zip_fopen(archive, path, 0);
 			if (!zf) {
-				g_set_error(error, SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR,
+						zip_error_is_locked(zip_get_error(archive)) ?
+								SOND_ERROR_LOCKED : 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);

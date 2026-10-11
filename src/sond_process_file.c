@@ -245,6 +245,39 @@ void sond_page_range_merge(GHashTable* ht, gpointer sfp, SondPageRange* range) {
 	g_object_unref(sfp);
 }
 
+static void sond_locked_item_free(gpointer p) {
+	SondLockedItem* item = (SondLockedItem*) p;
+
+	g_free(item->filepart);
+	g_free(item);
+}
+
+/* Vermerkt einen wegen Passwortschutzes übersprungenen Teil (je Filepart und
+ * Schicht einmal) und meldet das im Info-Fenster. */
+static void process_add_locked(SondProcessFileCtx* wctx,
+		gchar const* filepart, SondLockedKind kind) {
+	SondLockedItem* item = NULL;
+
+	if (!wctx->locked)
+		wctx->locked = g_ptr_array_new_with_free_func(sond_locked_item_free);
+
+	for (guint i = 0; i < wctx->locked->len; i++) {
+		SondLockedItem* known = g_ptr_array_index(wctx->locked, i);
+
+		if (known->kind == kind && !g_strcmp0(known->filepart, filepart))
+			return;
+	}
+
+	item = g_new0(SondLockedItem, 1);
+	item->filepart = g_strdup(filepart);
+	item->kind = kind;
+	g_ptr_array_add(wctx->locked, item);
+
+	if (wctx->log_func)
+		wctx->log_func(wctx->log_func_data,
+				"'%s': passwortgeschützt - übersprungen", filepart);
+}
+
 static gint process_zip_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondProcessFileCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
@@ -324,6 +357,19 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 			continue;
 		if (!(zstat.valid & ZIP_STAT_SIZE))
 			continue;
+
+		/* verschlüsselter Eintrag: nicht lesbar, weder indiziert noch
+		 * abgedeckt; das ZIP bleibt dadurch unvollständig */
+		if ((zstat.valid & ZIP_STAT_ENCRYPTION_METHOD) &&
+				zstat.encryption_method != ZIP_EM_NONE) {
+			gchar* entry_locked = g_strdup_printf("%s//%s", filename,
+					entry_name);
+
+			process_add_locked(wctx, entry_locked, SOND_LOCKED_ZIP_ENTRY);
+			g_free(entry_locked);
+
+			continue;
+		}
 
 		/* Größe steht im Archiv und kann beschädigt oder gefälscht sein:
 		 * g_malloc() würde das Programm beenden */
@@ -832,6 +878,10 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	return 0;
 }
 
+/* Rückgabe von process_pdf_for_ocr(), wenn die PDF ein Passwort braucht:
+ * übersprungen und in wctx->locked vermerkt, kein Fehler. */
+#define PROCESS_LOCKED 1
+
 /* with_embedded: eingebettete Dateien mitverarbeiten (nur bei ganzer
  * Datei). Gezählt werden sie immer (out_n_emb), damit der Aufrufer
  * erkennt, ob "nur Seiten" hier zugleich die ganze Datei ist. */
@@ -844,6 +894,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	fz_stream* file = NULL;
 	fz_buffer* buf = NULL;
 	gint rc = 0;
+	gint locked = 0;
 	gboolean emb_changed = FALSE;
 	gboolean ocr_changed = FALSE;
 
@@ -867,6 +918,26 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 				"Failed to open PDF document: %s",
 				fz_caught_message(wctx->ctx) ? fz_caught_message(wctx->ctx) : "unknown error");
 		return -1;
+	}
+
+	/* Benutzerpasswort nötig (ein leeres probiert MuPDF schon beim Laden):
+	 * ohne Authentifizierung liefert MuPDF Datenmüll. Nichts indizieren,
+	 * nichts als abgedeckt markieren, nur vermerken. */
+	fz_try(wctx->ctx)
+		locked = pdf_needs_password(wctx->ctx, doc);
+	fz_catch(wctx->ctx) {
+		g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(wctx->ctx),
+				"Passwortprüfung der PDF fehlgeschlagen: %s",
+				fz_caught_message(wctx->ctx) ? fz_caught_message(wctx->ctx) : "unknown error");
+		pdf_drop_document(wctx->ctx, doc);
+		return -1;
+	}
+	if (locked) {
+		pdf_drop_document(wctx->ctx, doc);
+		process_add_locked(wctx, filename, SOND_LOCKED_PDF);
+		*out_n_emb = 0;
+
+		return PROCESS_LOCKED;
 	}
 
 	/* Adressen der Anhänge: zählen, in der Index-DB festhalten (pdf_embedded,
@@ -1000,6 +1071,14 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		rc = process_pdf_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, seite_von, seite_bis,
 				whole, &n_emb, &error);
+		if (rc == PROCESS_LOCKED) {
+			//übersprungen und vermerkt: kein Text, keine Coverage
+			if (batch)
+				sond_index_ctx_batch_end(wctx->index_ctx, TRUE);
+			g_free(mime_type);
+
+			return;
+		}
 		if (pdf_pagetree_only && n_emb == 0)
 			pdf_pagetree_only = FALSE;
 	}
@@ -1268,6 +1347,10 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTable* collapse_groups = g_hash_table_new_full(g_str_hash,
 			g_str_equal, g_free, g_free);
 
+	//Sperrliste gehört zu diesem Lauf
+	if (wctx->locked)
+		g_ptr_array_set_size(wctx->locked, 0);
+
 	clean_hashtable(files);
 
 	g_hash_table_iter_init(&iter, files);
@@ -1354,6 +1437,16 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		if (!bytes) {
 			gboolean cancelled = g_error_matches(error, G_IO_ERROR,
 					G_IO_ERROR_CANCELLED);
+
+			//verschlüsselter ZIP-Eintrag: vermerken statt als Fehler loggen
+			if (g_error_matches(error, SOND_ERROR, SOND_ERROR_LOCKED)) {
+				process_add_locked(wctx, file_part, SOND_LOCKED_ZIP_ENTRY);
+				g_clear_error(&error);
+				if (coverage_key != file_part) g_free(coverage_key);
+				g_free(file_part);
+
+				continue;
+			}
 
 			if (!cancelled && wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
@@ -1493,6 +1586,11 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	}
 	g_hash_table_unref(collapse_groups);
 
+	if (wctx->locked && wctx->locked->len && wctx->log_func)
+		wctx->log_func(wctx->log_func_data,
+				"%u passwortgeschützte Datei(en) übersprungen",
+				wctx->locked->len);
+
 	return;
 }
 
@@ -1553,6 +1651,8 @@ void sond_process_file_destroy_wctx(SondProcessFileCtx *wctx) {
 	if (wctx->ctx)
 		fz_drop_context(wctx->ctx);
 	g_free(wctx->project_dir);
+	if (wctx->locked)
+		g_ptr_array_unref(wctx->locked);
 
 	g_free(wctx);
 

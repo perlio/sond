@@ -31,6 +31,7 @@ enum SondError
 {
 	SOND_ERROR_EXISTS = 1,
 	SOND_ERROR_BUSY,
+	SOND_ERROR_LOCKED, //Inhalt passwortgeschützt, Passwort fehlt oder falsch
 	NUM_SOND_ERROR
 };
 

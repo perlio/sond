@@ -519,8 +519,8 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
 ## Passwortschutz ZIP/PDF: Umsetzung (Konzept 11.10.2026)
 
 Vorgesehene Reihenfolge (jeder Schritt für sich baubar und prüfbar). Bisher
-gebaut: nur die Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md,
-10.10.2026); #221 (Dauerhaft entsperren) gehört in Schritt 5.
+gebaut: Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md, 10.10.2026)
+und Schritt 1 (#222, erledigt 11.10.2026); #221 (Dauerhaft entsperren) gehört in Schritt 5.
 
 ```text
  Grundsätze: Zustände nicht verschlüsselt (kein Badge) / gesperrt (Schloß) /
@@ -531,13 +531,6 @@ gebaut: nur die Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md,
  überschreiben. Dialog per Callback von zond, nie aus dem Hintergrund-Thread.
  Eingefügte/kopierte/exportierte Dateien sind immer unverschlüsselt (Ausnahme:
  Anhänge in verschlüsselter PDF). PDF-Berechtigungsbits werden ignoriert.
-
- #222 Schritt 1 - Indexlauf: geschützte PDFs sauber überspringen (unabhängig
- von allem Weiteren). In do_rec() (sond_process_file.c) früh pdf_needs_password()
- prüfen, VOR OCR und sond_index(): keine OCR, keine Coverage, kein pdf_embedded,
- stattdessen Eintrag in eine Sperrliste (wctx) und Meldung im Info-Fenster.
- Gleiches für verschlüsselte ZIP-Einträge (zip_stat_index) und nicht lesbare
- gesperrte Einträge der Dateiliste. Altlasten (Coverage ohne Chunks) egal.
 
  #223 Schritt 2 - Modul sond_password.c/.h (src/) und Zustandsmodell:
  Cache (Nachschlagen Eintrag, dann Standardpasswort; Pfade bei Umbenennen
@@ -579,7 +572,7 @@ gebaut: nur die Anzeige gesperrter ZIP-Einträge mit Schloss (HISTORY.md,
 
  Schritt 5 - #221 Dauerhaft entsperren (s. dort), danach
 
- #228 Schritt 6 - Indexlauf-Schleife: Index-Thread nur erkennen/sammeln (#222);
+ #228 Schritt 6 - Indexlauf-Schleife: Index-Thread nur erkennen/sammeln (erledigt, HISTORY.md "Indexlauf: passwortgeschützte Teile überspringen");
  nach dem Lauf im Hauptthread Dialog mit der Sperrliste, einmalige Bestätigung
  "Passwortschutz wird entfernt" je Dialog, dauerhaftes Entsperren (#221; ZIP-
  Einträge eines Archivs gesammelt in einem Neuschreiben), gezielter Nachlauf nur

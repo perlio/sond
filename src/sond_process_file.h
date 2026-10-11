@@ -42,6 +42,25 @@ typedef int gboolean;
  * process_*-Funktionen durchgeschleift.
  * Jedes Feld kann NULL sein — dann wird der jeweilige Schritt übersprungen.
  */
+/**
+ * SondLockedKind / SondLockedItem:
+ *
+ * Teil, den der Lauf wegen eines Passwortschutzes übersprungen hat: weder
+ * indiziert noch als abgedeckt markiert.
+ * @filepart: Filepart-String ("a.zip//x.pdf")
+ * @kind: Schicht, die das Passwort braucht - ZIP_ENTRY: der Eintrag im
+ *        Archiv ist verschlüsselt; PDF: das PDF-Dokument selbst.
+ */
+typedef enum {
+	SOND_LOCKED_ZIP_ENTRY = 0,
+	SOND_LOCKED_PDF
+} SondLockedKind;
+
+typedef struct _SondLockedItem {
+	gchar *filepart;
+	SondLockedKind kind;
+} SondLockedItem;
+
 typedef struct _SondProcessFileCtx {
 	fz_context* ctx;
 	gint cancel;
@@ -62,6 +81,10 @@ typedef struct _SondProcessFileCtx {
      *   2 = SOND_OCR_MODE_FORCE - versteckten Text löschen, neu OCRen
      * Als gint gehalten, damit dieser Header ohne sond_ocr.h auskommt. */
     gint ocr_mode;
+    /* Übersprungene, passwortgeschützte Teile (SondLockedItem*), NULL, wenn
+     * keine. Wird zu Beginn von sond_process_fileparts() geleert und nur vom
+     * Lauf-Thread beschrieben; nach dessen Ende darf der Hauptthread lesen. */
+    GPtrArray *locked;
 } SondProcessFileCtx;
 
 /**
