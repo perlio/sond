@@ -260,6 +260,7 @@ static void process_add_locked(SondProcessFileCtx* wctx,
 		SondPageRange const* range) {
 	SondLockedItem* item = NULL;
 
+	wctx->locked_events++;
 	if (!wctx->locked)
 		wctx->locked = g_ptr_array_new_with_free_func(sond_locked_item_free);
 
@@ -281,6 +282,113 @@ static void process_add_locked(SondProcessFileCtx* wctx,
 				"'%s': passwortgeschützt - übersprungen", filepart);
 }
 
+//Ein ZIP-Eintrag gilt als erledigt, wenn er nichts zu indizieren hat oder abgedeckt ist
+static gboolean zip_entry_done(SondProcessFileCtx* wctx,
+		gchar const* entry_filename, guchar const* data, gsize size) {
+	g_autofree gchar* mime = NULL;
+
+	if (!wctx->index_ctx)
+		return TRUE;
+
+	mime = mime_guess_content_type(data, size, entry_filename, NULL);
+	if (!mime)
+		return FALSE;
+
+	if (g_strcmp0(mime, "application/zip") &&
+			g_strcmp0(mime, "application/x-zip-compressed") &&
+			!sond_index_mime_type_supported(mime))
+		return TRUE;
+
+	return sond_index_ctx_coverage_get(wctx->index_ctx, entry_filename) >=
+			wctx->ocr_mode;
+}
+
+static gint zip_prefix_cmp(gconstpointer a, gconstpointer b) {
+	gsize la = strlen(*(gchar* const*) a);
+	gsize lb = strlen(*(gchar* const*) b);
+
+	return (la > lb) - (la < lb);
+}
+
+static void zip_add_dir_prefixes(GHashTable* set, gchar const* name) {
+	for (gchar const* slash = strchr(name, '/'); slash;
+			slash = strchr(slash + 1, '/'))
+		if (slash > name)
+			g_hash_table_add(set, g_strndup(name, slash - name));
+}
+
+static void zip_mark(SondProcessFileCtx* wctx, gchar const* filename,
+		gchar const* key_rel) {
+	GError* error = NULL;
+	g_autofree gchar* key = key_rel ?
+			g_strdup_printf("%s//%s", filename, key_rel) : g_strdup(filename);
+
+	if (!sond_index_ctx_coverage_mark(wctx->index_ctx, key, wctx->ocr_mode,
+			&error) && wctx->log_func)
+		wctx->log_func(wctx->log_func_data, "ZIP '%s': coverage_mark: %s", key,
+				error ? error->message : "?");
+	g_clear_error(&error);
+}
+
+/* Trägt ein ZIP ganz als abgedeckt ein, wenn jeder Eintrag erledigt ist, sonst
+ * jeden Ordner, unter dem alles erledigt ist (oberste Ebene reicht). */
+static void zip_mark_coverage(SondProcessFileCtx* wctx, zip_t* archive,
+		gchar const* filename, GPtrArray* undone) {
+	GHashTable* bad = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+			NULL);
+	GHashTable* cand = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+			NULL);
+	GPtrArray* dirs = g_ptr_array_new();
+	GPtrArray* marked = g_ptr_array_new();
+	GHashTableIter iter;
+	gpointer key = NULL;
+	zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+
+	if (undone->len == 0) {
+		zip_mark(wctx, filename, NULL);
+		goto out;
+	}
+
+	for (guint i = 0; i < undone->len; i++)
+		zip_add_dir_prefixes(bad, g_ptr_array_index(undone, i));
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const* name = zip_get_name(archive, (zip_uint64_t) i,
+				ZIP_FL_ENC_UTF_8);
+
+		if (name)
+			zip_add_dir_prefixes(cand, name);
+	}
+
+	g_hash_table_iter_init(&iter, cand);
+	while (g_hash_table_iter_next(&iter, &key, NULL))
+		if (!g_hash_table_contains(bad, key))
+			g_ptr_array_add(dirs, key);
+	g_ptr_array_sort(dirs, zip_prefix_cmp);
+
+	for (guint i = 0; i < dirs->len; i++) {
+		gchar const* dir = g_ptr_array_index(dirs, i);
+		gboolean covered = FALSE;
+
+		for (guint k = 0; k < marked->len && !covered; k++) {
+			gchar const* m = g_ptr_array_index(marked, k);
+			gsize lm = strlen(m);
+
+			covered = !strncmp(dir, m, lm) && dir[lm] == '/';
+		}
+		if (covered)
+			continue;
+
+		zip_mark(wctx, filename, dir);
+		g_ptr_array_add(marked, (gpointer) dir);
+	}
+
+out:
+	g_ptr_array_unref(marked);
+	g_ptr_array_unref(dirs);
+	g_hash_table_destroy(cand);
+	g_hash_table_destroy(bad);
+}
+
 static gint process_zip_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondProcessFileCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
@@ -289,6 +397,8 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 	zip_source_t* src = NULL;
 	zip_t* archive = NULL;
 	gboolean modified = FALSE;
+	GPtrArray* undone = NULL;
+	gboolean incomplete = FALSE;
 
 	/* Eigene Kopie des Puffers, da libzip Eigentuemer wird (freep=1) */
 	void* data_copy = g_memdup2(data, size);
@@ -347,19 +457,26 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		}
 	}
 
+	undone = g_ptr_array_new_with_free_func(g_free);
+
 	for (zip_int64_t i = 0; i < num_entries; i++) {
-		if (g_atomic_int_get(&wctx->cancel))
+		if (g_atomic_int_get(&wctx->cancel)) {
+			incomplete = TRUE;
 			break;
+		}
 
 		const char* entry_name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
-		if (!entry_name)
+		if (!entry_name) {
+			incomplete = TRUE;
 			continue;
+		}
 
 		zip_stat_t zstat = { 0 };
-		if (zip_stat_index(archive, (zip_uint64_t)i, 0, &zstat) != 0)
+		if (zip_stat_index(archive, (zip_uint64_t)i, 0, &zstat) != 0 ||
+				!(zstat.valid & ZIP_STAT_SIZE)) {
+			g_ptr_array_add(undone, g_strdup(entry_name));
 			continue;
-		if (!(zstat.valid & ZIP_STAT_SIZE))
-			continue;
+		}
 
 		/* verschlüsselter Eintrag: nicht lesbar, weder indiziert noch
 		 * abgedeckt; das ZIP bleibt dadurch unvollständig */
@@ -370,6 +487,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 
 			process_add_locked(wctx, entry_locked, SOND_LOCKED_ZIP_ENTRY, NULL);
 			g_free(entry_locked);
+			g_ptr_array_add(undone, g_strdup(entry_name));
 
 			continue;
 		}
@@ -382,6 +500,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 					"ZIP '%s': Eintrag '%s' zu groß (%" G_GUINT64_FORMAT
 					" Byte) - übersprungen", filename, entry_name,
 					(guint64) zstat.size);
+			g_ptr_array_add(undone, g_strdup(entry_name));
 			continue;
 		}
 
@@ -392,6 +511,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 					"ZIP '%s': Eintrag '%s' (%" G_GUINT64_FORMAT " Byte): "
 					"nicht genug Speicher - übersprungen", filename,
 					entry_name, (guint64) zstat.size);
+			g_ptr_array_add(undone, g_strdup(entry_name));
 			continue;
 		}
 
@@ -403,6 +523,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 					filename, entry_name,
 					zip_error_strerror(zip_get_error(archive)));
 			g_free(entry_data);
+			g_ptr_array_add(undone, g_strdup(entry_name));
 			continue;
 		}
 
@@ -415,6 +536,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 					"ZIP '%s': Fehler beim Lesen von Eintrag '%s'",
 					filename, entry_name);
 			g_free(entry_data);
+			g_ptr_array_add(undone, g_strdup(entry_name));
 			continue;
 		}
 
@@ -424,6 +546,10 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 
 		sond_process_file_do_rec(wctx, entry_data, (gsize)bytes_read, entry_filename,
 				&processed_data, &processed_size, out_pdf_count, NULL);
+		if (!g_str_has_suffix(entry_name, "/") &&
+				!zip_entry_done(wctx, entry_filename, entry_data,
+						(gsize) bytes_read))
+			g_ptr_array_add(undone, g_strdup(entry_name));
 		g_free(entry_data);
 		g_free(entry_filename);
 
@@ -461,6 +587,10 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		/* processed_data wird jetzt von zip_source verwaltet - NICHT freigeben */
 		modified = TRUE;
 	}
+
+	if (wctx->index_ctx && !incomplete)
+		zip_mark_coverage(wctx, archive, filename, undone);
+	g_ptr_array_unref(undone);
 
 	if (!modified) {
 		zip_discard(archive);
@@ -1069,6 +1199,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		gboolean whole = (seite_von == -1 && seite_bis == -1 &&
 				!pdf_pagetree_only);
 		gint n_emb = 0;
+		guint locked_before = wctx->locked_events;
 
 		rc = process_pdf_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, seite_von, seite_bis,
@@ -1084,6 +1215,11 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		}
 		if (pdf_pagetree_only && n_emb == 0)
 			pdf_pagetree_only = FALSE;
+
+		//unter den Anhängen wurde Passwortgeschütztes übersprungen: die PDF gilt
+		//nicht als Ganzes abgedeckt, nur ihre Seiten
+		if (whole && rc != -1 && wctx->locked_events != locked_before)
+			pdf_pagetree_only = TRUE;
 	}
 	else if (!g_strcmp0(mime_type, "application/zip")) {
 		/* Einträge und ihre Anzahl in einer Transaktion: ein Commit je

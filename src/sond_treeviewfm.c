@@ -3379,6 +3379,13 @@ static gchar* sond_treeviewfm_get_coverage_path(SondTVFMItemPrivate *priv,
 		*out_is_dir = TRUE;
 		if (!priv->sond_file_part) //DIR im Filesystem
 			return g_strdup(priv->path_or_section);
+		else if (priv->path_or_section &&
+				SOND_IS_FILE_PART_ZIP(priv->sond_file_part)) { //Ordner im ZIP
+			g_autofree gchar *zip_fp =
+					sond_file_part_get_filepart(priv->sond_file_part);
+
+			return g_strconcat(zip_fp, "//", priv->path_or_section, NULL);
+		}
 		else //Container (z.B. Zip/GMessage) als "Verzeichnis" dargestellt
 			return sond_file_part_get_filepart(priv->sond_file_part);
 	}

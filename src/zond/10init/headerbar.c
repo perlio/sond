@@ -310,6 +310,7 @@ static GHashTable* index_ht_from_decrypted(GPtrArray *items,
 		SondLockedItem *item = g_ptr_array_index(items, i);
 		gboolean found = FALSE;
 		SondFilePart *sfp = NULL;
+		SondFilePart *outer = NULL;
 		GError *error = NULL;
 
 		for (guint k = 0; k < decrypted->len && !found; k++)
@@ -324,11 +325,25 @@ static GHashTable* index_ht_from_decrypted(GPtrArray *items,
 			continue;
 		}
 
+		//Liegt die Datei in einer PDF oder einem ZIP, gilt der äußerste solche
+		//Container als Ganzes neu zu indizieren: nur dann wird er vollständig
+		//abgedeckt
+		for (SondFilePart *p = sond_file_part_get_parent(sfp); p;
+				p = sond_file_part_get_parent(p))
+			if (SOND_IS_FILE_PART_PDF(p) || SOND_IS_FILE_PART_ZIP(p))
+				outer = p;
+		if (outer) {
+			g_object_ref(outer);
+			g_object_unref(sfp);
+			sfp = outer;
+		}
+
 		if (g_hash_table_contains(ht, sfp))
 			g_object_unref(sfp);
 		else
 			g_hash_table_insert(ht, sfp,
-					item->range ? sond_page_range_copy(item->range) : NULL);
+					(!outer && item->range) ?
+							sond_page_range_copy(item->range) : NULL);
 	}
 
 	return ht;

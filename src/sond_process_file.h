@@ -88,6 +88,9 @@ typedef struct _SondProcessFileCtx {
      * keine. Wird zu Beginn von sond_process_fileparts() geleert und nur vom
      * Lauf-Thread beschrieben; nach dessen Ende darf der Hauptthread lesen. */
     GPtrArray *locked;
+    /* Zahl der Vermerke in locked seit Programmstart, auch der schon bekannten
+     * (Differenz zeigt, ob unter einem Container etwas übersprungen wurde). */
+    guint locked_events;
 } SondProcessFileCtx;
 
 /**

@@ -5449,3 +5449,25 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    ocr-doc, pdf_drop_document) im Gesamtlauf; mit und ohne OCR danach nicht
    reproduzierbar.
 ```
+
+## Indexabdeckung bei Passwortschutz, Ordner und ZIP-Badge (#230, 11.10.2026)
+
+```text
+ - PDF mit übersprungenen (passwortgeschützten) Anhängen wird nicht mehr als
+   Ganzes als abgedeckt eingetragen, nur ihre Seiten ("x.pdf//"): Zähler
+   wctx->locked_events, ausgewertet in sond_process_file_do_rec(). Vorher galten
+   die nie gelesenen Anhänge über den Vorfahren-Eintrag als indiziert (grünes
+   Index-Symbol an einer gesperrten docx).
+ - process_zip_for_ocr() trägt ein ZIP als Ganzes ein, wenn jeder Eintrag
+   erledigt ist (Verzeichnis, nicht indizierbar oder abgedeckt), sonst jeden
+   Ordner, unter dem alles erledigt ist (zip_mark_coverage()). Bei Abbruch oder
+   übersprungenen Einträgen kein Ganzes-Eintrag. Das ZIP-Badge wird so grün.
+ - Nachlauf nach dem Entsperren (index_ht_from_decrypted()): Ziel ist der
+   äußerste Container (PDF oder ZIP) des entsperrten Eintrags, damit er
+   vollständig abgedeckt wird.
+ - Ordner in einem ZIP zeigen im Dateibaum ihren eigenen Index-Status
+   (Coverage-Pfad "zip//ordner" statt des Archivs).
+ - Bekannt: E-Mails als ZIP-Einträge gelten erst mit eigener Coverage als
+   erledigt; das Zusammenfassen von Mail-Kindern läuft nur für Dateien auf
+   oberster Ebene.
+```
