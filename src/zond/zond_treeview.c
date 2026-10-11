@@ -28,6 +28,7 @@
 #include "../sond_process_file.h"
 #include "../sond_index.h"
 #include "../sond_mime.h"
+#include "../sond_password.h"
 #include "../sond_icon_util.h"
 #include "../sond_seadrive.h"
 
@@ -1248,9 +1249,12 @@ static void zond_treeview_anbinden_progress(gpointer data, gchar const *text) {
 		gtk_main_iteration();
 }
 
+static gint zond_treeview_anbinden_rekursiv(ZondTreeview*, GtkTreeIter*, gint,
+		gboolean, SondTVFMItem*, InfoWindow*, gint*, gboolean*);
+
 /*  Fehler: werden im info_window angezeigt
  **  ansonsten: Id des zunächst erzeugten Knotens  */
-static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
+static gint zond_treeview_anbinden_item(ZondTreeview *ztv,
 		GtkTreeIter *anchor_iter, gint anchor_id, gboolean child, SondTVFMItem *stvfm_item,
 		InfoWindow *info_window, gint *zaehler, gboolean* dir_inserted) {
 	gint new_node_id = 0;
@@ -1372,6 +1376,112 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 	return new_node_id;
 }
 
+/* TRUE für ein gesperrtes Element, bei dem vor dem Anbinden das Passwort
+ * gebraucht wird, weil es ein Container sein kann und beim Anbinden gelesen
+ * werden muss: eine PDF mit eigenem Passwort oder ein verschlüsselter
+ * ZIP-Eintrag, der nach seiner Endung PDF, ZIP oder E-Mail ist. Alle anderen
+ * gesperrten Elemente (Text, Bild, Office ...) werden ohne Passwort als Blatt
+ * angebunden - dafür muss ihr Inhalt nicht gelesen werden. */
+static gboolean zond_treeview_anbinden_locked_container(SondFilePart *sfp) {
+	gchar const *mime = NULL;
+
+	if (!sond_file_part_needs_unlock(sfp))
+		return FALSE;
+
+	if (SOND_IS_FILE_PART_PDF(sfp))
+		return TRUE;
+
+	if (!sond_file_part_is_placeholder(sfp))
+		return FALSE;
+
+	mime = mime_from_extension(sond_file_part_get_path(sfp));
+
+	return mime && (!g_strcmp0(mime, "application/pdf") ||
+			!g_strcmp0(mime, "application/zip") ||
+			!g_strcmp0(mime, "message/rfc822"));
+}
+
+/*  Fehler: werden im info_window angezeigt
+ **  ansonsten: Id des zunächst erzeugten Knotens
+ **  -1: Abbruch (Abbrechen-Knopf des Info-Fensters oder des Passwortdialogs)
+ **
+ ** Entsperrt einen gesperrten Container zuerst (Passwortdialog). Überspringt
+ ** der Nutzer, wird das Element nicht angebunden und der Anker rückt nicht
+ ** vor (Rückgabe 0). */
+static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
+		GtkTreeIter *anchor_iter, gint anchor_id, gboolean child, SondTVFMItem *stvfm_item,
+		InfoWindow *info_window, gint *zaehler, gboolean* dir_inserted) {
+	SondFilePart *sfp = NULL;
+	SondFilePart *sfp_new = NULL;
+	SondTVFMItem *stvfm_item_new = NULL;
+	gint ret = 0;
+
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+
+	if (*(info_window->cancel))
+		return -1;
+
+	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	if (sfp && !sond_tvfm_item_get_path_or_section(stvfm_item) &&
+			zond_treeview_anbinden_locked_container(sfp)) {
+		GError *error = NULL;
+		gchar *filepart = sond_file_part_get_filepart(sfp);
+		gchar *text = NULL;
+
+		sfp_new = sond_file_part_unlock(sfp, &error);
+		if (!sfp_new) {
+			if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+				gboolean abbrechen = (sond_password_last_result() ==
+						SOND_PROMPT_CANCEL);
+
+				text = g_strdup_printf(abbrechen ?
+						"'%s': Passwort nicht eingegeben - Anbinden abgebrochen" :
+						"'%s': Passwort nicht eingegeben - nicht angebunden",
+						filepart);
+				info_window_set_message(info_window, text);
+				g_free(text);
+				g_clear_error(&error);
+				g_free(filepart);
+
+				if (abbrechen) {
+					*(info_window->cancel) = 1;
+
+					return -1;
+				}
+
+				return 0; //übersprungen, Anker bleibt
+			}
+
+			g_free(filepart);
+			zond_treeview_anbinden_error_message(info_window, stvfm_item,
+					"Fehler Anbindung filepart '%s':\n%s", error);
+
+			return 0;
+		}
+		g_free(filepart);
+
+		//Element mit dem echten Typ (ggf. Container mit Kindern); im Dateibaum
+		//dieselbe Anpassung
+		stvfm_item_new = sond_tvfm_item_create(
+				sond_tvfm_item_get_stvfm(stvfm_item), sfp_new, NULL);
+		stvfm_item = stvfm_item_new;
+		for (SondFilePart *part = sfp_new; part;
+				part = sond_file_part_get_parent(part))
+			sond_treeviewfm_refresh_file_part(
+					SOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]), part);
+	}
+
+	ret = zond_treeview_anbinden_item(ztv, anchor_iter, anchor_id, child,
+			stvfm_item, info_window, zaehler, dir_inserted);
+
+	if (stvfm_item_new)
+		g_object_unref(stvfm_item_new);
+	if (sfp_new)
+		g_object_unref(sfp_new);
+
+	return ret;
+}
+
 typedef struct {
 	ZondTreeview *ztv;
 	gint anchor_id;
@@ -1444,8 +1554,11 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 		return;
 	}
 
+	//Passwortabfragen dieser Aktion: Überspringen/Alle überspringen/Abbrechen
+	sond_password_action_begin();
 	rc = sond_treeview_clipboard_foreach(
 			zond_treeview_clipboard_anbinden_foreach, &s_selection, &error);
+	sond_password_action_end();
 
 	/* rc == 1 (Nutzer-Abbruch) ist kein Fehler - bereits eingefügte Knoten
 	 * sollen wie bisher (ohne Transaktion) erhalten bleiben, daher trotzdem

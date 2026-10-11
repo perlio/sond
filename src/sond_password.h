@@ -75,9 +75,19 @@ void sond_password_clear(void);
 /* Abfrage beim Nutzer. Die Oberfläche (zond) meldet beim Start eine Funktion
  * an, die einen Passwortdialog zeigt: what beschreibt, wofür das Passwort
  * gebraucht wird ("Passwort für den Eintrag x.pdf in a.zip"), wrong ist TRUE,
- * wenn das zuvor eingegebene Passwort nicht passte. Rückgabe: das Passwort
- * (Freigabe mit sond_password_free()) oder NULL bei Abbruch. */
-typedef gchar* (*SondPasswordPromptFunc)(gchar const *what, gboolean wrong,
+ * wenn das zuvor eingegebene Passwort nicht passte, allow_skip ist TRUE bei
+ * einer Aktion über mehrere Dateien (dann bietet der Dialog zusätzlich
+ * Überspringen und Alle überspringen an). Bei SOND_PROMPT_OK liefert die
+ * Funktion das Passwort in *password (Freigabe mit sond_password_free()). */
+typedef enum {
+	SOND_PROMPT_OK = 0,
+	SOND_PROMPT_SKIP,      //dieses Element überspringen
+	SOND_PROMPT_SKIP_ALL,  //dieses und alle weiteren der Aktion überspringen
+	SOND_PROMPT_CANCEL     //Dialog bzw. ganze Aktion abbrechen
+} SondPromptResult;
+
+typedef SondPromptResult (*SondPasswordPromptFunc)(gchar const *what,
+		gboolean wrong, gboolean allow_skip, gchar **password,
 		gpointer user_data);
 
 /* Meldet die Dialogfunktion an. Muss im Hauptthread aufgerufen werden; dieser
@@ -89,8 +99,23 @@ void sond_password_set_prompt_func(SondPasswordPromptFunc func,
  * dem Hauptthread. Hintergrund-Threads (Indexlauf) fragen nie. */
 gboolean sond_password_can_prompt(void);
 
-/* Fragt den Nutzer; NULL bei Abbruch oder wenn nicht gefragt werden darf. */
+/* Fragt den Nutzer; NULL bei Überspringen, Abbruch oder wenn nicht gefragt
+ * werden darf (die Wahl des Nutzers liefert sond_password_last_result()).
+ * Innerhalb einer Aktion (s.u.) wird nach "Alle überspringen" bzw. "Abbrechen"
+ * nicht mehr gefragt. */
 gchar* sond_password_prompt(gchar const *what, gboolean wrong);
+
+/* Wahl des Nutzers im letzten Dialog; SOND_PROMPT_OK, wenn seit
+ * sond_password_action_begin() nicht gefragt oder zuletzt ein Passwort
+ * eingegeben wurde. */
+SondPromptResult sond_password_last_result(void);
+
+/* Eine Aktion über mehrere Dateien (Anbinden, Kopieren, Export, ...) klammern:
+ * begin setzt "Alle überspringen" und "Abbrechen" zurück und lässt im Dialog
+ * die Knöpfe Überspringen/Alle überspringen zu, end hebt das wieder auf.
+ * Schachtelbar, nur der äußerste Aufruf zählt. Nur im Hauptthread. */
+void sond_password_action_begin(void);
+void sond_password_action_end(void);
 
 /* Überschreibt den String mit Nullen und gibt ihn frei (NULL erlaubt). Für
  * jede Kopie, die sond_password_get() oder der Dialog geliefert hat. */

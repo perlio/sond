@@ -73,6 +73,12 @@ static SondPasswordPromptFunc prompt_func = NULL;
 static gpointer prompt_data = NULL;
 static GThread *prompt_thread = NULL;
 
+//Aktion über mehrere Dateien (nur im Hauptthread benutzt)
+static gint action_depth = 0;
+static gboolean action_skip_all = FALSE;
+static gboolean action_cancelled = FALSE;
+static SondPromptResult last_result = SOND_PROMPT_OK;
+
 void sond_password_set_prompt_func(SondPasswordPromptFunc func,
 		gpointer user_data) {
 	prompt_func = func;
@@ -84,11 +90,58 @@ gboolean sond_password_can_prompt(void) {
 	return prompt_func && g_thread_self() == prompt_thread;
 }
 
+void sond_password_action_begin(void) {
+	if (action_depth++ == 0) {
+		action_skip_all = FALSE;
+		action_cancelled = FALSE;
+		last_result = SOND_PROMPT_OK;
+	}
+}
+
+void sond_password_action_end(void) {
+	if (action_depth > 0 && --action_depth == 0) {
+		action_skip_all = FALSE;
+		action_cancelled = FALSE;
+	}
+}
+
+SondPromptResult sond_password_last_result(void) {
+	return last_result;
+}
+
 gchar* sond_password_prompt(gchar const *what, gboolean wrong) {
+	gchar *password = NULL;
+	SondPromptResult res = SOND_PROMPT_OK;
+
 	if (!sond_password_can_prompt())
 		return NULL;
 
-	return prompt_func(what, wrong, prompt_data);
+	if (action_depth > 0 && action_cancelled) {
+		last_result = SOND_PROMPT_CANCEL;
+
+		return NULL;
+	}
+	if (action_depth > 0 && action_skip_all) {
+		last_result = SOND_PROMPT_SKIP;
+
+		return NULL;
+	}
+
+	res = prompt_func(what, wrong, action_depth > 0, &password, prompt_data);
+	last_result = res;
+
+	if (res == SOND_PROMPT_OK)
+		return password;
+
+	sond_password_free(password);
+	if (action_depth > 0) {
+		if (res == SOND_PROMPT_SKIP_ALL)
+			action_skip_all = TRUE;
+		else if (res == SOND_PROMPT_CANCEL)
+			action_cancelled = TRUE;
+	}
+
+	return NULL;
 }
 
 void sond_password_set(gchar const *filepart, SondPasswordRole role,

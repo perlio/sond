@@ -21,11 +21,14 @@
 
 #include <glib.h>
 
+#include "../../sond_password.h"
+
 /* Passwortdialog für sond_password_set_prompt_func() (sond_password.h):
- * modal über dem Hauptfenster, die Eingabe ist maskiert. user_data ist das
- * Projekt (Projekt*). Rückgabe wie SondPasswordPromptFunc: das Passwort
- * (Freigabe mit sond_password_free()) oder NULL bei Abbruch. */
-gchar* zond_password_dialog(gchar const *what, gboolean wrong,
-		gpointer user_data);
+ * modal über dem gerade aktiven Fenster, die Eingabe ist maskiert, bei
+ * allow_skip mit den Knöpfen Überspringen und Alle überspringen. user_data
+ * ist das Projekt (Projekt*). Rückgabe und *password wie
+ * SondPasswordPromptFunc. */
+SondPromptResult zond_password_dialog(gchar const *what, gboolean wrong,
+		gboolean allow_skip, gchar **password, gpointer user_data);
 
 #endif /* SRC_ZOND_20ALLGEMEIN_PASSWORD_DIALOG_H_ */

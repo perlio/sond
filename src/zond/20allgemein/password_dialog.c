@@ -22,19 +22,38 @@
 
 #include "password_dialog.h"
 
-gchar* zond_password_dialog(gchar const *what, gboolean wrong,
-		gpointer user_data) {
+enum {
+	RESPONSE_SKIP = 1,
+	RESPONSE_SKIP_ALL
+};
+
+SondPromptResult zond_password_dialog(gchar const *what, gboolean wrong,
+		gboolean allow_skip, gchar **password, gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
+	GtkWindow *parent = NULL;
 	GtkWidget *dialog = NULL;
 	GtkWidget *content = NULL;
 	GtkWidget *label = NULL;
 	GtkWidget *entry = NULL;
-	gchar *password = NULL;
+	SondPromptResult result = SOND_PROMPT_CANCEL;
 
-	dialog = gtk_dialog_new_with_buttons("Passwort",
-			(zond && zond->app_window) ? GTK_WINDOW(zond->app_window) : NULL,
-			GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-			"Abbrechen", GTK_RESPONSE_CANCEL, "OK", GTK_RESPONSE_OK, NULL);
+	//über dem gerade aktiven Fenster, z.B. dem Info-Fenster beim Anbinden
+	if (g_application_get_default())
+		parent = gtk_application_get_active_window(
+				GTK_APPLICATION(g_application_get_default()));
+	if (!parent && zond && zond->app_window)
+		parent = GTK_WINDOW(zond->app_window);
+
+	dialog = gtk_dialog_new_with_buttons("Passwort", parent,
+			GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
+	if (allow_skip) {
+		gtk_dialog_add_button(GTK_DIALOG(dialog), "Alle überspringen",
+				RESPONSE_SKIP_ALL);
+		gtk_dialog_add_button(GTK_DIALOG(dialog), "Überspringen",
+				RESPONSE_SKIP);
+	}
+	gtk_dialog_add_button(GTK_DIALOG(dialog), "Abbrechen", GTK_RESPONSE_CANCEL);
+	gtk_dialog_add_button(GTK_DIALOG(dialog), "OK", GTK_RESPONSE_OK);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
 
 	content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
@@ -49,7 +68,6 @@ gchar* zond_password_dialog(gchar const *what, gboolean wrong,
 	if (wrong) {
 		label = gtk_label_new("Das Passwort ist falsch.");
 		gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-		gtk_widget_set_name(label, "passwort-falsch");
 		gtk_box_pack_start(GTK_BOX(content), label, FALSE, FALSE, 0);
 	}
 
@@ -63,15 +81,31 @@ gchar* zond_password_dialog(gchar const *what, gboolean wrong,
 	gtk_widget_show_all(dialog);
 	gtk_widget_grab_focus(entry);
 
-	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
+	case GTK_RESPONSE_OK: {
 		gchar const *text = gtk_entry_get_text(GTK_ENTRY(entry));
 
-		if (text && *text)
-			password = g_strdup(text);
+		//leere Eingabe zählt nicht als Passwort
+		if (text && *text) {
+			*password = g_strdup(text);
+			result = SOND_PROMPT_OK;
+		}
+		else
+			result = SOND_PROMPT_CANCEL;
+		break;
+	}
+	case RESPONSE_SKIP:
+		result = SOND_PROMPT_SKIP;
+		break;
+	case RESPONSE_SKIP_ALL:
+		result = SOND_PROMPT_SKIP_ALL;
+		break;
+	default:
+		result = SOND_PROMPT_CANCEL;
 	}
 
 	gtk_entry_set_text(GTK_ENTRY(entry), ""); //Eingabepuffer leeren
 	gtk_widget_destroy(dialog);
 
-	return password;
+	return result;
 }
