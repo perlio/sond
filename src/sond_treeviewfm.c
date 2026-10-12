@@ -1533,6 +1533,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	GtkTreeIter iter_cursor = { 0 };
 	GtkTreeIter iter_parent = { 0 };
 	gboolean expanded = FALSE;
+	gboolean was_leaf = FALSE;
 	Clipboard *clipboard = NULL;
 	SondTVFMItem* stvfm_item_parent = NULL;
 	gboolean parent_is_root = FALSE;
@@ -1705,18 +1706,27 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 			stvfm_item_parent_priv->has_children = TRUE;
 			stvfm_item_parent_priv->icon_name = "pdf-folder";
+			was_leaf = TRUE;
 		} //sonst funktioniert expand nämlich nicht
 	}
 
-	//Knoten war ursprünglich nicht geöffnet und nichts wurde eingefügt
-	if (!expanded && kind) { //kind wird beim 1. Einfügen FALSE
+	/* Elternknoten war nicht geöffnet: wieder einklappen. War er geöffnet und
+	 * bisher eine PDF ohne Anhänge (LEAF, Sections direkt darunter), steht die
+	 * eingefügte Datei sonst neben den Sections und der PageTree-Knoten fehlt:
+	 * einklappen und neu aufklappen baut die Kinder wie beim Öffnen auf. Der
+	 * Cursor-Iter zeigt danach auf eine entfernte Zeile. */
+	if (kind && (!expanded || was_leaf)) {
 		GtkTreePath* path = NULL;
 
 		path = gtk_tree_model_get_path(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-				s_paste_sel.iter_cursor);
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_parent);
 		gtk_tree_view_collapse_row(GTK_TREE_VIEW(stvfm), path);
 		gtk_tree_path_free(path);
+
+		if (expanded && was_leaf)
+			sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter_parent);
+
+		iter_cursor = iter_parent;
 	}
 
 	g_object_unref(stvfm_item_parent);
@@ -1724,8 +1734,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		return -1;
 
 	//Cursor setzen
-	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm),
-				s_paste_sel.iter_cursor);
+	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter_cursor);
 
 	return 0;
 }
