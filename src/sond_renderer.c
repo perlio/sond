@@ -1661,6 +1661,12 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
         return -1;
     }
 
+    if (g_bytes_get_size(input) == 0) {
+        if (error) *error = g_error_new(SOND_ERROR, 0,
+                "%s\nDatei ist leer", __func__);
+        return -1;
+    }
+
     int highlight_y = 0;
     RenderedDocument *rd;
 
@@ -1721,6 +1727,13 @@ gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 	RenderedDocument* rd = NULL;
 	GtkWidget* widget = NULL;
 	const char* window_title = NULL;
+
+	if (g_bytes_get_size(input) == 0) {
+		if (error) *error = g_error_new(SOND_ERROR, 0,
+				"%s\nDatei ist leer", __func__);
+
+		return -1;
+	}
 
 	rd = render_document_from_bytes(input, 0, sfp);
 	if (!rd) {

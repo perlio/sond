@@ -5471,3 +5471,19 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    erledigt; das Zusammenfassen von Mail-Kindern läuft nur für Dateien auf
    oberster Ebene.
 ```
+
+## Index: leere Ordner, Mails mit gesperrten Anhängen, leere Mimeparts (11./12.10.2026)
+
+```text
+ - zip_mark_coverage(): Ordner ohne Dateien (nur Verzeichniseinträge) werden nicht
+   als abgedeckt eingetragen; process_zip_for_ocr() verarbeitet Verzeichniseinträge
+   nicht mehr.
+ - Mail mit übersprungenen (passwortgeschützten) Anhängen wird nur als Header
+   abgedeckt (x.eml//header), nicht als Ganzes (wctx->locked_events, wie bei PDF).
+   Nachlauf nach dem Entsperren: äußerster Container darf auch eine Mail sein.
+ - Leerer Mimepart: kein Lesefehler mehr (nur length < 0 in
+   sond_file_part_read_bytes_internal). Beim Indizieren entscheidet der deklarierte
+   Content-Type: ein leerer text/*-Teil gilt als abgedeckt, andere nicht.
+ - Öffnen einer leeren Datei im eigenen Viewer: Meldung "Datei ist leer"
+   (sond_render, sond_render_with_term).
+```

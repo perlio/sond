@@ -1125,9 +1125,9 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			return NULL;
 		}
 
-		if (length <= 0) {
+		if (length < 0) {
 			g_set_error(error, SOND_ERROR, 0,
-					"%s\n%s leer oder __Fehler__", __func__,
+					"%s\n%s nicht lesbar", __func__,
 					GMIME_IS_MESSAGE_PART(object) ? "GMimeMessagePart" : "GMimePart");
 			g_object_unref(object);
 			g_object_unref(mem_stream);

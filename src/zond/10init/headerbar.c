@@ -325,12 +325,13 @@ static GHashTable* index_ht_from_decrypted(GPtrArray *items,
 			continue;
 		}
 
-		//Liegt die Datei in einer PDF oder einem ZIP, gilt der äußerste solche
+		//Liegt die Datei in einer PDF, einem ZIP oder einer Mail, gilt der äußerste solche
 		//Container als Ganzes neu zu indizieren: nur dann wird er vollständig
 		//abgedeckt
 		for (SondFilePart *p = sond_file_part_get_parent(sfp); p;
 				p = sond_file_part_get_parent(p))
-			if (SOND_IS_FILE_PART_PDF(p) || SOND_IS_FILE_PART_ZIP(p))
+			if (SOND_IS_FILE_PART_PDF(p) || SOND_IS_FILE_PART_ZIP(p) ||
+					SOND_IS_FILE_PART_GMESSAGE(p))
 				outer = p;
 		if (outer) {
 			g_object_ref(outer);

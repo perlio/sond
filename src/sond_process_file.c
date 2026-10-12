@@ -355,7 +355,9 @@ static void zip_mark_coverage(SondProcessFileCtx* wctx, zip_t* archive,
 		gchar const* name = zip_get_name(archive, (zip_uint64_t) i,
 				ZIP_FL_ENC_UTF_8);
 
-		if (name)
+		//Verzeichniseinträge selbst nicht: ein Ordner ohne Dateien hat nichts
+		//zu indizieren und soll kein Badge bekommen
+		if (name && !g_str_has_suffix(name, "/"))
 			zip_add_dir_prefixes(cand, name);
 	}
 
@@ -470,6 +472,10 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 			incomplete = TRUE;
 			continue;
 		}
+
+		//Verzeichniseintrag: hat nichts zu indizieren
+		if (g_str_has_suffix(entry_name, "/"))
+			continue;
 
 		zip_stat_t zstat = { 0 };
 		if (zip_stat_index(archive, (zip_uint64_t)i, 0, &zstat) != 0 ||
@@ -778,11 +784,29 @@ static gboolean gmessage_process_part(GMimeObject* object,
 
 		GMimeStream* mem = g_mime_stream_mem_new();
 		gssize written = g_mime_data_wrapper_write_to_stream(wrapper, mem);
-		if (written <= 0) {
+		if (written < 0) {
 			g_object_unref(mem);
 			return FALSE;
 		}
 		GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem));
+		//leerer Teil: der deklarierte Typ (Content-Type) entscheidet. Ein leerer
+		//Textteil hat nichts zu indizieren und gilt als abgedeckt.
+		if (ba->len == 0) {
+			GMimeContentType* ctype = g_mime_object_get_content_type(object);
+			gchar* ctype_str = ctype ? g_mime_content_type_get_mime_type(ctype) : NULL;
+			gchar* empty_filename = internal_path ?
+					g_strdup_printf("%s//%s", eml_filename, internal_path) :
+					g_strdup_printf("%s//0", eml_filename);
+
+			if (wctx->index_ctx && ctype_str && g_str_has_prefix(ctype_str, "text/"))
+				sond_index_ctx_coverage_mark(wctx->index_ctx, empty_filename,
+						wctx->ocr_mode, NULL);
+			g_free(empty_filename);
+			g_free(ctype_str);
+			g_object_unref(mem);
+
+			return FALSE;
+		}
 		guchar* part_data = g_memdup2(ba->data, ba->len);
 		gsize part_size = ba->len;
 		g_object_unref(mem);
@@ -1237,10 +1261,17 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		 * verschwendete Arbeit und wird deshalb übersprungen. Bei
 		 * gmessage_message nur die Inline-Teile, keine Anhänge. Teile und
 		 * Mail in einer Transaktion: ein Commit je Mail. */
+		guint locked_before = wctx->locked_events;
+
 		batch = sond_index_ctx_batch_begin(wctx->index_ctx, NULL);
 
 		rc = process_gmessage_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, gmessage_message, &error);
+
+		//unter den Anhängen wurde Passwortgeschütztes übersprungen: die Mail gilt
+		//nicht als Ganzes abgedeckt, nur ihr Header
+		if (rc != -1 && !gmessage_message && wctx->locked_events != locked_before)
+			gmessage_header_only = TRUE;
 	}
 
 	if (rc == -1) {
