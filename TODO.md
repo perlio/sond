@@ -420,16 +420,6 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  für #167/#169 naheliegend.
 ```
 
-## zond_treeview_get_path() ohne Aufrufer
-
-Aus "Refactoring des #180-BAUM_FS-Sprungs" (HISTORY.md, 22.09.2026).
-
-```text
- zond_treeview_get_path() (zond_treeview.c/.h) hat dadurch aktuell keinen
- Aufrufer mehr - bewußt nicht entfernt (kein Teil dieser Anfrage, eigene
- Entscheidung wäre ggf. später sinnvoll).
-```
-
 ## Offene Frage: cursor-changed nach Sprung aus dem Suchfenster
 
 Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).

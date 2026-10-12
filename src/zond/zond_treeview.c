@@ -3985,34 +3985,6 @@ gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
 	return 0;
 }
 
-static gboolean zond_treeview_foreach_path(GtkTreeModel *model,
-		GtkTreePath *path, GtkTreeIter *iter, gpointer user_data) {
-	GtkTreePath **new_path = (GtkTreePath**) user_data;
-	gint node_id = GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(model), "node_id" ));
-
-	gint node_id_tree = 0;
-	gtk_tree_model_get(model, iter, 2, &node_id_tree, -1);
-
-	if (node_id == node_id_tree) {
-		*new_path = gtk_tree_path_copy(path);
-		return TRUE;
-	} else
-		return FALSE;
-}
-
-GtkTreePath*
-zond_treeview_get_path(SondTreeview *treeview, gint node_id) {
-	GtkTreePath *path = NULL;
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(treeview));
-
-	g_object_set_data(G_OBJECT(model), "node_id", GINT_TO_POINTER(node_id));
-	gtk_tree_model_foreach(model,
-			(GtkTreeModelForeachFunc) zond_treeview_foreach_path, &path);
-
-	return path;
-}
-
 static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv,
 		GtkTreeIter *iter, gchar **file_part, gchar** section, GError **error) {
 	gint node_id = 0;

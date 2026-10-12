@@ -52,8 +52,6 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt*, DisplayedDocument*,
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
-GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);
-
 /**
  * zond_treeview_get_selected_fileparts:
  * @ztv:                ZondTreeview (BAUM_INHALT oder BAUM_AUSWERTUNG)
