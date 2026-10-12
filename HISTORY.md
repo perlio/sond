@@ -5487,3 +5487,15 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  - Öffnen einer leeren Datei im eigenen Viewer: Meldung "Datei ist leer"
    (sond_render, sond_render_with_term).
 ```
+
+## Passwortschutz: Badges in BAUM_INHALT/BAUM_AUSWERTUNG nicht gebaut (#229, 12.10.2026)
+
+```text
+ - Bewusst verzichtet. Diese Bäume kennen nur den Filepart-String aus der DB, den
+   Sperrzustand trägt das SondFilePart. Ihn beim Zeichnen ohne Dateizugriff zu
+   ermitteln (nur bereits geöffnete Objekte) ließe das Badge nach einem Neustart
+   fehlen; mit Auflösung bräuchte es I/O im Zeichnen (SeaDrive, große ZIPs).
+   Passwörter werden beim Öffnen, Export und im Renderer ohnehin abgefragt, der
+   Überblick bleibt in BAUM_FS. Damit ist der Passwortschutz-Abschnitt (#221-#230)
+   abgeschlossen.
+```

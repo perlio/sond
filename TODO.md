@@ -494,12 +494,3 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
    sond_process_fileparts (~200). Keine automatischen Tests im Repository:
    sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
    aus dem Review liegen nur im Scratchpad).
-
-## Passwortschutz ZIP/PDF: Rest (Konzept 11.10.2026)
-
-Schritte 1 bis 6 (#221-#228) sind erledigt (HISTORY.md, 11.10.2026).
-
-```text
- #229 Schritt 7 (später) - Badges (Schloß rot/grün) in BAUM_INHALT und
- BAUM_AUSWERTUNG; diese Bäume zeichnen heute keine Overlays.
-```
