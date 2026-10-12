@@ -897,6 +897,7 @@ typedef struct _S_FM_Paste_Selection {
 	gboolean expanded;
 	gchar* base_inserted;
 	gint index_to;
+	gboolean no_tree; //Ziel eingeklappt: nur auf der Platte einfügen, Baum bleibt unberührt
 } SFMPasteSelection;
 
 //TRUE, wenn der Eintrag Inhalt eines Containers (ZIP/PDF/E-Mail) ist
@@ -1276,7 +1277,26 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	s_paste_sel->index_to++; //> 0 zugleich Marker, daß Knoten eingefügt wurde
 
-	iter_new = sond_treeviewfm_insert_node(stvfm_item_parent_priv->stvfm,
+	//Eingeklapptes Ziel: Inhalt wird beim Aufklappen von der Platte geladen
+	if (s_paste_sel->no_tree) {
+		if (clipboard->ausschneiden && path_old) {
+			g_autofree gchar *path_moved = g_strconcat(
+					(stvfm_item_parent_priv->path_or_section) ?
+							stvfm_item_parent_priv->path_or_section : "",
+					(stvfm_item_parent_priv->path_or_section) ? "/" : "",
+					s_paste_sel->base_inserted, NULL);
+
+			adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
+					stvfm_item_parent_priv->sond_file_part, path_old, path_moved);
+		}
+
+		if (clipboard->ausschneiden)
+			remove_item_from_tree(iter, stvfm_item);
+
+		return 0;
+	}
+
+	iter_new =sond_treeviewfm_insert_node(stvfm_item_parent_priv->stvfm,
 			s_paste_sel->iter_cursor, s_paste_sel->kind);
 	*(s_paste_sel->iter_cursor) = *iter_new;
 	gtk_tree_iter_free(iter_new);
@@ -1655,7 +1675,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 				&iter_cursor);
 
 	SFMPasteSelection s_paste_sel = {NULL, NULL, &iter_cursor,
-			kind, expanded, NULL, 0};
+			kind, expanded, NULL, 0, FALSE};
 
 	if (!parent_is_root) {
 		//STVFM_Item im tree holen
@@ -1736,9 +1756,15 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		return -1;
 	}
 
+	//Eingeklapptes Verzeichnis (außer PDF): Baum nicht anfassen, der Dummy
+	//bleibt einziges Kind, geladen wird erst beim Aufklappen
+	s_paste_sel.no_tree = (!parent_is_root && kind && !expanded &&
+			stvfm_item_parent_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
+			!SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part));
+
 	//Wenn in nicht geöffnetes Verzeichnis eingefügt werden solL:
 	//wenn schon Kind, dann expandieren
-	if (stvfm_item_parent_priv->has_children
+	if (!s_paste_sel.no_tree && stvfm_item_parent_priv->has_children
 			&& s_paste_sel.kind && !s_paste_sel.expanded)
 		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), s_paste_sel.iter_cursor);
 
@@ -1815,6 +1841,19 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	}
 
 	inserted = (s_paste_sel.index_to != index_to_start);
+
+	//bisher leeres, eingeklapptes Verzeichnis: Dummy für den Expander anlegen
+	if (inserted && s_paste_sel.no_tree) {
+		GtkTreeStore *store = GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)));
+
+		stvfm_item_parent_priv->has_children = TRUE;
+		if (gtk_tree_model_iter_n_children(GTK_TREE_MODEL(store), &iter_parent) == 0) {
+			GtkTreeIter iter_dummy = { 0 };
+
+			gtk_tree_store_insert(store, &iter_dummy, &iter_parent, -1);
+		}
+	}
 
 	if (inserted) {
 		//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
