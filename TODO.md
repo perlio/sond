@@ -325,22 +325,6 @@ Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
  nicht bearbeiten, bis der Nutzer es wieder aufgreift.
 ```
 
-## NULL-Prüfung von stvfm_item bei Dummy-Zeilen (nur notiert)
-
-Aus dem Abschnitt "BAUM_FS: hängenbleibende Dummy-Zeile nach fehlgeschlagenem Expand" (HISTORY.md, 18.09.2026).
-
-```text
- Nicht angegangen (nur notiert): beim Durchsuchen des Codes fielen weitere
- Aufrufstellen auf (u.a. Doppelklick-Handler ~Zeile 2690/3198, Selektions-
- Verarbeitung ~Zeile 2580/2909), die stvfm_item nach gtk_tree_model_get()
- ebenfalls ohne NULL-Prüfung entreffen bzw. weiterreichen - potentiell
- riskant, falls eine Dummy-Zeile je direkt angeklickt werden sollte. Durch
- obigen Fix jetzt nur noch für ein sehr kurzes Zeitfenster (während des
- Ladens) statt dauerhaft sichtbar, also entschärft, aber nicht
- grundsätzlich ausgeschlossen - bei Bedarf defensiv nachrüsten. Nicht
- durch Kompilieren/Testen verifiziert.
-```
-
 ## Busy-/Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
 
 Aus "Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke" (HISTORY.md, 16.09.2026).
@@ -433,30 +417,6 @@ Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).
  vermutlich dieselbe Ursache und müsste analog behoben werden.
 ```
 
-## #192 GLib-GIO-CRITICAL "GFileInfo created without standard::type"
-
-```text
- #192 offen (01.10.2026): GLib-GIO-CRITICAL "GFileInfo created without
- standard::type" (g_file_info_get_file_type) tritt häufig in einem
- Projekt mit angebundener Section auf. Kein eigener Aufruf von
- g_file_info_get_file_type() im Code - Auslöser in GLib/GTK. Nächster
- Schritt: Stacktrace per G_DEBUG=fatal-criticals (Eclipse-Debug-
- Konfiguration, Environment).
- Seit 1.1.3 nicht mehr beobachtet, Ursache unklar. Zusammenhang mit #190
- (leerer Auszug) unwahrscheinlich - der leere Auszug griff auf nichts zu.
- Bei erneutem Auftreten im Debug-Build mit Konsole prüfen (Release-Build
- mit -mwindows zeigt keine Konsole).
- Vermutung (unbelegt): GtkFileChooserDialog (choose_file(), misc.c) beim
- Einlesen eines SeaDrive-Ordners - GTK3 liest dort intern den Dateityp,
- der bei nicht hydrierten Platzhaltern fehlen kann. Passt zum
- gleichzeitigen Auftreten (gleicher Zeitstempel), nicht aber zu "ganz
- oft" ohne offenen Dialog.
- Nebenbei behoben: choose_file() las bei NULL von
- gtk_file_chooser_get_filename() (nicht lokale Auswahl) in der
- "\"->"/"-Schleife einen NULL-Zeiger.
-
-```
-
 ## Review der Index-Implementation (06.10.2026)
 
 Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implementation") von sond_index.c, sond_process_file.c, sond_text_extract.c,
@@ -471,14 +431,4 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
  Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
  Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
-
- #219 Rest (Kleinigkeiten aus dem Index-Review, Erledigtes: HISTORY.md):
- - sond_index_ctx_embedding_model_changed() hat keinen Aufrufer: ein
-   Modellwechsel stößt kein Re-Embedding an. Embeddings gibt es nur im
-   Debug-Build (Release ohne SOND_WITH_EMBEDDINGS); beim Wiedereinschalten
-   der Embeddings muss der Aufrufer bei TRUE ein Re-Embedding anstoßen.
- - Lange Funktionen: sond_index (~290 Z.), coverage_invalidate (~265),
-   coverage_try_collapse (~200), zond_indexsuche_do (~280),
-   sond_process_fileparts (~200). Keine automatischen Tests im Repository:
-   sond_index.c lässt sich mit etwa zehn Stubs linken (die Testprogramme
-   aus dem Review liegen nur im Scratchpad).
+```
