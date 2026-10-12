@@ -1041,6 +1041,9 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
+static gint sond_treeviewfm_expand_dummy(SondTreeviewFM*, GtkTreeIter*,
+		SondTVFMItem*, GError**);
+
 static void remove_item_from_tree(GtkTreeIter* iter,
 		SondTVFMItem* stvfm_item) {
 	gboolean is_gmessage = FALSE;
@@ -1054,8 +1057,9 @@ static void remove_item_from_tree(GtkTreeIter* iter,
 		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(
 				sond_file_part_get_parent(stvfm_item_priv->sond_file_part));
 
-	//Wenn gelöschte Datei embedded file in PDF war:
-	if (SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(
+	//Wenn gelöschte Datei embedded file in PDF war (keine Section):
+	if (!stvfm_item_priv->path_or_section &&
+			SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(
 			stvfm_item_priv->sond_file_part))) {
 		//Falls es das letzte war, muß alles umgestellt werdem
 		if (!sond_file_part_get_has_children(sond_file_part_get_parent(
@@ -1105,6 +1109,22 @@ parent:
 			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
 			stvfm_item_parent_priv->has_children = FALSE;
 			stvfm_item_parent_priv->icon_name = "pdf";
+
+			/* Die Sections hingen unter dem entfernten PageTree-Knoten:
+			 * als LEAF stehen sie direkt unter der PDF, neu laden */
+			if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->has_sections &&
+					SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->has_sections(
+							stvfm_item_parent)) {
+				GError* error = NULL;
+
+				stvfm_item_parent_priv->has_children = TRUE;
+				if (sond_treeviewfm_expand_dummy(stvfm_item_priv->stvfm,
+						&iter_parent, stvfm_item_parent, &error)) {
+					LOG_WARN("Sections konnten nicht geladen werden: %s",
+							error ? error->message : "(keine Meldung)");
+					g_clear_error(&error);
+				}
+			}
 			g_object_unref(stvfm_item_parent);
 
 			end:
@@ -1527,6 +1547,76 @@ static gint sond_treeviewfm_preflight_foreach(SondTreeview *stv,
 	return ok ? 0 : 1;
 }
 
+/* PDF-Zeile, die bisher keine Anhänge hatte (Sections direkt darunter oder
+ * gar keine Kinder): Kinder verwerfen und aus der Datei neu aufbauen
+ * (PageTree mit Sections darunter, Anhänge), wie beim Öffnen. War die Zeile
+ * offen, bleibt sie es, sonst wird sie geöffnet. Der Dummy steht von Anfang
+ * an, damit die Zeile nie ohne Kind ist (GTK klappt sie sonst zu). TRUE und
+ * iter_sel gesetzt, wenn der Anhang name_select gefunden wurde. */
+static gboolean sond_treeviewfm_pdf_rebuild(SondTreeviewFM* stvfm,
+		GtkTreeIter* iter_pdf, SondTVFMItem* stvfm_item_pdf,
+		gchar const* name_select, GtkTreeIter* iter_sel) {
+	GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	GtkTreeStore* store = GTK_TREE_STORE(model);
+	GtkTreeIter iter_child = { 0 };
+	GtkTreeIter iter_dummy = { 0 };
+	gboolean was_expanded = sond_treeview_row_expanded(SOND_TREEVIEW(stvfm),
+			iter_pdf);
+	gboolean found = FALSE;
+	gint n = gtk_tree_model_iter_n_children(model, iter_pdf);
+
+	gtk_tree_store_insert(store, &iter_dummy, iter_pdf, -1);
+	for (gint i = 0; i < n; i++) {
+		gtk_tree_model_iter_nth_child(model, &iter_child, iter_pdf, 0);
+		gtk_tree_store_remove(store, &iter_child);
+	}
+
+	if (was_expanded) { //Handler row-expanded läuft hier nicht, selbst laden
+		GError* error = NULL;
+
+		if (sond_treeviewfm_expand_dummy(stvfm, iter_pdf, stvfm_item_pdf,
+				&error)) {
+			LOG_WARN("PDF-Kinder konnten nicht geladen werden: %s",
+					error ? error->message : "(keine Meldung)");
+			g_clear_error(&error);
+		}
+		gtk_tree_store_remove(store, &iter_dummy);
+	}
+	else
+		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), iter_pdf);
+
+	//Sections sichtbar machen: PageTree ist immer das erste Kind
+	if (was_expanded && gtk_tree_model_iter_nth_child(model, &iter_child,
+			iter_pdf, 0)) {
+		SondTVFMItem* stvfm_item_page_tree = NULL;
+
+		gtk_tree_model_get(model, &iter_child, 0, &stvfm_item_page_tree, -1);
+		if (stvfm_item_page_tree) {
+			if (sond_tvfm_item_is_content_root_marker(stvfm_item_page_tree) &&
+					sond_tvfm_item_get_priv(stvfm_item_page_tree)->has_children)
+				sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter_child);
+			g_object_unref(stvfm_item_page_tree);
+		}
+	}
+
+	//eingefügten Anhang suchen
+	n = gtk_tree_model_iter_n_children(model, iter_pdf);
+	for (gint i = 0; name_select && i < n && !found; i++) {
+		SondTVFMItem* stvfm_item = NULL;
+
+		gtk_tree_model_iter_nth_child(model, iter_sel, iter_pdf, i);
+		gtk_tree_model_get(model, iter_sel, 0, &stvfm_item, -1);
+		if (stvfm_item) {
+			found = !sond_tvfm_item_is_content_root_marker(stvfm_item) &&
+					!g_strcmp0(sond_tvfm_item_get_display_name(stvfm_item),
+							name_select);
+			g_object_unref(stvfm_item);
+		}
+	}
+
+	return found;
+}
+
 static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind,
 		GError **error) {
 	gint rc = 0;
@@ -1534,6 +1624,8 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	GtkTreeIter iter_parent = { 0 };
 	gboolean expanded = FALSE;
 	gboolean was_leaf = FALSE;
+	gboolean inserted = FALSE;
+	gint index_to_start = 0;
 	Clipboard *clipboard = NULL;
 	SondTVFMItem* stvfm_item_parent = NULL;
 	gboolean parent_is_root = FALSE;
@@ -1632,7 +1724,13 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 							stvfm_item_parent_priv->sond_file_part))) {
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nEinfügen in Datei nicht unterstützt", __func__);
+					"%s\nEinfügen in Datei nicht unterstützt "
+					"(Typ %d, PDF %d, sfp-Kinder %d)", __func__,
+					(gint) stvfm_item_parent_priv->type,
+					SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part),
+					stvfm_item_parent_priv->sond_file_part ?
+							sond_file_part_get_has_children(
+									stvfm_item_parent_priv->sond_file_part) : -1);
 		g_object_unref(stvfm_item_parent); //mutig sein
 
 		return -1;
@@ -1643,6 +1741,22 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	if (stvfm_item_parent_priv->has_children
 			&& s_paste_sel.kind && !s_paste_sel.expanded)
 		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), s_paste_sel.iter_cursor);
+
+	//Anhänge stehen in einer PDF mit Anhängen hinter dem PageTree (erstes Kind)
+	if (s_paste_sel.kind && stvfm_item_parent_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
+			!stvfm_item_parent_priv->path_or_section &&
+			SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part)) {
+		GtkTreeIter iter_first = { 0 };
+
+		if (gtk_tree_model_iter_children(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_first,
+				s_paste_sel.iter_cursor)) {
+			*(s_paste_sel.iter_cursor) = iter_first;
+			s_paste_sel.kind = FALSE;
+			s_paste_sel.index_to = 1;
+		}
+	}
+	index_to_start = s_paste_sel.index_to;
 
 	s_paste_sel.stvfm_item_parent = stvfm_item_parent;
 
@@ -1700,7 +1814,9 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		g_ptr_array_unref(arr_skipped);
 	}
 
-	if (s_paste_sel.index_to) { //heißt: entweder !kind oder mind. 1 node eingefügt
+	inserted = (s_paste_sel.index_to != index_to_start);
+
+	if (inserted) {
 		//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
 		if (stvfm_item_parent_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
 			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
@@ -1710,25 +1826,31 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		} //sonst funktioniert expand nämlich nicht
 	}
 
-	/* Elternknoten war nicht geöffnet: wieder einklappen. War er geöffnet und
-	 * bisher eine PDF ohne Anhänge (LEAF, Sections direkt darunter), steht die
-	 * eingefügte Datei sonst neben den Sections und der PageTree-Knoten fehlt:
-	 * einklappen und neu aufklappen baut die Kinder wie beim Öffnen auf. Der
-	 * Cursor-Iter zeigt danach auf eine entfernte Zeile. */
-	if (kind && (!expanded || was_leaf)) {
+	/* PDF war bisher ohne Anhänge: Kinder (PageTree mit den Sections darunter,
+	 * Anhänge) wie beim Öffnen neu aufbauen, Cursor auf den eingefügten Anhang */
+	if (was_leaf) {
+		GtkTreeIter iter_emb = { 0 };
+
+		if (sond_treeviewfm_pdf_rebuild(stvfm, &iter_parent, stvfm_item_parent,
+				s_paste_sel.base_inserted, &iter_emb))
+			iter_cursor = iter_emb;
+		else
+			iter_cursor = iter_parent;
+	}
+	//nichts eingefügt, Elternknoten war nicht geöffnet: wieder einklappen
+	else if (kind && !expanded && !inserted) {
 		GtkTreePath* path = NULL;
 
 		path = gtk_tree_model_get_path(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_parent);
 		gtk_tree_view_collapse_row(GTK_TREE_VIEW(stvfm), path);
 		gtk_tree_path_free(path);
-
-		if (expanded && was_leaf)
-			sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter_parent);
-
-		iter_cursor = iter_parent;
 	}
 
+	if (kind && !inserted) //Cursor auf der Zielzeile, nicht auf dem PageTree
+		iter_cursor = iter_parent;
+
+	g_free(s_paste_sel.base_inserted);
 	g_object_unref(stvfm_item_parent);
 	if (rc == -1)
 		return -1;
@@ -1764,7 +1886,28 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	if (rc)
 		return -1;
 
-	remove_item_from_tree(iter, stvfm_item);
+	{
+		GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+		GtkTreePath* path = gtk_tree_model_get_path(model, iter);
+		gint idx = gtk_tree_path_get_indices(path)[gtk_tree_path_get_depth(path) - 1];
+		GtkTreeIter iter_parent = { 0 };
+		GtkTreeIter iter_new = { 0 };
+		gboolean has_parent = FALSE;
+		gint n = 0;
+
+		gtk_tree_path_free(path);
+		has_parent = gtk_tree_model_iter_parent(model, &iter_parent, iter);
+
+		remove_item_from_tree(iter, stvfm_item);
+
+		//Cursor auf das nachrückende bzw. letzte Geschwister, sonst auf das Elternelement
+		n = gtk_tree_model_iter_n_children(model, has_parent ? &iter_parent : NULL);
+		if (n > 0 && gtk_tree_model_iter_nth_child(model, &iter_new,
+				has_parent ? &iter_parent : NULL, MIN(idx, n - 1)))
+			sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter_new);
+		else if (has_parent)
+			sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter_parent);
+	}
 
 	return 0;
 }
