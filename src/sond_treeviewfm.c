@@ -1853,6 +1853,33 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 
 			gtk_tree_store_insert(store, &iter_dummy, &iter_parent, -1);
 		}
+
+		//aufklappen (Handler lädt von der Platte), Cursor auf den zuletzt
+		//eingefügten Eintrag
+		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter_parent);
+		if (s_paste_sel.base_inserted) {
+			GtkTreeModel *model = GTK_TREE_MODEL(store);
+			gint n = gtk_tree_model_iter_n_children(model, &iter_parent);
+
+			for (gint i = 0; i < n; i++) {
+				GtkTreeIter iter_child = { 0 };
+				SondTVFMItem *item_child = NULL;
+				gboolean found = FALSE;
+
+				gtk_tree_model_iter_nth_child(model, &iter_child, &iter_parent, i);
+				gtk_tree_model_get(model, &iter_child, 0, &item_child, -1);
+				if (item_child) {
+					found = !g_strcmp0(sond_tvfm_item_get_display_name(item_child),
+							s_paste_sel.base_inserted);
+					g_object_unref(item_child);
+				}
+				if (found) {
+					iter_cursor = iter_child;
+
+					break;
+				}
+			}
+		}
 	}
 
 	if (inserted) {
