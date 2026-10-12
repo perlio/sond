@@ -455,8 +455,6 @@ Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).
  gtk_file_chooser_get_filename() (nicht lokale Auswahl) in der
  "\"->"/"-Schleife einen NULL-Zeiger.
 
- #193 Eingebettete Dateien mit gleichem Namen (02.10.2026, Nutzer-Hinweis).
- Eingebettete Dateien werden über ihren Dateinamen (/UF, sonst /F, s.
 ```
 
 ## Review der Index-Implementation (06.10.2026)

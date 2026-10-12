@@ -720,8 +720,11 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * geprüft ist und die Abdeckungs-Aussage sonst verletzen würde.
 		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
 		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
-		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht. */
-		if (!rename_in_gmessage &&
+		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht.
+		 * Nicht beim Umbenennen an Ort und Stelle (index_to -1): der Inhalt
+		 * bleibt derselbe, ein abdeckender Vorfahre (Verzeichnis, PDF) bliebe
+		 * sonst aufgelöst und müsste neu zusammengefasst werden. */
+		if (!rename_in_gmessage && index_to != -1 &&
 				!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
 				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);

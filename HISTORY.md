@@ -4431,6 +4431,8 @@ Unverändert aus src/zond/ToDo.c übernommen (Stand 03.10.2026); aus dem Text he
  x.pdf/PageTree (Anhang bleibt); Index durchsuchen mit Auswahl x.pdf
  (keine Treffer aus dem Anhang); PDF ohne Einbettungen weiterhin "x.pdf".
 
+ #193 Eingebettete Dateien mit gleichem Namen (02.10.2026, Nutzer-Hinweis), umgesetzt, vom Nutzer getestet.
+ Eingebettete Dateien werden über ihren Dateinamen (/UF, sonst /F, s.
  pdf_get_EF_F()) adressiert - der ist nicht eindeutig, nur der Schlüssel
  im EmbeddedFiles-Namensbaum ist es (PDF-Norm). Bei doppeltem Namen
  treffen load/lookup/modify/delete/rename (sond_fileparts.c) immer den
@@ -4495,10 +4497,12 @@ Unverändert aus src/zond/ToDo.c übernommen (Stand 03.10.2026); aus dem Text he
  bild.txt), a/b%c und notiz-2 (beide notiz.txt), fremder_schluessel
  (einzeln.txt); Suchwörter Bildeins, Bildzwei, Notizalpha, Notizbeta,
  Einzeln, Seitentext.
- Zu testen: fremde PDF mit zwei gleichnamigen Anhängen (beide in BAUM_FS
- öffnen, anbinden, indizieren); Anhang umbenennen und die Anbindung
- öffnen; Anhang mit "%" oder "/" im Schlüssel; bestehende Anbindungen auf
- Anhänge weiterhin öffnen; OCR einer PDF mit Anhängen.
+ Weitere Test-PDF: Testordner/emb_dup.pdf - Schlüssel dup_1/dup_2 (beide rechnung.txt),
+ x/y%z und vermerk-2 (beide vermerk.txt), fremd_key (einzeln.txt); Suchwörter
+ Dupeins, Dupzwei, Dupalpha, Dupbeta, Dupeinzel, Dupseite.
+ Getestet (12.10.2026): öffnen, anbinden, indizieren, umbenennen, löschen.
+ Einmalig fanden Dupalpha/Dupbeta nicht, obwohl indiziert; Ursache ungeklärt,
+ bei erneutem Auftreten Ablauf notieren.
 
  #194 umgesetzt (03.10.2026), vom Nutzer getestet - Befund: Mimepart-Nummern einer E-Mail werden in der
  Index-DB nicht nachgeführt. Beim Löschen/Verschieben eines Mimeparts
