@@ -404,6 +404,30 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  für #167/#169 naheliegend.
 ```
 
+## #221 Konsistenzprüfung der Projektdatenbank (Extras)
+
+```text
+ #221 Idee (13.10.2026, Nutzer): Funktion unter Extras, die eine
+ Projektdatenbank auf Konsistenz prüft und ggf. korrigiert. Anlass: Reste
+ in genutzten Projekten (FILE_PART-Zeilen zu Pfaden, die es nicht mehr gibt,
+ doppelte Zeilen zum selben Pfad). Unangebundene FILE_PART-Zeilen MIT
+ Sections sind gewollt (BAUM_FS zeigt sie an, wiederverwendbar), nur melden,
+ nicht löschen; "leere Wurzeln" ohne Sections ebenfalls nur melden.
+ Ablauf: erst Bericht je Kategorie (ohne Änderung), dann je Kategorie
+ "Korrigieren" mit Rückfrage; vorher Sicherungskopie der Projektdatei.
+ Löschen nur bei unangebundenen Zeilen, Kaskade (link, parent_ID) beachten.
+ Prüfungen, billig (nur DB): PRAGMA integrity_check/foreign_key_check;
+ doppelte FILE_PART-Zeilen (gleicher file_part und section; unangebundene
+ zusammenführen); Anker ohne Ziel, Copies/Links ohne Ziel; Geschwisterketten
+ (older_sibling_ID/parent_ID lückenlos, ohne Zyklus); Unterschiede main/work.
+ Prüfungen mit Dateizugriff (optional, mit Fortschrittsanzeige):
+ FILE_PART-Zeilen, deren äußerer Pfad nicht mehr existiert; Reste innerhalb
+ von Containern (z.B. emb_dup.pdf//vermddderk.txt) nur durch Öffnen des
+ Containers erkennbar - bei ZIP/PDF mit Passwort und SeaDrive-Platzhaltern
+ heikel/teuer. Index-DB: Chunks, Coverage, pdf_embedded zu Pfaden, die es
+ nicht mehr gibt.
+```
+
 ## Review der Index-Implementation (06.10.2026)
 
 Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implementation") von sond_index.c, sond_process_file.c, sond_text_extract.c,
