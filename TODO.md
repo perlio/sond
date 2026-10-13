@@ -3,28 +3,10 @@
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 Neue Einträge werden ab #200 nummeriert.
 
-Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stand 03.10.2026).
-
 ## Allgemeine Liste
 
 ```text
  ToDo:
-
-- Rows mit Text Farbe
-- #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt, bei Bedarf als
-  weiteres Feld in SondTVFMSearchOpts)
-
- - Abschnitte neu organisieren
-
- - BAUM_INHALT
- - Anbindungen in PDF einfügen
- - Anbindungen in PDF löschen
-
- - Viewer
- - Farben für Markieren
- - Rummalen
- - angezeigte Seiten als Datei speichern
-
 
  - datei_oeffnen:
  - nicht-Win32 (niedrig)
@@ -369,7 +351,7 @@ Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
    sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
 ```
 
-## Ideen #167, #169, #205
+## Ideen #167, #169, #202, #205, #232, #233
 
 Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
 
@@ -401,15 +383,25 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  Richtung "raus" in eine neue zond_dbase mit eigenem Root-Verzeichnis,
  in das die betroffenen Dateien kopiert würden). Gemeinsame Infrastruktur
  für #167/#169 naheliegend.
+
+ #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt,
+ bei Bedarf als weiteres Feld in SondTVFMSearchOpts).
+
+ #232 BAUM_INHALT: Anbindungen in einer PDF einfügen und löschen
+ (13.10.2026, Nutzer).
+
+ #233 Viewer: Rummalen (13.10.2026, Nutzer).
 ```
 
-## #221 Konsistenzprüfung der Projektdatenbank (Extras)
+## #231 Konsistenzprüfung der Projektdatenbank (Extras)
 
 ```text
- #221 Idee (13.10.2026, Nutzer): Funktion unter Extras, die eine
+ #231 Idee (13.10.2026, Nutzer): Funktion unter Extras, die eine
  Projektdatenbank auf Konsistenz prüft und ggf. korrigiert. Anlass: Reste
  in genutzten Projekten (FILE_PART-Zeilen zu Pfaden, die es nicht mehr gibt,
- doppelte Zeilen zum selben Pfad). Unangebundene FILE_PART-Zeilen MIT
+ doppelte Zeilen zum selben Pfad; beim Löschen einer PDF oder eines
+ Verzeichnisses werden die FILE_PART-Zeilen der Anhänge bzw. Dateien darin
+ nicht mitgelöscht). Unangebundene FILE_PART-Zeilen MIT
  Sections sind gewollt (BAUM_FS zeigt sie an, wiederverwendbar), nur melden,
  nicht löschen; "leere Wurzeln" ohne Sections ebenfalls nur melden.
  Ablauf: erst Bericht je Kategorie (ohne Änderung), dann je Kategorie

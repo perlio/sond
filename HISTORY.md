@@ -4501,8 +4501,6 @@ Unverändert aus src/zond/ToDo.c übernommen (Stand 03.10.2026); aus dem Text he
  x/y%z und vermerk-2 (beide vermerk.txt), fremd_key (einzeln.txt); Suchwörter
  Dupeins, Dupzwei, Dupalpha, Dupbeta, Dupeinzel, Dupseite.
  Getestet (12.10.2026): öffnen, anbinden, indizieren, umbenennen, löschen.
- Einmalig fanden Dupalpha/Dupbeta nicht, obwohl indiziert; Ursache ungeklärt,
- bei erneutem Auftreten Ablauf notieren.
 
  #194 umgesetzt (03.10.2026), vom Nutzer getestet - Befund: Mimepart-Nummern einer E-Mail werden in der
  Index-DB nicht nachgeführt. Beim Löschen/Verschieben eines Mimeparts
@@ -5502,4 +5500,40 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Passwörter werden beim Öffnen, Export und im Renderer ohnehin abgefragt, der
    Überblick bleibt in BAUM_FS. Damit ist der Passwortschutz-Abschnitt (#221-#230)
    abgeschlossen.
+```
+
+## Anhänge in PDFs: Umbenennen, Sprung nach BAUM_FS, Aufräumen beim Löschen; Wartecursor (12./13.10.2026)
+
+```text
+ Alles vom Nutzer getestet.
+ - Umbenennen an Ort und Stelle (index_to -1): zond_treeviewfm_before_move()
+   löst die Abdeckung des Zielpfads nicht mehr auf. Vorher wurde der
+   abdeckende Vorfahre (PDF, Verzeichnis) in Einzeleinträge zerlegt, der
+   Index-Badge wurde grau. Gilt auch für Dateien in Verzeichnissen.
+ - Sprung nach BAUM_FS zu einem Anhang in einer PDF (Verwendungsfenster,
+   Sprung zur Herkunft): sond_treeviewfm_file_part_visible() stieg in den
+   PageTree-Marker ab (gleicher Pfad wie seine PDF) und gab "nicht gefunden"
+   zurück, ohne die Geschwister zu prüfen. Jetzt wird der Marker nicht
+   betreten, bei erfolglosem Abstieg geht die Suche bei den Geschwistern
+   weiter.
+ - Löschen: dbase_zond_remove_filepart() (project.c) löscht die FILE_PART-Zeile
+   zum Pfad in main und work innerhalb der Dual-Write-Transaktion von
+   zond_treeviewfm_before_delete() (das Löschen läuft für Dateien jetzt immer
+   als Dual-Write). Die Sperre bei Anbindung bleibt; ohne Anker kann auch kein
+   Copy oder Link auf die Zeile zeigen. Gelöscht wird nur die Zeile zum Pfad,
+   nicht die der Anhänge bzw. Dateien darin (TODO.md #231).
+   zond_dbase_get_section(): bei mehreren Zeilen zum selben Pfad die mit
+   Anbindung zuerst. Unangebundene FILE_PART-Zeilen mit Sections nach
+   Entfernen der Anbindung sind gewollt (BAUM_FS zeigt sie, wiederverwendbar).
+ - Wartecursor beim Aufklappen in BAUM_FS: sond_treeviewfm_row_expanded()
+   setzt wait_cursor_set_quick() (misc.c, Cursor ohne Ereignis-Pumpen), Zähler
+   expand_busy bei verschachteltem Aufklappen, Reset vor der Fehlermeldung.
+   Ein Fortschrittsanzeiger ist offen (TODO.md).
+ - NULL-Prüfung bei Dummy-Zeilen: cell_edited, open_item, row_activated,
+   get_fileparts_foreach und die Kindsuche beim Einfügen (sond_treeviewfm.c);
+   Fileparts-Handler, jump_activate und find_section (zond_treeviewfm.c).
+ - Aus TODO.md gestrichen: zwei Punkte zu copy_auswertung (erledigt), #192,
+   #219, die NULL-Prüfung bei Dummy-Zeilen (damals nicht erforderlich) und die
+   Frage zu cursor-changed nach Sprung aus dem Suchfenster (durch #184
+   beantwortet).
 ```
