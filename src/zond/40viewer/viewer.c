@@ -233,13 +233,18 @@ gboolean viewer_has_dirty_dd(PdfViewer* pv) {
 
 typedef struct {
 	PdfViewer *pv;
+	GtkWidget *vf; //Weak-Pointer: NULL, wenn der Viewer inzwischen geschlossen wurde
 	PdfPos pdf_pos;
 	gdouble delta;
 } SSpringArgs;
 
 static gboolean viewer_springen_idle(gpointer data) {
 	SSpringArgs *args = (SSpringArgs*) data;
-	viewer_springen_zu_pos_pdf(args->pv, args->pdf_pos, args->delta);
+
+	if (args->vf) {
+		g_object_remove_weak_pointer(G_OBJECT(args->vf), (gpointer*) &args->vf);
+		viewer_springen_zu_pos_pdf(args->pv, args->pdf_pos, args->delta);
+	}
 	g_free(args);
 	return G_SOURCE_REMOVE;
 }
@@ -248,6 +253,8 @@ void viewer_springen_zu_pos_pdf_idle(PdfViewer *pv, PdfPos pdf_pos,
 		gdouble delta) {
 	SSpringArgs *args = g_new0(SSpringArgs, 1);
 	args->pv = pv;
+	args->vf = pv->vf;
+	g_object_add_weak_pointer(G_OBJECT(args->vf), (gpointer*) &args->vf);
 	args->pdf_pos = pdf_pos;
 	args->delta = delta;
 	g_idle_add(viewer_springen_idle, args);

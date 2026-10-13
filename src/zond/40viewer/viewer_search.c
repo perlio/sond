@@ -147,7 +147,8 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 				(fz_search_callback_fn *) search_hit_cb, &hit_data);
 	}
 	fz_catch(ctx) {
-		/* Fehler ignorieren, hits bleibt leer */
+		LOG_WARN("Suche in Seite %i fehlgeschlagen: %s", page_nr,
+				fz_caught_message(ctx));
 	}
 
 	if (hit_data.hits->len == 0) {
@@ -362,8 +363,11 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 	const gchar *search_text = NULL;
 
 	//dokument durchsucht und kein Fund: return
-	if (pv->text_occ.not_found == TRUE)
+	if (pv->text_occ.not_found == TRUE) {
+		display_message(pv->vf, "Kein Treffer", NULL);
+
 		return 0;
+	}
 
 	dir = (widget == pv->button_vorher) ? -1 : 1;
 
@@ -454,7 +458,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 						pv->text_occ.arr_quad->len);
 				g_array_remove_range(pv->text_occ.arr_hit, 0,
 						pv->text_occ.arr_hit->len);
-				pv->text_occ.not_found = TRUE;
+				//kein not_found: Fehler, nächster Klick versucht es erneut
 				ERROR_PDF
 			}
 
