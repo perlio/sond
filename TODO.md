@@ -1,34 +1,32 @@
 # TODO
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
-Neue Einträge werden ab #200 nummeriert.
 
-## Allgemeine Liste
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #240.
+
+## Inhalt
+
+Offen: #235, #236, #234
+Zurückgestellt: #202, #220, #237, #238, #239
+Ideen: #167, #169, #205, #231, #232, #233
+
+## Offen
+
+### #235 Review der Textsuche im Viewer (PDF)
+
+Status: offen
 
 ```text
- ToDo:
-
- #234 sond_open() (sond_file_helper.c) unter Nicht-Windows (niedrig):
- Zweig ruft xdg-open per g_spawn_async auf. Lücken: open_with wird
- ignoriert (Windows: "openas"); temporäre Dateien aus Containern bekommen
- die Endung nur unter __WIN32__ (sond_file_part_write_to_tmp_file()),
- sonst entscheidet xdg-open nach dem Inhalt, macOS nach der Endung; kein
- macOS ("open" statt xdg-open); Fehler von xdg-open selbst (keine
- passende Anwendung) werden nicht gemeldet. Vorschlag:
- g_app_info_launch_default_for_uri() mit g_filename_to_uri(), Endung der
- Temp-Datei auf allen Systemen anhängen, "Öffnen mit" über einen
- GtkAppChooserDialog (GUI-Code, nicht in sond_file_helper.c). Unabhängig
- vom System: die Temp-Datei wird nur bei Fehlschlag von sond_open()
- gelöscht (sond_fileparts.c), bei Erfolg bleibt sie liegen - Aufräumen
- nicht geprüft.
-
  #235 Review der Textsuche im Viewer (PDF). Dabei auch behandeln:
  silbengetrennte Wörter als ein Treffer erfassen und anzeigen.
 ```
 
-## Architektur-Plan: Atomarität store/work (Phase 2 offen)
+### #236 Atomarität store/work, Phase 2
+
+Status: offen (Phase 1 und Punkt 8 umgesetzt)
 
 Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
+
 
 ```text
  Architektur-Plan: Atomarität store/work bei den Dual-Write-Stellen
@@ -271,7 +269,59 @@ Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
     es bei erneuter Gelegenheit doch klappt).
 ```
 
-## SeaDrive-Hydrierungsfehler: UX-Umgang (zurückgestellt)
+### #234 sond_open() unter Nicht-Windows
+
+Status: offen (niedrig)
+
+```text
+ #234 sond_open() (sond_file_helper.c) unter Nicht-Windows (niedrig):
+ Zweig ruft xdg-open per g_spawn_async auf. Lücken: open_with wird
+ ignoriert (Windows: "openas"); temporäre Dateien aus Containern bekommen
+ die Endung nur unter __WIN32__ (sond_file_part_write_to_tmp_file()),
+ sonst entscheidet xdg-open nach dem Inhalt, macOS nach der Endung; kein
+ macOS ("open" statt xdg-open); Fehler von xdg-open selbst (keine
+ passende Anwendung) werden nicht gemeldet. Vorschlag:
+ g_app_info_launch_default_for_uri() mit g_filename_to_uri(), Endung der
+ Temp-Datei auf allen Systemen anhängen, "Öffnen mit" über einen
+ GtkAppChooserDialog (GUI-Code, nicht in sond_file_helper.c). Unabhängig
+ vom System: die Temp-Datei wird nur bei Fehlschlag von sond_open()
+ gelöscht (sond_fileparts.c), bei Erfolg bleibt sie liegen - Aufräumen
+ nicht geprüft.
+```
+
+## Zurückgestellt
+
+### #202 Dateisuche: Filter nach Endung, Größe, Datum
+
+Status: zurückgestellt
+
+```text
+ #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt,
+ bei Bedarf als weiteres Feld in SondTVFMSearchOpts).
+```
+
+### #220 Index löschen im UI-Thread
+
+Status: bewußt so belassen
+
+Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implementation") von sond_index.c, sond_process_file.c, sond_text_extract.c,
+sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
+
+
+```text
+ #220 Index löschen läuft im UI-Thread (headerbar.c, zond_index_loeschen_...):
+ bewußt so belassen. Gemessen auf einer Kopie des größten Index (23 MB, 15.519
+ Chunks, 30 Dateien): 30 Dateien 1,3 s (rund 43 ms je Datei), ganzer Index
+ 0,9 s; hochgerechnet etwa 40 s Stillstand bei 1000 Dateien mit ähnlich vielen
+ Chunks. Ohne Abbrechen-Button. Wird das im Betrieb zu langsam: Löschen in
+ einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
+ Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
+ Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
+```
+
+### #237 SeaDrive-Hydrierungsfehler: UX-Umgang
+
+Status: zurückgestellt
 
 ```text
  SeaDrive-Hydrierungsfehler: UX-Umgang (11.09.2026, zurückgestellt).
@@ -316,9 +366,12 @@ Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
  nicht bearbeiten, bis der Nutzer es wieder aufgreift.
 ```
 
-## Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
+### #238 Fortschrittsanzeige beim Aufklappen in BAUM_FS
+
+Status: zurückgestellt (Wartecursor erledigt)
 
 Aus "Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke" (HISTORY.md, 16.09.2026).
+
 
 ```text
  Wartecursor beim Aufklappen: umgesetzt und getestet (sond_treeviewfm_row_
@@ -330,9 +383,12 @@ Aus "Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke" (HISTORY.md, 1
  oder Schließen der gerade ladenden Zeile abfangen.
 ```
 
-## Löschen in BAUM_INHALT: verbleibende Kosten (nicht behoben)
+### #239 Löschen in BAUM_INHALT: verbleibende Kosten
+
+Status: nicht behoben, vorerst akzeptiert
 
 Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
+
 
 ```text
  - Tatsächliche verbleibende Kosten (Fund, NOCH NICHT behoben - Nutzer:
@@ -362,9 +418,14 @@ Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
    sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
 ```
 
-## Ideen #167, #169, #202, #205, #232, #233
+## Ideen
+
+### #167 Import fremder Projekte
+
+Status: Idee
 
 Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
+
 
 ```text
  #167 Import fremder Projekte in ein bestehendes Projekt: ein "Projekt"
@@ -378,14 +439,13 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  bereits vorhandenen gleichen Dateien/Pfaden. Technisch am ehesten
  verwandt mit der bestehenden zond_dbase_backup(), die aber komplette
  1:1-Kopien macht statt selektiver Teilmengen.
+```
 
- #205 Rendering von odt/docx verbessern (Nutzer, 04.10.2026): Die Anzeige
- im Renderer (sond_renderer.c) und die Texteinheit im Export (Text aus
- sond_text_extract_odt/_docx) liefern flachen Text ohne Gestaltung.
- Prüfen, ob das besser geht (Überschriften, Listen, Tabellen, Fett/
- Kursiv, eingebettete Bilder). Was dabei entsteht, auch in den Export
- übernehmen (odt, docx und PDF-Ziel).
+### #169 Projekt-Teilexport
 
+Status: Idee
+
+```text
  #169 Projekt-Teilexport: markierte Punkte eines Baums (z.B. BAUM_INHALT
  oder BAUM_AUSWERTUNG) samt zugehöriger Dateien als eigenständiges,
  kleineres Projekt exportieren. Spiegelbildlich zu #167 (Import) - beide
@@ -394,17 +454,24 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  Richtung "raus" in eine neue zond_dbase mit eigenem Root-Verzeichnis,
  in das die betroffenen Dateien kopiert würden). Gemeinsame Infrastruktur
  für #167/#169 naheliegend.
-
- #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt,
- bei Bedarf als weiteres Feld in SondTVFMSearchOpts).
-
- #232 BAUM_INHALT: Anbindungen in einer PDF einfügen und löschen
- (13.10.2026, Nutzer).
-
- #233 Viewer: Rummalen (13.10.2026, Nutzer).
 ```
 
-## #231 Konsistenzprüfung der Projektdatenbank (Extras)
+### #205 odt/docx-Rendering verbessern
+
+Status: Idee
+
+```text
+ #205 Rendering von odt/docx verbessern (Nutzer, 04.10.2026): Die Anzeige
+ im Renderer (sond_renderer.c) und die Texteinheit im Export (Text aus
+ sond_text_extract_odt/_docx) liefern flachen Text ohne Gestaltung.
+ Prüfen, ob das besser geht (Überschriften, Listen, Tabellen, Fett/
+ Kursiv, eingebettete Bilder). Was dabei entsteht, auch in den Export
+ übernehmen (odt, docx und PDF-Ziel).
+```
+
+### #231 Konsistenzprüfung der Projektdatenbank (Extras)
+
+Status: Idee
 
 ```text
  #231 Idee (13.10.2026, Nutzer): Funktion unter Extras, die eine
@@ -430,18 +497,19 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  nicht mehr gibt.
 ```
 
-## Review der Index-Implementation (06.10.2026)
+### #232 BAUM_INHALT: Anbindungen in PDF einfügen und löschen
 
-Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implementation") von sond_index.c, sond_process_file.c, sond_text_extract.c,
-sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
+Status: Idee
 
 ```text
- #220 Index löschen läuft im UI-Thread (headerbar.c, zond_index_loeschen_...):
- bewußt so belassen. Gemessen auf einer Kopie des größten Index (23 MB, 15.519
- Chunks, 30 Dateien): 30 Dateien 1,3 s (rund 43 ms je Datei), ganzer Index
- 0,9 s; hochgerechnet etwa 40 s Stillstand bei 1000 Dateien mit ähnlich vielen
- Chunks. Ohne Abbrechen-Button. Wird das im Betrieb zu langsam: Löschen in
- einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
- Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
- Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
+ #232 BAUM_INHALT: Anbindungen in einer PDF einfügen und löschen
+ (13.10.2026, Nutzer).
+```
+
+### #233 Viewer: Rummalen
+
+Status: Idee
+
+```text
+ #233 Viewer: Rummalen (13.10.2026, Nutzer).
 ```
