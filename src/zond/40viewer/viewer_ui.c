@@ -155,6 +155,14 @@ static void cb_viewer_text_search(GtkWidget *widget, gpointer data) {
 	return;
 }
 
+//Option "Umlaute ignorieren" geändert: neu suchen
+static void cb_viewer_text_search_option_toggled(GtkToggleButton *button,
+		gpointer data) {
+	cb_viewer_text_search_entry_buffer_changed(data);
+
+	return;
+}
+
 //Shift+Enter im Such-Entry: rückwärts suchen
 static gboolean cb_viewer_text_search_entry_key_press(GtkWidget *entry,
 		GdkEventKey *event, gpointer data) {
@@ -611,6 +619,9 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	pv->entry_search = gtk_entry_new();
 	gtk_entry_set_width_chars(GTK_ENTRY(pv->entry_search), 15);
 	pv->button_nachher = gtk_button_new_from_icon_name("go-next", GTK_ICON_SIZE_SMALL_TOOLBAR);
+	pv->check_diakritika = gtk_check_button_new_with_label("ä=a");
+	gtk_widget_set_tooltip_text(pv->check_diakritika,
+			"Umlaute und Akzente beim Suchen ignorieren");
 	pv->label_search = gtk_label_new("");
 	gtk_widget_set_margin_start(pv->label_search, 6);
 	gtk_style_context_add_class(gtk_widget_get_style_context(pv->label_search),
@@ -621,6 +632,7 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_box_pack_start(GTK_BOX(box_text), pv->entry_search, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box_text), pv->button_nachher, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box_text), pv->label_search, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->check_diakritika, FALSE, FALSE, 0);
 	GtkWidget *frame_search = gtk_frame_new("Text suchen");
 	gtk_container_add(GTK_CONTAINER(frame_search), box_text);
 
@@ -704,6 +716,7 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	g_signal_connect(pv->entry, "activate", G_CALLBACK(cb_viewer_page_entry_activated), (gpointer)pv);
 
 	g_signal_connect(pv->entry_search, "activate", G_CALLBACK(cb_viewer_text_search), pv);
+	g_signal_connect(pv->check_diakritika, "toggled", G_CALLBACK(cb_viewer_text_search_option_toggled), pv);
 	g_signal_connect(pv->entry_search, "key-press-event", G_CALLBACK(cb_viewer_text_search_entry_key_press), pv);
 	g_signal_connect(pv->button_nachher, "clicked", G_CALLBACK(cb_viewer_text_search), pv);
 	g_signal_connect(pv->button_vorher, "clicked", G_CALLBACK(cb_viewer_text_search), pv);

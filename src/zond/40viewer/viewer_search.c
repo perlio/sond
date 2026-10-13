@@ -16,12 +16,9 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* Aus viewer.c herausgelöst: die Textsuche im angezeigten Dokument (Vor/
- * Zurück-Suche über das Such-Entry im Viewer) sowie das Anspringen/
- * Markieren einer über Zeichenposition adressierten Fundstelle, wie es
- * von der Index-Suche (zond_indexsuche.c) benutzt wird. Beides in sich
- * geschlossen und ohne Berührungspunkte zum Speichern/Layout in viewer.c
- * bzw. viewer_save.c. */
+//Textsuche im angezeigten Dokument (Vor/Zurück über das Such-Entry) und
+//Anspringen/Markieren einer über Zeichenposition adressierten Fundstelle
+//(Index-Suche, zond_indexsuche.c)
 
 #include "viewer.h"
 
@@ -92,9 +89,9 @@ static void viewer_anzeigen_text_occ(PdfViewer *pv, gboolean wrapped) {
 	return;
 }
 
-/* Hilfsstruct für den fz_search_stext_page_cb-Callback */
+//Array von GArray* (je Treffer ein Array von fz_quad)
 typedef struct {
-	GArray *hits; /* Array von GArray* (jeder Eintrag = Array von fz_quad) */
+	GArray *hits;
 } SearchHitData;
 
 static gint search_hit_cb(fz_context *ctx, void *opaque,
@@ -103,7 +100,7 @@ static gint search_hit_cb(fz_context *ctx, void *opaque,
 	GArray *hit = g_array_new(FALSE, FALSE, sizeof(fz_quad));
 	g_array_append_vals(hit, quads, (guint) num_quads);
 	g_array_append_val(d->hits, hit);
-	return 0; /* weitersuchen */
+	return 0; //weitersuchen
 }
 
 void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
@@ -114,7 +111,7 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	if (!term || !*term)
 		return;
 
-	/* Passende ViewerPage für page_nr (page_akt) suchen */
+	//ViewerPage zu page_nr (page_akt) suchen
 	for (guint i = 0; i < pv->arr_pages->len; i++) {
 		ViewerPageNew *vp = g_ptr_array_index(pv->arr_pages, i);
 		if (vp->pdf_document_page->page_akt == page_nr) {
@@ -130,15 +127,9 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	fz_context *ctx = zond_pdf_document_get_ctx(
 			viewer_page->dd->zpdfd_part->zond_pdf_document);
 
-	/* stext_page synchron sicherstellen. Beim erstmaligen Öffnen eines
-	 * Dokuments (frisch erzeugte Seite) ist der asynchrone Render-Task
-	 * oft noch gar nicht gestartet - viewer_render_wait_for_transfer()
-	 * wartet aber nur auf einen BEREITS laufenden Task und kehrt sonst
-	 * sofort zurück, sodass "thread & 8" fälschlich "nicht bereit"
-	 * anzeigt und Markierung+Scroll stillschweigend übersprungen wurden.
-	 * viewer_render_stext_page_fast() (schon für die Textsuche im
-	 * Dokument benutzt, siehe viewer_anzeigen_text_occ) lädt/rendert bei
-	 * Bedarf synchron nach. */
+	//stext_page synchron sicherstellen: beim erstmaligen Öffnen ist der
+	//Render-Task oft noch nicht gestartet, und wait_for_transfer wartet nur
+	//auf einen bereits laufenden
 	{
 		GError *error = NULL;
 		gint rc = 0;
@@ -153,7 +144,7 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 
 	fz_stext_page *stext = viewer_page->pdf_document_page->stext_page;
 
-	/* Alle Treffer des Terms auf der Seite sammeln (case-insensitive) */
+	//alle Treffer des Terms auf der Seite sammeln (ohne Groß-/Kleinschreibung)
 	SearchHitData hit_data;
 	hit_data.hits = g_array_new(FALSE, TRUE, sizeof(GArray *));
 
@@ -171,10 +162,8 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		return;
 	}
 
-	/* Den richtigen Treffer per char_pos_in_page identifizieren:
-	 * Flat-Text der Seite mit map erzeugen (FZ_TEXT_FLATTEN_ALL),
-	 * map[char_pos_in_page] liefert den fz_stext_char am gesuchten Offset.
-	 * Dann den Treffer wählen, der diesen Char enthält. */
+	//Treffer über char_pos_in_page bestimmen: map des Flat-Texts liefert das
+	//Zeichen am Offset, gewählt wird der Treffer, der es enthält
 	GArray *chosen_hit = NULL;
 
 	fz_stext_position *map = NULL;
@@ -190,15 +179,9 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	}
 
 	if (map && flat_buf) {
-		/* Zeichenindex aus Byte-Offset: fz_runeidx */
 		unsigned char *flat_data = NULL;
-		/* flat_len aus dem Rückgabewert von fz_buffer_storage() - nicht per
-		 * strlen() ermitteln: flat_data ist kein garantiert NUL-
-		 * terminierter String ohne eingebettete NUL-Bytes. Für Glyphen
-		 * ohne Unicode-Mapping kann FZ_TEXT_FLATTEN_ALL ein NUL-Byte
-		 * mitten in den Text setzen - strlen() würde dann zu früh
-		 * abbrechen (falsche, zu kleine Länge) oder, falls der Buffer gar
-		 * nicht terminiert ist, über dessen Ende hinauslaufen. */
+		//Länge aus fz_buffer_storage(), nicht strlen(): Puffer ist nicht
+		//terminiert und kann NUL-Bytes enthalten (Glyphen ohne Unicode)
 		gsize flat_len = fz_buffer_storage(ctx, flat_buf, &flat_data);
 		if (flat_data) {
 			gint safe_pos = (char_pos_in_page < (gint) flat_len)
@@ -257,9 +240,9 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	}
 
 	if (flat_buf) fz_drop_buffer(ctx, flat_buf);
-	if (map) fz_free(ctx, map); /* map ist separat alloziert */
+	if (map) fz_free(ctx, map); //map ist separat alloziert
 
-	/* Fallback falls map-Methode fehlschlug: ersten Treffer nehmen */
+	//Fallback, falls die map-Methode nichts ergab: ersten Treffer nehmen
 	if (!chosen_hit && hit_data.hits->len > 0)
 		chosen_hit = g_array_index(hit_data.hits, GArray *, 0);
 
@@ -270,11 +253,10 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		return;
 	}
 
-	/* Erste Quad des Treffers merken (unbeschnitten), um anschließend zur
-	 * Trefferposition zu scrollen - analog zu viewer_anzeigen_text_occ(). */
+	//erste Quad (unbeschnitten) für den Sprung merken
 	fz_quad first_quad = g_array_index(chosen_hit, fz_quad, 0);
 
-	/* Quads des gewählten Treffers crop-adjustiert in pv->highlight schreiben */
+	//Quads des Treffers beschnitten in pv->highlight schreiben
 	pv->highlight.page[0] = -1;
 	gint n_quads = 0;
 	for (guint q = 0; q < chosen_hit->len && n_quads < 999; q++) {
@@ -291,22 +273,13 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	}
 	pv->highlight.page[n_quads] = -1;
 
-	/* Speicher freigeben */
 	for (guint h = 0; h < hit_data.hits->len; h++)
 		g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
 	g_array_free(hit_data.hits, TRUE);
 
 	if (n_quads > 0) {
-		/* Zur Trefferposition scrollen. Beim erstmaligen Öffnen eines neuen
-		 * Viewers plant viewer_display_document() den Sprung zur Seite
-		 * bereits als Idle-Callback ein (viewer_springen_zu_pos_pdf_idle()),
-		 * noch bevor wir hier ankommen - ein sofortiger Sprung würde
-		 * von diesem später ausgeführten Callback wieder auf den
-		 * Seitenanfang zurückgesetzt. Indem wir denselben Mechanismus
-		 * benutzen, reiht sich unser Sprung als zweiter (später
-		 * hinzugefügter) Idle-Callback dahinter ein und gewinnt. Bei einem
-		 * bereits offenen Viewer (rein synchroner Sprung dort) ist unserer
-		 * ohnehin der einzige/letzte. */
+		//als Idle-Sprung: viewer_display_document() plant beim ersten Öffnen
+		//schon einen zum Seitenanfang ein, der sonst unseren überschriebe
 		PdfPos pdf_pos = { 0 };
 
 		pdf_pos.seite = page_idx;
@@ -317,17 +290,34 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	}
 }
 
-/* Hilfsstruct für den Seitentext-Suchlauf in viewer_handle_text_search() */
+//Hilfsstruct für den Seitentext-Suchlauf in viewer_handle_text_search()
 typedef struct {
 	PdfViewer *pv;
 	ViewerPageNew *viewer_page;
+	guint n_dedup; //Treffer aus dem ersten Lauf, gegen die geprüft wird
 } PageSearchData;
+
+//Gleicher Trefferanfang wie einer der ersten n_dedup Treffer?
+static gboolean page_hit_known(PdfViewer *pv, guint first, guint n_dedup) {
+	fz_quad q = g_array_index(pv->text_occ.arr_quad, fz_quad, first);
+
+	for (guint i = 0; i < n_dedup; i++) {
+		TextHit hit = g_array_index(pv->text_occ.arr_hit, TextHit, i);
+		fz_quad k = g_array_index(pv->text_occ.arr_quad, fz_quad, hit.first);
+
+		if (fabsf(q.ul.x - k.ul.x) < 0.5f && fabsf(q.ul.y - k.ul.y) < 0.5f)
+			return TRUE;
+	}
+
+	return FALSE;
+}
 
 //Übernimmt einen Treffer (alle Quads) beschnitten auf den sichtbaren Teil
 static gint page_hit_cb(fz_context *ctx, void *opaque, gint num_quads,
-		fz_quad *quads) {
+		fz_quad *quads, gint chapter, gint page) {
 	PageSearchData *d = (PageSearchData *) opaque;
-	TextHit hit = { d->pv->text_occ.arr_quad->len, 0 };
+	GArray *arr_quad = d->pv->text_occ.arr_quad;
+	TextHit hit = { arr_quad->len, 0 };
 
 	for (gint i = 0; i < num_quads; i++) {
 		fz_rect cropped = fz_intersect_rect(d->viewer_page->crop,
@@ -339,14 +329,64 @@ static gint page_hit_cb(fz_context *ctx, void *opaque, gint num_quads,
 		cropped = fz_translate_rect(cropped, -d->viewer_page->crop.x0,
 				-d->viewer_page->crop.y0);
 		fz_quad quad = fz_quad_from_rect(cropped);
-		g_array_append_val(d->pv->text_occ.arr_quad, quad);
+		g_array_append_val(arr_quad, quad);
 		hit.n++;
 	}
 
-	if (hit.n > 0)
+	if (hit.n == 0)
+		return 0;
+
+	if (d->n_dedup > 0 && page_hit_known(d->pv, hit.first, d->n_dedup))
+		g_array_set_size(arr_quad, hit.first);
+	else
 		g_array_append_val(d->pv->text_occ.arr_hit, hit);
 
-	return 0; /* weitersuchen */
+	return 0; //weitersuchen
+}
+
+static gint page_hit_compare(gconstpointer a, gconstpointer b,
+		gpointer data) {
+	PdfViewer *pv = (PdfViewer *) data;
+	fz_quad qa = g_array_index(pv->text_occ.arr_quad, fz_quad,
+			((const TextHit *) a)->first);
+	fz_quad qb = g_array_index(pv->text_occ.arr_quad, fz_quad,
+			((const TextHit *) b)->first);
+
+	if (qa.ul.y != qb.ul.y)
+		return (qa.ul.y > qb.ul.y) - (qa.ul.y < qb.ul.y);
+
+	return (qa.ul.x > qb.ul.x) - (qa.ul.x < qb.ul.x);
+}
+
+static gboolean needle_has_hyphen(gchar const *needle) {
+	return strchr(needle, '-') || strstr(needle, "\u2010")
+			|| strstr(needle, "\u2011");
+}
+
+//Sucht needle in der Seite und legt die Treffer in pv->text_occ ab. Enthält
+//needle einen Bindestrich, wird zusätzlich ohne Zusammenziehen getrennter
+//Zeilenenden gesucht ("E-" / "Mail" = "E-Mail"), da der erste Lauf diesen
+//Bindestrich entfernt.
+static void viewer_search_page(fz_context *ctx, PageSearchData *sd,
+		fz_stext_page *stext, gchar const *needle, fz_search_options options) {
+	PdfViewer *pv = sd->pv;
+
+	fz_match_stext_page_cb(ctx, stext, needle, page_hit_cb, sd, options);
+
+	if (needle_has_hyphen(needle)) {
+		guint n_first = pv->text_occ.arr_hit->len;
+
+		sd->n_dedup = n_first;
+		fz_match_stext_page_cb(ctx, stext, needle, page_hit_cb, sd,
+				options | FZ_SEARCH_KEEP_HYPHENS);
+		sd->n_dedup = 0;
+
+		if (pv->text_occ.arr_hit->len > n_first)
+			g_array_sort_with_data(pv->text_occ.arr_hit,
+					(GCompareDataFunc) page_hit_compare, pv);
+	}
+
+	return;
 }
 
 static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {
@@ -446,7 +486,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 		if (pdf_pos.seite != pv->text_occ.page_act) {
 			gint rc = 0;
 			fz_context *ctx = NULL;
-			PageSearchData sd = { pv, NULL };
+			PageSearchData sd = { pv, NULL, 0 };
 
 			//arrays leeren; page_act erst nach erfolgreicher Suche setzen
 			pv->text_occ.page_act = -1;
@@ -470,9 +510,12 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			sd.viewer_page = viewer_page;
 
 			fz_try( ctx )
-				fz_search_stext_page_cb(ctx,
-						viewer_page->pdf_document_page->stext_page,
-						search_text, (fz_search_callback_fn *) page_hit_cb, &sd);
+				viewer_search_page(ctx, &sd,
+						viewer_page->pdf_document_page->stext_page, search_text,
+						FZ_SEARCH_IGNORE_CASE
+								| (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(
+										pv->check_diakritika)) ?
+										FZ_SEARCH_IGNORE_DIACRITICS : 0));
 			fz_catch(ctx) {
 				g_array_remove_range(pv->text_occ.arr_quad, 0,
 						pv->text_occ.arr_quad->len);

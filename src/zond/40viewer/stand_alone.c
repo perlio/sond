@@ -40,6 +40,7 @@ static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
 	gtk_widget_set_sensitive(pv->entry_search, activ);
 	gtk_widget_set_sensitive(pv->button_vorher, activ);
 	gtk_widget_set_sensitive(pv->button_nachher, activ);
+	gtk_widget_set_sensitive(pv->check_diakritika, activ);
 	gtk_widget_set_sensitive(pv->item_drehen, activ);
 	gtk_widget_set_sensitive(pv->item_einfuegen, activ);
 	gtk_widget_set_sensitive(pv->item_loeschen, activ);

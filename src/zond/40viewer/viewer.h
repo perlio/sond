@@ -137,6 +137,7 @@ typedef struct _Pdf_Viewer {
 	GtkWidget *button_vorher;
 	GtkWidget *entry_search;
 	GtkWidget *label_search; //Position des aktuellen Treffers
+	GtkWidget *check_diakritika; //Umlaute/Akzente beim Suchen ignorieren
 	GtkWidget *button_nachher;
 
 	GtkAdjustment *v_adj;
