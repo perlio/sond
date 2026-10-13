@@ -127,6 +127,7 @@ static void cb_viewer_text_search_entry_buffer_changed(gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
 
 	g_array_remove_range(pv->text_occ.arr_quad, 0, pv->text_occ.arr_quad->len);
+	g_array_remove_range(pv->text_occ.arr_hit, 0, pv->text_occ.arr_hit->len);
 	pv->text_occ.not_found = FALSE;
 	pv->text_occ.index_act = -1;
 	//page_act mit zurücksetzen, sonst hält viewer_handle_text_search() die
@@ -742,6 +743,7 @@ viewer_init(Projekt *zond) {
 	pv->anbindung.bis.index = EOP + 1;
 
 	pv->text_occ.arr_quad = g_array_new( FALSE, FALSE, sizeof(fz_quad));
+	pv->text_occ.arr_hit = g_array_new( FALSE, FALSE, sizeof(TextHit));
 	//Sentinel "kein Treffer aktuell angezeigt" - g_malloc0() würde 0 liefern,
 	//was fälschlich als gültiger Index/gültige Seite gelesen würde
 	pv->text_occ.index_act = -1;

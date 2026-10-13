@@ -43,9 +43,17 @@ typedef struct _Page_Quad {
 	fz_quad quad[1000];
 } PageQuad;
 
+/* Ein Treffer = n aufeinanderfolgende Quads ab arr_quad[first] (mehrere bei
+ * Treffern über Zeilenumbruch/Silbentrennung) */
+typedef struct _Text_Hit {
+	guint first;
+	guint n;
+} TextHit;
+
 typedef struct _Text_Occ {
 	gint page_act;
 	GArray *arr_quad;
+	GArray *arr_hit; //TextHit; index_act zählt Treffer, nicht Quads
 	gint index_act;
 	gboolean not_found;
 } TextOcc;

@@ -55,14 +55,19 @@
 static void viewer_anzeigen_text_occ(PdfViewer *pv) {
 	PdfPos pdf_pos = { 0 };
 	fz_quad quad = { 0 };
-
-	quad = g_array_index(pv->text_occ.arr_quad, fz_quad,
+	TextHit hit = g_array_index(pv->text_occ.arr_hit, TextHit,
 			pv->text_occ.index_act);
+	guint n = MIN(hit.n, 999);
 
-	pv->highlight.page[0] = pv->text_occ.page_act;
-	pv->highlight.quad[0] = quad;
-	pv->highlight.page[1] = -1;
+	//alle Quads des Treffers (mehrzeilig bei Silbentrennung)
+	for (guint i = 0; i < n; i++) {
+		pv->highlight.quad[i] = g_array_index(pv->text_occ.arr_quad, fz_quad,
+				hit.first + i);
+		pv->highlight.page[i] = pv->text_occ.page_act;
+	}
+	pv->highlight.page[n] = -1;
 
+	quad = pv->highlight.quad[0];
 	pdf_pos.seite = pv->text_occ.page_act;
 	pdf_pos.index = (gint) quad.ul.y;
 
@@ -180,50 +185,53 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		 * nicht terminiert ist, über dessen Ende hinauslaufen. */
 		gsize flat_len = fz_buffer_storage(ctx, flat_buf, &flat_data);
 		if (flat_data) {
-			gint  safe_pos = (char_pos_in_page < (gint) flat_len)
+			gint safe_pos = (char_pos_in_page < (gint) flat_len)
 					? char_pos_in_page : (gint) flat_len - 1;
+
+			//Offset nicht mitten in einem UTF-8-Zeichen
+			while (safe_pos > 0 && (flat_data[safe_pos] & 0xC0) == 0x80)
+				safe_pos--;
+
 			if (safe_pos >= 0) {
 				gsize char_idx = fz_runeidx((gchar *) flat_data,
 						(gchar *) flat_data + safe_pos);
 				fz_stext_char *target_ch = map[char_idx].ch;
 
 				if (target_ch) {
-					/* Treffer suchen, der target_ch enthält */
-					for (guint h = 0; h < hit_data.hits->len; h++) {
-						GArray *hit = g_array_index(hit_data.hits,
-								GArray *, h);
-						if (hit->len == 0) continue;
-						/* Prüfen ob target_ch innerhalb der
-						 * Bounding-Box dieses Treffers liegt */
-						fz_quad first = g_array_index(hit, fz_quad, 0);
-						fz_quad last  = g_array_index(hit, fz_quad,
-								hit->len - 1);
-						fz_rect hit_rect = fz_union_rect(
-								fz_rect_from_quad(first),
-								fz_rect_from_quad(last));
-						fz_rect ch_rect = fz_rect_from_quad(
-								target_ch->quad);
-						if (!fz_is_empty_rect(fz_intersect_rect(
-								hit_rect, ch_rect))) {
-							chosen_hit = hit;
-							break;
-						}
-					}
-					/* Fallback: nächsten Treffer nach char_pos_in_page */
-					if (!chosen_hit) {
-						fz_point target_origin = target_ch->origin;
-						float best_dist = 1e30f;
-						for (guint h = 0; h < hit_data.hits->len; h++) {
-							GArray *hit = g_array_index(
-									hit_data.hits, GArray *, h);
-							if (hit->len == 0) continue;
-							fz_quad q = g_array_index(hit, fz_quad, 0);
-							float dx = q.ll.x - target_origin.x;
-							float dy = q.ll.y - target_origin.y;
-							float dist = dx * dx + dy * dy;
-							if (dist < best_dist) {
-								best_dist = dist;
+					//Mittelpunkt des Zeichens in einem Quad des Treffers?
+					//(je Quad, nicht Vereinigungsbox: Treffer können mehrzeilig sein)
+					fz_quad cq = target_ch->quad;
+					fz_point center = { (cq.ul.x + cq.lr.x) / 2,
+							(cq.ul.y + cq.lr.y) / 2 };
+
+					for (guint h = 0; h < hit_data.hits->len && !chosen_hit; h++) {
+						GArray *hit = g_array_index(hit_data.hits, GArray *, h);
+
+						for (guint q = 0; q < hit->len; q++)
+							if (fz_is_point_inside_quad(center,
+									g_array_index(hit, fz_quad, q))) {
 								chosen_hit = hit;
+								break;
+							}
+					}
+
+					//Fallback: Treffer mit nächstgelegenem Quad
+					if (!chosen_hit) {
+						float best_dist = 1e30f;
+
+						for (guint h = 0; h < hit_data.hits->len; h++) {
+							GArray *hit = g_array_index(hit_data.hits, GArray *, h);
+
+							for (guint q = 0; q < hit->len; q++) {
+								fz_quad hq = g_array_index(hit, fz_quad, q);
+								float dx = hq.ll.x - target_ch->origin.x;
+								float dy = hq.ll.y - target_ch->origin.y;
+								float dist = dx * dx + dy * dy;
+
+								if (dist < best_dist) {
+									best_dist = dist;
+									chosen_hit = hit;
+								}
 							}
 						}
 					}
@@ -293,16 +301,52 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	}
 }
 
+/* Hilfsstruct für den Seitentext-Suchlauf in viewer_handle_text_search() */
+typedef struct {
+	PdfViewer *pv;
+	ViewerPageNew *viewer_page;
+} PageSearchData;
+
+//Übernimmt einen Treffer (alle Quads) beschnitten auf den sichtbaren Teil
+static gint page_hit_cb(fz_context *ctx, void *opaque, gint num_quads,
+		fz_quad *quads) {
+	PageSearchData *d = (PageSearchData *) opaque;
+	TextHit hit = { d->pv->text_occ.arr_quad->len, 0 };
+
+	for (gint i = 0; i < num_quads; i++) {
+		fz_rect cropped = fz_intersect_rect(d->viewer_page->crop,
+				fz_rect_from_quad(quads[i]));
+
+		if (fz_is_empty_rect(cropped))
+			continue;
+
+		cropped = fz_translate_rect(cropped, -d->viewer_page->crop.x0,
+				-d->viewer_page->crop.y0);
+		fz_quad quad = fz_quad_from_rect(cropped);
+		g_array_append_val(d->pv->text_occ.arr_quad, quad);
+		hit.n++;
+	}
+
+	if (hit.n > 0)
+		g_array_append_val(d->pv->text_occ.arr_hit, hit);
+
+	return 0; /* weitersuchen */
+}
+
 static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {
 	if (dir == 1) {
-		for (guint i = 0; i < pv->text_occ.arr_quad->len; i++) {
-			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad, i);
+		for (guint i = 0; i < pv->text_occ.arr_hit->len; i++) {
+			TextHit hit = g_array_index(pv->text_occ.arr_hit, TextHit, i);
+			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad,
+					hit.first);
 			if ((gint) quad.ul.y >= index)
 				return (gint) i;
 		}
 	} else {
-		for (gint i = (gint) pv->text_occ.arr_quad->len - 1; i >= 0; i--) {
-			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad, i);
+		for (gint i = (gint) pv->text_occ.arr_hit->len - 1; i >= 0; i--) {
+			TextHit hit = g_array_index(pv->text_occ.arr_hit, TextHit, i);
+			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad,
+					hit.first);
 			if ((gint) quad.ul.y <= index)
 				return i;
 		}
@@ -328,7 +372,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 		//nicht erste oder letzte Fundstelle auf dieser Seite
 		if (!((dir == 1
 				&& pv->text_occ.index_act + dir
-						== pv->text_occ.arr_quad->len)
+						== pv->text_occ.arr_hit->len)
 				|| (dir == -1 && pv->text_occ.index_act == 0))) {
 			pv->text_occ.index_act += dir;
 			viewer_anzeigen_text_occ(pv);
@@ -377,13 +421,15 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 		//Seite ist aktuell nicht durchsucht - durchsuchen
 		if (pdf_pos.seite != pv->text_occ.page_act) {
 			gint rc = 0;
-			gint anzahl = 0;
-			fz_quad quads[100] = { 0 };
 			fz_context *ctx = NULL;
+			PageSearchData sd = { pv, NULL };
 
-			//array leeren
+			//arrays leeren; page_act erst nach erfolgreicher Suche setzen
+			pv->text_occ.page_act = -1;
 			g_array_remove_range(pv->text_occ.arr_quad, 0,
 					pv->text_occ.arr_quad->len);
+			g_array_remove_range(pv->text_occ.arr_hit, 0,
+					pv->text_occ.arr_hit->len);
 
 			//page_act durchsuchen
 			ViewerPageNew *viewer_page = g_ptr_array_index(pv->arr_pages,
@@ -397,36 +443,27 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			if (rc)
 				return -1;
 
+			sd.viewer_page = viewer_page;
+
 			fz_try( ctx )
-				anzahl = fz_search_stext_page(ctx,
+				fz_search_stext_page_cb(ctx,
 						viewer_page->pdf_document_page->stext_page,
-						search_text,
-						NULL, quads, 99);
+						search_text, (fz_search_callback_fn *) page_hit_cb, &sd);
 			fz_catch(ctx) {
+				g_array_remove_range(pv->text_occ.arr_quad, 0,
+						pv->text_occ.arr_quad->len);
+				g_array_remove_range(pv->text_occ.arr_hit, 0,
+						pv->text_occ.arr_hit->len);
 				pv->text_occ.not_found = TRUE;
 				ERROR_PDF
 			}
 
-			for (gint u = 0; u < anzahl; u++) {
-				fz_rect text_rect = fz_rect_from_quad(quads[u]);
-				fz_rect cropped_text_rect = fz_intersect_rect(
-						viewer_page->crop, text_rect);
-
-				if (!fz_is_empty_rect(cropped_text_rect)) {
-					fz_quad quad = { 0 };
-
-					cropped_text_rect = fz_translate_rect(cropped_text_rect,
-							-viewer_page->crop.x0, -viewer_page->crop.y0);
-
-					quad = fz_quad_from_rect(cropped_text_rect);
-
-					g_array_append_val(pv->text_occ.arr_quad, quad);
-				}
-			}
+			//auch ohne Treffer: arr_hit gehört jetzt zu dieser Seite
+			pv->text_occ.page_act = pdf_pos.seite;
 		}
 
 		//Treffer in soeben oder schon früher durchsuchter Seite?
-		if (pv->text_occ.arr_quad->len) //dann gucken, ob im sichtbaren Teil der Seite
+		if (pv->text_occ.arr_hit->len) //dann gucken, ob im sichtbaren Teil der Seite
 		{
 			pv->text_occ.index_act = viewer_text_occ_search_next(pv,
 					pdf_pos.index, dir);

@@ -95,7 +95,7 @@ GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
         gint i_bis = (seite_bis >= 0) ? MIN(seite_bis, n_pages - 1) : n_pages - 1;
 
         for (gint i = i_von; i <= i_bis; i++) {
-            fz_stext_options opts = { 0 };
+            fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
             fz_stext_page *stext = NULL;
             fz_buffer *fzbuf = NULL;
             gsize   len  = 0;
@@ -112,10 +112,10 @@ GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
                 stext = fz_new_stext_page_from_page_number(
                         ctx, (fz_document*) doc, i, &opts);
 
-                /* Denselben Flat-Text wie fz_search_stext_page intern
-                 * verwendet: FZ_TEXT_FLATTEN_ALL -> alle Lücken als einzelnes
-                 * Leerzeichen, keine Zeilenumbrüche. map wird nicht
-                 * benötigt (NULL). */
+                /* Derselbe Flat-Text wie im Viewer (viewer_render.c: ebenfalls
+                 * FZ_STEXT_DEHYPHENATE, FZ_TEXT_FLATTEN_ALL), damit
+                 * char_pos_in_page dort passt und getrennte Wörter im Index
+                 * zusammenhängend stehen. map wird nicht benötigt (NULL). */
                 fzbuf = fz_new_buffer_from_flattened_stext_page(
                         ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
                 /* Kopie mit abschließendem NUL: der Puffer von MuPDF ist nicht
