@@ -858,6 +858,7 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 	//Löschen, arr_quad/page_act könnten sich sonst auf die falsche Seite
 	//beziehen
 	pv->text_occ.page_act = -1;
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
 
 	viewer_close_thread_pool_and_transfer(pv);
 
@@ -1142,6 +1143,7 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	//Einfügen, arr_quad/page_act könnten sich sonst auf die falsche Seite
 	//beziehen
 	pv->text_occ.page_act = -1;
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
 
 	//jetzt in viewer einfügen
 	for (gint u = 0; u < data_insert->count; u++) {

@@ -136,6 +136,7 @@ typedef struct _Pdf_Viewer {
 	GtkWidget *button_anbindung;
 	GtkWidget *button_vorher;
 	GtkWidget *entry_search;
+	GtkWidget *label_search; //Position des aktuellen Treffers
 	GtkWidget *button_nachher;
 
 	GtkAdjustment *v_adj;

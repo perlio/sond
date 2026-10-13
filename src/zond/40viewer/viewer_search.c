@@ -52,7 +52,20 @@
 #include "viewer_render.h"
 #include "viewer_annot.h"
 
-static void viewer_anzeigen_text_occ(PdfViewer *pv) {
+//Position des aktuellen Treffers neben dem Such-Entry; wrapped: Suche ist am
+//Dokumentende/-anfang umgebrochen
+static void viewer_text_occ_update_label(PdfViewer *pv, gboolean wrapped) {
+	gchar *text = g_strdup_printf("%sS. %i · %i/%u",
+			wrapped ? "↻ " : "", pv->text_occ.page_act + 1,
+			pv->text_occ.index_act + 1, pv->text_occ.arr_hit->len);
+
+	gtk_label_set_text(GTK_LABEL(pv->label_search), text);
+	g_free(text);
+
+	return;
+}
+
+static void viewer_anzeigen_text_occ(PdfViewer *pv, gboolean wrapped) {
 	PdfPos pdf_pos = { 0 };
 	fz_quad quad = { 0 };
 	TextHit hit = g_array_index(pv->text_occ.arr_hit, TextHit,
@@ -66,6 +79,8 @@ static void viewer_anzeigen_text_occ(PdfViewer *pv) {
 		pv->highlight.page[i] = pv->text_occ.page_act;
 	}
 	pv->highlight.page[n] = -1;
+
+	viewer_text_occ_update_label(pv, wrapped);
 
 	quad = pv->highlight.quad[0];
 	pdf_pos.seite = pv->text_occ.page_act;
@@ -361,6 +376,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 	PdfPos pdf_pos = { 0 };
 	PdfPunkt pdf_punkt = { 0 };
 	const gchar *search_text = NULL;
+	gboolean wrapped = FALSE;
 
 	//dokument durchsucht und kein Fund: return
 	if (pv->text_occ.not_found == TRUE) {
@@ -379,7 +395,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 						== pv->text_occ.arr_hit->len)
 				|| (dir == -1 && pv->text_occ.index_act == 0))) {
 			pv->text_occ.index_act += dir;
-			viewer_anzeigen_text_occ(pv);
+			viewer_anzeigen_text_occ(pv, FALSE);
 
 			return 0;
 		} else //doch
@@ -389,12 +405,16 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			//Überlauf??
 			if (dir == 1) {
 				pdf_pos.index = 0;
-				if (pv->text_occ.page_act == pv->arr_pages->len - 1)
+				if (pv->text_occ.page_act == pv->arr_pages->len - 1) {
 					pdf_pos.seite = 0;
+					wrapped = TRUE;
+				}
 			} else if (dir == -1) {
 				pdf_pos.index = EOP;
-				if (pv->text_occ.page_act == 0)
+				if (pv->text_occ.page_act == 0) {
 					pdf_pos.seite = pv->arr_pages->len - 1;
+					wrapped = TRUE;
+				}
 			}
 
 			//damit festgestellt werden kann, ob einmal durch...
@@ -474,7 +494,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 
 			if (pv->text_occ.index_act > -1) {
 				pv->text_occ.page_act = pdf_pos.seite;
-				viewer_anzeigen_text_occ(pv);
+				viewer_anzeigen_text_occ(pv, wrapped);
 
 				return 0;
 			}
@@ -488,10 +508,13 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			pdf_pos.index = EOP;
 
 		//Überlauf
-		if (dir == 1 && pdf_pos.seite == pv->arr_pages->len)
+		if (dir == 1 && pdf_pos.seite == pv->arr_pages->len) {
 			pdf_pos.seite = 0;
-		else if (dir == -1 && pdf_pos.seite == -1)
+			wrapped = TRUE;
+		} else if (dir == -1 && pdf_pos.seite == -1) {
 			pdf_pos.seite = pv->arr_pages->len - 1;
+			wrapped = TRUE;
+		}
 
 		if (pdf_pos.seite == pdf_punkt.seite) //Ausgangsseite wieder erreicht?
 				{
@@ -499,6 +522,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			if ((dir == 1 && pdf_punkt.punkt.y == 0.0)
 					|| (dir == -1 && pdf_punkt.punkt.y == (gfloat) EOP)) {
 				pv->text_occ.not_found = TRUE;
+				gtk_label_set_text(GTK_LABEL(pv->label_search), "");
 				display_message(pv->vf, "Kein Treffer", NULL);
 
 				return 0;

@@ -795,6 +795,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 		pv->click_pdf_punkt = pdf_punkt;
 		pv->highlight.page[0] = -1;
 		pv->text_occ.index_act = -1;
+		gtk_label_set_text(GTK_LABEL(pv->label_search), "");
 
 		pv->y = event->button.y_root;
 		pv->x = event->button.x_root;
