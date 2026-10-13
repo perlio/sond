@@ -506,7 +506,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	/* Anhang einer PDF: ggf. Adressen der übrigen Anhänge nachführen
 	 * (emb_sibling_apply() unten) - schreibt wie bei GMessage in beide
 	 * Datenbanken */
-	dual = from_gmessage || is_pdf_emb(stvfm_item);
+	dual = from_gmessage || is_pdf_emb(stvfm_item) || !section;
 
 	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
 	*ctx = GINT_TO_POINTER(
@@ -544,6 +544,17 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		emb_sibling_pending_clear(priv);
 		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		return -1;
+	}
+
+	/* Die (nicht mehr angebundene, s. Sperre oben) FILE_PART-Zeile zum Pfad
+	 * in work und store mitlöschen, sonst bleibt sie als Müll stehen */
+	if (!section && !from_gmessage &&
+			dbase_zond_remove_filepart(priv->zond->dbase_zond, path, error)) {
+		emb_sibling_pending_clear(priv);
+		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 		return -1;
 	}

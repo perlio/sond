@@ -404,19 +404,6 @@ Aus "Offene Punkte (21.09.2026, Nutzer-Sammlung)".
  für #167/#169 naheliegend.
 ```
 
-## Offene Frage: cursor-changed nach Sprung aus dem Suchfenster
-
-Aus #182 (unselect_all()-Nachfrage, HISTORY.md, 22.09.2026).
-
-```text
- Offene Frage/Beobachtung für später: dieselbe Unsicherheit betrifft
- möglicherweise auch das im #181-Nachtrag beschriebene Entfallen des
- manuellen "cursor-changed"-Connect/Emit (dort mit derselben, jetzt
- widerlegten Grab-Focus-Annahme begründet) - falls Label/Textview nach
- einem Sprung aus dem Suchfenster nicht aktualisiert werden, ist das
- vermutlich dieselbe Ursache und müsste analog behoben werden.
-```
-
 ## Review der Index-Implementation (06.10.2026)
 
 Reste aus dem Review (Erledigtes: HISTORY.md, Abschnitt "Review der Index-Implementation") von sond_index.c, sond_process_file.c, sond_text_extract.c,

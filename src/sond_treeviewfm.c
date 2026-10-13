@@ -185,17 +185,22 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_
 
 		/* Präfix-Treffer nur, wenn direkt danach ein Trenner folgt -
 		 * "/" bzw. der erste Schrägstrich von "//" - sonst würde z.B.
-		 * "sub" fälschlich als Präfix von "sub2/d.pdf" durchgehen. */
+		 * "sub" fälschlich als Präfix von "sub2/d.pdf" durchgehen.
+		 * Der PageTree-Marker trägt denselben Pfad wie seine PDF, enthält
+		 * aber nur deren Sections, nie Anhänge: kein Abstieg (er würde nur
+		 * unnötig aufgeklappt). */
 		if (g_str_has_prefix(filepart, filepart_item)
-				&& filepart[strlen(filepart_item)] == '/') {
+				&& filepart[strlen(filepart_item)] == '/'
+				&& !stvfm_item_priv->is_content_root_marker) {
 			/* Präfix-Treffer: rekursiv in Kinder */
 			g_free(filepart_item);
 			gint rc = sond_treeviewfm_file_part_visible(stvfm, &iter_child,
 					filepart, open, iter_res, error);
-			if (rc == -1)
-				return -1;
-			else
+			if (rc != 0)
 				return rc;
+
+			/* nicht gefunden: weiter bei den Geschwistern */
+			continue;
 		}
 
 		g_free(filepart_item);

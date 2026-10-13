@@ -27,6 +27,7 @@ gint dbase_zond_commit(DBaseZond*, GError**);
 // Database update functions
 gint dbase_zond_update_sections(DBaseZond*, DisplayedDocument*, GError**);
 gint dbase_zond_update_path(DBaseZond*, gchar const*, gchar const*, GError**);
+gint dbase_zond_remove_filepart(DBaseZond*, gchar const*, GError**);
 gint dbase_zond_update_gmessage_index(DBaseZond*, gchar const*, gint, gboolean, GError**);
 
 // Project state management

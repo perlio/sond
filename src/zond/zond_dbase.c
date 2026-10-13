@@ -1917,8 +1917,11 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
+	/* Bei mehreren Zeilen zum selben Pfad die mit Anbindung zuerst */
 	const gchar *sql[] = { "SELECT ID FROM knoten WHERE file_part=?1 AND "
-			"(section=?2 OR (section IS NULL AND ?2 IS NULL));"
+			"(section=?2 OR (section IS NULL AND ?2 IS NULL)) "
+			"ORDER BY EXISTS (SELECT 1 FROM knoten a WHERE a.type=2 AND "
+			"a.link=knoten.ID) DESC, ID LIMIT 1;"
 	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,

@@ -298,6 +298,43 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 	return 0;
 }
 
+gint dbase_zond_remove_filepart(DBaseZond* dbase_zond, gchar const* path,
+		GError** error) {
+	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+	static gchar const *schemas[] = { "main", "work" };
+
+	for (gint i = 0; i < 2; i++) {
+		gchar *sql = NULL;
+		sqlite3_stmt *stmt = NULL;
+		gint rc = 0;
+
+		//Sections und Kinder folgen per ON DELETE CASCADE
+		sql = g_strdup_printf("DELETE FROM %s.knoten WHERE type=5 AND "
+				"file_part=?1 AND section IS NULL;", schemas[i]);
+		rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+		g_free(sql);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+
+		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_STATIC);
+
+		rc = sqlite3_step(stmt);
+		sqlite3_finalize(stmt);
+		if (rc != SQLITE_DONE) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 		gchar const* prefix, gint index, gboolean into, GError** error) {
 	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
