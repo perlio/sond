@@ -408,6 +408,8 @@ static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 			gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter, path_string);
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
 			&iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return;
 
 	if (!g_strcmp0(sond_tvfm_item_get_basename(stvfm_item), new_text))
 		return;
@@ -880,6 +882,8 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 				gtk_tree_model_get(
 						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
 						&iter_child, 0, &stvfm_item_child, -1);
+				if (!stvfm_item_child) //Dummy-Zeile
+					continue;
 				g_object_unref(stvfm_item_child);
 
 				if (g_strcmp0(sond_tvfm_item_get_path_or_section(stvfm_item_child),
@@ -2177,6 +2181,8 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
 	gtk_tree_path_free(path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return;
 
 	rc = sond_treeviewfm_open(&iter, stvfm_item, open_with, &error);
 	g_object_unref(stvfm_item);
@@ -2479,6 +2485,9 @@ static gint sond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
 			iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return 0;
+
 	rc = sond_tvfm_item_get_fileparts(stvfm_item, ht, error);
 	g_object_unref(stvfm_item);
 	if (rc)
@@ -3341,6 +3350,8 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, tree_path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return;
 
 	rc = sond_treeviewfm_open(&iter, stvfm_item, FALSE, &error);
 	g_object_unref(stvfm_item);
@@ -3452,6 +3463,11 @@ static gboolean row_expand_failed_collapse_idle(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+/* Tiefe verschachtelter Aufklappvorgänge (Sprung in eine tief liegende Datei
+ * klappt mehrere Ebenen nacheinander auf): Wartecursor nur außen setzen und
+ * zurücknehmen. */
+static gint expand_busy = 0;
+
 static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	gint rc = 0;
@@ -3466,7 +3482,15 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), iter, 0,
 			&stvfm_item, -1);
 
+	//Laden kann dauern (großes ZIP, Container mit Passwort, SeaDrive)
+	if (expand_busy++ == 0)
+		wait_cursor_set_quick(SOND_GET_TOPLEVEL(tree_view));
+
 	rc = sond_treeviewfm_expand_dummy(SOND_TREEVIEWFM(tree_view), iter, stvfm_item, &error);
+
+	if (--expand_busy == 0)
+		wait_cursor_reset(SOND_GET_TOPLEVEL(tree_view));
+
 	if (rc) {
 		gpointer *idle_data = NULL;
 

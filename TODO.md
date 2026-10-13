@@ -11,8 +11,6 @@ Die folgenden Abschnitte sind unverändert aus src/zond/ToDo.c übernommen (Stan
  ToDo:
 
 - Rows mit Text Farbe
-- Copy_Auswertung wenn root dann Verweis auf root?
-- Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
 - #202 Dateisuche: Filter nach Dateiendung, Größe, Datum (zurückgestellt, bei Bedarf als
   weiteres Feld in SondTVFMSearchOpts)
 
@@ -325,17 +323,18 @@ Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
  nicht bearbeiten, bis der Nutzer es wieder aufgreift.
 ```
 
-## Busy-/Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
+## Fortschrittsanzeige beim Aufklappen in BAUM_FS (zurückgestellt)
 
 Aus "Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke" (HISTORY.md, 16.09.2026).
 
 ```text
- - Bewusst zurückgestellt (kein Teil dieses Fixes): eine Busy-/
-   Fortschritts-Cursor-Anzeige (z.B. Uhrglas, später ggf. ein sich
-   füllender Kreis) beim interaktiven Aufklappen von BAUM_FS-
-   Verzeichnissen (sond_treeviewfm_expand_dummy()) - der Mechanismus
-   (SondTVFMProgress) ist dafür vorbereitet, aber noch nicht an dieser
-   Stelle verdrahtet.
+ Wartecursor beim Aufklappen: umgesetzt und getestet (sond_treeviewfm_row_
+ expanded(), wait_cursor_set_quick() ohne Ereignis-Pumpen, Zähler gegen
+ verschachteltes Aufklappen). Handler, die ein Item aus dem Baum holen,
+ prüfen jetzt auf NULL (Dummy-Zeile). Offen: echter Fortschrittsanzeiger
+ (z.B. sich füllender Kreis, Abbrechen) über SondTVFMProgress (vorbereitet,
+ an dieser Stelle nicht verdrahtet). Beim Pumpen noch zu klären: Zuklappen
+ oder Schließen der gerade ladenden Zeile abfangen.
 ```
 
 ## Löschen in BAUM_INHALT: verbleibende Kosten (nicht behoben)

@@ -82,6 +82,13 @@ void info_window_display_progress(InfoWindow*, gint);
  * die Arbeit beginnt; jedes set braucht ein reset (auf allen Ausstiegen). */
 void wait_cursor_set(GtkWidget *widget);
 
+/* Wie wait_cursor_set(), arbeitet aber keine Ereignisse ab: der Cursor wird
+ * nur gesetzt und an die Anzeige geschickt. Für Stellen, an denen ein
+ * Ereignis (z.B. ein Klick) den Zustand nicht stören darf. Ob die Sanduhr
+ * schon vor der Arbeit erscheint, hängt vom Fenstersystem ab. Reset wie
+ * bei wait_cursor_set(). */
+void wait_cursor_set_quick(GtkWidget *widget);
+
 void wait_cursor_reset(GtkWidget *widget);
 
 void info_window_set_message(InfoWindow*, const gchar*, ...);

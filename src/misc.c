@@ -434,6 +434,12 @@ void wait_cursor_set(GtkWidget *widget) {
 	return;
 }
 
+void wait_cursor_set_quick(GtkWidget *widget) {
+	wait_cursor_apply(widget, "wait");
+
+	return;
+}
+
 void wait_cursor_reset(GtkWidget *widget) {
 	wait_cursor_apply(widget, NULL);
 

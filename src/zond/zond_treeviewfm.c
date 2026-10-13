@@ -1650,6 +1650,9 @@ static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
 			iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return 0;
+
 	rc = zond_treeviewfm_item_get_fileparts(stvfm_item, gfd->ht,
 			gfd->reject_unterseitig, gfd->skip_fully_covered, error);
 	g_object_unref(stvfm_item);
@@ -1830,6 +1833,8 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 
 	gtk_tree_model_get(gtk_tree_view_get_model(
 			GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter, 0, &stvfm_item, -1);
+	if (!stvfm_item) //Dummy-Zeile
+		return;
 	g_object_unref(stvfm_item);
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR)
@@ -1992,6 +1997,8 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 		gtk_tree_model_get(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
 				&iter_child, 0, &stvfm_item, -1);
+		if (!stvfm_item) //Dummy-Zeile
+			continue;
 		section_child =
 				sond_tvfm_item_get_path_or_section(stvfm_item);
 		anbindung_parse_file_section(section_child, &anbindung_child);
