@@ -8,11 +8,22 @@ Neue Einträge werden ab #200 nummeriert.
 ```text
  ToDo:
 
- - datei_oeffnen:
- - nicht-Win32 (niedrig)
+ #234 sond_open() (sond_file_helper.c) unter Nicht-Windows (niedrig):
+ Zweig ruft xdg-open per g_spawn_async auf. Lücken: open_with wird
+ ignoriert (Windows: "openas"); temporäre Dateien aus Containern bekommen
+ die Endung nur unter __WIN32__ (sond_file_part_write_to_tmp_file()),
+ sonst entscheidet xdg-open nach dem Inhalt, macOS nach der Endung; kein
+ macOS ("open" statt xdg-open); Fehler von xdg-open selbst (keine
+ passende Anwendung) werden nicht gemeldet. Vorschlag:
+ g_app_info_launch_default_for_uri() mit g_filename_to_uri(), Endung der
+ Temp-Datei auf allen Systemen anhängen, "Öffnen mit" über einen
+ GtkAppChooserDialog (GUI-Code, nicht in sond_file_helper.c). Unabhängig
+ vom System: die Temp-Datei wird nur bei Fehlschlag von sond_open()
+ gelöscht (sond_fileparts.c), bei Erfolg bleibt sie liegen - Aufräumen
+ nicht geprüft.
 
- - Textsuche PDF:
- - silbengetrennte Wörte als ein Treffer erfassen und anzeigen
+ #235 Review der Textsuche im Viewer (PDF). Dabei auch behandeln:
+ silbengetrennte Wörter als ein Treffer erfassen und anzeigen.
 ```
 
 ## Architektur-Plan: Atomarität store/work (Phase 2 offen)
