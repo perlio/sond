@@ -6,39 +6,11 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #242.
 
 ## Inhalt
 
-Offen: #236, #234
-Zurückgestellt: #202, #220, #237, #238, #239, #240, #241
+Offen: #234
+Zurückgestellt: #202, #220, #236, #237, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
-
-### #236 Atomarität store/work, Phase 2
-
-Status: offen (Index-DB eingebunden und Fehlerfälle getestet, s. HISTORY.md)
-
-```text
- Phase 1, der Fehlerzweig beim fehlgeschlagenen Commit, die Einbindung der
- Index-DB in die Dual-Write-Transaktion und deren Fehlertests sind erledigt
- (HISTORY.md, "Atomarität store/work"). Offen:
-
- 1. Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko).
-    wctx (mit index_ctx, eine feste Connection) geht an den Indexier-Thread
-    (headerbar.c, zond_index_lauf(): td->wctx = zond->wctx). Von den Feldern teilt er
-    sich mit der UI nur index_ctx; cancel, log_func_data und ocr_mode setzt die UI
-    nur vor dem Start bzw. über den Abbrechen-Button, locked liest sie erst nach dem
-    Ende des Threads. UI-Schreibzugriffe mit offener Transaktion auf index_ctx->db
-    (rohes BEGIN/COMMIT/ROLLBACK) gibt es nur noch in headerbar.c (Index löschen).
-    Sie sind nutzergesteuert und während der Indizierung nicht erreichbar, weil das
-    Info-Fenster modal ist (misc.c, info_window_open()). Übrig bleiben lesende Zugriffe
-    ohne Nutzereingabe: Badge-Status beim Aktualisieren der Bäume (Root-Monitor-Timer,
-    sond_treeviewfm.c) und die semantische Suche im Chat-Thread (zond_chat.c,
-    benutzt index_ctx ebenfalls in einem eigenen Thread). Der SeaDrive-Watcher
-    (sond_seadrive.c) greift nicht auf den Index zu. Lesezugriffe stören die
-    offene Transaktion nicht (SQLite serialisiert pro Connection; nicht geprüft:
-    sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
-    ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
-    Indexlauf): Mutex um die Index-Transaktionen.
-```
 
 ### #234 sond_open() unter Nicht-Windows
 
@@ -88,6 +60,34 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
  Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
  Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
+```
+
+### #236 Atomarität store/work: Index-Verbindung in mehreren Threads
+
+Status: zurückgestellt (erst nötig, wenn ein UI-Schreibzugriff auf den Index während einer Indizierung möglich wird)
+
+```text
+ Phase 1, der Fehlerzweig beim fehlgeschlagenen Commit, die Einbindung der
+ Index-DB in die Dual-Write-Transaktion und deren Fehlertests sind erledigt
+ (HISTORY.md, "Atomarität store/work"). Zurückgestellt bleibt:
+
+ Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko).
+    wctx (mit index_ctx, eine feste Connection) geht an den Indexier-Thread
+    (headerbar.c, zond_index_lauf(): td->wctx = zond->wctx). Von den Feldern teilt er
+    sich mit der UI nur index_ctx; cancel, log_func_data und ocr_mode setzt die UI
+    nur vor dem Start bzw. über den Abbrechen-Button, locked liest sie erst nach dem
+    Ende des Threads. UI-Schreibzugriffe mit offener Transaktion auf index_ctx->db
+    (rohes BEGIN/COMMIT/ROLLBACK) gibt es nur noch in headerbar.c (Index löschen).
+    Sie sind nutzergesteuert und während der Indizierung nicht erreichbar, weil das
+    Info-Fenster modal ist (misc.c, info_window_open()). Übrig bleiben lesende Zugriffe
+    ohne Nutzereingabe: Badge-Status beim Aktualisieren der Bäume (Root-Monitor-Timer,
+    sond_treeviewfm.c) und die semantische Suche im Chat-Thread (zond_chat.c,
+    benutzt index_ctx ebenfalls in einem eigenen Thread). Der SeaDrive-Watcher
+    (sond_seadrive.c) greift nicht auf den Index zu. Lesezugriffe stören die
+    offene Transaktion nicht (SQLite serialisiert pro Connection; nicht geprüft:
+    sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
+    ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
+    Indexlauf): Mutex um die Index-Transaktionen.
 ```
 
 ### #237 SeaDrive-Hydrierungsfehler: UX-Umgang
