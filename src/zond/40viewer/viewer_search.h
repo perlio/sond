@@ -29,6 +29,9 @@ typedef char gchar;
  * wird u.a. von den Vor/Zurück-Buttons und dem Such-Entry im Viewer benutzt. */
 gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
 
+/* Bricht eine laufende Textsuche ab. Rückgabe 1, wenn eine lief, sonst 0. */
+gint viewer_text_search_cancel(PdfViewer* pv);
+
 /* Springt im Viewer zu einer über Zeichenposition (char_pos_in_page, aus dem
  * flachen Seitentext) adressierten Fundstelle von term und markiert sie -
  * wird von der Index-Suche (zond_indexsuche.c) benutzt, um von einem

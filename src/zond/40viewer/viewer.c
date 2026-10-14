@@ -43,6 +43,7 @@
 #include "seiten.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_search.h"
 #include "viewer_annot.h"
 
 void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
@@ -287,6 +288,7 @@ void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 void viewer_schliessen(PdfViewer *pv) {
 	viewer_close_thread_pool_and_transfer(pv); //..._and_transfer, damit etwaig noch gerenderte GdkPixbufs verarztet werden
 	g_idle_remove_by_data(pv);
+	viewer_text_search_cancel(pv);
 
 	g_array_unref(pv->arr_rendered);
 	g_mutex_clear(&pv->mutex_arr_rendered);

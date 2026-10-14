@@ -126,6 +126,7 @@ static void cb_tree_thumb(GtkToggleButton *button, gpointer data) {
 static void cb_viewer_text_search_entry_buffer_changed(gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
 
+	viewer_text_search_cancel(pv);
 	g_array_remove_range(pv->text_occ.arr_quad, 0, pv->text_occ.arr_quad->len);
 	g_array_remove_range(pv->text_occ.arr_hit, 0, pv->text_occ.arr_hit->len);
 	pv->text_occ.not_found = FALSE;
@@ -167,6 +168,10 @@ static void cb_viewer_text_search_option_toggled(GtkToggleButton *button,
 static gboolean cb_viewer_text_search_entry_key_press(GtkWidget *entry,
 		GdkEventKey *event, gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
+
+	//Escape bricht eine laufende Suche ab
+	if (event->keyval == GDK_KEY_Escape && viewer_text_search_cancel(pv))
+		return TRUE;
 
 	if ((event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter)
 			&& (event->state & GDK_SHIFT_MASK)) {

@@ -411,12 +411,195 @@ static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {
 	return -1;
 }
 
+//Dauer einer Zeitscheibe der seitenübergreifenden Suche
+#define TEXT_SEARCH_SLICE_US 30000
+
+static void text_search_run_free(PdfViewer *pv) {
+	TextSearchRun *run = pv->text_occ.run;
+
+	if (!run)
+		return;
+
+	if (run->source)
+		g_source_remove(run->source);
+	g_free(run->text);
+	g_free(run);
+	pv->text_occ.run = NULL;
+
+	return;
+}
+
+gint viewer_text_search_cancel(PdfViewer *pv) {
+	if (!pv->text_occ.run)
+		return 0;
+
+	text_search_run_free(pv);
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+
+	return 1;
+}
+
+//Durchsucht Seiten ab run->pos, höchstens eine Zeitscheibe lang.
+//Rückgabe 0: beendet (Treffer angezeigt oder "Kein Treffer"), 1: Rest in
+//nächster Scheibe, -1: Fehler
+static gint text_search_slice(PdfViewer *pv, GError **error) {
+	TextSearchRun *run = pv->text_occ.run;
+	gint64 start = g_get_monotonic_time();
+
+	do {
+		//Seite ist aktuell nicht durchsucht - durchsuchen
+		if (run->pos.seite >= (gint) pv->arr_pages->len)
+			return 0; //Dokument hat sich geändert
+
+		if (run->pos.seite != pv->text_occ.page_act) {
+			gint rc = 0;
+			fz_context *ctx = NULL;
+			PageSearchData sd = { pv, NULL, 0 };
+
+			//arrays leeren; page_act erst nach erfolgreicher Suche setzen
+			pv->text_occ.page_act = -1;
+			g_array_remove_range(pv->text_occ.arr_quad, 0,
+					pv->text_occ.arr_quad->len);
+			g_array_remove_range(pv->text_occ.arr_hit, 0,
+					pv->text_occ.arr_hit->len);
+
+			ViewerPageNew *viewer_page = g_ptr_array_index(pv->arr_pages,
+					run->pos.seite);
+
+			ctx = zond_pdf_document_get_ctx(
+					viewer_page->pdf_document_page->document);
+
+			rc = viewer_render_stext_page_fast(ctx,
+					viewer_page->pdf_document_page, error);
+			if (rc)
+				return -1;
+
+			sd.viewer_page = viewer_page;
+
+			fz_try( ctx )
+				viewer_search_page(ctx, &sd,
+						viewer_page->pdf_document_page->stext_page, run->text,
+						run->options);
+			fz_catch(ctx) {
+				g_array_remove_range(pv->text_occ.arr_quad, 0,
+						pv->text_occ.arr_quad->len);
+				g_array_remove_range(pv->text_occ.arr_hit, 0,
+						pv->text_occ.arr_hit->len);
+				//kein not_found: Fehler, nächster Klick versucht es erneut
+				ERROR_PDF
+			}
+
+			//auch ohne Treffer: arr_hit gehört jetzt zu dieser Seite
+			pv->text_occ.page_act = run->pos.seite;
+		}
+
+		//Treffer in soeben oder schon früher durchsuchter Seite?
+		if (pv->text_occ.arr_hit->len) //dann gucken, ob im sichtbaren Teil der Seite
+		{
+			pv->text_occ.index_act = viewer_text_occ_search_next(pv,
+					run->pos.index, run->dir);
+
+			if (pv->text_occ.index_act > -1) {
+				viewer_anzeigen_text_occ(pv, run->wrapped);
+
+				return 0;
+			}
+		}
+
+		//auf der durchsuchten Seite paßt nix: weiterspulen
+		run->pos.seite += run->dir;
+		if (run->dir == 1)
+			run->pos.index = 0;
+		else
+			run->pos.index = EOP;
+
+		//Überlauf
+		if (run->dir == 1 && run->pos.seite == (gint) pv->arr_pages->len) {
+			run->pos.seite = 0;
+			run->wrapped = TRUE;
+		} else if (run->dir == -1 && run->pos.seite == -1) {
+			run->pos.seite = pv->arr_pages->len - 1;
+			run->wrapped = TRUE;
+		}
+
+		if (run->pos.seite == run->punkt.seite) //Ausgangsseite wieder erreicht?
+		{
+			//vielleicht Treffer vor/nach index?
+			if ((run->dir == 1 && run->punkt.punkt.y == 0.0)
+					|| (run->dir == -1
+							&& run->punkt.punkt.y == (gfloat) EOP)) {
+				pv->text_occ.not_found = TRUE;
+				gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+				display_message(pv->vf, "Kein Treffer", NULL);
+
+				return 0;
+			} else //ansonsten referenz-index ( pdf_punkt) verstellen, damit das nur einmal durchlaufen wird
+			{
+				if (run->dir == 1)
+					run->punkt.punkt.y = 0;
+				else
+					run->punkt.punkt.y = (float) EOP;
+			}
+		}
+
+		//Zeitscheibe verbraucht: Oberfläche bedienen lassen, dann weiter
+		if (g_get_monotonic_time() - start > TEXT_SEARCH_SLICE_US) {
+			gchar *text = g_strdup_printf("Suche … S. %i/%u", run->pos.seite + 1,
+					pv->arr_pages->len);
+
+			gtk_label_set_text(GTK_LABEL(pv->label_search), text);
+			g_free(text);
+
+			return 1;
+		}
+	} while (1);
+
+	return 0;
+}
+
+//Idle-Daten sind run, nicht pv: g_idle_remove_by_data(pv) beim Schließen
+//des Viewers darf diese Source nicht erwischen
+static gboolean text_search_idle(gpointer data) {
+	TextSearchRun *run = (TextSearchRun *) data;
+	PdfViewer *pv = run->pv;
+	GError *error = NULL;
+	gint rc = text_search_slice(pv, &error);
+
+	//während der Scheibe (z.B. Meldungsdialog) abgebrochen?
+	if (pv->text_occ.run != run) {
+		g_clear_error(&error);
+
+		return G_SOURCE_REMOVE;
+	}
+
+	if (rc == 1)
+		return G_SOURCE_CONTINUE;
+
+	run->source = 0; //entfernt sich durch Rückgabewert selbst
+	text_search_run_free(pv);
+
+	if (rc == -1) {
+		gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+		display_message(pv->vf, "Fehler bei Textsuche\n\n",
+				error ? error->message : "", NULL);
+		g_clear_error(&error);
+	}
+
+	return G_SOURCE_REMOVE;
+}
+
 gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error) {
 	gint dir = 0;
+	gint rc = 0;
 	PdfPos pdf_pos = { 0 };
 	PdfPunkt pdf_punkt = { 0 };
 	const gchar *search_text = NULL;
 	gboolean wrapped = FALSE;
+	TextSearchRun *run = NULL;
+
+	//laufende Suche: dieser Klick bricht sie nur ab
+	if (viewer_text_search_cancel(pv))
+		return 0;
 
 	//dokument durchsucht und kein Fund: return
 	if (pv->text_occ.not_found == TRUE) {
@@ -481,103 +664,27 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 	if (!g_strcmp0(search_text, ""))
 		return 0;
 
-	do {
-		//Seite ist aktuell nicht durchsucht - durchsuchen
-		if (pdf_pos.seite != pv->text_occ.page_act) {
-			gint rc = 0;
-			fz_context *ctx = NULL;
-			PageSearchData sd = { pv, NULL, 0 };
+	run = g_new0(TextSearchRun, 1);
+	run->pv = pv;
+	run->dir = dir;
+	run->pos = pdf_pos;
+	run->punkt = pdf_punkt;
+	run->wrapped = wrapped;
+	run->text = g_strdup(search_text);
+	run->options = FZ_SEARCH_IGNORE_CASE
+			| (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(
+					pv->check_diakritika)) ? FZ_SEARCH_IGNORE_DIACRITICS : 0);
+	pv->text_occ.run = run;
 
-			//arrays leeren; page_act erst nach erfolgreicher Suche setzen
-			pv->text_occ.page_act = -1;
-			g_array_remove_range(pv->text_occ.arr_quad, 0,
-					pv->text_occ.arr_quad->len);
-			g_array_remove_range(pv->text_occ.arr_hit, 0,
-					pv->text_occ.arr_hit->len);
+	//erste Scheibe sofort: kleine Dokumente sind damit synchron fertig
+	rc = text_search_slice(pv, error);
+	if (rc == 1) {
+		run->source = g_idle_add(text_search_idle, run);
 
-			//page_act durchsuchen
-			ViewerPageNew *viewer_page = g_ptr_array_index(pv->arr_pages,
-					pdf_pos.seite);
+		return 0;
+	}
 
-			ctx = zond_pdf_document_get_ctx(
-					viewer_page->pdf_document_page->document);
+	text_search_run_free(pv);
 
-			rc = viewer_render_stext_page_fast(ctx,
-					viewer_page->pdf_document_page, error);
-			if (rc)
-				return -1;
-
-			sd.viewer_page = viewer_page;
-
-			fz_try( ctx )
-				viewer_search_page(ctx, &sd,
-						viewer_page->pdf_document_page->stext_page, search_text,
-						FZ_SEARCH_IGNORE_CASE
-								| (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(
-										pv->check_diakritika)) ?
-										FZ_SEARCH_IGNORE_DIACRITICS : 0));
-			fz_catch(ctx) {
-				g_array_remove_range(pv->text_occ.arr_quad, 0,
-						pv->text_occ.arr_quad->len);
-				g_array_remove_range(pv->text_occ.arr_hit, 0,
-						pv->text_occ.arr_hit->len);
-				//kein not_found: Fehler, nächster Klick versucht es erneut
-				ERROR_PDF
-			}
-
-			//auch ohne Treffer: arr_hit gehört jetzt zu dieser Seite
-			pv->text_occ.page_act = pdf_pos.seite;
-		}
-
-		//Treffer in soeben oder schon früher durchsuchter Seite?
-		if (pv->text_occ.arr_hit->len) //dann gucken, ob im sichtbaren Teil der Seite
-		{
-			pv->text_occ.index_act = viewer_text_occ_search_next(pv,
-					pdf_pos.index, dir);
-
-			if (pv->text_occ.index_act > -1) {
-				pv->text_occ.page_act = pdf_pos.seite;
-				viewer_anzeigen_text_occ(pv, wrapped);
-
-				return 0;
-			}
-		}
-
-		//auf der durchsuchten Seite paßt nix: weiterspulen
-		pdf_pos.seite += dir;
-		if (dir == 1)
-			pdf_pos.index = 0;
-		else
-			pdf_pos.index = EOP;
-
-		//Überlauf
-		if (dir == 1 && pdf_pos.seite == pv->arr_pages->len) {
-			pdf_pos.seite = 0;
-			wrapped = TRUE;
-		} else if (dir == -1 && pdf_pos.seite == -1) {
-			pdf_pos.seite = pv->arr_pages->len - 1;
-			wrapped = TRUE;
-		}
-
-		if (pdf_pos.seite == pdf_punkt.seite) //Ausgangsseite wieder erreicht?
-				{
-			//vielleicht Treffer vor/nach index?
-			if ((dir == 1 && pdf_punkt.punkt.y == 0.0)
-					|| (dir == -1 && pdf_punkt.punkt.y == (gfloat) EOP)) {
-				pv->text_occ.not_found = TRUE;
-				gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-				display_message(pv->vf, "Kein Treffer", NULL);
-
-				return 0;
-			} else //ansonsten referenz-index ( pdf_punkt) verstellen, damit das nur einmal durchlaufen wird
-			{
-				if (dir == 1)
-					pdf_punkt.punkt.y = 0;
-				else
-					pdf_punkt.punkt.y = (float) EOP;
-			}
-		}
-	} while (1);
-
-	return 0;
+	return rc;
 }

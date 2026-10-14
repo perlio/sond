@@ -50,14 +50,6 @@ typedef struct _Text_Hit {
 	guint n;
 } TextHit;
 
-typedef struct _Text_Occ {
-	gint page_act;
-	GArray *arr_quad;
-	GArray *arr_hit; //TextHit; index_act zählt Treffer, nicht Quads
-	gint index_act;
-	gboolean not_found;
-} TextOcc;
-
 typedef struct _RenderResponse {
 	gint page_pv;
 	gint error;
@@ -107,6 +99,27 @@ typedef struct _Anbindung {
 #else
 #include "../zond_init.h"
 #endif
+
+//Laufende, in Zeitscheiben (g_idle) abgearbeitete Suche über mehrere Seiten
+typedef struct _Text_Search_Run {
+	struct _Pdf_Viewer *pv;
+	gint dir;
+	PdfPos pos; //als nächstes zu durchsuchende Seite/Position
+	PdfPunkt punkt; //Ausgangspunkt, um "einmal durch" zu erkennen
+	gboolean wrapped;
+	gchar *text;
+	gint options; //fz_search_options
+	guint source; //Idle-Source, 0 = noch nicht eingereiht
+} TextSearchRun;
+
+typedef struct _Text_Occ {
+	TextSearchRun *run; //NULL, wenn keine Suche läuft
+	gint page_act;
+	GArray *arr_quad;
+	GArray *arr_hit; //TextHit; index_act zählt Treffer, nicht Quads
+	gint index_act;
+	gboolean not_found;
+} TextOcc;
 
 typedef struct _Pdf_Viewer {
 	Projekt *zond;
