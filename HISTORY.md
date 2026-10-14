@@ -5606,6 +5606,23 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    ins Projektverzeichnis (alter/neuer Pfad, beide Fehlermeldungen), dann Schleife über
    project_close() bis es 0 liefert, danach exit(EXIT_FAILURE). project_close() fragt bei
    fehlgeschlagenem project_save() "Projekt trotzdem ohne Speichern schließen?".
+ - Index-DB in der Dual-Write-Transaktion (14.10.2026, Funktion vom Nutzer getestet):
+   dbase_zond_attach_index()/_detach_index() (project.c) hängen die Index-DB als
+   drittes Schema "idx" an die store-Connection (ATTACH vor dbase_zond_begin(),
+   DETACH nach Commit/Rollback). Geprüft werden journal_mode von idx und, dass kein
+   Tabellenname von idx in main/work vorkommt; busy_timeout 5 s auf der
+   store-Connection. Die Index-Funktionen (sond_index.c) laufen unverändert über
+   eine Kopie des Index-Kontexts (sond_index_ctx_init_attached(), db = store-
+   Connection): SQLite löst unqualifizierte Namen in allen angehängten
+   Datenbanken auf, die Namen sind disjunkt (knoten gegenüber chunks, coverage,
+   pages usw.). Ein Commit gilt für store, work und idx (Super-Journal).
+   zond_treeviewfm.c: before_delete/before_move/after ohne rohe BEGIN/COMMIT/
+   ROLLBACK auf der Index-Verbindung (Schreibzugriffe nach dbase_zond_begin(),
+   try_collapse vor dem Commit; der bisher ungeprüfte Index-COMMIT entfällt).
+   viewer_save.c: viewer_update_index_for_save() läuft in der Transaktion; schlägt
+   das Speichern fehl, wird der Index mit zurückgerollt (vorher blieb er bereits
+   geändert). Nach dem Commit bleibt structure_refresh() (record_structure) auf
+   der normalen Index-Verbindung.
  - Entscheidungen: Index-DB wird nicht dauerhaft in store/work integriert (Indizierung
    läuft im Hintergrund-Thread mit eigener Connection; der Index ist ein ableitbares
    Artefakt mit geringerer Fehlertoleranz-Anforderung). Geprüft und verworfen: store und

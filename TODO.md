@@ -14,33 +14,21 @@ Ideen: #167, #169, #205, #231, #232, #233
 
 ### #236 Atomarität store/work, Phase 2
 
-Status: offen (Phase 1 und Punkt 8 in HISTORY.md)
+Status: offen (Index-DB eingebunden, Rest in HISTORY.md)
 
 ```text
- Phase 1 (store/work atomar per ATTACH) und der Fehlerzweig beim fehlgeschlagenen
- Commit sind erledigt (HISTORY.md, "Atomarität store/work", 14.10.2026). Offen
- ist die Index-DB (index_ctx, .sond_index.db):
+ Phase 1, der Fehlerzweig beim fehlgeschlagenen Commit und die Einbindung der
+ Index-DB in die Dual-Write-Transaktion sind erledigt (HISTORY.md, "Atomarität
+ store/work"). Offen:
 
- 1. Einbindung in die Dual-Write-Transaktion (früher 6.b). zond_treeviewfm_before_move()
-    und _before_delete() (zond_treeviewfm.c) schreiben die Index-DB in einer
-    eigenen Transaktion per rohem sqlite3_exec(index_ctx->db, "BEGIN;" ...), neben der
-    atomaren store+work-Transaktion. Geplant: index_ctx dort lokal per ATTACH
-    unmittelbar vor und DETACH unmittelbar nach der Transaktion als drittes Schema
-    in die store+work-Connection aufnehmen (kein dauerhaftes ATTACH: der
-    Hintergrund-Thread der Indizierung braucht seine eigene Connection). FTS5-Tabellen
-    sind vom Super-Journal-Mechanismus mit abgedeckt. Voraussetzung: SQLITE_BUSY
-    behandeln (busy_timeout setzen und/oder Retry, sonst Meldung "Indizierung läuft,
-    bitte kurz warten"), denn läuft der Thread gerade in einer Schreibtransaktion,
-    scheitert der ATTACH-Schreibversuch.
- 2. Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko, unabhängig von 1.).
+ 1. Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko).
     wctx (mit index_ctx, eine feste Connection) geht an den Indexier-Thread
     (headerbar.c, zond_index_lauf(): td->wctx = zond->wctx). Von den Feldern teilt er
     sich mit der UI nur index_ctx; cancel, log_func_data und ocr_mode setzt die UI
     nur vor dem Start bzw. über den Abbrechen-Button, locked liest sie erst nach dem
     Ende des Threads. UI-Schreibzugriffe mit offener Transaktion auf index_ctx->db
-    (rohes BEGIN/COMMIT/ROLLBACK): zond_treeviewfm.c (Move, Delete), headerbar.c
-    (Index löschen), viewer_save.c (Seiten löschen/einfügen). Sie sind
-    nutzergesteuert und während der Indizierung nicht erreichbar, weil das
+    (rohes BEGIN/COMMIT/ROLLBACK) gibt es nur noch in headerbar.c (Index löschen).
+    Sie sind nutzergesteuert und während der Indizierung nicht erreichbar, weil das
     Info-Fenster modal ist (misc.c, info_window_open()). Übrig bleiben lesende Zugriffe
     ohne Nutzereingabe: Badge-Status beim Aktualisieren der Bäume (Root-Monitor-Timer,
     sond_treeviewfm.c) und die semantische Suche im Chat-Thread (zond_chat.c,
@@ -49,12 +37,14 @@ Status: offen (Phase 1 und Punkt 8 in HISTORY.md)
     offene Transaktion nicht (SQLite serialisiert pro Connection; nicht geprüft:
     sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
     ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
-    Indexlauf): Mutex um die Index-Transaktionen oder eigene Connection per 1.
- 3. Test nach der Umsetzung: einen Fehler mitten in einer Dual-Write-Operation
-    provozieren (z.B. künstliche Constraint-Verletzung nur im zweiten Statement) und
-    prüfen, dass das Rollback store, work (und die Index-DB) zurücksetzt; eine
-    Dual-Write-Operation während der laufenden Indizierung auslösen und prüfen, dass
-    SQLITE_BUSY sauber behandelt wird (kein Absturz, kein stiller Fehler).
+    Indexlauf): Mutex um die Index-Transaktionen.
+ 2. Noch nicht gezielt getestet (die normalen Abläufe laufen): Fehlerfälle der
+    Dual-Write-Transaktion - einen Fehler mitten in der Operation provozieren (z.B.
+    Speichern einer PDF scheitern lassen) und prüfen, dass store, work und Index
+    zurückgerollt werden; Move/Delete während einer Chat-Suche (SQLITE_BUSY nach
+    bis zu 5 s, kein Absturz); Prozess mitten in der Transaktion beenden und
+    prüfen, dass nach dem Neustart kein halb übernommener Zustand in den drei
+    Dateien bleibt (Super-Journal).
 ```
 
 ### #234 sond_open() unter Nicht-Windows
