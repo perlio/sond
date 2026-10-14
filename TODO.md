@@ -2,24 +2,15 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #240.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #242.
 
 ## Inhalt
 
-Offen: #235, #236, #234
-Zurückgestellt: #202, #220, #237, #238, #239
+Offen: #236, #234
+Zurückgestellt: #202, #220, #237, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
-
-### #235 Review der Textsuche im Viewer (PDF)
-
-Status: offen
-
-```text
- #235 Review der Textsuche im Viewer (PDF). Dabei auch behandeln:
- silbengetrennte Wörter als ein Treffer erfassen und anzeigen.
-```
 
 ### #236 Atomarität store/work, Phase 2
 
@@ -416,6 +407,55 @@ Aus "Performance Löschen (BAUM_INHALT)" (HISTORY.md, 16.09.2026).
    bleibt für andere Beobachter korrekt), aber ohne angehängten View
    verarbeitet GTK sie nicht einzeln - beim Wiederanhängen baut GTK die
    sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
+```
+
+### #240 Viewer: Cache für gerenderte Seiten
+
+Status: zurückgestellt (nicht besonders wichtig)
+
+```text
+ Bei großen PDFs bleibt vieles je Seite im Speicher, solange der Viewer
+ offen ist: das gerenderte Pixbuf (pixbuf_page wird nur beim Zoomwechsel
+ freigegeben, viewer_ui.c; A4 bei 100 % ca. 3-4 MB, bei 150 % gut 8 MB),
+ das Thumbnail (pixbuf_thumb), die display_list (bei Scans mit dem Bild,
+ mehrere MB), die geladene page und die stext_page (ca. 72 Byte je Zeichen,
+ 200-450 KB je Textseite). Idee: Cache, der nur die zuletzt gesehenen
+ Seiten hält (letzte N oder Speichergrenze) und ältere freigibt; die
+ stext_page aus der Textsuche (#235) wird dort mitbehandelt. Zu beachten:
+ Render-Threads, thread-Bits in ViewerPageNew/PdfDocumentPage, erneutes
+ Laden bei Bedarf, Annotationen/Highlights. Vorher an einer großen Akte
+ messen.
+```
+
+### #241 Textsuche im Viewer: Silbentrennung über die Seitengrenze
+
+Status: zurückgestellt
+
+```text
+ Ein getrenntes Wort am Seitenende ("Ver-" / "trag" auf der Folgeseite)
+ wird nicht als ein Treffer gefunden (aus #235). Ursache: MuPDF setzt
+ FZ_STEXT_LINE_FLAGS_JOINED nur bei einer Folgezeile auf derselben Seite
+ (stext-device.c); beim Flachklopfen bleiben Strich und Zeilenumbruch
+ am Seitenende stehen. Weicher Trennstrich (U+00AD) ginge ohnehin.
+
+ Plan (ca. 3-4 Stunden):
+ 1. Endet die letzte Textzeile der Seite N auf einen Bindestrich und beginnt
+    Seite N+1 mit einem Kleinbuchstaben, auf der Zeile JOINED setzen.
+ 2. Grenzsuche: iterative MuPDF-Suche (fz_new_search, fz_feed_search,
+    fz_search_forwards) mit den Seiten N und N+1; nur Treffer mit Quads
+    beider Seiten (fz_match_quad.seq) übernehmen. Vorprüfung auf den
+    Bindestrich am Seitenende, damit Seite N+1 nur dann geladen wird.
+ 3. TextHit (viewer.h) um ein zweites Segment (first2/n2) für die Quads auf
+    Seite N+1 erweitern; Grenztreffer gehört zur Seite N.
+ 4. viewer_anzeigen_text_occ(): Segment 2 mit page_act + 1 in
+    pv->highlight.page[] eintragen; Crop der Seite N+1 beachten.
+ 5. Testdatei mit getrennten Wörtern am Seitenende (auch "E-" / "Mail",
+    Gedankenstrich, weicher Trennstrich).
+
+ Nicht abgedeckt: echte Bindestriche über die Seitengrenze ("E-Mail" mit
+ Umbruch nach "E-"), da KEEP_HYPHENS am Blockende ein Zeilenende setzt.
+ viewer_highlight_at_char_pos bleibt unverändert (Index-Texte sind je
+ Seite getrennt).
 ```
 
 ## Ideen

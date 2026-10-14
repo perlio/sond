@@ -5537,3 +5537,44 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Frage zu cursor-changed nach Sprung aus dem Suchfenster (durch #184
    beantwortet).
 ```
+
+## Review der Textsuche im Viewer, Silbentrennung (#235, 13./14.10.2026)
+
+```text
+ Alles vom Nutzer getestet. Dateien: viewer_search.c/.h, viewer_ui.c, viewer.c/.h,
+ seiten.c, stand_alone.c (src/zond/40viewer), sond_text_extract.c.
+ - Treffer als Einheit: TextOcc.arr_hit (TextHit: first/n) zeigt auf die Quads
+   eines Treffers in arr_quad. Navigation und Markierung laufen je Treffer, ein
+   silbengetrenntes oder zeilenübergreifendes Wort ist ein Treffer mit allen
+   Zeilenteilen. Die Seitentexte werden mit FZ_STEXT_DEHYPHENATE aufgebaut, das
+   Flachklopfen verbindet die Zeilen. Suche über fz_match_stext_page_cb (kein
+   Quad-Limit von 99 mehr).
+ - page_act wird auch bei Seiten ohne Treffer gesetzt (vorher wurde eine früher
+   gefundene Seite fälschlich als durchsucht übersprungen).
+ - Indexer (sond_text_extract.c) nutzt jetzt ebenfalls FZ_STEXT_DEHYPHENATE, damit
+   char_pos_in_page zum Viewer-Text passt. Bestehende Indizes enthalten noch den
+   alten Text und müssen bei Bedarf neu aufgebaut werden (Testphase, nicht
+   angefasst).
+ - viewer_highlight_at_char_pos(): Treffer über Mittelpunkt des Zielzeichens in
+   einem Quad statt Vereinigungsbox; Byte-Offset auf UTF-8-Zeichengrenze.
+ - Idle-Sprung (viewer_springen_zu_pos_pdf_idle) hält einen Weak-Pointer auf das
+   Viewer-Fenster und springt nach dem Schließen nicht mehr auf freigegebenes pv.
+ - Fehler: MuPDF-Exception setzt not_found nicht mehr; nach "Kein Treffer" zeigt
+   jeder Klick die Meldung erneut; Suchfehler beim Anspringen werden geloggt.
+ - Bedienung: Label neben dem Such-Entry mit Seite und Trefferposition ("S. 12 ·
+   2/5"), "↻" bei Umbruch, Shift+Enter sucht rückwärts, Checkbox "ä=a" ignoriert
+   Umlaute/Akzente (Standard aus).
+ - Bindestriche: enthält der Suchbegriff einen Bindestrich, zweiter Lauf mit
+   FZ_SEARCH_KEEP_HYPHENS; Treffer mit gleichem Anfang werden nur einmal gezählt,
+   danach nach Position sortiert ("E-" / "Mail" findet "E-Mail").
+ - Seitenübergreifende Suche in Zeitscheiben von 30 ms (g_idle,
+   TEXT_SEARCH_SLICE_US), Fortschritt im Label; kleine Dokumente bleiben
+   synchron. Abbruch per Escape, erneutem Klick, Textänderung, Umschalten von
+   "ä=a", Schließen des Viewers und Seiten löschen/einfügen
+   (viewer_text_search_cancel()). Idle-Daten sind der Suchlauf, nicht pv
+   (g_idle_remove_by_data(pv) beim Schließen darf ihn nicht entfernen).
+ - Zurückgestellt: Cache für gerenderte Seiten (TODO.md #240), Trennung über
+   die Seitengrenze (TODO.md #241).
+ - MuPDF: fz_match_stext_page_cb liest hinter dem Quad-Array (chapter_num mit
+   Index num_quads, stext-search.c); beim nächsten MuPDF-Update prüfen.
+```
