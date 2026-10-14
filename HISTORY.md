@@ -5623,6 +5623,19 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    das Speichern fehl, wird der Index mit zurückgerollt (vorher blieb er bereits
    geändert). Nach dem Commit bleibt structure_refresh() (record_structure) auf
    der normalen Index-Verbindung.
+ - Fehlertests der Dual-Write-Transaktion mit Index-DB (14.10.2026): Auf
+   Datenbank-Ebene (Skript mit drei SQLite-Dateien, store mit angehängtem work und
+   idx, Python-SQLite 3.53.4, lokales NTFS): Lesesperre auf idx beim Commit und
+   Schreibsperre auf idx ergeben "database is locked" und einen Rollback aller
+   drei Dateien, die Wiederholung klappt; 68 hart beendete Prozesse mitten in
+   Commits ergaben nie einen inkonsistenten Stand (liegengebliebene *-journal- und
+   store.db-mj*-Dateien sind harmlos). Im Programm vom Nutzer getestet: (a) Speichern
+   einer indizierten PDF mit gelöschter Seite scheitert - Fehlermeldung, die
+   Volltextsuche findet den Text der Seite weiterhin (Index zurückgerollt);
+   (b) Schreibsperre auf der Index-Datei (sqlite3, BEGIN IMMEDIATE;), indizierte
+   Datei verschieben - nach ca. 5 s Fehlermeldung, Datei nicht verschoben, nach
+   ROLLBACK; klappt die Verschiebung. Nicht abgedeckt: SeaDrive-Laufwerk, die in zond
+   eingebaute SQLite-Bibliothek, Stromausfall.
  - Entscheidungen: Index-DB wird nicht dauerhaft in store/work integriert (Indizierung
    läuft im Hintergrund-Thread mit eigener Connection; der Index ist ein ableitbares
    Artefakt mit geringerer Fehlertoleranz-Anforderung). Geprüft und verworfen: store und

@@ -14,12 +14,12 @@ Ideen: #167, #169, #205, #231, #232, #233
 
 ### #236 Atomarität store/work, Phase 2
 
-Status: offen (Index-DB eingebunden, Rest in HISTORY.md)
+Status: offen (Index-DB eingebunden und Fehlerfälle getestet, s. HISTORY.md)
 
 ```text
- Phase 1, der Fehlerzweig beim fehlgeschlagenen Commit und die Einbindung der
- Index-DB in die Dual-Write-Transaktion sind erledigt (HISTORY.md, "Atomarität
- store/work"). Offen:
+ Phase 1, der Fehlerzweig beim fehlgeschlagenen Commit, die Einbindung der
+ Index-DB in die Dual-Write-Transaktion und deren Fehlertests sind erledigt
+ (HISTORY.md, "Atomarität store/work"). Offen:
 
  1. Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko).
     wctx (mit index_ctx, eine feste Connection) geht an den Indexier-Thread
@@ -38,20 +38,6 @@ Status: offen (Index-DB eingebunden, Rest in HISTORY.md)
     sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
     ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
     Indexlauf): Mutex um die Index-Transaktionen.
- 2. Fehlerfälle der Dual-Write-Transaktion. Auf Datenbank-Ebene geprüft
-    (14.10.2026, Skript mit drei SQLite-Dateien, store mit angehängtem work und idx,
-    Python-SQLite 3.53.4, lokales NTFS): Lesesperre auf idx beim Commit und Schreibsperre
-    auf idx führen zu "database is locked" und einem Rollback aller drei Dateien,
-    die Wiederholung klappt; 68 hart beendete Prozesse mitten in Commits ergaben nie
-    einen inkonsistenten Stand (liegengebliebene *-journal- und store.db-mj*-Dateien sind
-    harmlos). Nicht abgedeckt: SeaDrive-Laufwerk, die in zond eingebaute SQLite-Bibliothek,
-    Stromausfall. Im Programm getestet (Nutzer, 14.10.2026): Speichern einer
-    indizierten PDF mit gelöschter Seite scheitern lassen - Fehlermeldung, die
-    Volltextsuche findet den Text der gelöschten Seite weiterhin (Index
-    zurückgerollt). Noch zu testen:
-    Sperre auf der Index-Datei (sqlite3 .sond_index.db, BEGIN IMMEDIATE; offen
-    lassen), indizierte Datei verschieben: nach ca. 5 s Fehlermeldung, Datei nicht
-    verschoben; nach ROLLBACK; klappt die Verschiebung.
 ```
 
 ### #234 sond_open() unter Nicht-Windows
