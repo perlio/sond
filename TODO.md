@@ -32,15 +32,24 @@ Status: offen (Phase 1 und Punkt 8 in HISTORY.md)
     behandeln (busy_timeout setzen und/oder Retry, sonst Meldung "Indizierung läuft,
     bitte kurz warten"), denn läuft der Thread gerade in einer Schreibtransaktion,
     scheitert der ATTACH-Schreibversuch.
- 2. Dieselbe Index-Verbindung in zwei Threads (bestehendes Risiko, unabhängig von 1.).
-    headerbar.c reicht zond->wctx (mit index_ctx, eine feste Connection) an den
-    Indexier-Thread weiter (td->wctx = zond->wctx). Dieselbe Connection benutzt die UI
-    synchron mit rohem BEGIN/COMMIT/ROLLBACK: zond_treeviewfm.c (Move, Delete) und
-    headerbar.c (Index löschen, index_ctx->db). Ein Move/Delete während der Indizierung
-    kann sich in deren offene Transaktion mischen, ein ROLLBACK der einen Seite
-    Arbeit der anderen wegwerfen. Auflösung offen: ein Mutex um die Index-Transaktionen
-    (einfacher, genügt gegen das Interleaving) oder die eigene Connection per 1.
-    Entscheidung steht aus.
+ 2. Dieselbe Index-Verbindung in mehreren Threads (geringes Risiko, unabhängig von 1.).
+    wctx (mit index_ctx, eine feste Connection) geht an den Indexier-Thread
+    (headerbar.c, zond_index_lauf(): td->wctx = zond->wctx). Von den Feldern teilt er
+    sich mit der UI nur index_ctx; cancel, log_func_data und ocr_mode setzt die UI
+    nur vor dem Start bzw. über den Abbrechen-Button, locked liest sie erst nach dem
+    Ende des Threads. UI-Schreibzugriffe mit offener Transaktion auf index_ctx->db
+    (rohes BEGIN/COMMIT/ROLLBACK): zond_treeviewfm.c (Move, Delete), headerbar.c
+    (Index löschen), viewer_save.c (Seiten löschen/einfügen). Sie sind
+    nutzergesteuert und während der Indizierung nicht erreichbar, weil das
+    Info-Fenster modal ist (misc.c, info_window_open()). Übrig bleiben lesende Zugriffe
+    ohne Nutzereingabe: Badge-Status beim Aktualisieren der Bäume (Root-Monitor-Timer,
+    sond_treeviewfm.c) und die semantische Suche im Chat-Thread (zond_chat.c,
+    benutzt index_ctx ebenfalls in einem eigenen Thread). Der SeaDrive-Watcher
+    (sond_seadrive.c) greift nicht auf den Index zu. Lesezugriffe stören die
+    offene Transaktion nicht (SQLite serialisiert pro Connection; nicht geprüft:
+    sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
+    ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
+    Indexlauf): Mutex um die Index-Transaktionen oder eigene Connection per 1.
  3. Test nach der Umsetzung: einen Fehler mitten in einer Dual-Write-Operation
     provozieren (z.B. künstliche Constraint-Verletzung nur im zweiten Statement) und
     prüfen, dass das Rollback store, work (und die Index-DB) zurücksetzt; eine
