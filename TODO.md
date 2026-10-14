@@ -87,51 +87,29 @@ Status: zurückgestellt (erst nötig, wenn ein UI-Schreibzugriff auf den Index w
     Indexlauf): Mutex um die Index-Transaktionen.
 ```
 
-### #237 SeaDrive-Hydrierungsfehler: UX-Umgang
+### #237 SeaDrive-Hydrierungsfehler: Rest
 
-Status: zurückgestellt
+Status: zurückgestellt (Doppelklick und Indizierung erledigt, s. HISTORY.md)
 
 ```text
- SeaDrive-Hydrierungsfehler: UX-Umgang (11.09.2026, zurückgestellt).
- Anlass: s.o. ("Invalid argument"). Nutzerfrage: wie geht die App damit
- um, dass eine angeforderte Hydrierung (SeaDrive/Seafile-Server nicht
- erreichbar, oder anderer Fehler) fehlschlägt? In welchen Fällen kann
- das überhaupt auftreten? Gemeinsam begonnene, aber nicht fertig
- durchgegangene Liste der Zugriffsstellen:
- 1. Doppelklick auf eine nicht hydrierte Datei (Öffnen im Viewer)
- 2. Indizierung einer Datei (sond_index_erstellen, s.o.)
- 3. (dritter Punkt vom Nutzer nur angerissen, nicht ausformuliert -
-    offen)
- (weitere Kandidaten, aus dem Code bekannt, aber noch nicht mit dem
- Nutzer besprochen: Indexsuche-Abdeckungs-Check - s.o. größtenteils
- behoben -, "Gesamtes Projektverzeichnis"-Scans beim Laden von
- BAUM_FS-Verzeichnissen, Kopieren/Verschieben von Dateien im
- Projektbaum, PDF-Vorschau/Thumbnail-Erzeugung.)
+ Erledigt (HISTORY.md, "SeaDrive-Hydrierungsfehler"): Meldung beim Doppelklick auf eine
+ nicht geladene Datei (Dialog) und Hinweis bei der Indizierung (Info-Fenster).
+ Offen:
+ 1. Weitere Zugriffsstellen, an denen ein Hydrierungsfehler nur als rohe Systemmeldung
+    oder gar nicht auftaucht (aus dem Code bekannt, noch nicht mit dem Nutzer
+    besprochen): "Gesamtes Projektverzeichnis"-Scans beim Laden von BAUM_FS-
+    Verzeichnissen, Kopieren/Verschieben von Dateien im Projektbaum, PDF-Vorschau/
+    Thumbnail-Erzeugung, Öffnen der Index-DB beim Laden des Projekts (project.c,
+    sond_seadrive_hydrate() nur mit LOG_WARN); ein dritter Punkt des Nutzers wurde
+    nie ausformuliert.
+ 2. Proaktiv (Strategie B): vor kritischen Aktionen (z.B. Indizierung) prüfen, ob
+    SeaDrive bzw. der Seafile-Server erreichbar ist, und vorab gesammelt warnen,
+    statt je Datei zu scheitern. Es gibt im Code noch keinen Erreichbarkeits-
+    Indikator: das Signal "seadrive-status" zählt nur pending_down/pending_up laufender
+    Transfers.
 
- Technische Einschränkung: ein fehlgeschlagener Hydrierungsversuch
- äußert sich nur als generisches CRT errno=EINVAL ("Invalid argument")
- über die üblichen fread()/_wfopen()-Pfade - es gibt keinen
- unterscheidbaren Windows-Cloud-Files-API-Fehlercode, an dem man
- "Hydrierung fehlgeschlagen" zuverlässig von anderen Lesefehlern
- unterscheiden könnte. Rein reaktive Fehlerauswertung ist also
- unzuverlässig.
-
- Zwei denkbare Strategien, nicht entschieden, keine gegenüber der
- anderen priorisiert:
- A) Reaktiv: an den bekannten Zugriffsstellen bei Lesefehlern eine
-    klarere, spezifischere Fehlermeldung anzeigen (Hinweis auf
-    mögliche SeaDrive/Server-Nichterreichbarkeit), statt der rohen
-    Systemfehlermeldung.
- B) Proaktiv: vor kritischen Aktionen (z.B. Indizierung) grob prüfen,
-    ob der SeaDrive/Seafile-Server überhaupt erreichbar ist, und bei
-    Nichterreichbarkeit vorab und gesammelt warnen, statt einzeln pro
-    Datei zu scheitern. Es existiert aktuell kein Erreichbarkeits-
-    Indikator im Code (das "seadrive-status"-Signal zählt nur
-    pending_down/pending_up laufender Transfers, ist aber kein
-    Erreichbarkeits-Flag).
-
- Nutzer-Entscheidung: "Merke Dir das. Stellen das zurück." - Thema
- nicht bearbeiten, bis der Nutzer es wieder aufgreift.
+ Nutzer-Entscheidung (11.09.2026): zurückgestellt, nicht bearbeiten, bis der Nutzer es
+ wieder aufgreift.
 ```
 
 ### #238 Fortschrittsanzeige beim Aufklappen in BAUM_FS

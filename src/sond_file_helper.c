@@ -61,6 +61,26 @@
 #define ERROR_CLOUD_FILE_ACCESS_DENIED 395L
 #endif
 
+//Fehler der Cloud-Filter-API, die auf einen nicht laufenden oder nicht
+//erreichbaren Anbieter hindeuten (Windows-Fehlercodes ERROR_CLOUD_FILE_*)
+static gboolean sond_win32_is_cloud_error(DWORD win_err)
+{
+    switch (win_err) {
+    case 362: //PROVIDER_NOT_RUNNING
+    case 386: //AUTHENTICATION_FAILED
+    case 387: //INSUFFICIENT_RESOURCES
+    case 388: //NETWORK_UNAVAILABLE
+    case 389: //UNSUCCESSFUL
+    case 393: //REQUEST_ABORTED
+    case 395: //ACCESS_DENIED
+    case 404: //PROVIDER_TERMINATED
+    case 426: //REQUEST_TIMEOUT
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder_fh)(
     HANDLE       FileHandle,
     LARGE_INTEGER StartingOffset,
@@ -589,8 +609,12 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     if (h == INVALID_HANDLE_VALUE) {
         DWORD win_err = GetLastError();
         gchar *msg = g_win32_error_message(win_err);
+        //Cloud-Fehler (Anbieter läuft nicht, Hydrierung gescheitert, Zugriff verweigert)
+        gchar const *hint = sond_win32_is_cloud_error(win_err) ?
+                "\nDie Datei ist nicht geladen - ist SeaDrive bzw. der Server erreichbar?" : "";
+
         g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_err),
-                    "sond_fopen('%s'): %s", path, msg);
+                    "sond_fopen('%s'): %s%s", path, msg, hint);
         g_free(msg);
         return NULL;
     }

@@ -145,17 +145,58 @@ gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {
 	return px;
 }
 
+gchar const* sond_icon_util_normalize_name(gchar const *name) {
+	gchar *lower = NULL;
+	gchar const *result = "text-x-generic";
+
+	//Theme-Namen enthalten weder Pfadtrenner noch Komma
+	if (!name || !*name
+			|| (!strchr(name, '\\') && !strchr(name, '/') && !strchr(name, ',')))
+		return name;
+
+	lower = g_ascii_strdown(name, -1);
+	if (strstr(lower, "thunderbird") || strstr(lower, "outlook"))
+		result = "mail-read";
+	else if (strstr(lower, "irfanview") || strstr(lower, "i_view")
+			|| strstr(lower, "photo"))
+		result = "image-x-generic";
+	else if (strstr(lower, "excel"))
+		result = "x-office-spreadsheet";
+	else if (strstr(lower, "powerpnt"))
+		result = "x-office-presentation";
+	else if (strstr(lower, "wordpad") || strstr(lower, "winword")
+			|| strstr(lower, "soffice"))
+		result = "x-office-document";
+	else if (strstr(lower, ".ico") || strstr(lower, "acro")
+			|| strstr(lower, "pdf"))
+		result = "pdf";
+	g_free(lower);
+
+	return result;
+}
+
 gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 		GtkCellRenderer *renderer, gchar const *base_icon_name,
 		SondIconOverlay const *overlays, guint n_overlays) {
 	gint px = sond_icon_util_renderer_get_size(renderer);
 	gint overlay_px = MAX(px / 2, 8);
-	GdkPixbuf *main_pb = sond_icon_util_load_pixbuf(widget, base_icon_name, px);
+	GdkPixbuf *main_pb = NULL;
+
+	base_icon_name = sond_icon_util_normalize_name(base_icon_name);
+	main_pb = sond_icon_util_load_pixbuf(widget, base_icon_name, px);
 
 	if (!main_pb) {
-		LOG_WARN("sond_icon_util_load_pixbuf(""%s"", %d) fehlgeschlagen - "
-				"Overlay(s) können nicht gezeichnet werden",
-				base_icon_name ? base_icon_name : "(null)", px);
+		//je Name nur einmal melden: der Baum wird ständig neu gezeichnet
+		static GHashTable *logged = NULL;
+		gchar const *key = base_icon_name ? base_icon_name : "(null)";
+
+		if (!logged)
+			logged = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+		if (!g_hash_table_contains(logged, key)) {
+			g_hash_table_add(logged, g_strdup(key));
+			LOG_WARN("sond_icon_util_load_pixbuf(\"%s\", %d) fehlgeschlagen - "
+					"Overlay(s) können nicht gezeichnet werden", key, px);
+		}
 		g_object_set(G_OBJECT(renderer), "icon-name",
 				base_icon_name ? base_icon_name : "image-missing", NULL);
 		return FALSE;

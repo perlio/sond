@@ -81,6 +81,15 @@ gboolean sond_seadrive_needs_hydration(const gchar *full_path);
 void sond_seadrive_hydrate_async(const gchar *full_path);
 
 /*
+ * Wie sond_seadrive_hydrate_async(), meldet aber einen Fehlschlag (z.B. SeaDrive
+ * oder Server nicht erreichbar) in einem Dialog über parent. Keine Meldung bei
+ * vom Nutzer abgebrochener Hydrierung oder wenn parent inzwischen zerstört ist.
+ * parent darf NULL sein (dann nur Log).
+ */
+void sond_seadrive_hydrate_async_notify(const gchar *full_path,
+        GtkWindow *parent);
+
+/*
  * TRUE, wenn full_path aktuell hydriert wird (sond_seadrive_hydrate_
  * async() dafür einen Hintergrund-Thread laufen hat).
  */
@@ -204,6 +213,12 @@ static inline void
 sond_seadrive_hydrate_async(const gchar *full_path)
 {
     (void)full_path;
+}
+
+static inline void
+sond_seadrive_hydrate_async_notify(const gchar *full_path, GtkWindow *parent)
+{
+    (void)full_path; (void)parent;
 }
 
 static inline gboolean

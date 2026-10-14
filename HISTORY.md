@@ -5681,3 +5681,31 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Arbeitskopien wurden gelöscht.
  - Reste vor #242 (NNNNN.ext im Temp-Ordner) werden vom Programm nicht entfernt.
 ```
+
+## SeaDrive-Hydrierungsfehler: Meldung; alte Icon-Namen (#237 Teil, 14.10.2026)
+
+```text
+ Vom Nutzer getestet. Anlass: Doppelklick auf eine nicht geladene Datei tat bei nicht
+ laufendem SeaDrive gar nichts (Fehler nur im Log).
+ - sond_seadrive_hydrate_async_notify() (sond_seadrive.c/.h; die Variante ohne
+   Fenster bleibt): scheitert die Hydrierung im Hintergrundthread, zeigt ein
+   Dialog (per g_idle im Hauptthread, Fenster über GWeakRef) Pfad, Meldung (z.B.
+   "Der Clouddateianbieter wurde unerwartet beendet. (0x80070194)", Windows-Code 404)
+   und die Frage, ob SeaDrive bzw. der Server erreichbar ist. Keine Meldung bei vom
+   Nutzer abgebrochener Hydrierung oder zerstörtem Fenster. sond_seadrive_ensure_
+   hydrated_multi() nutzt die Variante, also auch der Auszug-Fall in BAUM_AUSWERTUNG.
+   Kein Starthinweis (der Badge ändert sich).
+ - sond_fopen() (sond_file_helper.c) hängt bei Cloud-Fehlern (sond_win32_is_cloud_error():
+   362, 386-389, 393, 395, 404, 426) den Hinweis "Die Datei ist nicht geladen - ist
+   SeaDrive bzw. der Server erreichbar?" an; die Indizierung zeigt die Fehlerzeile
+   schon im Info-Fenster.
+ - Alte Icon-Namen: Projekte aus früheren Versionen speichern in knoten.icon_name die
+   Registry-Angabe des Windows-Dateisymbols (z.B. Thunderbird-Programmpfad mit
+   Komma und Index, imageres.dll mit negativem Index; im Projekt "Lips" 707 Knoten). Der Baum
+   loggte bei jedem Neuzeichnen eine Warnung (sond_icon_util_load_pixbuf). Neu:
+   sond_icon_util_normalize_name() (sond_icon_util.c) bildet solche Namen (mit
+   Backslash, Slash oder Komma) beim Rendern auf Theme-Icons ab (Thunderbird/Outlook
+   mail-read, IrfanView image-x-generic, WordPad/Word/LibreOffice x-office-document,
+   Excel, PowerPoint, .ico/PDF pdf, sonst text-x-generic); die Daten bleiben
+   unverändert. Nicht gefundene Namen werden nur einmal je Name gemeldet.
+```

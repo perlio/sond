@@ -148,6 +148,13 @@ typedef struct {
  * kennen. */
 gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer);
 
+/* Ältere Projekte enthalten als Icon-Name statt eines Theme-Icons die
+ * Registry-Angabe des Windows-Dateisymbols (z.B.
+ * "C:\\Program Files\\Mozilla Thunderbird\\thunderbird.exe,0"). Bildet solche
+ * Namen auf ein Theme-Icon ab; alle übrigen Namen kommen unverändert zurück.
+ * Der Rückgabewert gehört dem Aufrufer nicht (statisch oder name selbst). */
+gchar const* sond_icon_util_normalize_name(gchar const *name);
+
 /* Lädt base_icon_name als Pixbuf in der zu renderer passenden Größe,
  * komponiert die angegebenen Overlays (je halb so groß wie das Basis-Icon,
  * s. sond_icon_util_renderer_get_size()) an ihrer jeweiligen Ecke darauf

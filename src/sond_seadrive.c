@@ -990,7 +990,59 @@ static void hydrating_entry_free(gpointer data)
 
 typedef struct {
     gchar *full_path;
+    GWeakRef parent;   /* Fenster für die Fehlermeldung, kann leer sein */
+    gboolean notify;
 } HydrateThreadData;
+
+typedef struct {
+    gchar *full_path;
+    gchar *message;
+    GWeakRef parent;
+} HydrateReport;
+
+static gboolean hydrate_report_idle(gpointer data)
+{
+    HydrateReport *report = (HydrateReport *) data;
+    GtkWidget *parent = g_weak_ref_get(&report->parent);
+
+    if (parent) {
+        //die Meldung von sond_seadrive_hydrate() beginnt mit dem Pfad
+        gchar const *detail = report->message;
+        gchar const *sep = g_str_has_prefix(detail, "sond_seadrive_hydrate(") ?
+                strstr(detail, "): ") : NULL;
+
+        if (sep)
+            detail = sep + 3;
+
+        display_message(parent,
+                "Die Datei konnte nicht von SeaDrive geladen werden:\n\n",
+                report->full_path, "\n\n", detail,
+                "\n\nIst SeaDrive bzw. der Server erreichbar?", NULL);
+        g_object_unref(parent);
+    }
+
+    g_weak_ref_clear(&report->parent);
+    g_free(report->full_path);
+    g_free(report->message);
+    g_free(report);
+
+    return G_SOURCE_REMOVE;
+}
+
+//Fehlschlag im Hintergrundthread an den Hauptthread melden (Dialog)
+static void hydrate_report_error(HydrateThreadData *td, gchar const *message)
+{
+    HydrateReport *report = g_new0(HydrateReport, 1);
+    gpointer parent = g_weak_ref_get(&td->parent);
+
+    report->full_path = g_strdup(td->full_path);
+    report->message = g_strdup(message ? message : "unbekannter Fehler");
+    g_weak_ref_init(&report->parent, parent);
+    if (parent)
+        g_object_unref(parent);
+
+    g_idle_add(hydrate_report_idle, report);
+}
 
 static gpointer hydrate_thread_func(gpointer data)
 {
@@ -1030,6 +1082,15 @@ static gpointer hydrate_thread_func(gpointer data)
          * einfach mitgeloggt. */
         LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
                 td->full_path, error ? error->message : "?");
+
+        /* vom Nutzer abgebrochen? Dann keine Fehlermeldung */
+        g_mutex_lock(&g_hydrating_mutex);
+        entry = g_hash_table_lookup(g_hydrating_paths, td->full_path);
+        pre_cancelled = entry && entry->cancel_requested;
+        g_mutex_unlock(&g_hydrating_mutex);
+
+        if (td->notify && !pre_cancelled)
+            hydrate_report_error(td, error ? error->message : NULL);
         g_clear_error(&error);
     }
 
@@ -1038,6 +1099,7 @@ static gpointer hydrate_thread_func(gpointer data)
             thread_handle_dup via hydrating_entry_free(), falls gesetzt */
     g_mutex_unlock(&g_hydrating_mutex);
 
+    g_weak_ref_clear(&td->parent);
     g_free(td->full_path);
     g_free(td);
     return NULL;
@@ -1057,7 +1119,8 @@ static gpointer hydrate_thread_func(gpointer data)
  * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
  * i.d.R. noch läuft.
  */
-void sond_seadrive_hydrate_async(const gchar *full_path)
+void sond_seadrive_hydrate_async_notify(const gchar *full_path,
+        GtkWindow *parent)
 {
     HydrateThreadData *td = NULL;
     GThread *thread = NULL;
@@ -1078,6 +1141,8 @@ void sond_seadrive_hydrate_async(const gchar *full_path)
 
     td = g_new0(HydrateThreadData, 1);
     td->full_path = g_strdup(full_path);
+    td->notify = (parent != NULL);
+    g_weak_ref_init(&td->parent, parent);
 
     thread = g_thread_new("seadrive-hydrate", hydrate_thread_func, td);
     if (!thread) {
@@ -1087,11 +1152,17 @@ void sond_seadrive_hydrate_async(const gchar *full_path)
         g_mutex_lock(&g_hydrating_mutex);
         g_hash_table_remove(g_hydrating_paths, td->full_path);
         g_mutex_unlock(&g_hydrating_mutex);
+        g_weak_ref_clear(&td->parent);
         g_free(td->full_path);
         g_free(td);
         return;
     }
     g_thread_unref(thread); /* fire-and-forget, kein g_thread_join() */
+}
+
+void sond_seadrive_hydrate_async(const gchar *full_path)
+{
+    sond_seadrive_hydrate_async_notify(full_path, NULL);
 }
 
 /*
@@ -1563,8 +1634,8 @@ gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
 
     if (pending->len > 0) {
         for (i = 0; i < pending->len; i++)
-            sond_seadrive_hydrate_async(
-                    (const gchar *) g_ptr_array_index(pending, i));
+            sond_seadrive_hydrate_async_notify(
+                    (const gchar *) g_ptr_array_index(pending, i), parent);
 
         if (any_hydrating)
             sond_seadrive_show_hydrate_progress_dialog_multi(parent, pending);
