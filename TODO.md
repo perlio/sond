@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #242.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #243.
 
 ## Inhalt
 
-Offen: #234
+Offen: #234, #242
 Zurückgestellt: #202, #220, #236, #237, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
@@ -26,10 +26,49 @@ Status: offen (niedrig)
  passende Anwendung) werden nicht gemeldet. Vorschlag:
  g_app_info_launch_default_for_uri() mit g_filename_to_uri(), Endung der
  Temp-Datei auf allen Systemen anhängen, "Öffnen mit" über einen
- GtkAppChooserDialog (GUI-Code, nicht in sond_file_helper.c). Unabhängig
- vom System: die Temp-Datei wird nur bei Fehlschlag von sond_open()
- gelöscht (sond_fileparts.c), bei Erfolg bleibt sie liegen - Aufräumen
- nicht geprüft.
+ GtkAppChooserDialog (GUI-Code, nicht in sond_file_helper.c). Das Aufräumen
+ der Temp-Dateien steht in #242.
+```
+
+### #242 Temp-Dateien aufräumen
+
+Status: offen
+
+```text
+ Zond legt Temp-Dateien an (sond_file_part_write_to_tmp_file(),
+ sond_fileparts.c, Name <g_get_tmp_dir()>/<5-stellige Zufallszahl>[.ext]) und
+ räumt sie nicht verlässlich auf. Befund am 14.10.2026 im Temp-Ordner des
+ Nutzers: 37 Dateien dieser Form (.pdf, .zip, .eml, .bin) seit dem 06.10.2026,
+ zusammen 1,1 GB; die 0-Byte-.bin-Dateien stammen vermutlich von leeren Teilen.
+ Aufrufer:
+ - sond_file_part_open() (sond_fileparts.c): Temp-Datei einer Datei in ZIP/PDF/
+   Mail für die Standardanwendung. Wird nur bei Fehlschlag von sond_open()
+   gelöscht, bei Erfolg nie.
+ - zond_pdf_document_open() (zond_pdf_document.c): Arbeitskopie der PDF für den
+   Viewer; wird in finalize entfernt (nicht, wenn der Prozess beendet oder
+   abgestürzt ist, z.B. im Debugger).
+ - sond_renderer.c: Brücke, wird sofort wieder gelöscht (in Ordnung).
+ Zusätzlich: der Name ist nur eine Zufallszahl von 10000 bis 99998. Gleicht eine
+ neue Datei einer noch offenen (Viewer, andere Anwendung), wird deren Inhalt mit
+ "wb" überschrieben; mit jeder liegengebliebenen Datei steigt das Risiko.
+
+ Vorschlag (noch nicht umgesetzt):
+ 1. Eigener Unterordner (<tmp>/zond/ oder g_get_user_cache_dir()/zond/tmp, dort liegt
+    schon der lokale Arbeitspfad der work-DB), Dateinamen eindeutig (pid +
+    Zähler) und möglichst mit dem Originalnamen in einem eigenen Unterordner,
+    damit die Anwendung den richtigen Namen zeigt.
+ 2. Alle angelegten Pfade in einer Liste vormerken. Ein Timer (alle 30-60 s)
+    versucht Einträge zu löschen, die älter als ca. 60 s sind: Eine von einer
+    Anwendung geöffnete Datei lässt sich unter Windows nicht löschen
+    (Sharing-Verletzung), der Versuch scheitert still und wird wiederholt. Beim
+    Beenden ein letzter Versuch, beim Programmstart alles im Ordner löschen, was
+    nicht gesperrt ist (Reste abgestürzter Läufe, auch einer parallelen Instanz).
+ 3. Alternative "auf das Ende der Anwendung warten": ShellExecuteExW mit
+    SEE_MASK_NOCLOSEPROCESS liefert hProcess, ein Thread wartet darauf und löscht
+    danach. Nur Hilfsmittel: hProcess ist NULL oder nur ein kurzlebiger Starter,
+    wenn die Anwendung schon läuft (Word, Acrobat, Browser, Notepad++) oder per
+    DDE/Single-Instance arbeitet; für den Normalfall wäre das Polling in 2.
+    verlässlicher.
 ```
 
 ## Zurückgestellt
