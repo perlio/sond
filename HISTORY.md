@@ -5578,3 +5578,39 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  - MuPDF: fz_match_stext_page_cb liest hinter dem Quad-Array (chapter_num mit
    Index num_quads, stext-search.c); beim nächsten MuPDF-Update prüfen.
 ```
+
+## Atomarität store/work, Phase 1 und Fehlerzweig beim Commit (#236, umgesetzt 02./12.09.2026, geprüft 14.10.2026)
+
+```text
+ Vom Nutzer getestet. Offen bleibt die Index-DB (TODO.md #236).
+ Ausgangslage: store und work sind zwei unabhängige sqlite3-Verbindungen; die
+ Dual-Write-Stellen (viewer_save_dirty_dds(), zond_treeviewfm_before_move()/_after()
+ und _before_delete() bei GMessage-Elementen) schrieben nacheinander in beide.
+ Schlug der zweite Commit oder das Rollback fehl, entstand ein inkonsistenter Zustand.
+ - journal_mode/synchronous werden vor dem Öffnen und vor jeder Dual-Write-Transaktion
+   geprüft (zond_dbase_check_journal_settings(), aus dbase_zond_begin() für beide
+   Dateien); WAL/MEMORY/OFF bzw. synchronous OFF lehnt die Operation mit Meldung ab
+   (sonst fehlt der Super-Journal-Mechanismus für ATTACH-Transaktionen).
+ - work wird beim Öffnen (project_create_dbase_zond()) per ATTACH DATABASE als
+   zweites Schema an die store-Connection gehängt; work behält daneben seine eigene
+   Connection für die ca. 80 Einzel-DB-Funktionen. sqlite3_update_hook() ist nur dort
+   registriert, Dual-Writes lösen den "changed"-Hook nicht aus; die frühere
+   Sicherungs-/Rücksetzungslogik dafür entfiel.
+ - dbase_zond_update_sections()/_update_path()/_update_gmessage_index() (project.c)
+   schreiben schemaqualifiziert in einer Transaktion auf der store-Connection;
+   dbase_zond_begin/_commit/_rollback laufen mit einem einzigen BEGIN/COMMIT/ROLLBACK.
+ - Fehlgeschlagener dbase_zond_commit() in zond_treeviewfm_after() (dual_write-Zweig)
+   beendet das Programm nicht mehr sofort: bei physischer Umbenennung/Verschiebung
+   Revert per sond_rename() mit vertauschten Pfaden; schlägt das fehl (oder gab es keine
+   physische Aktion), schreibt write_commit_failure_report() eine ZOND_FEHLER_<Zeitstempel>.txt
+   ins Projektverzeichnis (alter/neuer Pfad, beide Fehlermeldungen), dann Schleife über
+   project_close() bis es 0 liefert, danach exit(EXIT_FAILURE). project_close() fragt bei
+   fehlgeschlagenem project_save() "Projekt trotzdem ohne Speichern schließen?".
+ - Entscheidungen: Index-DB wird nicht dauerhaft in store/work integriert (Indizierung
+   läuft im Hintergrund-Thread mit eigener Connection; der Index ist ein ableitbares
+   Artefakt mit geringerer Fehlertoleranz-Anforderung). Geprüft und verworfen: store und
+   work auf eine einzige Connection umstellen, da alle ca. 80 zond_dbase_*-Funktionen mit
+   unqualifizierten SQL-Strings arbeiten (stille Fehlrouting-Gefahr), der update_hook
+   nicht mehr zwischen Single- und Dual-Write unterscheiden könnte und die
+   Online-Backup-API zwischen zwei Schemata einer Connection undokumentiert ist.
+```

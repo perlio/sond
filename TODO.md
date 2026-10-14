@@ -14,250 +14,38 @@ Ideen: #167, #169, #205, #231, #232, #233
 
 ### #236 Atomarität store/work, Phase 2
 
-Status: offen (Phase 1 und Punkt 8 umgesetzt)
-
-Phase 1 und Punkt 8 sind umgesetzt, als Kontext des Plans hier belassen.
-
+Status: offen (Phase 1 und Punkt 8 in HISTORY.md)
 
 ```text
- Architektur-Plan: Atomarität store/work bei den Dual-Write-Stellen
- (24.08.2026 aufgesetzt; Phase 1 - Punkte 1.-5. - am 02.09.2026 UMGESETZT,
- s. Doc-Kommentare in project.c bei dbase_zond_begin()/_commit()/
- _rollback() und vor dbase_zond_update_section_schema(); Phase 2 - Punkte
- 6./7., plus die separat notierten Punkte 8./9. - weiterhin OFFEN,
- zurückgestellt. 12.09.2026 richtiggestellt, nachdem im Code verifiziert:
- vorher stand hier fälschlich "insgesamt noch nicht umgesetzt"):
+ Phase 1 (store/work atomar per ATTACH) und der Fehlerzweig beim fehlgeschlagenen
+ Commit sind erledigt (HISTORY.md, "Atomarität store/work", 14.10.2026). Offen
+ ist die Index-DB (index_ctx, .sond_index.db):
 
- Betroffene Stellen (Stand 24.08.2026, ergänzt 02.09.2026, per grep
- verifiziert):
- - viewer_save.c, viewer_save_dirty_dds() (~Zeile 604-647): dbase_zond_begin/
-   commit/rollback um dbase_zond_update_sections() (Seiten löschen/einfügen).
- - zond_treeviewfm.c, zond_treeviewfm_before_move()/_after() (~Zeile 215-369):
-   dbase_zond_begin/commit/rollback um dbase_zond_update_path() und
-   mehrfach dbase_zond_update_gmessage_index() (Datei/Verzeichnis umbenennen/
-   verschieben, inkl. GMessage-Sonderfälle). ZUSÄTZLICH dort eine dritte,
-   unabhängige Transaktion auf index_ctx->db (FTS-Suchindex, eigene
-   sqlite3-Verbindung, eigenes rohes sqlite3_exec("BEGIN/COMMIT/ROLLBACK")),
-   die bislang (Phase 2, s.u.) nicht mit der store/work-Transaktion
-   verklammert ist.
- - zond_treeviewfm.c, zond_treeviewfm_before_delete() (~Zeile 236-260):
-   dual_write dort BEDINGT (nur wenn from_gmessage) - dbase_zond_begin/
-   commit/rollback um dbase_zond_update_gmessage_index() beim Löschen eines
-   Elements aus einer GMessage/E-Mail-Anhangsstruktur (nachfolgende
-   Geschwister-Indizes müssen in beiden DBs neu nummeriert werden). Beim
-   normalen Löschen (nicht aus GMessage) reiner Single-Write auf work,
-   nicht betroffen.
-
- Problem (Ausgangslage vor Phase 1, für Phase 2 - index_ctx - unverändert
- relevant): store und work sind zwei unabhängige sqlite3-Verbindungen; die
- obigen Stellen schrieben sequenziell in beide (dbase_zond_begin/commit/
- rollback, project.c). Schlägt der zweite Commit nach erfolgreichem ersten
- fehl, oder das Rollback selbst, entsteht potenziell ein inkonsistenter
- Zustand zwischen store und work - keine echte Atomarität über beide
- Dateien. Für index_ctx (separate dritte Transaktion, s.o.) besteht dieses
- Problem unverändert fort, bis Phase 2 (6./7.) umgesetzt ist.
-
- Plan (abschichtbar in zwei Phasen, s. Begründung in 6.b unten,
- Frage/Antwort 03.09.2026):
-
- Phase 1 - Punkte 1.-5.: store/work atomar machen, unabhängig von
- index_ctx, in sich abgeschlossen umsetzbar. UMGESETZT 02.09.2026.
- Phase 2 - Punkte 6./7.: index_ctx-Anbindung (Entscheidung s.u.), kann
- zeitlich beliebig später erfolgen, ohne Phase 1 nochmal anzufassen. OFFEN.
-
- Geprüfte und verworfene Alternative (03.09.2026): komplett auf EINE
- Connection für store+work umstellen (work als "main", store nur noch
- als angehängtes Schema, oder umgekehrt), statt wie umgesetzt work's
- eigene Connection für die ~80 Einzel-DB-Funktionen unangetastet zu
- lassen und nur für die paar Dual-Use-Funktionen zusätzlich anzuhängen.
- Verworfen, aus mehreren Gründen:
- - Es sind nicht nur die 3 _update-Funktionen (Punkt 3), die beide DBs
-   brauchen - mind. 3 weitere Stellen fragen lesend BEIDE Schemata
-   unabhängig voneinander ab, mit unterschiedlicher Behandlung je
-   nachdem wo der Treffer liegt: zond_treeviewfm.c Zeile 159/180 (vor
-   Löschen: erst work, dann store geprüft, bei Treffer in store eigene
-   Fehlermeldung "bitte zuerst speichern") und seiten.c Zeile 937
-   (seiten_anbindung_int, dieselbe Zwei-Pass-Prüfung). "Die meisten nur
-   auf work umstellen" trifft also nicht zu.
- - Hauptgrund: alle ~80 zond_dbase_*-Funktionen arbeiten mit fest
-   verdrahteten UNQUALIFIZIERTEN SQL-Strings ("... FROM knoten",
-   "UPDATE knoten SET ..."). Bei einer gemeinsamen Connection löst sich
-   ein unqualifizierter Tabellenname immer gegen "main" auf - jede
-   dieser ~80 Funktionen müsste also schemabewusst gemacht werden, nicht
-   nur umbenannt. Risiko: eine übersehene Stelle liest/schreibt still
-   das falsche Schema (stiller Datenfehler statt Absturz).
- - sqlite3_update_hook() ist bewusst nur auf works eigener Connection
-   registriert, damit Dual-Write-Zugriffe (über die an store angehängte
-   work-Verbindung) den "changed"-Hook NICHT auslösen (s. Punkt 2). Bei
-   einer gemeinsamen Connection fiele diese Unterscheidung weg (Hook
-   bekäme für Single- wie Dual-Write auf work gleichermaßen zDb="work"
-   gemeldet) - bräuchte ein zusätzliches Flag zur Unterscheidung. Dieser
-   Punkt war für die Entscheidung ausschlaggebend.
- - zond_dbase_backup() (kompletter Kopiervorgang store<->work bei
-   Öffnen/Speichern, project.c) nutzt die SQLite-Online-Backup-API
-   zwischen zwei unabhängigen Connections. Ob das zwischen zwei Schemata
-   EINER Connection ebenso funktioniert, ist in der offiziellen SQLite-
-   Doku (sqlite.org/backup.html) nicht dokumentiert - weder bestätigt
-   noch ausgeschlossen, wäre also ungetestetes Neuland.
- Ergebnis: technisch nicht unmöglich, aber Umfang und Risiko (praktisch
- alle ~80 Funktionen anfassen, stille Fehlrouting-Gefahr) stehen in
- keinem guten Verhältnis zum Nutzen (eine Connection weniger). Bei der
- umgesetzten, chirurgischen Lösung (work-Connection unangetastet, ATTACH
- nur für die Dual-Use-Funktionen) geblieben.
-
- Punkte 1.-5. (Phase 1, UMGESETZT 02.09.2026 - Mechanik/Details jetzt in
- den Doc-Kommentaren der genannten Funktionen, nicht mehr hier ausgeführt):
- 1. journal_mode/synchronous-Sicherung vor jedem Öffnen des Projekts UND
-    vor jeder Dual-Write-Transaktion (zond_dbase_check_journal_settings(),
-    aufgerufen aus dbase_zond_begin() für BEIDE Dateien) - lehnt die
-    Operation mit klarer Fehlermeldung ab, wenn journal_mode auf
-    WAL/MEMORY/OFF oder synchronous auf OFF steht (verhindert sonst den
-    für ATTACH-Transaktionen nötigen SQLite-Super-Journal-Mechanismus,
-    s. sqlite.org/atomiccommit.html).
- 2. work wird beim Öffnen des Projekts (project_create_dbase_zond()) per
-    "ATTACH DATABASE ... AS work;" zusätzlich als zweites Schema an die
-    store-Connection gehängt - work behält daneben unverändert seine
-    eigene Connection für alle ~80 Einzel-DB-Funktionen. Nebeneffekt:
-    sqlite3_update_hook() (nur auf works eigener Connection registriert)
-    feuert für Dual-Writes über die attachte Verbindung nicht mehr -
-    die frühere Sicherungs-/Rücksetzungs-Logik für "changed" in
-    viewer_save_dirty_dds()/zond_treeviewfm_before_move()/_after() wurde
-    dadurch überflüssig und entfernt.
- 3. dbase_zond_update_sections()/update_path()/update_gmessage_index()
-    (project.c) schreiben jetzt schemaqualifiziert ("work.tabelle" /
-    unqualifiziert für store) auf der store-mit-attachtem-work-
-    Verbindung, innerhalb einer Transaktion - statt zweimal dieselbe
-    Einzel-DB-Funktion auf getrennten ZondDBase-Objekten aufzurufen.
- 4. dbase_zond_begin/commit/rollback (project.c) laufen jetzt nur noch
-    mit einem einzigen BEGIN/COMMIT/ROLLBACK auf der einen
-    store-mit-work-Verbindung, statt einer Schleife über zwei Objekte.
- 5. Die Rollback-Fehlerbehandlung in dbase_zond_rollback() entsprechend
-    vereinfacht (nur noch ein lokaler error_int für den einen
-    Rollback-Aufruf, an ein schon gesetztes *error angehängt statt
-    zwischen zwei error_int gemergt - direktes Durchreichen auf *error
-    bewusst vermieden, s. Kommentar dort, würde sonst den eigentlichen
-    Fehlergrund überschreiben können).
-
- 6. Entscheidung index_ctx (02.09.2026 getroffen, Umsetzung = Phase 2,
-    weiterhin OFFEN, zwei getrennte Fragen):
-
-    a) Index-DB dauerhaft in die Projekt-DB integrieren (store/work)?
-       NEIN. Indizierung (neue Dateien einlesen, Embeddings berechnen)
-       läuft auf einem eigenen Hintergrund-Thread (headerbar.c Zeile 228,
-       g_thread_new("ocr-doc", do_index_thread, ...)) mit eigener
-       SQLite-Connection - eine dauerhafte Verschmelzung mit store/work
-       würde diese Trennung aufbrechen. Außerdem ist der Index ein
-       abgeleitetes Artefakt (kann im Zweifel neu aufgebaut werden),
-       anders als store/work (Primärdaten) - eine geringere
-       Fehlertoleranz-Anforderung, die durch Verschmelzung verloren ginge
-       (aktuell lässt z.B. ein fehlendes Embedding-Modell die Indizierung
-       bewusst nicht scheitern, s. sond_index_ctx_new()).
-
-    b) index_ctx NUR für die kurze Dual-Write-Transaktion (Move/Delete-
-       Coverage-Invalidierung) per ATTACH mit in die store+work-Connection
-       aufnehmen (drittes Schema), ansonsten bleibt index_ctx's eigene
-       Connection für den Hintergrund-Thread unangetastet? JA, und zwar
-       als dynamisches ATTACH/DETACH lokal in
-       zond_treeviewfm_before_move()/_before_delete() (ATTACH unmittelbar
-       vor, DETACH unmittelbar nach der jeweiligen Transaktion) - NICHT
-       als dauerhaftes ATTACH beim Verbindungsaufbau wie work in 2.
-       (index_ctx braucht weiterhin seine eigene dauerhafte Connection für
-       den Hintergrund-Thread, s. 6.a). FTS5-Tabellen sind normale
-       Shadow-Tables und vom Super-Journal-Mechanismus mit abgedeckt, kein
-       grundsätzliches Hindernis.
-       Abschichtbar (Frage/Antwort 03.09.2026): so umgesetzt betrifft
-       6.b) NUR den bestehenden separaten Transaktionsblock auf
-       index_ctx->db in zond_treeviewfm.c (Stand 12.09.2026 unverändert:
-       zwei rohe sqlite3_exec(index_ctx->db, "BEGIN;") in
-       zond_treeviewfm_before_move()/_before_insert()), NICHT
-       dbase_zond_begin/commit/rollback (4.) und NICHT die
-       SQL-Umschreibung in 3. - deshalb konnte store/work-Atomarität
-       (1.-5.) unabhängig als Phase 1 vorgezogen werden. In der
-       Zwischenzeit (Phase 1 umgesetzt, Phase 2 noch offen) bleibt
-       index_ctx wie bisher eine separate, eigene Transaktion neben der
-       jetzt schon atomaren store+work-Transaktion - und das in 7.
-       beschriebene Cross-Thread-Risiko besteht unverändert fort, bis
-       6.b) umgesetzt ist.
-       Voraussetzung für 6.b) selbst: SQLITE_BUSY behandeln - läuft der
-       Hintergrund-Thread gerade eine offene Schreibtransaktion auf
-       index_ctx's eigener Connection, bekommt der ATTACH-Schreibversuch
-       der UI-Transaktion SQLITE_BUSY (zwei getrennte Connections auf
-       dieselbe Datei, siehe 7.) - busy_timeout setzen und/oder Retry,
-       sonst klare Fehlermeldung an den Anwender ("Indizierung läuft,
-       bitte kurz warten").
-
- 7. Separat notiert, unabhängig von 6.b) beim Nachdenken darüber gefunden
-    (weiterhin offenes Risiko, per Grep am 12.09.2026 erneut bestätigt):
-    zond->wctx (inkl. wctx->index_ctx, EINE feste SQLite-Connection) wird
-    beim Start der Indizierung 1:1 an den Hintergrund-Thread durchgereicht
-    (headerbar.c Zeile 222: td->wctx = zond->wctx, kurz vor g_thread_new(...)).
-    Dieselbe Connection wird aber auch synchron von der UI aus benutzt:
-    zond_treeviewfm_before_move()/_before_delete() schreiben per rohem
-    sqlite3_exec(priv->zond->wctx->index_ctx->db, "BEGIN/COMMIT/ROLLBACK")
-    direkt auf dieselbe Connection. D.h. schon HEUTE (unabhängig von 6.b)
-    könnte ein Datei-Move/-Delete während laufender Hintergrund-
-    Indizierung dieselbe Connection von zwei Threads aus ansprechen.
-    SQLite serialisiert Zugriffe auf eine Connection zwar intern (kein
-    Crash), aber falls der Hintergrund-Thread mitten in einer offenen
-    Transaktion mit Lücken zwischen den Statements steckt (Embedding-
-    Berechnung kann pro Chunk dauern), könnte sich das UI-BEGIN/COMMIT in
-    die noch offene Hintergrund-Transaktion einmischen - unklare
-    Reihenfolge, ein ROLLBACK der einen Seite könnte Arbeit der anderen
-    mit wegwerfen. Mit 6.b) umgesetzt würde dieses bestehende Problem
-    tendenziell sogar entschärft (UI-Schreibzugriffe liefen dann über
-    eine eigene, angehängte Connection statt über die geteilte
-    index_ctx-Connection - nur noch normale dateibasierte SQLite-Sperren,
-    klar behandelbar mit busy_timeout, statt unklarem Cross-Thread-
-    Interleaving). Bis 6.b) umgesetzt ist, bleibt es ein offenes Risiko.
-
- 8. UMGESETZT (12.09.2026): zond_treeviewfm.c, zond_treeviewfm_after() -
-    das bisherige exit(EXIT_FAILURE) bei fehlgeschlagenem
-    dbase_zond_commit() (dual_write-Zweig) ist ersetzt durch:
-    - Bei physischer Umbenennung/Verschiebung (pending_move_path_old/
-      _new, gesetzt in before_move()): Revert-Versuch per sond_rename()
-      mit vertauschten Pfaden - deckt sowohl reinen Rename- als auch
-      Move(Kopieren+Löschen)-Fall ab, da das Dateisystem danach gleich
-      aussieht. Erfolg -> normaler Fehlerdialog ("bitte erneut
-      versuchen"), kein exit, normaler Weiterbetrieb.
-    - Schlägt der Revert fehl (oder war keiner möglich, z.B. reine
-      GMessage-Index-Renumerierung ohne physische Aktion): neue Funktion
-      write_commit_failure_report() schreibt eine für den Anwender
-      lesbare Klartextdatei (ZOND_FEHLER_<Zeitstempel>.txt) ins
-      Projektverzeichnis mit altem/neuem Pfad und beiden Fehlermeldungen
-      - einziger dauerhafter Anhaltspunkt, da project_close() die
-      Arbeitskopie am Ende aufräumt. Kritischer Fehlerdialog verweist auf
-      diese Datei.
-    - project_close() wird in einer Schleife aufgerufen, bis sie 0
-      zurückgibt, dann erst exit(EXIT_FAILURE). project_close() selbst
-      wurde dafür erweitert (project.c): schlägt project_save() darin
-      fehl, wird jetzt zusätzlich gefragt "Speichern fehlgeschlagen:
-      <Fehler>. Projekt trotzdem ohne Speichern schließen?" - bei "Ja"
-      wird wie gewohnt weitergemacht (offene PDF-Viewer werden mit
-      Speichern-Abfrage geschlossen usw.), sonst -1 wie bisher. Durch die
-      Schleife hat der Anwender die Chance, ein z.B. nur kurzzeitig
-      nicht erreichbares Netzlaufwerk zwischenzeitlich zu beheben und das
-      Projekt doch noch zu retten, aber keine Möglichkeit, ohne Speichern
-      oder ausdrückliche Bestätigung einfach in den Normalbetrieb
-      zurückzukehren (Nutzervorgabe).
-    Betroffene Dateien: zond_treeviewfm.c (neue Felder
-    pending_move_path_old/_new, neue Funktion
-    write_commit_failure_report(), umgebauter dual_write-Fehlerzweig in
-    zond_treeviewfm_after()), project.c (project_close() um die
-    Rückfrage bei fehlgeschlagenem Speichern erweitert).
-
- 9. Testschritt (nach Umsetzung von Phase 2): gezielt einen Fehler mitten
-    in einer Dual-Write-Operation provozieren (z.B. künstliche
-    Constraint-Verletzung nur im zweiten Statement), prüfen, ob das
-    Rollback wirklich beide Schemata (store und work) zurücksetzt.
-    Zusätzlich (aus 6.b)/7.): gezielt eine Dual-Write-Operation auslösen,
-    während der Hintergrund-Indizierungs-Thread läuft, prüfen, ob
-    SQLITE_BUSY sauber behandelt wird statt eines Absturzes oder stillen
-    Fehlers. Speziell zu Punkt 8 (noch zu testen): Revert-Erfolgsfall
-    (Umbenennen rückgängig, kein exit), Revert-Fehlschlagsfall
-    (Fehlerdatei wird geschrieben, project_close()-Schleife greift), und
-    die neue Rückfrage in project_close() bei fehlgeschlagenem
-    project_save() (inkl. Fall, dass der Anwender zunächst ablehnt und
-    es bei erneuter Gelegenheit doch klappt).
+ 1. Einbindung in die Dual-Write-Transaktion (früher 6.b). zond_treeviewfm_before_move()
+    und _before_delete() (zond_treeviewfm.c) schreiben die Index-DB in einer
+    eigenen Transaktion per rohem sqlite3_exec(index_ctx->db, "BEGIN;" ...), neben der
+    atomaren store+work-Transaktion. Geplant: index_ctx dort lokal per ATTACH
+    unmittelbar vor und DETACH unmittelbar nach der Transaktion als drittes Schema
+    in die store+work-Connection aufnehmen (kein dauerhaftes ATTACH: der
+    Hintergrund-Thread der Indizierung braucht seine eigene Connection). FTS5-Tabellen
+    sind vom Super-Journal-Mechanismus mit abgedeckt. Voraussetzung: SQLITE_BUSY
+    behandeln (busy_timeout setzen und/oder Retry, sonst Meldung "Indizierung läuft,
+    bitte kurz warten"), denn läuft der Thread gerade in einer Schreibtransaktion,
+    scheitert der ATTACH-Schreibversuch.
+ 2. Dieselbe Index-Verbindung in zwei Threads (bestehendes Risiko, unabhängig von 1.).
+    headerbar.c reicht zond->wctx (mit index_ctx, eine feste Connection) an den
+    Indexier-Thread weiter (td->wctx = zond->wctx). Dieselbe Connection benutzt die UI
+    synchron mit rohem BEGIN/COMMIT/ROLLBACK: zond_treeviewfm.c (Move, Delete) und
+    headerbar.c (Index löschen, index_ctx->db). Ein Move/Delete während der Indizierung
+    kann sich in deren offene Transaktion mischen, ein ROLLBACK der einen Seite
+    Arbeit der anderen wegwerfen. Auflösung offen: ein Mutex um die Index-Transaktionen
+    (einfacher, genügt gegen das Interleaving) oder die eigene Connection per 1.
+    Entscheidung steht aus.
+ 3. Test nach der Umsetzung: einen Fehler mitten in einer Dual-Write-Operation
+    provozieren (z.B. künstliche Constraint-Verletzung nur im zweiten Statement) und
+    prüfen, dass das Rollback store, work (und die Index-DB) zurücksetzt; eine
+    Dual-Write-Operation während der laufenden Indizierung auslösen und prüfen, dass
+    SQLITE_BUSY sauber behandelt wird (kein Absturz, kein stiller Fehler).
 ```
 
 ### #234 sond_open() unter Nicht-Windows
