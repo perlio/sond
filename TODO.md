@@ -38,13 +38,20 @@ Status: offen (Index-DB eingebunden, Rest in HISTORY.md)
     sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
     ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
     Indexlauf): Mutex um die Index-Transaktionen.
- 2. Noch nicht gezielt getestet (die normalen Abläufe laufen): Fehlerfälle der
-    Dual-Write-Transaktion - einen Fehler mitten in der Operation provozieren (z.B.
-    Speichern einer PDF scheitern lassen) und prüfen, dass store, work und Index
-    zurückgerollt werden; Move/Delete während einer Chat-Suche (SQLITE_BUSY nach
-    bis zu 5 s, kein Absturz); Prozess mitten in der Transaktion beenden und
-    prüfen, dass nach dem Neustart kein halb übernommener Zustand in den drei
-    Dateien bleibt (Super-Journal).
+ 2. Fehlerfälle der Dual-Write-Transaktion. Auf Datenbank-Ebene geprüft
+    (14.10.2026, Skript mit drei SQLite-Dateien, store mit angehängtem work und idx,
+    Python-SQLite 3.53.4, lokales NTFS): Lesesperre auf idx beim Commit und Schreibsperre
+    auf idx führen zu "database is locked" und einem Rollback aller drei Dateien,
+    die Wiederholung klappt; 68 hart beendete Prozesse mitten in Commits ergaben nie
+    einen inkonsistenten Stand (liegengebliebene *-journal- und store.db-mj*-Dateien sind
+    harmlos). Nicht abgedeckt: SeaDrive-Laufwerk, die in zond eingebaute SQLite-Bibliothek,
+    Stromausfall. Im Programm getestet (Nutzer, 14.10.2026): Speichern einer
+    indizierten PDF mit gelöschter Seite scheitern lassen - Fehlermeldung, die
+    Volltextsuche findet den Text der gelöschten Seite weiterhin (Index
+    zurückgerollt). Noch zu testen:
+    Sperre auf der Index-Datei (sqlite3 .sond_index.db, BEGIN IMMEDIATE; offen
+    lassen), indizierte Datei verschieben: nach ca. 5 s Fehlermeldung, Datei nicht
+    verschoben; nach ROLLBACK; klappt die Verschiebung.
 ```
 
 ### #234 sond_open() unter Nicht-Windows
