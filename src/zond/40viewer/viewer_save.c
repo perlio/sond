@@ -140,8 +140,8 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
  * inserted-Flags werden gelöscht/page_akt neu gesetzt) genau das ist,
  * was anbindung_korrigieren() auswertet - danach sind die Flags weg. */
 #ifndef VIEWER
-static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd) {
-	SondIndexCtx *index_ctx = NULL;
+static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd,
+		SondIndexCtx *index_ctx) {
 	gchar *filename = NULL;
 	GArray *arr_journal = NULL;
 	GArray *pages = NULL;
@@ -149,10 +149,9 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 	GArray *old_nrs = NULL;
 	GArray *new_nrs = NULL;
 
-	if (!pdfv->zond->wctx || !pdfv->zond->wctx->index_ctx)
+	if (!index_ctx)
 		return;
 
-	index_ctx = pdfv->zond->wctx->index_ctx;
 	filename = sond_file_part_get_filepart(
 			SOND_FILE_PART(zond_pdf_document_get_sfp_pdf(
 					dd->zpdfd_part->zond_pdf_document)));
@@ -827,10 +826,32 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			return -1;
 
 #ifndef VIEWER
+		SondIndexCtx index_tx = { 0 };
+		gboolean index_tx_active = FALSE;
+
+		//Index-DB als Schema idx anhängen (vor der Transaktion): ihre
+		//Änderungen liegen dann im selben Commit wie store/work und werden
+		//mit zurückgerollt, wenn das Speichern scheitert
+		if (pdfv->zond->wctx && pdfv->zond->wctx->index_ctx) {
+			rc = dbase_zond_attach_index(pdfv->zond->dbase_zond,
+					pdfv->zond->wctx->index_ctx->db_path, error);
+			if (rc) {
+				g_prefix_error(error, "%s\n", __func__);
+				pdf_drop_document(ctx, doc);
+
+				return rc;
+			}
+			dbase_zond_index_ctx(pdfv->zond->dbase_zond, &index_tx,
+					pdfv->zond->wctx->index_ctx);
+			index_tx_active = TRUE;
+		}
+
 		rc = dbase_zond_begin(pdfv->zond->dbase_zond, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 			pdf_drop_document(ctx, doc);
+			if (index_tx_active)
+				dbase_zond_detach_index(pdfv->zond->dbase_zond);
 
 			return rc;
 		}
@@ -838,7 +859,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		//FTS-Index für diese Datei auf den nach dem Speichern gültigen
 		//Stand bringen (Seiten verwerfen/umnummerieren) - muss vor dem
 		//physischen Speichern laufen, s. Kommentar an der Funktion.
-		viewer_update_index_for_save(pdfv, dd);
+		viewer_update_index_for_save(pdfv, dd,
+				index_tx_active ? &index_tx : NULL);
 
 		//Anbindungen in db anpassen
 		rc = dbase_zond_update_sections(pdfv->zond->dbase_zond, dd, error);
@@ -848,6 +870,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			pdf_drop_document(ctx, doc);
 
 			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
+			if (index_tx_active)
+				dbase_zond_detach_index(pdfv->zond->dbase_zond);
 
 			return -1;
 		}
@@ -864,6 +888,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			g_prefix_error(error, "%s\n", __func__);
 #ifndef VIEWER
 			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
+			if (index_tx_active)
+				dbase_zond_detach_index(pdfv->zond->dbase_zond);
 #endif //VIEWER
 
 			return -1;
@@ -871,6 +897,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 #ifndef VIEWER
 		rc = dbase_zond_commit(pdfv->zond->dbase_zond, error);
+		if (index_tx_active)
+			dbase_zond_detach_index(pdfv->zond->dbase_zond);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 

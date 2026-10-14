@@ -559,6 +559,15 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
     return ctx;
 }
 
+void sond_index_ctx_init_attached(SondIndexCtx *out, SondIndexCtx const *src,
+		sqlite3 *db) {
+    *out = *src;
+    out->db = db;
+    out->stmt_insert_chunk = NULL;
+
+    return;
+}
+
 gboolean sond_index_ctx_has_embeddings(SondIndexCtx *ctx) {
 #ifdef SOND_WITH_EMBEDDINGS
     return ctx && ctx->llama_ctx && ctx->n_embd > 0;

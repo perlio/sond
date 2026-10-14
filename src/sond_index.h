@@ -95,6 +95,21 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
 void sond_index_ctx_free(SondIndexCtx *ctx);
 
 /**
+ * sond_index_ctx_init_attached:
+ * @out: (out): Kontext, der auf der Connection @db arbeitet
+ * @src: Index-Kontext mit eigener Connection
+ * @db: Connection, an die die Index-DB als Schema "idx" gehängt ist
+ *
+ * Kopie von @src für Schreibzugriffe innerhalb einer Dual-Write-Transaktion
+ * (dbase_zond_attach_index(), project.c). Die Index-Funktionen laufen damit
+ * unverändert, aber über @db. Nicht mit sond_index_ctx_free() freigeben; nur
+ * für die Funktionen benutzen, die ausschließlich ->db brauchen (Löschen,
+ * Umbenennen, Coverage, Seitenzahlen), nicht fürs Einfügen von Chunks.
+ */
+void sond_index_ctx_init_attached(SondIndexCtx *out, SondIndexCtx const *src,
+		sqlite3 *db);
+
+/**
  * sond_index_ctx_embedding_model_changed:
  * @ctx: SondIndexCtx
  *

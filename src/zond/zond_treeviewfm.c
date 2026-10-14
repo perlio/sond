@@ -81,9 +81,50 @@ typedef struct {
 	 * Aktion ändern - nach Erfolg wird ihre Struktur in der Index-DB neu
 	 * eingelesen. Eigene Refs. */
 	GPtrArray *pending_structure;
+
+	/* Index-DB innerhalb der Dual-Write-Transaktion: als Schema idx an die
+	 * store-Connection gehängt (index_tx_begin()), index_tx ist eine Kopie
+	 * des Index-Kontexts, die über diese Connection arbeitet. So gehören die
+	 * Schreibzugriffe auf die Index-DB zum selben Commit wie store und work. */
+	SondIndexCtx index_tx;
+	gboolean index_tx_active;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
+
+//Index-DB als Schema idx anhängen; VOR dbase_zond_begin(). Ohne Index-Kontext
+//ist nichts zu tun.
+static gint index_tx_begin(ZondTreeviewFMPrivate *priv, GError **error) {
+	if (!priv->zond->wctx || !priv->zond->wctx->index_ctx
+			|| priv->index_tx_active)
+		return 0;
+
+	if (dbase_zond_attach_index(priv->zond->dbase_zond,
+			priv->zond->wctx->index_ctx->db_path, error))
+		return -1;
+
+	dbase_zond_index_ctx(priv->zond->dbase_zond, &priv->index_tx,
+			priv->zond->wctx->index_ctx);
+	priv->index_tx_active = TRUE;
+
+	return 0;
+}
+
+//NACH commit/rollback (auch auf allen Fehlerwegen vor dem "after")
+static void index_tx_end(ZondTreeviewFMPrivate *priv) {
+	if (!priv->index_tx_active)
+		return;
+
+	dbase_zond_detach_index(priv->zond->dbase_zond);
+	priv->index_tx_active = FALSE;
+
+	return;
+}
+
+//Index-Kontext für Schreibzugriffe in der Transaktion; NULL ohne Index
+static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
+	return priv->index_tx_active ? &priv->index_tx : NULL;
+}
 
 static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
 	gchar* filepart = NULL;
@@ -173,9 +214,9 @@ static gint gmessage_index_renumber(ZondTreeviewFMPrivate *priv,
 	g_autofree gchar *mail = NULL;
 	GError *idx_err = NULL;
 
-	if (!priv->zond->wctx || !priv->zond->wctx->index_ctx)
+	index_ctx = index_tx(priv);
+	if (!index_ctx)
 		return 0;
-	index_ctx = priv->zond->wctx->index_ctx;
 
 	if (!sond_index_ctx_update_gmessage_index(index_ctx, prefix, index, into,
 			&idx_err))
@@ -337,8 +378,8 @@ static gint emb_sibling_apply(ZondTreeviewFMPrivate *priv, GError **error) {
 				error))
 			return -1;
 
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx &&
-				!sond_index_ctx_rename_file(priv->zond->wctx->index_ctx,
+		if (index_tx(priv) &&
+				!sond_index_ctx_rename_file(index_tx(priv),
 						path_old, path_new, &idx_err)) {
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_rename_file: %s", __func__,
@@ -465,18 +506,35 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (from_gmessage)
 		prefix = g_strndup(path, strlen(path) - strlen(strrchr(path, '/') + 1));
 
-	/* Index-DB-Transaktion öffnen (vor zond-DB, damit both oder neither) */
-	if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section) {
+	/* Anhang einer PDF: ggf. Adressen der übrigen Anhänge nachführen
+	 * (emb_sibling_apply() unten) - schreibt wie bei GMessage in beide
+	 * Datenbanken */
+	dual = from_gmessage || is_pdf_emb(stvfm_item) || !section;
+
+	/* Index-DB als Schema idx anhängen (vor der Transaktion). Ihre
+	 * Schreibzugriffe unten laufen in derselben Transaktion wie store/work. */
+	if (!section && index_tx_begin(priv, error))
+		return -1;
+
+	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
+	*ctx = GINT_TO_POINTER(
+			(dual ? 1 : 0) |
+			(priv->zond->dbase_zond->changed ? 2 : 0));
+
+	rc = dual ?
+			dbase_zond_begin(priv->zond->dbase_zond, error) :
+			zond_dbase_begin(priv->zond->dbase_zond->zond_dbase_work, error);
+	if (rc) {
+		index_tx_end(priv);
+		return -1;
+	}
+
+	if (index_tx(priv)) {
 		GError *idx_err = NULL;
-		if (sqlite3_exec(priv->zond->wctx->index_ctx->db, "BEGIN;",
-				NULL, NULL, NULL) != SQLITE_OK) {
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: Index-DB BEGIN fehlgeschlagen: %s", __func__,
-					sqlite3_errmsg(priv->zond->wctx->index_ctx->db));
-			return -1;
-		}
-		if (!sond_index_ctx_clear_file(priv->zond->wctx->index_ctx, path, &idx_err)) {
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+
+		if (!sond_index_ctx_clear_file(index_tx(priv), path, &idx_err)) {
+			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+			index_tx_end(priv);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_clear_file: %s", __func__,
 					idx_err ? idx_err->message : "?");
@@ -492,34 +550,15 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		 * abgedeckt" gilt. Ein eventuell abdeckender VORFAHRE wird bewusst
 		 * NICHT angetastet - reines Löschen von Inhalt kann dessen Aussage
 		 * nicht verletzen, s. Kommentar bei sond_index_ctx_coverage_clear(). */
-		if (!sond_index_ctx_coverage_clear(priv->zond->wctx->index_ctx,
-				path, &idx_err)) {
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		if (!sond_index_ctx_coverage_clear(index_tx(priv), path, &idx_err)) {
+			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+			index_tx_end(priv);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_coverage_clear: %s", __func__,
 					idx_err ? idx_err->message : "?");
 			g_clear_error(&idx_err);
 			return -1;
 		}
-	}
-
-	/* Anhang einer PDF: ggf. Adressen der übrigen Anhänge nachführen
-	 * (emb_sibling_apply() unten) - schreibt wie bei GMessage in beide
-	 * Datenbanken */
-	dual = from_gmessage || is_pdf_emb(stvfm_item) || !section;
-
-	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
-	*ctx = GINT_TO_POINTER(
-			(dual ? 1 : 0) |
-			(priv->zond->dbase_zond->changed ? 2 : 0));
-
-	rc = dual ?
-			dbase_zond_begin(priv->zond->dbase_zond, error) :
-			zond_dbase_begin(priv->zond->dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-		return -1;
 	}
 
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
@@ -532,8 +571,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
 		if (rc) {
 			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-			if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
-				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			index_tx_end(priv);
 			return -1;
 		}
 	}
@@ -543,8 +581,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			emb_sibling_apply(priv, error)) {
 		emb_sibling_pending_clear(priv);
 		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		index_tx_end(priv);
 		return -1;
 	}
 
@@ -554,8 +591,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			dbase_zond_remove_filepart(priv->zond->dbase_zond, path, error)) {
 		emb_sibling_pending_clear(priv);
 		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		index_tx_end(priv);
 		return -1;
 	}
 
@@ -713,16 +749,19 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
 	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->dbase_zond->changed ? 2 : 0));
 
-	/* Index-DB-Transaktion öffnen und Pfad umbenennen */
-	if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
+	/* Index-DB als Schema idx anhängen (vor der Transaktion) */
+	if (index_tx_begin(ztvfm_priv, error))
+		return -1;
+
+	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
+	if (rc) {
+		index_tx_end(ztvfm_priv);
+		return -1;
+	}
+
+	/* Index-Pfad umbenennen - in derselben Transaktion wie store/work */
+	if (index_tx(ztvfm_priv)) {
 		GError *idx_err = NULL;
-		if (sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "BEGIN;",
-				NULL, NULL, NULL) != SQLITE_OK) {
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: Index-DB BEGIN fehlgeschlagen: %s", __func__,
-					sqlite3_errmsg(ztvfm_priv->zond->wctx->index_ctx->db));
-			return -1;
-		}
 
 		/* Vorsichtsmaßnahme: falls der ZIEL-Pfad schon (direkt oder über
 		 * einen Vorfahren) als abgedeckt gilt, muss das VOR dem Umbenennen
@@ -736,9 +775,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * bleibt derselbe, ein abdeckender Vorfahre (Verzeichnis, PDF) bliebe
 		 * sonst aufgelöst und müsste neu zusammengefasst werden. */
 		if (!rename_in_gmessage && index_to != -1 &&
-				!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
+				!sond_index_ctx_coverage_invalidate(index_tx(ztvfm_priv),
 				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
-			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
+			index_tx_end(ztvfm_priv);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
 					idx_err ? idx_err->message : "?");
@@ -747,9 +787,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		}
 
 		if (!rename_in_gmessage &&
-				!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
+				!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
 				prefix_old, prefix_new, &idx_err)) {
-			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
+			index_tx_end(ztvfm_priv);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_rename_file: %s", __func__,
 					idx_err ? idx_err->message : "?");
@@ -758,21 +799,13 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		}
 	}
 
-	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
-	if (rc) {
-		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-		return -1;
-	}
-
 	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
 		//-> umbenennen
 	rc = rename_in_gmessage ? 0 :
 			dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
 		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
-		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		index_tx_end(ztvfm_priv);
 		return -1;
 	}
 
@@ -792,8 +825,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			index_tx_end(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -815,8 +847,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 					index_to, TRUE, error);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			index_tx_end(ztvfm_priv);
 			g_free(prefix_gmessage);
 
 			return -1;
@@ -830,10 +861,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 		/* Index-DB: Platzhalter "alpha" (s. rename_file() oben) auf den
 		 * Zielindex (sonst bliebe der Teil dort dauerhaft "x.eml//alpha"). */
-		if (!rc && ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
+		if (!rc && index_tx(ztvfm_priv)) {
 			GError *idx_err = NULL;
 
-			if (!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
+			if (!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
 					prefix_new, prefix_gmessage, &idx_err)) {
 				if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 						"%s: sond_index_ctx_rename_file: %s", __func__,
@@ -845,8 +876,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			index_tx_end(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -865,8 +895,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 				emb_sibling_apply(ztvfm_priv, error)) {
 			emb_sibling_pending_clear(ztvfm_priv);
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
-				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			index_tx_end(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -970,14 +999,39 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 	if (suc) {
 		gint rc = 0;
 
+		/* Löschung war erfolgreich: falls dabei ein Pfad zur
+		 * Coverage-Nachprüfung vorgemerkt wurde (s. pending_delete_path),
+		 * jetzt - und nur jetzt, weil der Knoten physisch weg ist und ein
+		 * echtes Verzeichnis-Listing ihn nicht mehr sieht - prüfen, ob das
+		 * Elternverzeichnis dadurch vollständig abgedeckt ist (die gerade
+		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Sonst
+		 * bliebe ein Ordner nach Löschen der zuvor hineinkopierten, nicht
+		 * indizierten Datei dauerhaft "orange" (gemischt), obwohl wieder
+		 * alle verbliebenen Geschwister einzeln abgedeckt sind - es fehlte
+		 * lediglich das erneute Zusammenfassen (Coalescing) zu einem
+		 * Ordner-Eintrag. Vor dem Commit, damit der evtl. neu gesetzte
+		 * coverage-Eintrag Teil derselben Transaktion ist wie das Löschen
+		 * selbst. */
+		if (priv->pending_delete_path && index_tx(priv)) {
+			GError *collapse_error = NULL;
+
+			if (!sond_index_ctx_coverage_try_collapse(
+					index_tx(priv), priv->pending_delete_path,
+					priv->zond->project_dir, &collapse_error)) {
+				LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s",
+						__func__, priv->pending_delete_path,
+						collapse_error ? collapse_error->message : "?");
+				g_clear_error(&collapse_error);
+			}
+		}
+
 		if (dual_write) {
 			rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 			if (rc) {
 				gboolean reverted = FALSE;
 				GError *error_revert = NULL;
 
-				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+				index_tx_end(priv);
 
 				/* Physische Verschiebung rückgängig machen, wenn möglich
 				 * (s. Kommentar bei pending_move_is_physical) - vertauschte
@@ -1041,42 +1095,13 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		} else {
 			rc = zond_dbase_commit(priv->zond->dbase_zond->zond_dbase_work, &error_int);
 			if (rc) {
-				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+				index_tx_end(priv);
 				display_message(priv->zond->app_window,
 						"Fehler beim Speichern:\n\n", error_int->message, NULL);
 				g_clear_error(&error_int);
 			}
 		}
-		/* Löschung war erfolgreich: falls dabei ein Pfad zur
-		 * Coverage-Nachprüfung vorgemerkt wurde (s. pending_delete_path),
-		 * jetzt - und nur jetzt, weil der Knoten physisch weg ist und ein
-		 * echtes Verzeichnis-Listing ihn nicht mehr sieht - prüfen, ob das
-		 * Elternverzeichnis dadurch vollständig abgedeckt ist (die gerade
-		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Sonst
-		 * bliebe ein Ordner nach Löschen der zuvor hineinkopierten, nicht
-		 * indizierten Datei dauerhaft "orange" (gemischt), obwohl wieder
-		 * alle verbliebenen Geschwister einzeln abgedeckt sind - es fehlte
-		 * lediglich das erneute Zusammenfassen (Coalescing) zu einem
-		 * Ordner-Eintrag. Vor dem COMMIT, damit der evtl. neu gesetzte
-		 * coverage-Eintrag Teil derselben Transaktion ist wie das Löschen
-		 * selbst. */
-		if (priv->pending_delete_path && priv->zond->wctx &&
-				priv->zond->wctx->index_ctx) {
-			GError *collapse_error = NULL;
-
-			if (!sond_index_ctx_coverage_try_collapse(
-					priv->zond->wctx->index_ctx, priv->pending_delete_path,
-					priv->zond->project_dir, &collapse_error)) {
-				LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s",
-						__func__, priv->pending_delete_path,
-						collapse_error ? collapse_error->message : "?");
-				g_clear_error(&collapse_error);
-			}
-		}
-
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+		index_tx_end(priv);
 
 		//geöffnete Anhänge auf ihre nachgeführte Adresse setzen
 		emb_sibling_adjust_opened(priv);
@@ -1090,8 +1115,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		else
 			zond_dbase_rollback(priv->zond->dbase_zond->zond_dbase_work, &error_int);
 
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+		index_tx_end(priv);
 	}
 
 	if (dual_write)

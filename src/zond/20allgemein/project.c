@@ -130,6 +130,136 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	return 0;
 }
 
+/* Journal-Modus der angehängten Index-DB: wie bei store/work Voraussetzung
+ * für die atomare Mehrdatei-Transaktion (s. zond_dbase_check_journal_
+ * settings()). */
+static gint dbase_zond_check_index_journal(sqlite3 *db, GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	g_autofree gchar *journal_mode = NULL;
+
+	if (sqlite3_prepare_v2(db, "PRAGMA idx.journal_mode;", -1, &stmt, NULL)
+			!= SQLITE_OK) {
+		g_set_error(error, SOND_ERROR, 0, "%s: PRAGMA idx.journal_mode: %s",
+				__func__, sqlite3_errmsg(db));
+		return -1;
+	}
+	if (sqlite3_step(stmt) == SQLITE_ROW)
+		journal_mode = g_strdup((gchar const*) sqlite3_column_text(stmt, 0));
+	sqlite3_finalize(stmt);
+
+	if (!journal_mode || (g_ascii_strcasecmp(journal_mode, "delete")
+			&& g_ascii_strcasecmp(journal_mode, "truncate")
+			&& g_ascii_strcasecmp(journal_mode, "persist"))) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Die Index-Datenbank wird von einem anderen Programm "
+				"verwendet (journal_mode)");
+		return -1;
+	}
+
+	return 0;
+}
+
+/* Die Index-Funktionen (sond_index.c) arbeiten mit unqualifizierten
+ * Tabellennamen und laufen über die store-Connection gegen idx, weil SQLite
+ * unqualifizierte Namen in allen angehängten Datenbanken sucht. Das geht
+ * nur, solange kein Tabellenname in idx auch in main oder work vorkommt -
+ * sonst würde still in die falsche Datenbank geschrieben. */
+static gint dbase_zond_check_index_names(sqlite3 *db, GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	g_autofree gchar *name = NULL;
+
+	if (sqlite3_prepare_v2(db,
+			"SELECT name FROM idx.sqlite_master WHERE type='table' "
+			"AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
+			"AND (name IN (SELECT name FROM main.sqlite_master) "
+			"OR name IN (SELECT name FROM work.sqlite_master)) LIMIT 1;",
+			-1, &stmt, NULL) != SQLITE_OK) {
+		g_set_error(error, SOND_ERROR, 0, "%s: %s", __func__,
+				sqlite3_errmsg(db));
+		return -1;
+	}
+	if (sqlite3_step(stmt) == SQLITE_ROW)
+		name = g_strdup((gchar const*) sqlite3_column_text(stmt, 0));
+	sqlite3_finalize(stmt);
+
+	if (name) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Tabelle '%s' kommt in der Projekt- und der Index-Datenbank "
+				"vor", name);
+		return -1;
+	}
+
+	return 0;
+}
+
+void dbase_zond_detach_index(DBaseZond* dbase_zond) {
+	sqlite3 *db = NULL;
+	gchar *errmsg = NULL;
+
+	if (!dbase_zond->index_attached)
+		return;
+
+	db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+	if (sqlite3_exec(db, "DETACH DATABASE idx;", NULL, NULL, &errmsg)
+			!= SQLITE_OK) {
+		LOG_WARN("%s: DETACH idx: %s", __func__, errmsg ? errmsg : "?");
+		sqlite3_free(errmsg);
+
+		return; //bleibt angehängt, der nächste attach nutzt es weiter
+	}
+
+	dbase_zond->index_attached = FALSE;
+
+	return;
+}
+
+void dbase_zond_index_ctx(DBaseZond* dbase_zond, SondIndexCtx* out,
+		SondIndexCtx const* src) {
+	sond_index_ctx_init_attached(out, src,
+			zond_dbase_get_dbase(dbase_zond->zond_dbase_store));
+
+	return;
+}
+
+gint dbase_zond_attach_index(DBaseZond* dbase_zond,
+		gchar const* index_db_path, GError** error) {
+	sqlite3 *db = NULL;
+	gchar *sql = NULL;
+	gchar *errmsg = NULL;
+	gint rc = 0;
+
+	if (dbase_zond->index_attached)
+		return 0;
+
+	db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+
+	//läuft die Index-Verbindung gerade (Lesen im Chat-Thread), kurz warten
+	sqlite3_busy_timeout(db, 5000);
+
+	sql = sqlite3_mprintf("ATTACH DATABASE %Q AS idx;", index_db_path);
+	rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg);
+	sqlite3_free(sql);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, g_quark_from_static_string("SQLITE3"), rc,
+				"%s: ATTACH idx: %s", __func__, errmsg ? errmsg : "?");
+		sqlite3_free(errmsg);
+
+		return -1;
+	}
+	dbase_zond->index_attached = TRUE;
+
+	sqlite3_exec(db, "PRAGMA idx.synchronous=FULL;", NULL, NULL, NULL);
+
+	if (dbase_zond_check_index_journal(db, error)
+			|| dbase_zond_check_index_names(db, error)) {
+		dbase_zond_detach_index(dbase_zond);
+
+		return -1;
+	}
+
+	return 0;
+}
+
 // ============================================================================
 // Database Update Functions
 // ============================================================================
