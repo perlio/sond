@@ -6,26 +6,13 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #243.
 
 ## Inhalt
 
-Offen: #234
-Zurückgestellt: #202, #220, #236, #237, #238, #239, #240, #241
+Offen: -
+Zurückgestellt: #202, #220, #234, #236, #237, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
 
-### #234 sond_open() unter Nicht-Windows
-
-Status: offen (niedrig)
-
-```text
- #234 sond_open() (sond_file_helper.c) unter Nicht-Windows (niedrig):
- Zweig ruft xdg-open per g_spawn_async auf. Lücken: open_with wird
- ignoriert (Windows: "openas"); kein macOS ("open" statt xdg-open); Fehler
- von xdg-open selbst (keine passende Anwendung) werden nicht gemeldet.
- Vorschlag: g_app_info_launch_default_for_uri() mit g_filename_to_uri(),
- "Öffnen mit" über einen GtkAppChooserDialog (GUI-Code, nicht in
- sond_file_helper.c). Die Endung der Temp-Dateien auf allen Systemen und
- das Aufräumen sind erledigt (HISTORY.md, "Temp-Dateien aufräumen", #242).
-```
+Zur Zeit keine offenen Punkte.
 
 ## Zurückgestellt
 
@@ -55,6 +42,21 @@ sond_ocr.c, zond_indexsuche.c, headerbar.c (Index), zond_treeview.c (Auswahl).
  einen Thread mit Info-Fenster und Abbrechen (wie beim Indizieren) legen; der
  Thread benutzt index_ctx->db, das Indizieren ist währenddessen gesperrt.
  Bis dahin zeigt die Oberfläche beim Löschen einen Wartecursor (wait_cursor_set(), misc.c).
+```
+
+### #234 sond_open() unter Nicht-Windows
+
+Status: zurückgestellt (erst nötig, wenn zond unter Linux oder macOS laufen soll)
+
+```text
+ #234 sond_open() (sond_file_helper.c) unter Nicht-Windows (niedrig):
+ Zweig ruft xdg-open per g_spawn_async auf. Lücken: open_with wird
+ ignoriert (Windows: "openas"); kein macOS ("open" statt xdg-open); Fehler
+ von xdg-open selbst (keine passende Anwendung) werden nicht gemeldet.
+ Vorschlag: g_app_info_launch_default_for_uri() mit g_filename_to_uri(),
+ "Öffnen mit" über einen GtkAppChooserDialog (GUI-Code, nicht in
+ sond_file_helper.c). Die Endung der Temp-Dateien auf allen Systemen und
+ das Aufräumen sind erledigt (HISTORY.md, "Temp-Dateien aufräumen", #242).
 ```
 
 ### #236 Atomarität store/work: Index-Verbindung in mehreren Threads
