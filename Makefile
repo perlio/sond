@@ -41,7 +41,7 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_seadrive.c \
 	$(SRC_DIRS)/sond_icon_util.c \
-	$(SRC_DIRS)/sond_password.c
+	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)
 LDFLAGS += $(shell pkg-config --libs libmagic libxml-2.0 gtk+-3.0 sqlite3 libcurl tesseract \
@@ -57,7 +57,7 @@ SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_renderer.c\
 	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
-	$(SRC_DIRS)/sond_password.c
+	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += -DVIEWER $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
 	libxml-2.0)
 LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip \

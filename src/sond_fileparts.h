@@ -177,7 +177,9 @@ GBytes* sond_file_part_get_bytes_cancellable(SondFilePart*, gint const* cancel,
 
 gint sond_file_part_replace(SondFilePart*, GBytes*, GError**);
 
-gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
+/* Schreibt den Inhalt in eine Temp-Datei (sond_tmpfiles.h); read_only: schreibgeschützt,
+ * damit eine Anwendung die Kopie nicht stillschweigend als Original behandelt. */
+gchar* sond_file_part_write_to_tmp_file(SondFilePart*, gboolean read_only, GError**);
 
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 

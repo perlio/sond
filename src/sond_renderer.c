@@ -16,6 +16,7 @@
 #include "sond_log_and_error.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
+#include "sond_tmpfiles.h"
 #include "sond_gmessage_helper.h"
 #include "sond_text_extract.h"
 
@@ -172,7 +173,7 @@ static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp)
      * Besser: Wir fügen sond_file_part_get_bytes_public hinzu — aber das
      * würde weitere Headeränderungen bedeuten. Pragmatisch: tmp-Datei.
      */
-    gchar *tmp = sond_file_part_write_to_tmp_file(new_sfp, &error);
+    gchar *tmp = sond_file_part_write_to_tmp_file(new_sfp, FALSE, &error);
     if (!tmp) {
         LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
         g_clear_error(&error);
@@ -184,11 +185,11 @@ static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp)
     if (!sond_file_get_contents(tmp, (gchar**)&data, &len, &error)) {
         LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
         g_clear_error(&error);
-        sond_remove(tmp, NULL);
+        sond_tmp_remove(tmp, NULL);
         g_free(tmp);
         return FALSE;
     }
-    sond_remove(tmp, NULL);
+    sond_tmp_remove(tmp, NULL);
     g_free(tmp);
 
     bytes = g_bytes_new_take(data, len);

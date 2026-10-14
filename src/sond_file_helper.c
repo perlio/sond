@@ -339,6 +339,120 @@ sond_rmdir(const gchar *path, GError **error)
 }
 
 gboolean
+sond_remove_once(const gchar *path, GError **error)
+{
+    g_return_val_if_fail(path != NULL, FALSE);
+
+#ifdef G_OS_WIN32
+    wchar_t *long_path = prepare_long_path(path, error);
+    if (!long_path)
+        return FALSE;
+
+    BOOL success = DeleteFileW(long_path);
+    DWORD win_error = success ? 0 : GetLastError();
+
+    if (!success && win_error == ERROR_ACCESS_DENIED) {
+        //schreibgeschützt? Schutz aufheben und noch einmal; bei Misserfolg
+        //(z.B. weil die Datei offen ist) wieder setzen
+        DWORD attr = GetFileAttributesW(long_path);
+
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY)) {
+            SetFileAttributesW(long_path, attr & ~FILE_ATTRIBUTE_READONLY);
+            success = DeleteFileW(long_path);
+            if (!success) {
+                win_error = GetLastError();
+                SetFileAttributesW(long_path, attr);
+            }
+        }
+    }
+    g_free(long_path);
+
+    if (!success) {
+        set_error_from_win32(error, win_error);
+        return FALSE;
+    }
+    return TRUE;
+#else
+    if (g_remove(path) != 0) {
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                    "%s", g_strerror(errno));
+        return FALSE;
+    }
+    return TRUE;
+#endif
+}
+
+gboolean
+sond_rmdir_once(const gchar *path, GError **error)
+{
+    g_return_val_if_fail(path != NULL, FALSE);
+
+#ifdef G_OS_WIN32
+    wchar_t *long_path = prepare_long_path(path, error);
+    if (!long_path)
+        return FALSE;
+
+    BOOL success = RemoveDirectoryW(long_path);
+    DWORD win_error = success ? 0 : GetLastError();
+
+    g_free(long_path);
+
+    if (!success) {
+        set_error_from_win32(error, win_error);
+        return FALSE;
+    }
+    return TRUE;
+#else
+    if (g_rmdir(path) != 0) {
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                    "%s", g_strerror(errno));
+        return FALSE;
+    }
+    return TRUE;
+#endif
+}
+
+gboolean
+sond_set_readonly(const gchar *path, gboolean readonly, GError **error)
+{
+    g_return_val_if_fail(path != NULL, FALSE);
+
+#ifdef G_OS_WIN32
+    wchar_t *long_path = prepare_long_path(path, error);
+    if (!long_path)
+        return FALSE;
+
+    DWORD attr = GetFileAttributesW(long_path);
+    BOOL success = FALSE;
+    DWORD win_error = 0;
+
+    if (attr == INVALID_FILE_ATTRIBUTES)
+        win_error = GetLastError();
+    else {
+        attr = readonly ? (attr | FILE_ATTRIBUTE_READONLY)
+                : (attr & ~FILE_ATTRIBUTE_READONLY);
+        success = SetFileAttributesW(long_path, attr);
+        if (!success)
+            win_error = GetLastError();
+    }
+    g_free(long_path);
+
+    if (!success) {
+        set_error_from_win32(error, win_error);
+        return FALSE;
+    }
+    return TRUE;
+#else
+    if (g_chmod(path, readonly ? 0444 : 0644) != 0) {
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                    "%s", g_strerror(errno));
+        return FALSE;
+    }
+    return TRUE;
+#endif
+}
+
+gboolean
 sond_rmdir_r(const gchar *path, GError **error)
 {
     g_return_val_if_fail(path != NULL, FALSE);

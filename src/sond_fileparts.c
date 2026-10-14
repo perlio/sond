@@ -37,6 +37,7 @@
 #include "sond_pdf_helper.h"
 #include "sond_gmessage_helper.h"
 #include "sond_file_helper.h"
+#include "sond_tmpfiles.h"
 #include "sond_mime.h"
 #include "sond_password.h"
 
@@ -1287,9 +1288,27 @@ save_bytes_longpath(GBytes* bytes, const gchar *filename, GError **error)
     return TRUE;
 }
 
-gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
+//Hat der Name eine übliche Endung (Punkt nicht am Anfang, höchstens 8 Zeichen)?
+static gboolean tmp_name_has_extension(gchar const *name) {
+	gchar const *dot = strrchr(name, '.');
+
+	if (!dot || dot == name || !dot[1] || strlen(dot + 1) > 8)
+		return FALSE;
+
+	for (gchar const *c = dot + 1; *c; c++)
+		if (!g_ascii_isalnum(*c))
+			return FALSE;
+
+	return TRUE;
+}
+
+gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, gboolean read_only,
+		GError **error) {
+	gchar *name = NULL;
 	gchar *filename = NULL;
 	GBytes *bytes = NULL;
+	gchar const *path = NULL;
+	gchar const *base = NULL;
 
 	g_return_val_if_fail(sfp, NULL);
 
@@ -1297,33 +1316,56 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	if (!bytes)
 		return NULL;
 
-	filename = g_strdup_printf("%s/%d", g_get_tmp_dir(),
-			g_random_int_range(10000, 99999));
+	//Name: letzte Komponente der Adresse im Container, ohne Endung ergänzt
+	//aus dem MIME-Typ (Mimeparts und Anhänge heißen oft nur "0" oder "bild")
+	path = sond_file_part_get_path(sfp);
+	base = path ? strrchr(path, '/') : NULL;
+	base = base ? base + 1 : path;
+	name = (base && *base) ? g_strdup(base) : g_strdup("datei");
 
-#ifdef __WIN32__
-	{
+	if (!tmp_name_has_extension(name)) {
 		gsize len = 0;
 		gconstpointer data = g_bytes_get_data(bytes, &len);
 		gchar* mime = mime_guess_content_type((const guchar*)data,
-				MIN(len, (gsize)2048), sond_file_part_get_path(sfp), error);
+				MIN(len, (gsize)2048), path, error);
+		gchar const* ext = NULL;
+
 		if (!mime) {
 			g_bytes_unref(bytes);
-			g_free(filename);
+			g_free(name);
 			return NULL;
 		}
-		gchar const* ext = mime_to_extension(mime);
+		ext = mime_to_extension(mime);
 		g_free(mime);
-		filename = add_string(filename, g_strdup(ext));
+		if (ext)
+			name = add_string(name, g_strdup(ext));
 	}
-#endif
+
+	filename = sond_tmp_new_path(name, error);
+	g_free(name);
+	if (!filename) {
+		g_bytes_unref(bytes);
+		return NULL;
+	}
 
 	if (!save_bytes_longpath(bytes, filename, error)) {
+		sond_tmp_remove(filename, NULL);
 		g_bytes_unref(bytes);
 		g_free(filename);
 		return NULL;
 	}
-
 	g_bytes_unref(bytes);
+
+	if (read_only) {
+		GError *error_ro = NULL;
+
+		if (!sond_set_readonly(filename, TRUE, &error_ro)) {
+			LOG_WARN("Schreibschutz für '%s' nicht gesetzt: %s", filename,
+					error_ro ? error_ro->message : "?");
+			g_clear_error(&error_ro);
+		}
+	}
+
 	return filename;
 }
 
@@ -1371,7 +1413,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 					g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 					"/", sond_file_part_get_path(sfp), NULL);
 		else { //Datei in zip/pdf/gmessage
-			path = sond_file_part_write_to_tmp_file(sfp, error);
+			path = sond_file_part_write_to_tmp_file(sfp, TRUE, error);
 			if (!path)
 				return -1;
 		}
@@ -1380,7 +1422,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
 				GError* error_rem = NULL;
 
-				if (!sond_remove(path, &error_rem)) {
+				if (!sond_tmp_remove(path, &error_rem)) {
 					LOG_WARN("Datei '%s' konnte nicht gelöscht werden:\n%s",
 							path, error_rem ? error_rem->message : "(kein Fehler gesetzt)");
 					g_clear_error(&error_rem);
@@ -1388,6 +1430,10 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 			}
 			return -1;
 		}
+
+		//Kopie aus einem Container: löschen, sobald keine Anwendung sie mehr hält
+		if (sond_file_part_get_parent(sfp))
+			sond_tmp_register(path);
 	}
 
 	return 0;

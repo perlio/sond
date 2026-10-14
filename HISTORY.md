@@ -5644,3 +5644,40 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    nicht mehr zwischen Single- und Dual-Write unterscheiden könnte und die
    Online-Backup-API zwischen zwei Schemata einer Connection undokumentiert ist.
 ```
+
+## Temp-Dateien aufräumen, neuer Ablageort (#242, 14.10.2026)
+
+```text
+ Vom Nutzer getestet (Windows). Anlass: im Temp-Ordner lagen 37 Dateien der Form
+ NNNNN.pdf/.zip/.eml/.bin (1,1 GB) seit dem 06.10.2026; Container-Kopien wurden nach
+ erfolgreichem sond_open() nie gelöscht, Viewer-Arbeitskopien blieben nach
+ Abstürzen oder Abbruch im Debugger liegen. Der Name war nur eine Zufallszahl
+ (Überschreiben einer noch offenen Datei möglich).
+ - Neues Modul sond_tmpfiles.c/.h (Makefile: zond und viewer). Pfad
+   <Nutzerdaten>/zond/tmp/<pid>-<n>/<Name>, unter Windows AppData/Local/zond/tmp;
+   je Datei ein eigener Ordner mit dem Originalnamen (bereinigt, auf 80 Zeichen
+   gekürzt, Endung aus dem MIME-Typ, wenn der Name keine hat - jetzt auf allen
+   Systemen). Beim ersten Gebrauch: Ordner beendeter Prozesse löschen
+   (pid-Prüfung, laufende Instanzen bleiben unberührt), Timer alle 30 s, atexit-
+   Aufräumen.
+ - sond_file_part_open(): Kopien von Dateien aus Containern (ZIP, PDF, Mail) sind
+   schreibgeschützt (Windows: FILE_ATTRIBUTE_READONLY, sonst 0444), damit eine
+   Anwendung sie nicht stillschweigend als Original behandelt, und werden zum
+   Löschen vorgemerkt: der Timer löscht sie frühestens 60 s nach dem Anlegen,
+   sobald keine Anwendung sie mehr geöffnet hat (unter Windows lässt sich eine
+   geöffnete Datei nicht löschen; sie bleibt liegen und wird später erneut
+   versucht). Dateien direkt im Projektverzeichnis werden unverändert im
+   Original geöffnet.
+ - sond_file_helper.c: sond_remove_once()/sond_rmdir_once() (ein Versuch, ohne die
+   5-s-Wiederholungen von sond_remove()/sond_rmdir(); löscht auch schreibgeschützte
+   Dateien und stellt den Schutz wieder her, wenn das Löschen scheitert) und
+   sond_set_readonly().
+ - sond_file_part_write_to_tmp_file() hat den Parameter read_only; zond_pdf_document.c
+   (Viewer-Arbeitskopie, schreibbar) und sond_renderer.c löschen über
+   sond_tmp_remove().
+ - Die work-DB liegt jetzt in <Nutzerdaten>/zond/ (project_get_local_tmp_path(),
+   project.c) statt im INetCache-Ordner, den der Explorer nicht zeigt und die
+   Windows-Speicheroptimierung leeren kann. Ohne Migration: bestehende
+   Arbeitskopien wurden gelöscht.
+ - Reste vor #242 (NNNNN.ext im Temp-Ordner) werden vom Programm nicht entfernt.
+```

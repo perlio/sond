@@ -81,6 +81,23 @@ gboolean sond_remove(const gchar *path, GError **error);
 gboolean sond_rmdir(const gchar *path, GError **error);
 
 /**
+ * Wie sond_remove() bzw. sond_rmdir(), aber genau ein Versuch ohne
+ * Wiederholungen (unter Windows wiederholen die beiden bei gesperrten Dateien
+ * bis zu 5 s). Für Aufräumläufe im UI-Thread: eine von einer Anwendung
+ * geöffnete Datei bleibt liegen (FALSE), ohne die Oberfläche zu blockieren.
+ * sond_remove_once() löscht auch schreibgeschützte Dateien; scheitert das
+ * Löschen, bleibt der Schreibschutz erhalten.
+ */
+gboolean sond_remove_once(const gchar *path, GError **error);
+gboolean sond_rmdir_once(const gchar *path, GError **error);
+
+/**
+ * Setzt bzw. entfernt den Schreibschutz einer Datei (Windows:
+ * FILE_ATTRIBUTE_READONLY, sonst Modus 0444 bzw. 0644).
+ */
+gboolean sond_set_readonly(const gchar *path, gboolean readonly, GError **error);
+
+/**
  * Löscht ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
  */
 gboolean sond_rmdir_r(const gchar *path, GError **error);

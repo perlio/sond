@@ -998,7 +998,7 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
 
 	hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, project_path, -1);
 
-	dir = g_build_filename(g_get_user_cache_dir(), "zond", NULL);
+	dir = g_build_filename(g_get_user_data_dir(), "zond", NULL);
 	if (!sond_mkdir_with_parents(dir, error)) {
 		g_free(hash);
 		g_free(dir);
