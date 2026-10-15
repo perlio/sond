@@ -5699,6 +5699,14 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    362, 386-389, 393, 395, 404, 426) den Hinweis "Die Datei ist nicht geladen - ist
    SeaDrive bzw. der Server erreichbar?" an; die Indizierung zeigt die Fehlerzeile
    schon im Info-Fenster.
+ - Lesefehler bei der Indizierung (15.10.2026, vom Nutzer getestet): war SeaDrive
+   beendet, gelang sond_fopen() beim Platzhalter, erst das Lesen scheiterte, und die
+   Meldung lautete nur "fread: 0 von N Bytes gelesen". sond_file_get_contents_
+   cancellable() sichert jetzt bei zu kurzem Lesen ferror() und GetLastError() und
+   hängt die Systemmeldung an; bei einem Cloud-Fehler oder einem noch nicht geladenen
+   Platzhalter (sond_win32_is_cloud_placeholder(): RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN,
+   OFFLINE) zusätzlich den Hinweis auf SeaDrive bzw. den Server. Eine zu kurze Datei ohne
+   Lesefehler meldet wie bisher nur die Byte-Zahlen.
  - Alte Icon-Namen: Projekte aus früheren Versionen speichern in knoten.icon_name die
    Registry-Angabe des Windows-Dateisymbols (z.B. Thunderbird-Programmpfad mit
    Komma und Index, imageres.dll mit negativem Index; im Projekt "Lips" 707 Knoten). Der Baum

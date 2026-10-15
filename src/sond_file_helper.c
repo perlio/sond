@@ -61,6 +61,13 @@
 #define ERROR_CLOUD_FILE_ACCESS_DENIED 395L
 #endif
 
+#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS 0x00400000
+#endif
+#ifndef FILE_ATTRIBUTE_RECALL_ON_OPEN
+#define FILE_ATTRIBUTE_RECALL_ON_OPEN 0x00040000
+#endif
+
 //Fehler der Cloud-Filter-API, die auf einen nicht laufenden oder nicht
 //erreichbaren Anbieter hindeuten (Windows-Fehlercodes ERROR_CLOUD_FILE_*)
 static gboolean sond_win32_is_cloud_error(DWORD win_err)
@@ -279,6 +286,25 @@ win32_is_transient_error(DWORD win_error)
     return win_error == ERROR_SHARING_VIOLATION
             || win_error == ERROR_LOCK_VIOLATION
             || win_error == ERROR_ACCESS_DENIED;
+}
+#endif
+
+#ifdef G_OS_WIN32
+//Ist path ein SeaDrive/OneDrive-Platzhalter, dessen Inhalt noch nicht (vollständig) lokal liegt?
+static gboolean sond_win32_is_cloud_placeholder(const gchar *path)
+{
+    wchar_t *long_path = prepare_long_path(path, NULL);
+    DWORD attr = INVALID_FILE_ATTRIBUTES;
+
+    if (!long_path)
+        return FALSE;
+
+    attr = GetFileAttributesW(long_path);
+    g_free(long_path);
+
+    return attr != INVALID_FILE_ATTRIBUTES
+            && (attr & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+                    | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE));
 }
 #endif
 
@@ -1140,6 +1166,12 @@ sond_file_get_contents_cancellable(const gchar *path, gchar **contents,
     /* Blockweise lesen, damit ein Abbruch auch bei einer großen Datei (bei
      * SeaDrive-Platzhaltern auch der Download) bald wirkt */
     gsize bytes_read = 0;
+    gboolean read_error = FALSE;
+#ifdef G_OS_WIN32
+    DWORD read_win_err = 0;
+#else
+    gint read_errno = 0;
+#endif
     while (bytes_read < file_size) {
         gsize want = MIN(file_size - bytes_read, SOND_READ_BLOCK_SIZE);
         gsize n = 0;
@@ -1154,16 +1186,51 @@ sond_file_get_contents_cancellable(const gchar *path, gchar **contents,
 
         n = fread(buf + bytes_read, 1, want, f);
         bytes_read += n;
-        if (n < want)
+        if (n < want) {
+            //Lesefehler oder zu kurze Datei? Fehlercode vor fclose() sichern
+            read_error = ferror(f) != 0;
+#ifdef G_OS_WIN32
+            read_win_err = GetLastError();
+#else
+            read_errno = errno;
+#endif
             break;
+        }
     }
     fclose(f);
 
     if (bytes_read != file_size) {
+        gchar *detail = NULL;
+
         g_free(buf);
+
+#ifdef G_OS_WIN32
+        if (read_error) {
+            gchar *msg = g_win32_error_message(read_win_err);
+
+            detail = g_strdup_printf("\n%s", msg);
+            g_free(msg);
+        }
+        //Platzhalter, der nicht geladen werden konnte (Anbieter beendet, Server weg)
+        if ((read_error && sond_win32_is_cloud_error(read_win_err))
+                || sond_win32_is_cloud_placeholder(path)) {
+            gchar *with_hint = g_strconcat(detail ? detail : "",
+                    "\nDie Datei ist nicht geladen - ist SeaDrive bzw. der Server erreichbar?",
+                    NULL);
+
+            g_free(detail);
+            detail = with_hint;
+        }
+#else
+        if (read_error)
+            detail = g_strdup_printf("\n%s", g_strerror(read_errno));
+#endif
+
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "%s\nfread: %zu von %zu Bytes gelesen",
-                    __func__, bytes_read, file_size);
+                    "%s\nfread: %zu von %zu Bytes gelesen%s",
+                    __func__, bytes_read, file_size, detail ? detail : "");
+        g_free(detail);
+
         return FALSE;
     }
 
