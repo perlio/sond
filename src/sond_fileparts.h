@@ -56,6 +56,13 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 SondFilePart* sond_file_part_create_leaf(gchar const* path,
 		SondFilePart* parent, gchar const* mime_type);
 
+/* Container (ZIP, E-Mail) einer noch nicht geladenen Cloud-Datei nach der
+ * Endung anlegen, ohne die Datei zu lesen: has_children ist optimistisch TRUE
+ * (Pfeil), geprüft wird erst beim Aufklappen. NULL, wenn mime_type weder
+ * application/zip noch message/rfc822 ist. */
+SondFilePart* sond_file_part_create_unread(gchar const* path,
+		SondFilePart* parent, gchar const* mime_type);
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 void sond_file_part_set_parent(SondFilePart*, SondFilePart*);

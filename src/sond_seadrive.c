@@ -2351,13 +2351,13 @@ sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
 	g_object_unref(stvfm_item);
 
 	/* Nur korrigieren wenn Item ein durch Hydration entstandenes DIR ist:
-	 * GMessage oder ZIP als sfp, kein path_or_section (= Datei selbst, nicht Unterknoten) */
+	 * PDF als sfp, kein path_or_section (= Datei selbst, nicht Unterknoten).
+	 * ZIP und E-Mail bleiben Container (auch nicht geladen mit Pfeil, s.
+	 * sond_file_part_create_unread()); das Aufklappen lädt sie bei Bedarf neu. */
 	if (stvfm_item_priv->type != SOND_TVFM_ITEM_TYPE_DIR ||
 			!sfp_old ||
 			stvfm_item_priv->path_or_section ||
-			(!SOND_IS_FILE_PART_GMESSAGE(sfp_old) &&
-			 !SOND_IS_FILE_PART_ZIP(sfp_old) &&
-			 !SOND_IS_FILE_PART_PDF(sfp_old)))
+			!SOND_IS_FILE_PART_PDF(sfp_old))
 		return;
 
 	/* Altes sfp zuerst aus arr_opened_files entfernen - VOR create_leaf,

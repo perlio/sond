@@ -5759,3 +5759,33 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Container um. Lokal vorhandene PDFs werden beim Auflisten geöffnet (Prüfung auf eingebettete
    Dateien), E-Mails mit GMime geparst, ZIPs nur optimistisch mit Pfeil gezeigt.
 ```
+
+## SeaDrive: Pfeil für nicht geladene ZIP und EML (#237, 15.10.2026)
+
+```text
+ Vom Nutzer getestet. Ein nicht geladenes ZIP oder eine nicht geladene E-Mail ist in BAUM_FS
+ wie ein geladenes Element immer ein Container (Typ DIR, Pfeil). Gelesen wird die Datei erst,
+ wenn sie lokal vorliegt; ein leeres ZIP oder eine Mail ohne Teile ist dann nur eine leere
+ Liste, der Typ muss nicht umgewandelt werden. PDFs (nur wenige haben eingebettete Dateien)
+ und alle anderen Typen bleiben Blätter nach der Endung.
+ - sond_file_part_create_unread() (sond_fileparts.c/.h): legt SondFilePartZip bzw.
+   SondFilePartGMessage nach der Endung an (application/zip, message/rfc822) und setzt
+   has_children = TRUE, ohne zu lesen (create_from_mime_type() würde bei der Mail über
+   test_for_children die Datei parsen). load_fs_dir (sond_tvfm_item.c) nutzt sie im
+   Platzhalter-Zweig, sonst create_leaf.
+ - Klick auf den Pfeil wirkt wie der Doppelklick: das GtkTreeView-Signal "test-expand-row"
+   (sond_treeviewfm_test_expand_row(), sond_treeviewfm.c) verhindert das Aufklappen, solange die
+   oberste Datei des Elements ein nicht geladener SeaDrive-Platzhalter ist, und ruft stattdessen
+   sond_seadrive_ensure_hydrated() auf. Erster Klick: Download im Hintergrund (Dialog "<Datei> -
+   Download gescheitert" bei Fehlschlag); zweiter Klick während des Ladens: Fortschrittsdialog;
+   nach dem Laden klappt die Zeile auf und row-expanded lädt die Kinder. Dieselbe Hilfsfunktion
+   sond_treeviewfm_ensure_local() (der bisherige Block aus sond_treeviewfm_open) nutzt der
+   Doppelklick; bei einem Container-Element stößt er den Download jetzt ebenfalls an.
+ - item_dehydrated (sond_seadrive.c) verwandelt nur noch PDFs in ein Blatt zurück; ZIP und E-Mail
+   bleiben Container mit Pfeil, das Aufklappen prüft den Ladezustand jedes Mal neu.
+ - Programmatisches Aufklappen eines nicht geladenen Containers (Sprung in eine Datei darin) wird
+   ebenfalls verhindert, löst aber den Download aus.
+ - Befund: ein geladenes ZIP hält nach dem ersten Lesen einen geöffneten Archiv-Handle
+   (cached_archive in SondFilePartZip) bis zum Freigeben des Objekts (Baumzeile); das spielte
+   beim "Cache leeren" keine Rolle (ein SeaDrive-Aussetzer war die Ursache).
+```

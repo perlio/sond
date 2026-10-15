@@ -465,6 +465,26 @@ SondFilePart* sond_file_part_create_leaf(gchar const* path,
 	return sfp;
 }
 
+SondFilePart* sond_file_part_create_unread(gchar const* path,
+		SondFilePart* parent, gchar const* mime_type) {
+	SondFilePart* sfp = NULL;
+	GType type = 0;
+
+	g_return_val_if_fail(path, NULL);
+
+	if (!g_strcmp0(mime_type, "application/zip"))
+		type = SOND_TYPE_FILE_PART_ZIP;
+	else if (!g_strcmp0(mime_type, "message/rfc822"))
+		type = SOND_TYPE_FILE_PART_GMESSAGE;
+	else
+		return NULL;
+
+	sfp = sond_file_part_do_create(type, path, parent);
+	sond_file_part_set_has_children(sfp, TRUE);
+
+	return sfp;
+}
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 	SondFilePartPrivate *sfp_priv = NULL;
 

@@ -546,10 +546,16 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 #endif
 
 			if (mime_from_ext) {
-				/* Datei offline - SondFilePartLeaf erzwingen, kein Öffnen */
-				sfp_child = sond_file_part_create_leaf(
+				/* Datei offline - kein Öffnen. ZIP und E-Mail sind immer
+				 * Container (Pfeil, geprüft wird erst beim Aufklappen nach dem
+				 * Laden), alles andere ein Leaf nach der Endung. */
+				sfp_child = sond_file_part_create_unread(
 						rel_path_child, stvfm_item_priv->sond_file_part,
 						mime_from_ext);
+				if (!sfp_child)
+					sfp_child = sond_file_part_create_leaf(
+							rel_path_child, stvfm_item_priv->sond_file_part,
+							mime_from_ext);
 			} else
 				/* Datei lokal verfügbar - normal lesen und sfp erzeugen */
 				sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,

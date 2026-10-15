@@ -2090,14 +2090,62 @@ static gboolean error_is_cancelled(GError *error) {
 	return g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
 }
 
+#ifdef _WIN32
+/* Ist die Datei des Elements (bei Elementen in Containern die oberste Datei)
+ * lokal vorhanden? Liegt sie als nicht geladener Platzhalter auf SeaDrive,
+ * wird der Download angestoßen bzw. beim erneuten Aufruf der Fortschritt
+ * gezeigt (sond_seadrive_ensure_hydrated(): Doppelklick und Klick auf den
+ * Pfeil eines nicht geladenen Containers verhalten sich gleich) und FALSE
+ * geliefert; kein SeaDrive-Projekt oder lokal: TRUE.
+ *
+ * Es wird immer zum obersten Vorfahren (ohne Parent) hochgelaufen: nur der
+ * trägt in path den echten, projektrelativen Pfad (s.
+ * sond_file_part_do_create()); bei verschachtelten Teilen (ZIP-Eintrag,
+ * PDF-Anhang, Mimepart) ist path nur ein container-interner Bezeichner. */
+static gboolean sond_treeviewfm_ensure_local(SondTreeviewFM *stvfm,
+		SondFilePart *sfp) {
+	SondFilePart *sfp_root = sfp;
+	SondFilePart *sfp_parent = NULL;
+	gchar const *root = NULL;
+	gchar const *sfp_path = NULL;
+	gchar *full_path = NULL;
+	gboolean is_local = TRUE;
+
+	if (!sfp || !sond_treeviewfm_is_seadrive_path(stvfm))
+		return TRUE;
+
+	while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
+		sfp_root = sfp_parent;
+
+	root = sond_treeviewfm_get_root(stvfm);
+	sfp_path = sond_file_part_get_path(sfp_root);
+	if (!root || !sfp_path)
+		return TRUE;
+
+	full_path = g_strconcat(root, "/", sfp_path, NULL);
+	is_local = sond_seadrive_ensure_hydrated(
+			GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
+	g_free(full_path);
+
+	return is_local;
+}
+#endif
+
 static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
 	SondTVFMItem *stvfm_item_new = NULL;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+#ifdef _WIN32
+		//nicht geladener Container (ZIP, E-Mail): wie beim Klick auf den Pfeil
+		//(sond_treeviewfm_test_expand_row()) den Download anstoßen
+		sond_treeviewfm_ensure_local(sond_tvfm_item_get_stvfm(stvfm_item),
+				stvfm_item_priv->sond_file_part);
+#endif
 		return 0;
+	}
 
 #ifdef _WIN32
 	/* Bei offline-Dateien im SeaDrive-Pfad: Download über die offizielle
@@ -2129,43 +2177,12 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	 * Die Check-und-Reagiere-Sequenz ist auch in zond_treeview_open_node()
 	 * (zond_treeview.c, für BAUM_INHALT/BAUM_AUSWERTUNG) nötig und deshalb
 	 * in sond_seadrive_ensure_hydrated() (sond_seadrive.c/h) konsolidiert. */
-	{
-		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
-		if (sond_treeviewfm_is_seadrive_path(stvfm)) {
-			const gchar *root = sond_treeviewfm_get_root(stvfm);
-			/* DIR-Knoten sind oben schon ausgeschlossen (return 0) - alles,
-			 * was hier ankommt (LEAF wie LEAF_SECTION, unabhängig davon, ob
-			 * der jeweilige sond_file_part vom Typ Leaf/PDF/ZIP/GMessage
-			 * ist), steckt letztlich in GENAU EINER echten Datei auf der
-			 * Platte. Statt die Typen zu unterscheiden (eine PDF-/GMessage-
-			 * Section, LEAF_SECTION, behält den Container-Typ, s.
-			 * sond_tvfm_item_create()): immer zum obersten Vorfahren
-			 * (ohne Parent) hochlaufen - nur der trägt in seinem path-Feld
-			 * den echten, projektrelativen Pfad (s.
-			 * sond_file_part_do_create()); bei verschachtelten Parts
-			 * (ZIP-Eintrag, PDF-Embedded-File, GMessage-Mimepart) ist path
-			 * nur ein container-interner Bezeichner, den man nicht naiv an
-			 * root anhängen darf. */
-			SondFilePart *sfp_root = stvfm_item_priv->sond_file_part;
-			SondFilePart *sfp_parent = NULL;
-			while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
-				sfp_root = sfp_parent;
-
-			const gchar *sfp_path = sond_file_part_get_path(sfp_root);
-			if (root && sfp_path) {
-				gchar *full_path = g_strconcat(root, "/", sfp_path, NULL);
-				gboolean is_local = sond_seadrive_ensure_hydrated(
-						GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
-				g_free(full_path);
-
-				/* Bei Bedarf sofort zurück an die UI. Erneuter Doppelklick
-				 * später (nach Abschluss des Downloads) öffnet dann normal
-				 * über den unten stehenden Weg. */
-				if (!is_local)
-					return 0;
-			}
-		}
-	}
+	/* Bei Bedarf sofort zurück an die UI. Erneuter Doppelklick später (nach
+	 * Abschluss des Downloads) öffnet dann normal über den unten stehenden
+	 * Weg. */
+	if (!sond_treeviewfm_ensure_local(sond_tvfm_item_get_stvfm(stvfm_item),
+			stvfm_item_priv->sond_file_part))
+		return 0;
 #endif
 
 	/* Gesperrtes Element (verschlüsselter ZIP-Eintrag, PDF mit Passwort):
@@ -3503,6 +3520,32 @@ static gboolean row_expand_failed_collapse_idle(gpointer data) {
  * zurücknehmen. */
 static gint expand_busy = 0;
 
+/* Vor dem Aufklappen: ein Container (ZIP, E-Mail) einer nicht geladenen
+ * SeaDrive-Datei klappt nicht auf. Der Klick auf den Pfeil stößt wie der
+ * Doppelklick den Download an (ein zweiter Klick während des Ladens zeigt den
+ * Fortschritt); erst wenn die Datei lokal ist, klappt die Zeile auf und
+ * "row-expanded" lädt die Kinder. TRUE verhindert das Aufklappen. */
+static gboolean sond_treeviewfm_test_expand_row(GtkTreeView *tree_view,
+		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
+#ifdef _WIN32
+	SondTVFMItem *stvfm_item = NULL;
+	gboolean is_local = TRUE;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), iter, 0,
+			&stvfm_item, -1);
+	if (!stvfm_item)
+		return FALSE;
+
+	is_local = sond_treeviewfm_ensure_local(SOND_TREEVIEWFM(tree_view),
+			sond_tvfm_item_get_sond_file_part(stvfm_item));
+	g_object_unref(stvfm_item);
+
+	return !is_local;
+#else
+	return FALSE;
+#endif
+}
+
 static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	gint rc = 0;
@@ -4062,6 +4105,8 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 	g_object_unref(tree_store);
 
 	//Zeile expandiert
+	g_signal_connect(stvfm, "test-expand-row",
+			G_CALLBACK(sond_treeviewfm_test_expand_row), NULL);
 	g_signal_connect(stvfm, "row-expanded",
 			G_CALLBACK(sond_treeviewfm_row_expanded), NULL);
 	//Zeile kollabiert

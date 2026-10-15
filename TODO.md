@@ -7,7 +7,7 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #243.
 ## Inhalt
 
 Offen: -
-Zurückgestellt: #202, #220, #234, #236, #237, #238, #239, #240, #241
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
@@ -85,32 +85,6 @@ Status: zurückgestellt (erst nötig, wenn ein UI-Schreibzugriff auf den Index w
     sqlite3_threadsafe() der eingesetzten Bibliothek). Wäre nur dann zu lösen, wenn
     ein UI-Schreibzugriff während eines Laufs möglich wird (z.B. nicht modaler
     Indexlauf): Mutex um die Index-Transaktionen.
-```
-
-### #237 SeaDrive: Pfeil für nicht geladene ZIP und EML
-
-Status: zurückgestellt
-
-```text
- Die SeaDrive-Fehlermeldungen und die Sperre beim Anbinden sind erledigt (HISTORY.md,
- "SeaDrive: Download gescheitert"). Offen ist nur die Darstellung nicht geladener Container
- in BAUM_FS:
- Nicht geladene Dateien sind dort Blätter nach der Dateiendung, ohne Pfeil (sond_tvfm_item.c,
- load_fs_dir); der Pfeil erscheint erst, nachdem die Datei geladen ist
- (sond_treeviewfm_seadrive_item_hydrated() wandelt die Zeile um). Fast alle ZIPs haben Einträge
- und fast alle Mails neben dem Header mindestens einen Mimepart; ein geladenes ZIP bekommt den
- Pfeil ohnehin optimistisch. Idee: nicht geladene ZIPs und EMLs ebenfalls mit Pfeil zeigen
- (PDFs ohne, denn nur wenige haben eingebettete Dateien) und beim Aufklappen korrigieren:
- Hydrierung anstoßen (sond_seadrive_hydrate_async_notify), Zeile wieder einklappen, nach
- dem Laden ersetzt item_hydrated() sie durch den Container.
- Aufwand 4-6 Stunden, Regressionsgefahr: ein nicht geladenes ZIP wäre ein Element vom Typ
- Verzeichnis, dessen Dateiteil (sond_file_part) nur ein Blatt ist. Alle Stellen, die bei einem
- Verzeichnis einen echten Container erwarten, müssten das mitbehandeln: Anbinden (DIR-Zweig,
- gesperrt solange nicht geladen), Kopieren/Ausschneiden (process_stvfm_item_move_or_copy),
- Aufklappen, Index-Status-Badge, Drag&Drop. Offene Entscheidung: nach erfolgreichem Laden
- sofort aufklappen oder nur die Zeile umwandeln.
- Nutzer-Entscheidung: zunächst zurückgestellt, wenig dringend (Doppelklick lädt, danach
- erscheint der Pfeil von selbst).
 ```
 
 ### #238 Fortschrittsanzeige beim Aufklappen in BAUM_FS
