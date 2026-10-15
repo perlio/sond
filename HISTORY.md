@@ -5717,3 +5717,45 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Excel, PowerPoint, .ico/PDF pdf, sonst text-x-generic); die Daten bleiben
    unverändert. Nicht gefundene Namen werden nur einmal je Name gemeldet.
 ```
+
+## SeaDrive: "Download gescheitert" einheitlich, Anbinden nicht geladener Dateien gesperrt (#237, 15.10.2026)
+
+```text
+ Leitgedanke (Nutzer): Die Ursache (SeaDrive beendet, Server weg, Verbindung schlecht) muss
+ der Nutzer regeln; er braucht nur die Information, dass eine nicht (vollständig) geladene
+ Datei im Moment nicht geladen werden kann. Ein Vorab-Test der Erreichbarkeit bringt nichts,
+ weil sich der Zustand jederzeit ändert.
+ - Datenebene (sond_file_helper.c/.h): Fehler SOND_FILE_ERROR_CLOUD, Prüfung mit
+   sond_error_is_cloud(). sond_fopen(), das Lesen in sond_file_get_contents_cancellable()
+   und sond_copy() setzen ihn, wenn der Zugriff scheitert und die Datei ein nicht (voll-
+   ständig) geladener Platzhalter ist (Attribute RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN,
+   OFFLINE) oder ein Cloud-Fehlercode vorliegt (sond_win32_is_cloud_error(): 362, 386-389,
+   393, 395, 404, 426). Meldung: eine Zeile "<Dateiname> - Download gescheitert"; die
+   Windows-Systemmeldung steht im Log (g_warning).
+ - Je Fall dieselbe Aussage: Doppelklick/Auszug (Dialog), Index-Treffer anspringen und
+   Seiten einfügen (bestehende Fehlerdialoge), Anbinden (Zeile im Info-Fenster), Export
+   (Hinweis im exportierten Dokument, hinweis_nicht_geoeffnet()), Indizierung (eine Zeile je
+   Datei im Info-Fenster, sond_process_file.c), Kopieren/Einfügen/Drag&Drop (betroffene
+   Dateien werden übersprungen, am Schluss ein Sammeldialog mit den ersten fünf Namen,
+   sond_treeviewfm.c; beim Ausschneiden bleibt die Quelle).
+ - Projekt öffnen (project.c): scheitert die Hydrierung der .sond_index.db (oder -wal/-shm)
+   oder der Projektdatei, wird das Projekt mit "<Name> - Download gescheitert" nicht geöffnet;
+   gibt es noch keine Index-DB, ändert sich nichts. Speichern und Autosave bleiben unverändert
+   (es wird lokal gespeichert, SeaDrive lädt später hoch).
+ - Lesefehler bei der Indizierung (vom Nutzer getestet): war SeaDrive beendet, gelang
+   sond_fopen() beim Platzhalter, erst das Lesen scheiterte ("fread: 0 von N Bytes"); die
+   Meldung nennt jetzt den Download.
+ - Anbinden (zond_treeview.c, zond_treeview_anbinden_nicht_geladen()): Nicht geladene
+   SeaDrive-Dateien werden nicht angebunden, für alle Dateitypen, auch rekursiv in
+   Verzeichnissen. Im Info-Fenster steht "'<Datei>' - nicht geladen: erst per Doppelklick
+   laden, dann anbinden"; die übrigen Elemente der Auswahl werden angebunden, der Anker
+   rückt nicht vor. Begründung: erst nach dem Laden sieht man, was man anbindet (eingebettete
+   Dateien einer PDF, Mimeparts einer Mail, Einträge eines ZIP), und das Ergebnis hängt nicht
+   vom Ladezustand ab. Vorher wurde ein nicht geladenes ZIP oder eine Mail als Blatt, also als
+   Datei selbst, angebunden (nicht mehr möglich), eine nicht geladene PDF nur als PageTree.
+ - Befund zur Darstellung: nicht geladene Dateien sind in BAUM_FS seit der ersten SeaDrive-
+   Implementierung (April 2026) Blätter nach der Dateiendung (load_fs_dir), ohne Pfeil; nach
+   der Hydrierung wandelt sond_treeviewfm_seadrive_item_hydrated() die Zeile von selbst in den
+   Container um. Lokal vorhandene PDFs werden beim Auflisten geöffnet (Prüfung auf eingebettete
+   Dateien), E-Mails mit GMime geparst, ZIPs nur optimistisch mit Pfeil gezeigt.
+```

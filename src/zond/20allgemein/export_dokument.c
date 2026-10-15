@@ -20,6 +20,7 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_file_helper.h"
 #include "../../sond_text_extract.h"
 #include "../../sond_pdf_helper.h"
 
@@ -111,6 +112,9 @@ void export_dokument_ctx_free(ExportDokumentCtx *dctx) {
 static gchar* hinweis_nicht_geoeffnet(const gchar *datei, GError *error) {
 	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
 		return g_strdup_printf("%s - passwortgeschützt, übersprungen", datei);
+
+	if (sond_error_is_cloud(error))
+		return g_strdup_printf("%s - Download gescheitert", datei);
 
 	return g_strdup_printf("%s - konnte nicht geöffnet werden: %s", datei,
 			error ? error->message : "?");

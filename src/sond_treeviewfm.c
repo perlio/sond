@@ -907,6 +907,7 @@ typedef struct _S_FM_Paste_Selection {
 	gchar* base_inserted;
 	gint index_to;
 	gboolean no_tree; //Ziel eingeklappt: nur auf der Platte einfügen, Baum bleibt unberührt
+	GPtrArray *failed; //Namen (g_free) der Einträge, deren Download gescheitert ist
 } SFMPasteSelection;
 
 //TRUE, wenn der Eintrag Inhalt eines Containers (ZIP/PDF/E-Mail) ist
@@ -1277,8 +1278,21 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	rc = process_stvfm_item_move_or_copy(stvfm_item,
 			s_paste_sel, clipboard->ausschneiden, error);
-	if (rc == -1)
+	if (rc == -1) {
+		//nicht geladener SeaDrive-Platzhalter: merken, die übrigen weiter bearbeiten
+		if (sond_error_is_cloud(*error)) {
+			if (!s_paste_sel->failed)
+				s_paste_sel->failed = g_ptr_array_new_with_free_func(g_free);
+			g_ptr_array_add(s_paste_sel->failed,
+					g_strdup(stvfm_item_priv->display_name ?
+							stvfm_item_priv->display_name : "(ohne Namen)"));
+			g_clear_error(error);
+
+			return 0;
+		}
+
 		return -1;
+	}
 	else if (rc == 1) //Überspringen gewählt
 		return 0;
 	else if (rc == 2) //Abbrechen gewählt
@@ -1684,7 +1698,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 				&iter_cursor);
 
 	SFMPasteSelection s_paste_sel = {NULL, NULL, &iter_cursor,
-			kind, expanded, NULL, 0, FALSE};
+			kind, expanded, NULL, 0, FALSE, NULL};
 
 	if (!parent_is_root) {
 		//STVFM_Item im tree holen
@@ -1847,6 +1861,27 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		else
 			sond_password_action_end();
 		g_ptr_array_unref(arr_skipped);
+
+		//Download gescheitert: gesammelt am Schluss mitteilen
+		if (s_paste_sel.failed) {
+			GString *text = g_string_new(NULL);
+
+			g_string_append_printf(text, "%u %s nicht %s - Download gescheitert:\n",
+					s_paste_sel.failed->len,
+					(s_paste_sel.failed->len == 1) ? "Datei" : "Dateien",
+					clipboard->ausschneiden ? "verschoben" : "kopiert");
+			for (guint i = 0; i < MIN(s_paste_sel.failed->len, 5); i++)
+				g_string_append_printf(text, "\n%s",
+						(gchar const*) g_ptr_array_index(s_paste_sel.failed, i));
+			if (s_paste_sel.failed->len > 5)
+				g_string_append_printf(text, "\n... und %u weitere",
+						s_paste_sel.failed->len - 5);
+			display_message(SOND_GET_TOPLEVEL(stvfm),
+					clipboard->ausschneiden ? "Verschieben\n\n" : "Kopieren\n\n",
+					text->str, NULL);
+			g_string_free(text, TRUE);
+			g_clear_pointer(&s_paste_sel.failed, g_ptr_array_unref);
+		}
 	}
 
 	inserted = (s_paste_sel.index_to != index_to_start);

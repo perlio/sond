@@ -23,6 +23,7 @@
 
 #include "../misc.h"
 #include "../sond_fileparts.h"
+#include "../sond_file_helper.h"
 #include "../sond_treeview.h"
 #include "../sond_log_and_error.h"
 #include "../sond_process_file.h"
@@ -1205,7 +1206,11 @@ static void zond_treeview_anbinden_error_message(InfoWindow *info_window,
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
-	errmsg = g_strdup_printf(format, filepart ? filepart : "(kein Dateiname)", error->message);
+	if (sond_error_is_cloud(error))
+		errmsg = g_strdup_printf("%s - Download gescheitert",
+				filepart ? filepart : "(kein Dateiname)");
+	else
+		errmsg = g_strdup_printf(format, filepart ? filepart : "(kein Dateiname)", error->message);
 	g_free(filepart);
 	g_error_free(error);
 	info_window_set_message(info_window, errmsg);
@@ -1401,6 +1406,40 @@ static gboolean zond_treeview_anbinden_locked_container(SondFilePart *sfp) {
 			!g_strcmp0(mime, "message/rfc822"));
 }
 
+#ifdef _WIN32
+/* TRUE, wenn die zum Element gehörende Datei auf SeaDrive liegt und noch
+ * nicht (vollständig) geladen ist. Für Elemente in Containern zählt die
+ * oberste Datei. Solche Elemente werden nicht angebunden: erst laden (Doppelklick),
+ * dann sieht man, was man anbindet (Anhänge, Mimeparts). */
+static gboolean zond_treeview_anbinden_nicht_geladen(ZondTreeview *ztv,
+		SondTVFMItem *stvfm_item) {
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+	SondTreeviewFM *stvfm_fs = NULL;
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	SondFilePart *parent = NULL;
+	gchar const *root_dir = NULL;
+	g_autofree gchar *full_path = NULL;
+
+	if (!sfp || !ztv_priv->zond->treeview[BAUM_FS])
+		return FALSE;
+
+	stvfm_fs = SOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]);
+	if (!sond_treeviewfm_is_seadrive_path(stvfm_fs))
+		return FALSE;
+
+	while ((parent = sond_file_part_get_parent(sfp)))
+		sfp = parent;
+
+	root_dir = sond_treeviewfm_get_root(stvfm_fs);
+	if (!root_dir || !sond_file_part_get_path(sfp))
+		return FALSE;
+
+	full_path = g_strconcat(root_dir, "/", sond_file_part_get_path(sfp), NULL);
+
+	return sond_seadrive_needs_hydration(full_path);
+}
+#endif
+
 /*  Fehler: werden im info_window angezeigt
  **  ansonsten: Id des zunächst erzeugten Knotens
  **  -1: Abbruch (Abbrechen-Knopf des Info-Fensters oder des Passwortdialogs)
@@ -1422,6 +1461,23 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		return -1;
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+
+#ifdef _WIN32
+	//nicht geladene SeaDrive-Datei: nicht anbinden, Anker bleibt
+	if (zond_treeview_anbinden_nicht_geladen(ztv, stvfm_item)) {
+		gchar *filepart = sond_file_part_get_filepart(sfp);
+		gchar *text = g_strdup_printf(
+				"'%s' - nicht geladen: erst per Doppelklick laden, dann anbinden",
+				filepart);
+
+		info_window_set_message(info_window, text);
+		g_free(text);
+		g_free(filepart);
+
+		return 0;
+	}
+#endif
+
 	if (sfp && !sond_tvfm_item_get_path_or_section(stvfm_item) &&
 			zond_treeview_anbinden_locked_container(sfp)) {
 		GError *error = NULL;

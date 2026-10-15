@@ -1006,18 +1006,12 @@ static gboolean hydrate_report_idle(gpointer data)
     GtkWidget *parent = g_weak_ref_get(&report->parent);
 
     if (parent) {
-        //die Meldung von sond_seadrive_hydrate() beginnt mit dem Pfad
-        gchar const *detail = report->message;
-        gchar const *sep = g_str_has_prefix(detail, "sond_seadrive_hydrate(") ?
-                strstr(detail, "): ") : NULL;
+        gchar *base = g_path_get_basename(report->full_path);
+        gchar *text = g_strdup_printf("%s - Download gescheitert", base);
 
-        if (sep)
-            detail = sep + 3;
-
-        display_message(parent,
-                "Die Datei konnte nicht von SeaDrive geladen werden:\n\n",
-                report->full_path, "\n\n", detail,
-                "\n\nIst SeaDrive bzw. der Server erreichbar?", NULL);
+        display_message(parent, text, NULL);
+        g_free(text);
+        g_free(base);
         g_object_unref(parent);
     }
 

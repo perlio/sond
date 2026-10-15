@@ -289,6 +289,25 @@ win32_is_transient_error(DWORD win_error)
 }
 #endif
 
+G_DEFINE_QUARK(sond-file-cloud-error-quark, sond_file_cloud_error)
+
+gboolean sond_error_is_cloud(const GError *error)
+{
+    return error && g_error_matches(error, SOND_FILE_ERROR_CLOUD, 0);
+}
+
+//Setzt den Fehler "Download gescheitert"; die Ursache (Systemmeldung) kommt ins Log
+G_GNUC_UNUSED static void sond_set_cloud_error(GError **error, const gchar *path,
+        const gchar *detail)
+{
+    gchar *base = g_path_get_basename(path);
+
+    g_warning("%s - Download gescheitert: %s", path, detail ? detail : "?");
+    g_set_error(error, SOND_FILE_ERROR_CLOUD, 0, "%s - Download gescheitert",
+            base);
+    g_free(base);
+}
+
 #ifdef G_OS_WIN32
 //Ist path ein SeaDrive/OneDrive-Platzhalter, dessen Inhalt noch nicht (vollständig) lokal liegt?
 static gboolean sond_win32_is_cloud_placeholder(const gchar *path)
@@ -635,12 +654,14 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     if (h == INVALID_HANDLE_VALUE) {
         DWORD win_err = GetLastError();
         gchar *msg = g_win32_error_message(win_err);
-        //Cloud-Fehler (Anbieter läuft nicht, Hydrierung gescheitert, Zugriff verweigert)
-        gchar const *hint = sond_win32_is_cloud_error(win_err) ?
-                "\nDie Datei ist nicht geladen - ist SeaDrive bzw. der Server erreichbar?" : "";
 
-        g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_err),
-                    "sond_fopen('%s'): %s%s", path, msg, hint);
+        //nicht geladener Platzhalter (Anbieter beendet, Server nicht erreichbar, ...)
+        if (sond_win32_is_cloud_error(win_err)
+                || sond_win32_is_cloud_placeholder(path))
+            sond_set_cloud_error(error, path, msg);
+        else
+            g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_err),
+                        "sond_fopen('%s'): %s", path, msg);
         g_free(msg);
         return NULL;
     }
@@ -849,11 +870,20 @@ sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **e
     }
 
     BOOL success = CopyFileW(long_source, long_dest, !overwrite);
+    DWORD win_err = success ? 0 : GetLastError();
+
     g_free(long_source);
     g_free(long_dest);
 
     if (!success) {
-        set_error_from_win32(error, GetLastError());
+        if (sond_win32_is_cloud_error(win_err)
+                || sond_win32_is_cloud_placeholder(source)) {
+            gchar *msg = g_win32_error_message(win_err);
+
+            sond_set_cloud_error(error, source, msg);
+            g_free(msg);
+        } else
+            set_error_from_win32(error, win_err);
         return FALSE;
     }
     return TRUE;
@@ -1214,12 +1244,10 @@ sond_file_get_contents_cancellable(const gchar *path, gchar **contents,
         //Platzhalter, der nicht geladen werden konnte (Anbieter beendet, Server weg)
         if ((read_error && sond_win32_is_cloud_error(read_win_err))
                 || sond_win32_is_cloud_placeholder(path)) {
-            gchar *with_hint = g_strconcat(detail ? detail : "",
-                    "\nDie Datei ist nicht geladen - ist SeaDrive bzw. der Server erreichbar?",
-                    NULL);
-
+            sond_set_cloud_error(error, path, detail);
             g_free(detail);
-            detail = with_hint;
+
+            return FALSE;
         }
 #else
         if (read_error)

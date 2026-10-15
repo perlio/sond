@@ -1042,6 +1042,24 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 			(((strlen(abs_path) - strlen(zond->project_name)) > 1) ? 1 : 0));
 	// Ensure that if dir is root, '/' remains
 
+#ifdef _WIN32
+	//Projektdatei auf SeaDrive: SQLite öffnet einen nicht geladenen Platzhalter nicht
+	if (!create && sond_seadrive_needs_hydration(abs_path)) {
+		GError *error_hydrate = NULL;
+
+		if (!sond_seadrive_hydrate(abs_path, &error_hydrate)) {
+			LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__, abs_path,
+					error_hydrate ? error_hydrate->message : "?");
+			g_clear_error(&error_hydrate);
+			g_set_error(error, SOND_FILE_ERROR_CLOUD, 0,
+					"%s - Download gescheitert", zond->project_name);
+			project_open_cleanup(zond);
+
+			return -1;
+		}
+	}
+#endif
+
 	// Create or open databases
 	rc = project_create_dbase_zond(zond, create, error);
 	if (rc) {
@@ -1115,10 +1133,21 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 				GError *error_hydrate = NULL;
 
 				if (!sond_seadrive_hydrate(full_path, &error_hydrate)) {
+					gchar *base = g_path_get_basename(full_path);
+
 					LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
 							full_path,
 							error_hydrate ? error_hydrate->message : "?");
 					g_clear_error(&error_hydrate);
+
+					//ohne Index-DB lädt das Projekt nicht sinnvoll weiter
+					g_set_error(error, SOND_FILE_ERROR_CLOUD, 0,
+							"%s - Download gescheitert", base);
+					g_free(base);
+					g_free(full_path);
+					project_open_cleanup(zond);
+
+					return -1;
 				}
 			}
 			g_free(full_path);

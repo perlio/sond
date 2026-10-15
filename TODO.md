@@ -87,29 +87,30 @@ Status: zurückgestellt (erst nötig, wenn ein UI-Schreibzugriff auf den Index w
     Indexlauf): Mutex um die Index-Transaktionen.
 ```
 
-### #237 SeaDrive-Hydrierungsfehler: Rest
+### #237 SeaDrive: Pfeil für nicht geladene ZIP und EML
 
-Status: zurückgestellt (Doppelklick und Indizierung erledigt, s. HISTORY.md)
+Status: zurückgestellt
 
 ```text
- Erledigt (HISTORY.md, "SeaDrive-Hydrierungsfehler"): Meldung beim Doppelklick auf eine
- nicht geladene Datei (Dialog) und Hinweis bei der Indizierung (Info-Fenster).
- Offen:
- 1. Weitere Zugriffsstellen, an denen ein Hydrierungsfehler nur als rohe Systemmeldung
-    oder gar nicht auftaucht (aus dem Code bekannt, noch nicht mit dem Nutzer
-    besprochen): "Gesamtes Projektverzeichnis"-Scans beim Laden von BAUM_FS-
-    Verzeichnissen, Kopieren/Verschieben von Dateien im Projektbaum, PDF-Vorschau/
-    Thumbnail-Erzeugung, Öffnen der Index-DB beim Laden des Projekts (project.c,
-    sond_seadrive_hydrate() nur mit LOG_WARN); ein dritter Punkt des Nutzers wurde
-    nie ausformuliert.
- 2. Proaktiv (Strategie B): vor kritischen Aktionen (z.B. Indizierung) prüfen, ob
-    SeaDrive bzw. der Seafile-Server erreichbar ist, und vorab gesammelt warnen,
-    statt je Datei zu scheitern. Es gibt im Code noch keinen Erreichbarkeits-
-    Indikator: das Signal "seadrive-status" zählt nur pending_down/pending_up laufender
-    Transfers.
-
- Nutzer-Entscheidung (11.09.2026): zurückgestellt, nicht bearbeiten, bis der Nutzer es
- wieder aufgreift.
+ Die SeaDrive-Fehlermeldungen und die Sperre beim Anbinden sind erledigt (HISTORY.md,
+ "SeaDrive: Download gescheitert"). Offen ist nur die Darstellung nicht geladener Container
+ in BAUM_FS:
+ Nicht geladene Dateien sind dort Blätter nach der Dateiendung, ohne Pfeil (sond_tvfm_item.c,
+ load_fs_dir); der Pfeil erscheint erst, nachdem die Datei geladen ist
+ (sond_treeviewfm_seadrive_item_hydrated() wandelt die Zeile um). Fast alle ZIPs haben Einträge
+ und fast alle Mails neben dem Header mindestens einen Mimepart; ein geladenes ZIP bekommt den
+ Pfeil ohnehin optimistisch. Idee: nicht geladene ZIPs und EMLs ebenfalls mit Pfeil zeigen
+ (PDFs ohne, denn nur wenige haben eingebettete Dateien) und beim Aufklappen korrigieren:
+ Hydrierung anstoßen (sond_seadrive_hydrate_async_notify), Zeile wieder einklappen, nach
+ dem Laden ersetzt item_hydrated() sie durch den Container.
+ Aufwand 4-6 Stunden, Regressionsgefahr: ein nicht geladenes ZIP wäre ein Element vom Typ
+ Verzeichnis, dessen Dateiteil (sond_file_part) nur ein Blatt ist. Alle Stellen, die bei einem
+ Verzeichnis einen echten Container erwarten, müssten das mitbehandeln: Anbinden (DIR-Zweig,
+ gesperrt solange nicht geladen), Kopieren/Ausschneiden (process_stvfm_item_move_or_copy),
+ Aufklappen, Index-Status-Badge, Drag&Drop. Offene Entscheidung: nach erfolgreichem Laden
+ sofort aufklappen oder nur die Zeile umwandeln.
+ Nutzer-Entscheidung: zunächst zurückgestellt, wenig dringend (Doppelklick lädt, danach
+ erscheint der Pfeil von selbst).
 ```
 
 ### #238 Fortschrittsanzeige beim Aufklappen in BAUM_FS

@@ -1631,7 +1631,11 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 				continue;
 			}
 
-			if (!cancelled && wctx->log_func)
+			//nicht geladener SeaDrive-Platzhalter: eine kurze Zeile
+			if (!cancelled && wctx->log_func && sond_error_is_cloud(error))
+				wctx->log_func(wctx->log_func_data,
+						"%s - Download gescheitert", file_part);
+			else if (!cancelled && wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
 						"sond_process_fileparts: get_bytes '%s': %s",
 						file_part,

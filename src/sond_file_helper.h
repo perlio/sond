@@ -89,6 +89,16 @@ gboolean sond_rmdir(const gchar *path, GError **error);
  * Löschen, bleibt der Schreibschutz erhalten.
  */
 gboolean sond_remove_once(const gchar *path, GError **error);
+
+/**
+ * Fehler "Download gescheitert": ein nicht (vollständig) geladener Cloud-
+ * Platzhalter (SeaDrive) ließ sich nicht lesen oder kopieren. Die Meldung ist
+ * eine Zeile ("<Dateiname> - Download gescheitert"); die Systemmeldung steht
+ * im Log. Gesetzt von sond_fopen(), sond_file_get_contents() und sond_copy().
+ */
+GQuark sond_file_cloud_error_quark(void);
+#define SOND_FILE_ERROR_CLOUD sond_file_cloud_error_quark()
+gboolean sond_error_is_cloud(const GError *error);
 gboolean sond_rmdir_once(const gchar *path, GError **error);
 
 /**
