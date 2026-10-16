@@ -20,6 +20,12 @@ G_BEGIN_DECLS
 #define STVFM_PIN_STATE_EXCLUDED     3
 #define STVFM_PIN_STATE_INHERIT      4
 
+/*
+ * Fortsetzung nach erfolgreichem Laden (Hauptthread): führt die ursprüngliche
+ * Aktion erneut aus, dann ist alles lokal.
+ */
+typedef void (*SondSeadriveLoadedFunc)(gpointer user_data);
+
 #ifdef _WIN32
 
 /*
@@ -133,23 +139,24 @@ gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
         const gchar *full_path);
 
 /*
- * Fortschrittsdialog für mehrere gleichzeitig betroffene Dateien
- * (Auszug-Fall im Auswertungsverzeichnis, s. ausführl. Doc-Kommentar an der
- * Implementierung, sond_treeviewfm_seadrive.c) - eine Fortschrittszeile pro
- * Datei in full_paths, ein gemeinsamer Abbrechen-Button (bricht alle noch
- * laufenden Einträge ab) und ein gemeinsamer Schließen-Button.
+ * Stellt sicher, dass alle full_paths lokal vorliegen. Ja: TRUE, der Aufrufer
+ * macht synchron weiter (done_func/destroy werden nicht aufgerufen, user_data
+ * bleibt beim Aufrufer). Nein: die Downloads der fehlenden Dateien werden
+ * angestoßen, EIN modales Fenster zeigt den Fortschritt (Dateien und Volumen)
+ * mit "Abbrechen" und schließt sich selbst, sobald alles beendet ist; FALSE,
+ * der Aufrufer kehrt sofort zurück. Waren alle Downloads erfolgreich, ruft
+ * der Hauptthread done_func(user_data) auf; bei Abbruch geschieht nichts,
+ * gescheiterte Downloads werden gesammelt gemeldet. destroy(user_data) folgt
+ * in jedem Fall. Bereits geladene Dateien bleiben geladen. full_paths wird
+ * nur gelesen.
  */
-void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
-        GPtrArray *full_paths);
+gboolean sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
+        SondSeadriveLoadedFunc done_func, gpointer user_data,
+        GDestroyNotify destroy);
 
 /*
- * Wie sond_seadrive_ensure_hydrated(), aber für eine Menge von Pfaden
- * (Auszug-Fall) - stößt für jede noch nicht hydrierte Datei aus
- * full_paths die Hydrierung an (No-Op, falls schon läuft) und zeigt bei
- * bereits laufender Hydrierung (mind. einer davon) den gemeinsamen
- * Fortschrittsdialog (s.o.). Rückgabe: TRUE = alle Dateien bereits
- * lokal, Aufrufer soll normal öffnen. FALSE = mindestens eine Datei
- * musste hydriert werden, Aufrufer soll sofort zurückkehren.
+ * Wie sond_seadrive_ensure_loaded() ohne Fortsetzung: der Nutzer wiederholt
+ * die Aktion nach dem Laden selbst.
  */
 gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
         GPtrArray *full_paths);
@@ -261,6 +268,16 @@ static inline gboolean
 sond_seadrive_ensure_hydrated(GtkWindow *parent, const gchar *full_path)
 {
     (void)parent; (void)full_path;
+    return TRUE;
+}
+
+static inline gboolean
+sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
+        SondSeadriveLoadedFunc done_func, gpointer user_data,
+        GDestroyNotify destroy)
+{
+    (void)parent; (void)full_paths; (void)done_func; (void)user_data;
+    (void)destroy;
     return TRUE;
 }
 

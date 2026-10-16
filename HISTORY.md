@@ -5826,3 +5826,27 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  - Die Watcher-Zähler (sond_seadrive.c) waren korrekt (ADDED-Doppelzählung war nur eine
    verworfene Vermutung).
 ```
+
+## SeaDrive: Laden vor der Aktion mit Fortschrittsfenster, Etappe A (16.10.2026)
+
+```text
+ Vom Nutzer getestet. Aktionen, die eine nicht geladene SeaDrive-Datei lesen, laden sie vorab
+ und setzen sich danach selbst fort (statt "bitte erneut versuchen").
+ - sond_seadrive_ensure_loaded() (sond_seadrive.c/h): alles lokal -> TRUE, Aufrufer macht
+   synchron weiter. Sonst Downloads anstoßen (ab 8 Dateien Pool mit 4 Arbeitern), ein modales
+   Fenster mit Fortschritt und "Abbrechen" (X und Esc wirken wie Abbrechen), kein
+   "Schließen"-Knopf. Es schließt sich selbst, wenn alle Downloads beendet sind; waren alle
+   erfolgreich, ruft der Hauptthread die Fortsetzung auf (Aktion läuft erneut, alles ist dann
+   lokal). Abbruch: nichts weiter; gescheiterte Downloads: eine Sammelmeldung, keine
+   Fortsetzung. Geladene Dateien bleiben geladen.
+ - Titelzeile mit Volumen und Dateizahl ("1,2 GB von 8,4 GB (123 von 500 Dateien)"). Größe je
+   Datei per GetFileAttributesExW; Fortschritt per CfGetPlaceholderInfo nur für die ersten 8
+   laufenden Einträge (Sammelanzeige ab 20 Dateien, sonst eine Zeile je Datei).
+ - HydrateBatch und der alte Multi-Dialog entfallen; sond_seadrive_ensure_hydrated(_multi)
+   bleiben als Aufruf ohne Fortsetzung für die noch nicht umgestellten Stellen.
+ - sond_treeviewfm.c: LoadCont (Aktion + Zeilenreferenz) für Doppelklick/Öffnen mit,
+   Aufklappen (Doppelklick auf Container, Pfeil) und Kopieren/Einfügen; Vorabdurchlauf des
+   Einfügens ohne Obergrenze. sond_treeviewfm_open_at_path() für Öffnen aus Zeile.
+ - Offen: Etappe B (Viewer-Öffnen BAUM_INHALT/AUSWERTUNG, Auszug, Seiten einfügen, Treffer,
+   Entsperren), C (Export, Fehler im Dokument), D (Indizieren).
+```

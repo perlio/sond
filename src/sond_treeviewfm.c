@@ -1502,6 +1502,76 @@ typedef struct {
 #ifdef _WIN32
 static gchar* sond_treeviewfm_root_file_path(SondTreeviewFM*, SondFilePart*);
 
+/* Aktion, die nach dem Laden nicht geladener SeaDrive-Dateien fortgesetzt wird
+ * (sond_seadrive_ensure_loaded()): sie läuft dann erneut, jetzt sind alle
+ * Dateien lokal. */
+typedef enum {
+	LOAD_CONT_OPEN,
+	LOAD_CONT_OPEN_WITH,
+	LOAD_CONT_EXPAND,
+	LOAD_CONT_PASTE
+} LoadContAction;
+
+typedef struct {
+	GWeakRef stvfm;
+	GtkTreeRowReference *ref; //Zeile (Öffnen, Aufklappen), sonst NULL
+	LoadContAction action;
+	gboolean kind;            //Einfügen: als Kind (sonst Geschwister)
+} LoadCont;
+
+static void load_cont_run(gpointer data);
+
+static LoadCont* load_cont_new(SondTreeviewFM *stvfm, GtkTreeIter *iter,
+		LoadContAction action, gboolean kind) {
+	LoadCont *cont = g_new0(LoadCont, 1);
+
+	g_weak_ref_init(&cont->stvfm, stvfm);
+	if (iter) {
+		GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+		GtkTreePath *path = gtk_tree_model_get_path(model, iter);
+
+		cont->ref = gtk_tree_row_reference_new(model, path);
+		gtk_tree_path_free(path);
+	}
+	cont->action = action;
+	cont->kind = kind;
+
+	return cont;
+}
+
+static void load_cont_free(gpointer data) {
+	LoadCont *cont = (LoadCont*) data;
+
+	g_weak_ref_clear(&cont->stvfm);
+	if (cont->ref)
+		gtk_tree_row_reference_free(cont->ref);
+	g_free(cont);
+}
+
+/* Liegt die oberste Datei von sfp lokal vor (kein SeaDrive-Projekt oder
+ * geladen)? Dann TRUE und cont wird freigegeben. Sonst startet der Download
+ * mit Fortschrittsfenster, FALSE, und cont setzt die Aktion danach fort. */
+static gboolean sond_treeviewfm_ensure_loaded(SondTreeviewFM *stvfm,
+		SondFilePart *sfp, LoadCont *cont) {
+	gchar *full_path = sond_treeviewfm_root_file_path(stvfm, sfp);
+	GPtrArray *arr = NULL;
+	gboolean is_local = TRUE;
+
+	if (full_path) {
+		arr = g_ptr_array_new();
+		g_ptr_array_add(arr, full_path);
+		is_local = sond_seadrive_ensure_loaded(
+				GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), arr, load_cont_run, cont,
+				load_cont_free);
+		g_ptr_array_free(arr, TRUE);
+		g_free(full_path);
+	}
+	if (is_local)
+		load_cont_free(cont);
+
+	return is_local;
+}
+
 //nicht geladene Dateien unterhalb von abs_dir sammeln
 static void preflight_scan_dir(SFMPreflight *pf, gchar const *abs_dir) {
 	SondDir *dir = sond_dir_open(abs_dir, NULL);
@@ -1895,43 +1965,18 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 
 #ifdef _WIN32
 		//Ist eine Datei noch nicht (vollständig) geladen, wird gar nichts
-		//kopiert: Downloads anstoßen (ein erneuter Versuch während des Ladens
-		//zeigt den Fortschritt), der Nutzer fügt danach erneut ein
+		//kopiert: Downloads mit Fortschrittsfenster, danach läuft das Einfügen
+		//erneut (Abbruch oder Fehler: nichts)
 		if (rc != -1 && !pf.aborted && !pf.failure && pf.not_loaded
 				&& pf.not_loaded->len > 0) {
-			gboolean any_hydrating = FALSE;
+			LoadCont *cont = load_cont_new(stvfm, NULL, LOAD_CONT_PASTE, kind);
 
-			for (guint i = 0; i < pf.not_loaded->len && !any_hydrating; i++)
-				any_hydrating = sond_seadrive_is_hydrating(
-						(gchar const*) g_ptr_array_index(pf.not_loaded, i));
-
-			//noch nicht angestoßene Downloads werden mit gestartet; läuft
-			//schon einer, zeigt das Fortschrittsfenster alles, ohne Meldung
-			sond_seadrive_ensure_hydrated_multi(
-					GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), pf.not_loaded);
-			if (any_hydrating)
+			if (sond_seadrive_ensure_loaded(
+					GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), pf.not_loaded,
+					load_cont_run, cont, load_cont_free))
+				load_cont_free(cont);
+			else
 				pf.aborted = TRUE;
-		}
-
-		if (rc != -1 && !pf.aborted && !pf.failure && pf.not_loaded
-				&& pf.not_loaded->len > 0) {
-			GString *names = g_string_new(NULL);
-
-			g_string_append_printf(names, "%u %s nicht (vollständig) geladen. "
-					"Der Download wurde gestartet, bitte danach erneut "
-					"einfügen:\n", pf.not_loaded->len,
-					(pf.not_loaded->len == 1) ? "Datei ist" : "Dateien sind");
-			for (guint i = 0; i < MIN(pf.not_loaded->len, 5); i++) {
-				gchar *base = g_path_get_basename(
-						(gchar const*) g_ptr_array_index(pf.not_loaded, i));
-
-				g_string_append_printf(names, "\n%s", base);
-				g_free(base);
-			}
-			if (pf.not_loaded->len > 5)
-				g_string_append_printf(names, "\n... und %u weitere",
-						pf.not_loaded->len - 5);
-			pf.failure = g_string_free(names, FALSE);
 		}
 #endif
 
@@ -2236,29 +2281,8 @@ static gchar* sond_treeviewfm_root_file_path(SondTreeviewFM *stvfm,
 #endif
 
 #ifdef _WIN32
-/* Ist die Datei des Elements (bei Elementen in Containern die oberste Datei)
- * lokal vorhanden? Liegt sie als nicht geladener Platzhalter auf SeaDrive,
- * wird der Download angestoßen bzw. beim erneuten Aufruf der Fortschritt
- * gezeigt (sond_seadrive_ensure_hydrated(): Doppelklick und Klick auf den
- * Pfeil eines nicht geladenen Containers verhalten sich gleich) und FALSE
- * geliefert; kein SeaDrive-Projekt oder lokal: TRUE. */
-static gboolean sond_treeviewfm_ensure_local(SondTreeviewFM *stvfm,
-		SondFilePart *sfp) {
-	gchar *full_path = sond_treeviewfm_root_file_path(stvfm, sfp);
-	gboolean is_local = TRUE;
-
-	if (!full_path)
-		return TRUE;
-
-	is_local = sond_seadrive_ensure_hydrated(
-			GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
-	g_free(full_path);
-
-	return is_local;
-}
-
 /* Ist die Datei des Elements ein nicht geladener SeaDrive-Platzhalter?
- * Stößt anders als sond_treeviewfm_ensure_local() keinen Download an (für
+ * Stößt anders als sond_treeviewfm_ensure_loaded() keinen Download an (für
  * die Dateisuche, die nicht geladene Container überspringt). */
 static gboolean sond_treeviewfm_not_loaded(SondTreeviewFM *stvfm,
 		SondFilePart *sfp) {
@@ -2284,48 +2308,28 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
 #ifdef _WIN32
 		//nicht geladener Container (ZIP, E-Mail): wie beim Klick auf den Pfeil
-		//(sond_treeviewfm_test_expand_row()) den Download anstoßen
-		sond_treeviewfm_ensure_local(sond_tvfm_item_get_stvfm(stvfm_item),
-				stvfm_item_priv->sond_file_part);
+		//(sond_treeviewfm_test_expand_row()) laden, danach aufklappen
+		sond_treeviewfm_ensure_loaded(sond_tvfm_item_get_stvfm(stvfm_item),
+				stvfm_item_priv->sond_file_part,
+				load_cont_new(sond_tvfm_item_get_stvfm(stvfm_item), iter,
+				LOAD_CONT_EXPAND, FALSE));
 #endif
 		return 0;
 	}
 
 #ifdef _WIN32
-	/* Bei offline-Dateien im SeaDrive-Pfad: Download über die offizielle
-	 * CfHydratePlaceholder()-API anstoßen (sond_seadrive_hydrate_async(),
-	 * sond_treeviewfm_seadrive.c/h). Den Pin-State nicht ändern.
-	 *
-	 * Der Trick CreateFileW(GENERIC_READ)+ReadFile() (ein Byte lesen) zum
-	 * Auslösen des "Recall" schlägt unter aktuellem Windows zuverlässig mit
-	 * ERROR_CLOUD_FILE_ACCESS_DENIED fehl (kein zond-Bug). Deshalb
-	 * sond_seadrive_hydrate(), das die dafür vorgesehene CF-API verwendet.
-	 *
-	 * sond_seadrive_hydrate() blockiert synchron bis die Datei (bzw. der
-	 * angeforderte Bereich) lokal verfügbar ist - bei einer 51-GB-Datei
-	 * fröre das Programm minutenlang ein, ohne Rückmeldung oder
-	 * Abbrechen-Möglichkeit. Deshalb: beim ERSTEN Doppelklick kein
-	 * Info-Fenster (der Download läuft ohnehin im Hintergrund weiter),
-	 * stattdessen sofort in die UI zurückkehren und die eigentliche
-	 * Hydrierung in einem Hintergrund-Thread erledigen
-	 * (sond_seadrive_hydrate_async(), Fire-and-forget). Vorab ein
-	 * schneller, nicht-blockierender Check (sond_seadrive_needs_
-	 * hydration()), ob überhaupt hydriert werden muss - schon lokale
-	 * Dateien fallen unten auf den normalen Öffnen-Weg durch.
-	 *
-	 * Bei einem erneuten Doppelklick auf dieselbe, noch laufende Datei
-	 * (sond_seadrive_is_hydrating() == TRUE) erscheint statt eines stillen
-	 * No-Ops ein Fortschritts-/Abbrechen-Dialog, um den SeaDrive-Server bei
-	 * versehentlichen Großdatei-Downloads nicht unnötig weiter zu belasten.
-	 *
-	 * Die Check-und-Reagiere-Sequenz ist auch in zond_treeview_open_node()
-	 * (zond_treeview.c, für BAUM_INHALT/BAUM_AUSWERTUNG) nötig und deshalb
-	 * in sond_seadrive_ensure_hydrated() (sond_seadrive.c/h) konsolidiert. */
-	/* Bei Bedarf sofort zurück an die UI. Erneuter Doppelklick später (nach
-	 * Abschluss des Downloads) öffnet dann normal über den unten stehenden
-	 * Weg. */
-	if (!sond_treeviewfm_ensure_local(sond_tvfm_item_get_stvfm(stvfm_item),
-			stvfm_item_priv->sond_file_part))
+	/* Nicht geladene Datei im SeaDrive-Pfad: laden (Fortschrittsfenster, mit
+	 * Abbrechen), danach öffnet load_cont_run() erneut. Der Pin-State bleibt
+	 * unverändert. Der Trick CreateFileW(GENERIC_READ)+ReadFile() zum
+	 * Auslösen des "Recall" schlägt unter aktuellem Windows mit
+	 * ERROR_CLOUD_FILE_ACCESS_DENIED fehl, deshalb sond_seadrive_hydrate()
+	 * mit der CF-API (in einem Hintergrundthread, sonst fröre das Programm
+	 * bei großen Dateien ein). Dieselbe Sequenz gilt für BAUM_INHALT und
+	 * BAUM_AUSWERTUNG (zond_treeview_open_node()). */
+	if (!sond_treeviewfm_ensure_loaded(sond_tvfm_item_get_stvfm(stvfm_item),
+			stvfm_item_priv->sond_file_part,
+			load_cont_new(sond_tvfm_item_get_stvfm(stvfm_item), iter,
+			open_with ? LOAD_CONT_OPEN_WITH : LOAD_CONT_OPEN, FALSE)))
 		return 0;
 #endif
 
@@ -2366,16 +2370,16 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	return 0;
 }
 
-static void open_item(GtkTreeView* tree_view, gboolean open_with) {
-	SondTVFMItem* stvfm_item = NULL;
-	GtkTreePath* path = NULL;
+//Zeile an path öffnen; Fehler im Dialog melden
+static void sond_treeviewfm_open_at_path(GtkTreeView *tree_view,
+		GtkTreePath *path, gboolean open_with, gchar const *err_title) {
+	SondTVFMItem *stvfm_item = NULL;
 	GtkTreeIter iter = { 0 };
 	gint rc = 0;
-	GError* error = NULL;
+	GError *error = NULL;
 
-	gtk_tree_view_get_cursor(tree_view, &path, NULL);
-	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
-	gtk_tree_path_free(path);
+	if (!gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path))
+		return;
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) //Dummy-Zeile
 		return;
@@ -2384,13 +2388,67 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 	g_object_unref(stvfm_item);
 	if (rc) {
 		if (!error_is_cancelled(error))
-			display_message(SOND_GET_TOPLEVEL(tree_view), "Fehler beim Öffnen\n\n",
+			display_message(SOND_GET_TOPLEVEL(tree_view), err_title,
 					error->message, NULL);
 		g_error_free(error);
 	}
 
 	return;
 }
+
+static void open_item(GtkTreeView* tree_view, gboolean open_with) {
+	GtkTreePath* path = NULL;
+
+	gtk_tree_view_get_cursor(tree_view, &path, NULL);
+	if (!path)
+		return;
+	sond_treeviewfm_open_at_path(tree_view, path, open_with,
+			"Fehler beim Öffnen\n\n");
+	gtk_tree_path_free(path);
+
+	return;
+}
+
+#ifdef _WIN32
+//Fortsetzung nach dem Laden nicht geladener Dateien (s. LoadCont)
+static void load_cont_run(gpointer data) {
+	LoadCont *cont = (LoadCont*) data;
+	SondTreeviewFM *stvfm = g_weak_ref_get(&cont->stvfm);
+
+	if (!stvfm)
+		return;
+
+	if (cont->action == LOAD_CONT_PASTE) {
+		GError *error = NULL;
+
+		if (sond_treeviewfm_paste_clipboard(stvfm, cont->kind, &error)) {
+			if (!error_is_cancelled(error))
+				display_message(SOND_GET_TOPLEVEL(stvfm),
+						"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message,
+						NULL);
+			g_error_free(error);
+		}
+	}
+	else if (cont->ref) {
+		GtkTreePath *path = gtk_tree_row_reference_get_path(cont->ref);
+
+		if (path) {
+			if (cont->action == LOAD_CONT_EXPAND)
+				gtk_tree_view_expand_row(GTK_TREE_VIEW(stvfm), path, FALSE);
+			else
+				sond_treeviewfm_open_at_path(GTK_TREE_VIEW(stvfm), path,
+						cont->action == LOAD_CONT_OPEN_WITH,
+						cont->action == LOAD_CONT_OPEN_WITH ?
+						"Fehler beim Öffnen\n\n" :
+						"Datei kann nicht geöffnet werden\n\n");
+			gtk_tree_path_free(path);
+		}
+	}
+	g_object_unref(stvfm);
+
+	return;
+}
+#endif
 
 static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 		GPtrArray *arr_hits) {
@@ -3564,24 +3622,8 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 
 static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 		GtkTreePath *tree_path, gpointer column, gpointer data) {
-	gint rc = 0;
-	GError *error = NULL;
-	SondTVFMItem *stvfm_item = NULL;
-	GtkTreeIter iter = { 0 };
-
-	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, tree_path);
-	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
-	if (!stvfm_item) //Dummy-Zeile
-		return;
-
-	rc = sond_treeviewfm_open(&iter, stvfm_item, FALSE, &error);
-	g_object_unref(stvfm_item);
-	if (rc) {
-		if (!error_is_cancelled(error))
-			display_message(SOND_GET_TOPLEVEL(tree_view),
-					"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
-		g_error_free(error);
-	}
+	sond_treeviewfm_open_at_path(tree_view, tree_path, FALSE,
+			"Datei kann nicht geöffnet werden\n\n");
 
 	return;
 }
@@ -3690,9 +3732,8 @@ static gboolean row_expand_failed_collapse_idle(gpointer data) {
 static gint expand_busy = 0;
 
 /* Vor dem Aufklappen: ein Container (ZIP, E-Mail) einer nicht geladenen
- * SeaDrive-Datei klappt nicht auf. Der Klick auf den Pfeil stößt wie der
- * Doppelklick den Download an (ein zweiter Klick während des Ladens zeigt den
- * Fortschritt); erst wenn die Datei lokal ist, klappt die Zeile auf und
+ * SeaDrive-Datei klappt nicht auf. Der Klick auf den Pfeil lädt wie der
+ * Doppelklick die Datei (Fortschrittsfenster); danach klappt die Zeile auf und
  * "row-expanded" lädt die Kinder. TRUE verhindert das Aufklappen. */
 static gboolean sond_treeviewfm_test_expand_row(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
@@ -3705,8 +3746,10 @@ static gboolean sond_treeviewfm_test_expand_row(GtkTreeView *tree_view,
 	if (!stvfm_item)
 		return FALSE;
 
-	is_local = sond_treeviewfm_ensure_local(SOND_TREEVIEWFM(tree_view),
-			sond_tvfm_item_get_sond_file_part(stvfm_item));
+	is_local = sond_treeviewfm_ensure_loaded(SOND_TREEVIEWFM(tree_view),
+			sond_tvfm_item_get_sond_file_part(stvfm_item),
+			load_cont_new(SOND_TREEVIEWFM(tree_view), iter, LOAD_CONT_EXPAND,
+			FALSE));
 	g_object_unref(stvfm_item);
 
 	return !is_local;

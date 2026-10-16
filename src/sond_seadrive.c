@@ -994,11 +994,9 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
  * unabhängig davon, ob die UI darauf wartet) - stattdessen sofort in die UI
  * zurückkehren (Fire-and-forget).
  *
- * Bei einem erneuten Doppelklick auf dieselbe, noch laufende Datei wird
- * statt eines stillen No-Ops ein Fortschritts-/Abbrechen-Dialog gezeigt
- * (sond_seadrive_show_hydrate_progress_dialog_multi(), weiter unten), um bei
- * versehentlichen Großdateien den Download tatsächlich stoppen zu können,
- * statt den SeaDrive-Server unnötig weiter zu belasten.
+ * Aktionen, die Dateien lesen, laden vorab über sond_seadrive_ensure_loaded()
+ * (weiter unten): modales Fortschrittsfenster mit Abbrechen, danach läuft die
+ * Aktion automatisch weiter.
  *
  * Wert je Pfad: HydratingEntry (unten), enthält u.a. ein
  * THREAD_TERMINATE-Handle auf den Hydrier-Thread für CancelSynchronousIo()
@@ -1030,22 +1028,10 @@ static void hydrating_entry_free(gpointer data)
     g_free(entry);
 }
 
-/* Mehrere Dateien, die zusammen angestoßen werden (sond_seadrive_ensure_
- * hydrated_multi()): Fehlschläge werden gesammelt und am Ende in EINEM Dialog
- * gemeldet, statt je Datei einen zu zeigen. */
-typedef struct {
-    GMutex     mutex;
-    gint       remaining; /* nicht beendete Aufgaben, +1 Wächter bis alle
-                           * eingereiht sind */
-    GPtrArray *failed;    /* Namen gescheiterter Dateien (g_free) */
-    GWeakRef   parent;
-} HydrateBatch;
-
 typedef struct {
     gchar *full_path;
     GWeakRef parent;   /* Fenster für die Fehlermeldung, kann leer sein */
     gboolean notify;
-    HydrateBatch *batch; /* Sammelmeldung statt Einzeldialog, kann NULL sein */
 } HydrateThreadData;
 
 typedef struct {
@@ -1092,87 +1078,6 @@ static void hydrate_report_error(HydrateThreadData *td, gchar const *message)
     g_idle_add(hydrate_report_idle, report);
 }
 
-static HydrateBatch* hydrate_batch_new(GtkWindow *parent)
-{
-    HydrateBatch *batch = g_new0(HydrateBatch, 1);
-
-    g_mutex_init(&batch->mutex);
-    batch->remaining = 1; /* Wächter */
-    batch->failed = g_ptr_array_new_with_free_func(g_free);
-    g_weak_ref_init(&batch->parent, parent);
-
-    return batch;
-}
-
-static void hydrate_batch_free(HydrateBatch *batch)
-{
-    g_weak_ref_clear(&batch->parent);
-    g_ptr_array_unref(batch->failed);
-    g_mutex_clear(&batch->mutex);
-    g_free(batch);
-}
-
-static gboolean hydrate_batch_report_idle(gpointer data)
-{
-    HydrateBatch *batch = (HydrateBatch *) data;
-    GtkWidget *parent = g_weak_ref_get(&batch->parent);
-
-    if (parent) {
-        GString *text = g_string_new(NULL);
-
-        if (batch->failed->len == 1)
-            g_string_append(text, (const gchar *) g_ptr_array_index(
-                    batch->failed, 0));
-        else {
-            g_string_append_printf(text,
-                    "%u Dateien - Download gescheitert:\n", batch->failed->len);
-            for (guint i = 0; i < MIN(batch->failed->len, 5); i++)
-                g_string_append_printf(text, "\n%s",
-                        (const gchar *) g_ptr_array_index(batch->failed, i));
-            if (batch->failed->len > 5)
-                g_string_append_printf(text, "\n... und %u weitere",
-                        batch->failed->len - 5);
-        }
-        if (batch->failed->len == 1)
-            g_string_append(text, " - Download gescheitert");
-
-        display_message(parent, text->str, NULL);
-        g_string_free(text, TRUE);
-        g_object_unref(parent);
-    }
-
-    hydrate_batch_free(batch);
-
-    return G_SOURCE_REMOVE;
-}
-
-//eine Aufgabe des Batches ist beendet (oder der Wächter wird abgegeben)
-static void hydrate_batch_done(HydrateBatch *batch)
-{
-    gboolean last = FALSE;
-
-    g_mutex_lock(&batch->mutex);
-    last = (--batch->remaining == 0);
-    g_mutex_unlock(&batch->mutex);
-
-    if (!last)
-        return;
-
-    if (batch->failed->len > 0)
-        g_idle_add(hydrate_batch_report_idle, batch);
-    else
-        hydrate_batch_free(batch);
-}
-
-static void hydrate_batch_failed(HydrateBatch *batch, const gchar *full_path)
-{
-    gchar *base = g_path_get_basename(full_path);
-
-    g_mutex_lock(&batch->mutex);
-    g_ptr_array_add(batch->failed, base);
-    g_mutex_unlock(&batch->mutex);
-}
-
 static void hydrate_run(HydrateThreadData *td)
 {
     GError *error = NULL;
@@ -1217,9 +1122,7 @@ static void hydrate_run(HydrateThreadData *td)
         pre_cancelled = entry && entry->cancel_requested;
         g_mutex_unlock(&g_hydrating_mutex);
 
-        if (!pre_cancelled && td->batch)
-            hydrate_batch_failed(td->batch, td->full_path);
-        else if (td->notify && !pre_cancelled)
+        if (td->notify && !pre_cancelled)
             hydrate_report_error(td, error ? error->message : NULL);
         g_clear_error(&error);
     }
@@ -1228,9 +1131,6 @@ static void hydrate_run(HydrateThreadData *td)
     g_hash_table_remove(g_hydrating_paths, td->full_path); /* schließt
             thread_handle_dup via hydrating_entry_free(), falls gesetzt */
     g_mutex_unlock(&g_hydrating_mutex);
-
-    if (td->batch)
-        hydrate_batch_done(td->batch);
 
     g_weak_ref_clear(&td->parent);
     g_free(td->full_path);
@@ -1286,11 +1186,11 @@ static GThreadPool* hydrate_pool_get(void)
  * i.d.R. noch läuft.
  */
 /* Reiht die Hydrierung von full_path ein. TRUE, wenn sie neu eingereiht wurde,
- * FALSE, wenn schon eine läuft oder das Einreihen scheiterte. parent und
- * batch schließen sich aus (Einzeldialog bzw. Sammelmeldung); use_pool: Pool
- * statt eigenem Thread. */
+ * FALSE, wenn schon eine läuft oder das Einreihen scheiterte. Mit parent wird
+ * ein Fehlschlag in einem Dialog gemeldet; use_pool: Pool statt eigenem
+ * Thread. */
 static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
-        HydrateBatch *batch, gboolean use_pool)
+        gboolean use_pool)
 {
     HydrateThreadData *td = NULL;
 
@@ -1312,13 +1212,6 @@ static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
     td->full_path = g_strdup(full_path);
     td->notify = (parent != NULL);
     g_weak_ref_init(&td->parent, parent);
-    td->batch = batch;
-
-    if (batch) {
-        g_mutex_lock(&batch->mutex);
-        batch->remaining++;
-        g_mutex_unlock(&batch->mutex);
-    }
 
     if (use_pool) {
         g_thread_pool_push(hydrate_pool_get(), td, NULL);
@@ -1336,8 +1229,6 @@ static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
             g_mutex_lock(&g_hydrating_mutex);
             g_hash_table_remove(g_hydrating_paths, td->full_path);
             g_mutex_unlock(&g_hydrating_mutex);
-            if (batch)
-                hydrate_batch_done(batch);
             g_weak_ref_clear(&td->parent);
             g_free(td->full_path);
             g_free(td);
@@ -1352,7 +1243,7 @@ static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
 void sond_seadrive_hydrate_async_notify(const gchar *full_path,
         GtkWindow *parent)
 {
-    hydrate_start(full_path, parent, NULL, FALSE);
+    hydrate_start(full_path, parent, FALSE);
 }
 
 void sond_seadrive_hydrate_async(const gchar *full_path)
@@ -1503,51 +1394,72 @@ gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
 /*  Public API: sond_seadrive_ensure_hydrated_multi (Auszug-Fall)      */
 /* ------------------------------------------------------------------ */
 
-/* Der Auszug-Fall im Auswertungsverzeichnis (mehrere Kind-Anbindungen unter
- * einem Strukturpunkt werden zu einer gemeinsamen Ansicht zusammengefasst,
- * s. zond_treeview_open_auszug(), zond_treeview.c) kann mehrere verschiedene
- * reale PDF-Dateien betreffen, die jede für sich hydriert werden müssen:
- * für alle betroffenen PDFs wird erforderlichenfalls die Hydrierung
- * angestoßen; ein erneuter Doppelklick zeigt den Download-Status für alle
- * betroffenen - das heißt noch nicht hydrierten - Dateien.
- *
- * Analog zum Einzeldatei-Fall (sond_seadrive_ensure_hydrated() oben), aber
- * für eine Menge von Pfaden: pro betroffener, noch nicht hydrierter Datei
- * wird die Hydrierung angestoßen (No-Op, falls schon läuft); war beim
- * Aufruf schon mindestens eine davon in Hydrierung (= zweiter Doppelklick),
- * wird EIN gemeinsamer Dialog mit je einer Fortschrittszeile pro noch nicht
- * hydrierter Datei gezeigt (statt N einzelner Dialoge). "Schließen"
- * schließt nur den Dialog (Downloads laufen unbeobachtet weiter);
- * "Abbrechen" bricht alle noch laufenden Einträge gleichzeitig ab. Der
- * Dialog schließt sich von selbst, sobald ALLE Einträge fertig sind. */
+/* Laden nicht geladener Dateien vor einer Aktion (Öffnen, Kopieren, Auszug,
+ * Export, Indizieren ...): sond_seadrive_ensure_loaded() stößt die Downloads
+ * an und zeigt EIN modales Fenster mit Fortschritt (Dateien und Volumen in
+ * der Titelzeile) und "Abbrechen". Es schließt sich selbst, sobald alle
+ * Downloads beendet sind; waren alle erfolgreich, wird die Fertig-Funktion
+ * aufgerufen (sie führt die Aktion erneut aus, dann ist alles lokal). Bei
+ * Abbruch geschieht nichts weiter, scheiterten Downloads, werden sie gesammelt
+ * gemeldet. Bereits geladene Dateien bleiben geladen. Das Fenster zu
+ * schließen (X, Esc) wirkt wie "Abbrechen". */
 
 typedef struct {
     gchar     *full_path;
     GtkWidget *label;
     GtkWidget *progress_bar;
     guint64    file_size;
+    guint64    on_disk;        /* zuletzt ermittelte, lokal vorhandene Bytes */
     gboolean   logged_failure;
-    gboolean   done;
-} HydrateProgressEntryMulti;
+    gboolean   done;           /* Hydrierung beendet (Erfolg oder nicht) */
+    gboolean   ok;             /* Datei ist danach vollständig lokal */
+} LoadEntry;
 
 /* Ab so vielen Dateien statt einer Zeile je Datei nur eine Sammelanzeige:
  * je Datei zwei Widgets und je Aktualisierung ein Dateizugriff wären bei
  * Hunderten Dateien zu langsam. */
 #define HYDRATE_PROGRESS_AGGREGATE_MIN 20
 
+/* Sammelanzeige: je Aktualisierung höchstens so viele laufende Dateien nach
+ * dem Fortschritt fragen (der Pool lädt ohnehin nur wenige gleichzeitig; die
+ * Reihenfolge der Einträge entspricht der des Einreihens). */
+#define HYDRATE_PROGRESS_QUERY_MAX 8
+
 typedef struct {
-    GPtrArray *entries; /* HydrateProgressEntryMulti*, eigene Kopien */
+    GPtrArray *entries; /* LoadEntry*, eigene Kopien */
     GtkWidget *dialog;
     GtkWidget *abbrechen_button;
     guint      timeout_id;
     gboolean   aggregate;    /* Sammelanzeige: entries ohne Widgets */
+    gboolean   cancelled;
     GtkWidget *agg_label;
     GtkWidget *agg_bar;
-} HydrateProgressUiMulti;
+    guint64    total_bytes;
+    GWeakRef   parent;
+    SondSeadriveLoadedFunc done_func;
+    gpointer   user_data;
+    GDestroyNotify destroy;
+} LoadJob;
 
-/* Ermittelt per CfGetPlaceholderInfo() den Hydrierungs-Fortschritt eines
- * einzelnen Eintrags (Datei) und aktualisiert dessen Fortschrittsbalken. */
-static void hydrate_progress_entry_update(HydrateProgressEntryMulti *entry)
+static guint64 load_file_size(const gchar *full_path)
+{
+    wchar_t *lp = prepare_long_path(full_path, NULL);
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    guint64 size = 0;
+
+    if (!lp)
+        return 0;
+
+    if (GetFileAttributesExW(lp, GetFileExInfoStandard, &data))
+        size = ((guint64) data.nFileSizeHigh << 32) | data.nFileSizeLow;
+    g_free(lp);
+
+    return size;
+}
+
+/* Ermittelt per CfGetPlaceholderInfo() die lokal vorhandenen Bytes eines
+ * Eintrags und aktualisiert dessen Fortschrittsbalken (falls vorhanden). */
+static void load_entry_query(LoadEntry *entry)
 {
     wchar_t *lp;
     HANDLE   h;
@@ -1571,26 +1483,30 @@ static void hydrate_progress_entry_update(HydrateProgressEntryMulti *entry)
                 &info, sizeof(info), &returned_length);
 
         if (SUCCEEDED(hr)) {
-            guint64 on_disk = (guint64) info.OnDiskDataSize.QuadPart;
-            gdouble fraction = 0.0;
-            gchar *on_disk_str, *total_str, *text;
+            entry->on_disk = (guint64) info.OnDiskDataSize.QuadPart;
 
-            if (entry->file_size > 0) {
-                fraction = (gdouble) on_disk / (gdouble) entry->file_size;
-                if (fraction > 1.0)
-                    fraction = 1.0;
+            if (entry->progress_bar) {
+                gdouble fraction = 0.0;
+                gchar *on_disk_str, *total_str, *text;
+
+                if (entry->file_size > 0) {
+                    fraction = (gdouble) entry->on_disk
+                            / (gdouble) entry->file_size;
+                    if (fraction > 1.0)
+                        fraction = 1.0;
+                }
+                gtk_progress_bar_set_fraction(
+                        GTK_PROGRESS_BAR(entry->progress_bar), fraction);
+
+                on_disk_str = g_format_size(entry->on_disk);
+                total_str = g_format_size(entry->file_size);
+                text = g_strdup_printf("%s von %s", on_disk_str, total_str);
+                gtk_progress_bar_set_text(
+                        GTK_PROGRESS_BAR(entry->progress_bar), text);
+                g_free(on_disk_str);
+                g_free(total_str);
+                g_free(text);
             }
-            gtk_progress_bar_set_fraction(
-                    GTK_PROGRESS_BAR(entry->progress_bar), fraction);
-
-            on_disk_str = g_format_size(on_disk);
-            total_str = g_format_size(entry->file_size);
-            text = g_strdup_printf("%s von %s", on_disk_str, total_str);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(entry->progress_bar),
-                    text);
-            g_free(on_disk_str);
-            g_free(total_str);
-            g_free(text);
         } else if (!entry->logged_failure) {
             LOG_WARN("%s: CfGetPlaceholderInfo('%s'): 0x%08lX "
                     "(returned_length=%lu, sizeof(info)=%zu)", __func__,
@@ -1603,118 +1519,177 @@ static void hydrate_progress_entry_update(HydrateProgressEntryMulti *entry)
     CloseHandle(h);
 }
 
-static void hydrate_progress_entry_free(gpointer data)
+static void load_entry_free(gpointer data)
 {
-    HydrateProgressEntryMulti *entry = (HydrateProgressEntryMulti *) data;
+    LoadEntry *entry = (LoadEntry *) data;
     g_free(entry->full_path);
     g_free(entry);
 }
 
-/* Aktualisiert alle noch nicht fertigen Einträge (Fortschrittsbalken
- * bzw. "fertig", falls die Hydrierung inzwischen endete) - OHNE den
- * Dialog bei Bedarf zu schließen (das übernimmt separat
- * hydrate_progress_tick_multi(), s.u.). Getrennt gehalten, damit der
- * initiale, synchrone Aufruf direkt nach dem Aufbau des Dialogs (s.
- * sond_seadrive_show_hydrate_progress_dialog_multi()) nicht riskiert,
- * das gerade erst erzeugte ui bei sofort schon abgeschlossener
- * Hydrierung wieder freizugeben, bevor der Aufrufer fertig damit ist
- * (Use-after-free) - anders als hydrate_progress_tick_multi(), das nur
- * als g_timeout_add()-Callback läuft, nachdem der Aufrufer längst
- * zurückgekehrt ist. */
-static void hydrate_progress_update_multi(HydrateProgressUiMulti *ui)
+/* Aktualisiert Einträge, Balken und Titelzeile - OHNE den Dialog zu
+ * schließen (das übernimmt load_job_tick()). Getrennt gehalten, damit der
+ * initiale, synchrone Aufruf nach dem Aufbau des Dialogs das gerade erst
+ * erzeugte job nicht bei sofort beendeter Hydrierung freigibt, bevor der
+ * Aufrufer fertig damit ist. */
+static void load_job_update(LoadJob *job)
 {
     guint i;
+    guint done = 0;
+    guint queried = 0;
+    guint64 bytes = 0;
+    gchar *bytes_str = NULL;
+    gchar *total_str = NULL;
+    gchar *title = NULL;
 
-    if (ui->aggregate) {
-        guint done = 0;
-        gchar *text = NULL;
+    for (i = 0; i < job->entries->len; i++) {
+        LoadEntry *entry = g_ptr_array_index(job->entries, i);
 
-        for (i = 0; i < ui->entries->len; i++) {
-            HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
-
-            if (!entry->done && !sond_seadrive_is_hydrating(entry->full_path))
-                entry->done = TRUE;
-            if (entry->done)
-                done++;
+        if (!entry->done && !sond_seadrive_is_hydrating(entry->full_path)) {
+            entry->done = TRUE;
+            entry->ok = !sond_seadrive_needs_hydration(entry->full_path);
+            if (entry->ok)
+                entry->on_disk = entry->file_size;
+            if (entry->progress_bar) {
+                if (entry->ok) {
+                    gtk_progress_bar_set_fraction(
+                            GTK_PROGRESS_BAR(entry->progress_bar), 1.0);
+                    gtk_progress_bar_set_text(
+                            GTK_PROGRESS_BAR(entry->progress_bar), "fertig");
+                } else
+                    gtk_progress_bar_set_text(
+                            GTK_PROGRESS_BAR(entry->progress_bar),
+                            "nicht geladen");
+            }
         }
 
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->agg_bar),
-                ui->entries->len ? (gdouble) done / ui->entries->len : 1.0);
-        text = g_strdup_printf("%u von %u Dateien", done, ui->entries->len);
-        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(ui->agg_bar), text);
-        g_free(text);
-
-        return;
-    }
-
-    for (i = 0; i < ui->entries->len; i++) {
-        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+        if (!entry->done && (!job->aggregate
+                || queried < HYDRATE_PROGRESS_QUERY_MAX)) {
+            load_entry_query(entry);
+            queried++;
+        }
 
         if (entry->done)
-            continue;
+            done++;
+        bytes += entry->on_disk;
+    }
 
-        if (!sond_seadrive_is_hydrating(entry->full_path)) {
-            entry->done = TRUE;
-            gtk_progress_bar_set_fraction(
-                    GTK_PROGRESS_BAR(entry->progress_bar), 1.0);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(entry->progress_bar),
-                    "fertig");
-            continue;
-        }
+    if (bytes > job->total_bytes)
+        bytes = job->total_bytes;
+    bytes_str = g_format_size(bytes);
+    total_str = g_format_size(job->total_bytes);
 
-        hydrate_progress_entry_update(entry);
+    if (job->entries->len == 1)
+        title = g_strdup_printf("Download läuft – %s von %s", bytes_str,
+                total_str);
+    else
+        title = g_strdup_printf("Download läuft – %s von %s (%u von %u Dateien)",
+                bytes_str, total_str, done, job->entries->len);
+    gtk_window_set_title(GTK_WINDOW(job->dialog), title);
+    g_free(title);
+    g_free(bytes_str);
+    g_free(total_str);
+
+    if (job->aggregate) {
+        gchar *text = g_strdup_printf("%u von %u Dateien", done,
+                job->entries->len);
+        gdouble fraction = job->total_bytes ?
+                (gdouble) bytes / (gdouble) job->total_bytes :
+                (job->entries->len ? (gdouble) done / job->entries->len : 1.0);
+
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(job->agg_bar), fraction);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(job->agg_bar), text);
+        g_free(text);
     }
 }
 
-static gboolean hydrate_progress_all_done_multi(HydrateProgressUiMulti *ui)
+static gboolean load_job_all_done(LoadJob *job)
 {
     guint i;
 
-    for (i = 0; i < ui->entries->len; i++) {
-        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+    for (i = 0; i < job->entries->len; i++) {
+        LoadEntry *entry = g_ptr_array_index(job->entries, i);
         if (!entry->done)
             return FALSE;
     }
     return TRUE;
 }
 
-static gboolean hydrate_progress_tick_multi(gpointer data)
+//Alle beendet: Fenster schließen, Fehler melden bzw. Aktion fortsetzen
+static void load_job_finish(LoadJob *job)
 {
-    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
+    GPtrArray *failed = g_ptr_array_new_with_free_func(g_free);
+    GtkWidget *parent = NULL;
+    guint i;
 
-    hydrate_progress_update_multi(ui);
+    for (i = 0; i < job->entries->len; i++) {
+        LoadEntry *entry = g_ptr_array_index(job->entries, i);
 
-    if (hydrate_progress_all_done_multi(ui)) {
-        /* Alle betroffenen Dateien fertig (Erfolg, Fehler oder Abbruch) -
-         * Dialog selbstständig schließen. */
-        ui->timeout_id = 0;
-        gtk_widget_destroy(ui->dialog);
+        if (!entry->ok)
+            g_ptr_array_add(failed, g_path_get_basename(entry->full_path));
+    }
+
+    gtk_widget_destroy(job->dialog);
+
+    parent = g_weak_ref_get(&job->parent);
+    if (!job->cancelled && failed->len > 0 && parent) {
+        GString *text = g_string_new(NULL);
+
+        if (failed->len == 1)
+            g_string_append_printf(text, "%s - Download gescheitert",
+                    (const gchar *) g_ptr_array_index(failed, 0));
+        else {
+            g_string_append_printf(text,
+                    "%u Dateien - Download gescheitert:\n", failed->len);
+            for (i = 0; i < MIN(failed->len, 5); i++)
+                g_string_append_printf(text, "\n%s",
+                        (const gchar *) g_ptr_array_index(failed, i));
+            if (failed->len > 5)
+                g_string_append_printf(text, "\n... und %u weitere",
+                        failed->len - 5);
+        }
+        display_message(parent, text->str, NULL);
+        g_string_free(text, TRUE);
+    }
+    if (parent)
+        g_object_unref(parent);
+
+    if (!job->cancelled && failed->len == 0 && job->done_func)
+        job->done_func(job->user_data);
+    if (job->destroy)
+        job->destroy(job->user_data);
+
+    g_ptr_array_unref(failed);
+    g_ptr_array_free(job->entries, TRUE);
+    g_weak_ref_clear(&job->parent);
+    g_free(job);
+}
+
+static gboolean load_job_tick(gpointer data)
+{
+    LoadJob *job = (LoadJob *) data;
+
+    load_job_update(job);
+
+    if (load_job_all_done(job)) {
+        job->timeout_id = 0;
+        load_job_finish(job);
         return G_SOURCE_REMOVE;
     }
 
     return G_SOURCE_CONTINUE;
 }
 
-static void cb_hydrate_progress_dialog_destroy_multi(GtkWidget *dialog,
-        gpointer data)
+static void load_job_cancel(LoadJob *job)
 {
-    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
-    (void) dialog;
-
-    if (ui->timeout_id)
-        g_source_remove(ui->timeout_id);
-    g_ptr_array_free(ui->entries, TRUE);
-    g_free(ui);
-}
-
-static void cb_hydrate_progress_abbrechen_clicked_multi(GtkButton *button,
-        gpointer data)
-{
-    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
     guint i;
 
-    for (i = 0; i < ui->entries->len; i++) {
-        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+    if (job->cancelled)
+        return;
+    job->cancelled = TRUE;
+
+    for (i = 0; i < job->entries->len; i++) {
+        LoadEntry *entry = g_ptr_array_index(job->entries, i);
+
         if (!entry->done) {
             sond_seadrive_hydrate_cancel(entry->full_path);
             if (entry->label)
@@ -1722,44 +1697,80 @@ static void cb_hydrate_progress_abbrechen_clicked_multi(GtkButton *button,
                         "Wird abgebrochen...");
         }
     }
-    if (ui->agg_label)
-        gtk_label_set_text(GTK_LABEL(ui->agg_label), "Wird abgebrochen...");
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    if (job->agg_label)
+        gtk_label_set_text(GTK_LABEL(job->agg_label), "Wird abgebrochen...");
+    gtk_widget_set_sensitive(job->abbrechen_button, FALSE);
+}
+
+//Abbrechen-Knopf, X und Esc
+static void cb_load_job_response(GtkDialog *dialog, gint response,
+        gpointer data)
+{
+    (void) dialog;
+    (void) response;
+    load_job_cancel((LoadJob *) data);
 }
 
 /*
- * sond_seadrive_show_hydrate_progress_dialog_multi:
- * Wie sond_seadrive_show_hydrate_progress_dialog(), aber für mehrere
- * gleichzeitig betroffene Dateien - eine Fortschrittszeile (Dateiname +
- * Balken) pro Eintrag in full_paths, ein gemeinsamer "Abbrechen"-Button
- * (bricht alle noch laufenden Einträge ab) und ein gemeinsamer
- * "Schließen"-Button. Schließt sich automatisch, sobald ALLE Einträge
- * fertig sind.
+ * sond_seadrive_ensure_loaded:
+ * Sind alle full_paths lokal, wird TRUE geliefert (Aufrufer macht weiter,
+ * done_func/destroy werden nicht aufgerufen, der Aufrufer behält user_data).
+ * Sonst werden die Downloads der fehlenden Dateien angestoßen (ab
+ * HYDRATE_POOL_MIN_FILES über den Pool), das Fortschrittsfenster gezeigt und
+ * FALSE geliefert; der Aufrufer kehrt zurück. Nach erfolgreichem Laden ruft
+ * der Hauptthread done_func(user_data) auf; destroy(user_data) folgt in jedem
+ * Fall (auch bei Abbruch und Fehlern). full_paths wird nur gelesen.
  */
-void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
-        GPtrArray *full_paths)
+gboolean sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
+        SondSeadriveLoadedFunc done_func, gpointer user_data,
+        GDestroyNotify destroy)
 {
-    HydrateProgressUiMulti *ui;
+    GPtrArray *pending;
+    LoadJob *job;
     GtkWidget *content_area;
     GtkWidget *scrolled_window;
     GtkWidget *vbox;
-    GtkWidget *button;
     guint i;
 
-    ui = g_new0(HydrateProgressUiMulti, 1);
-    ui->entries = g_ptr_array_new_with_free_func(hydrate_progress_entry_free);
+    if (!full_paths || full_paths->len == 0)
+        return TRUE;
 
-    ui->dialog = gtk_dialog_new_with_buttons("Download läuft", parent,
-            GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
-    gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 460, -1);
+    pending = g_ptr_array_new();
+    for (i = 0; i < full_paths->len; i++) {
+        const gchar *path = g_ptr_array_index(full_paths, i);
 
-    /* Bei vielen betroffenen Dateien (Auszug mit entsprechend vielen
-     * Anbindungen) sollen trotzdem alle Fortschrittszeilen einsehbar
-     * bleiben, ohne dass der Dialog selbst über den Bildschirm hinaus
-     * wächst - Liste deshalb in ein GtkScrolledWindow mit fester
-     * Maximalhöhe gepackt (scrollt ab ca. 5 Zeilen; propagate_natural_height
-     * lässt den Dialog bei WENIGER Einträgen trotzdem passend klein bleiben,
-     * statt immer die volle Maximalhöhe zu belegen). */
+        if (path && sond_seadrive_needs_hydration(path))
+            g_ptr_array_add(pending, (gpointer) path);
+    }
+
+    if (pending->len == 0) {
+        g_ptr_array_free(pending, TRUE);
+
+        return TRUE;
+    }
+
+    {
+        gboolean use_pool = (pending->len >= HYDRATE_POOL_MIN_FILES);
+
+        for (i = 0; i < pending->len; i++)
+            hydrate_start((const gchar *) g_ptr_array_index(pending, i), NULL,
+                    use_pool);
+    }
+
+    job = g_new0(LoadJob, 1);
+    job->entries = g_ptr_array_new_with_free_func(load_entry_free);
+    g_weak_ref_init(&job->parent, parent);
+    job->done_func = done_func;
+    job->user_data = user_data;
+    job->destroy = destroy;
+
+    job->dialog = gtk_dialog_new_with_buttons("Download läuft", parent,
+            GTK_DIALOG_MODAL, NULL, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(job->dialog), 460, -1);
+
+    /* Bei vielen Dateien sollen trotzdem alle Fortschrittszeilen einsehbar
+     * bleiben, ohne dass der Dialog über den Bildschirm hinaus wächst: Liste
+     * in einem GtkScrolledWindow mit fester Maximalhöhe. */
     scrolled_window = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
             GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -1770,139 +1781,80 @@ void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
     gtk_scrolled_window_set_propagate_natural_height(
             GTK_SCROLLED_WINDOW(scrolled_window), TRUE);
 
-    content_area = gtk_dialog_get_content_area(GTK_DIALOG(ui->dialog));
+    content_area = gtk_dialog_get_content_area(GTK_DIALOG(job->dialog));
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
 
-    ui->aggregate = (full_paths->len > HYDRATE_PROGRESS_AGGREGATE_MIN);
-    if (ui->aggregate) {
+    job->aggregate = (pending->len > HYDRATE_PROGRESS_AGGREGATE_MIN);
+    if (job->aggregate) {
         gchar *text = g_strdup_printf("%u Dateien werden geladen",
-                full_paths->len);
+                pending->len);
 
-        ui->agg_label = gtk_label_new(text);
+        job->agg_label = gtk_label_new(text);
         g_free(text);
-        gtk_widget_set_halign(ui->agg_label, GTK_ALIGN_START);
-        gtk_box_pack_start(GTK_BOX(vbox), ui->agg_label, FALSE, FALSE, 0);
+        gtk_widget_set_halign(job->agg_label, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(vbox), job->agg_label, FALSE, FALSE, 0);
 
-        ui->agg_bar = gtk_progress_bar_new();
-        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(ui->agg_bar), TRUE);
-        gtk_box_pack_start(GTK_BOX(vbox), ui->agg_bar, FALSE, FALSE, 0);
-
-        for (i = 0; i < full_paths->len; i++) {
-            HydrateProgressEntryMulti *entry =
-                    g_new0(HydrateProgressEntryMulti, 1);
-
-            entry->full_path = g_strdup(g_ptr_array_index(full_paths, i));
-            g_ptr_array_add(ui->entries, entry);
-        }
+        job->agg_bar = gtk_progress_bar_new();
+        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(job->agg_bar), TRUE);
+        gtk_box_pack_start(GTK_BOX(vbox), job->agg_bar, FALSE, FALSE, 0);
     }
 
-    for (i = 0; !ui->aggregate && i < full_paths->len; i++) {
-        const gchar *full_path = g_ptr_array_index(full_paths, i);
-        HydrateProgressEntryMulti *entry = g_new0(HydrateProgressEntryMulti, 1);
-        gchar *basename;
-        wchar_t *lp;
-        LARGE_INTEGER size = { .QuadPart = 0 };
+    for (i = 0; i < pending->len; i++) {
+        const gchar *full_path = g_ptr_array_index(pending, i);
+        LoadEntry *entry = g_new0(LoadEntry, 1);
 
         entry->full_path = g_strdup(full_path);
+        entry->file_size = load_file_size(full_path);
+        job->total_bytes += entry->file_size;
 
-        lp = prepare_long_path(full_path, NULL);
-        if (lp) {
-            HANDLE h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            g_free(lp);
-            if (h != INVALID_HANDLE_VALUE) {
-                GetFileSizeEx(h, &size);
-                CloseHandle(h);
-            }
+        if (!job->aggregate) {
+            gchar *basename = g_path_get_basename(full_path);
+
+            entry->label = gtk_label_new(basename);
+            gtk_label_set_line_wrap(GTK_LABEL(entry->label), TRUE);
+            gtk_widget_set_halign(entry->label, GTK_ALIGN_START);
+            g_free(basename);
+            gtk_box_pack_start(GTK_BOX(vbox), entry->label, FALSE, FALSE, 0);
+
+            entry->progress_bar = gtk_progress_bar_new();
+            gtk_progress_bar_set_show_text(
+                    GTK_PROGRESS_BAR(entry->progress_bar), TRUE);
+            gtk_box_pack_start(GTK_BOX(vbox), entry->progress_bar, FALSE,
+                    FALSE, 0);
         }
-        entry->file_size = (guint64) size.QuadPart;
 
-        basename = g_path_get_basename(full_path);
-        entry->label = gtk_label_new(basename);
-        gtk_label_set_line_wrap(GTK_LABEL(entry->label), TRUE);
-        gtk_widget_set_halign(entry->label, GTK_ALIGN_START);
-        g_free(basename);
-        gtk_box_pack_start(GTK_BOX(vbox), entry->label, FALSE, FALSE, 0);
-
-        entry->progress_bar = gtk_progress_bar_new();
-        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(entry->progress_bar),
-                TRUE);
-        gtk_box_pack_start(GTK_BOX(vbox), entry->progress_bar, FALSE, FALSE, 0);
-
-        g_ptr_array_add(ui->entries, entry);
+        g_ptr_array_add(job->entries, entry);
     }
 
     gtk_container_add(GTK_CONTAINER(scrolled_window), vbox);
     gtk_container_add(GTK_CONTAINER(content_area), scrolled_window);
 
-    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Schließen",
-            GTK_RESPONSE_NONE);
-    g_signal_connect_swapped(button, "clicked",
-            G_CALLBACK(gtk_widget_destroy), ui->dialog);
+    job->abbrechen_button = gtk_dialog_add_button(GTK_DIALOG(job->dialog),
+            "Abbrechen", GTK_RESPONSE_CANCEL);
+    g_signal_connect(job->dialog, "response",
+            G_CALLBACK(cb_load_job_response), job);
 
-    ui->abbrechen_button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog),
-            "Abbrechen", GTK_RESPONSE_NONE);
-    g_signal_connect(ui->abbrechen_button, "clicked",
-            G_CALLBACK(cb_hydrate_progress_abbrechen_clicked_multi), ui);
+    gtk_widget_show_all(job->dialog);
 
-    g_signal_connect(ui->dialog, "destroy",
-            G_CALLBACK(cb_hydrate_progress_dialog_destroy_multi), ui);
+    load_job_update(job); /* initiale Anzeige, kein Auto-Destroy */
+    job->timeout_id = g_timeout_add(300, load_job_tick, job);
 
-    gtk_widget_show_all(ui->dialog);
+    g_ptr_array_free(pending, TRUE);
 
-    hydrate_progress_update_multi(ui); /* initiale Anzeige, kein Auto-Destroy */
-    ui->timeout_id = g_timeout_add(300, hydrate_progress_tick_multi, ui);
+    return FALSE;
 }
 
 /*
  * sond_seadrive_ensure_hydrated_multi:
- * Wie sond_seadrive_ensure_hydrated(), aber für eine Menge von Pfaden
- * (Auszug-Fall) - s. ausführlichen Doc-Kommentar oberhalb der Structs.
- * full_paths wird nur gelesen (full_path-Strings werden bei Bedarf
- * kopiert), Aufrufer bleibt Eigentümer.
+ * Ohne Fortsetzung: lädt die fehlenden Dateien mit Fortschrittsfenster, die
+ * Aktion muss der Nutzer danach selbst wiederholen. Rückgabe wie
+ * sond_seadrive_ensure_loaded().
  */
 gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
         GPtrArray *full_paths)
 {
-    GPtrArray *pending;
-    gboolean any_hydrating = FALSE;
-    gboolean result = TRUE;
-    guint i;
-
-    if (!full_paths || full_paths->len == 0)
-        return TRUE;
-
-    pending = g_ptr_array_new();
-    for (i = 0; i < full_paths->len; i++) {
-        const gchar *path = g_ptr_array_index(full_paths, i);
-        if (path && sond_seadrive_needs_hydration(path)) {
-            g_ptr_array_add(pending, (gpointer) path);
-            if (sond_seadrive_is_hydrating(path))
-                any_hydrating = TRUE;
-        }
-    }
-
-    if (pending->len > 0) {
-        /* Fehlschläge gesammelt in einem Dialog melden, ab einigen Dateien
-         * mit begrenzter Zahl gleichzeitiger Downloads */
-        HydrateBatch *batch = hydrate_batch_new(parent);
-        gboolean use_pool = (pending->len >= HYDRATE_POOL_MIN_FILES);
-
-        for (i = 0; i < pending->len; i++)
-            hydrate_start((const gchar *) g_ptr_array_index(pending, i), NULL,
-                    batch, use_pool);
-        hydrate_batch_done(batch); /* Wächter abgeben */
-
-        if (any_hydrating)
-            sond_seadrive_show_hydrate_progress_dialog_multi(parent, pending);
-
-        result = FALSE;
-    }
-
-    g_ptr_array_free(pending, TRUE);
-    return result;
+    return sond_seadrive_ensure_loaded(parent, full_paths, NULL, NULL, NULL);
 }
 
 /* ------------------------------------------------------------------ */
