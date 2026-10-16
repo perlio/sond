@@ -539,8 +539,12 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 					DWORD attrs = GetFileAttributesW(lp);
 					g_free(lp);
 					if (attrs != INVALID_FILE_ATTRIBUTES &&
-							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS))
+							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)) {
 						mime_from_ext = mime_from_extension(filename);
+						//unbekannte Endung: trotzdem nicht lesen (löst Download aus)
+						if (!mime_from_ext)
+							mime_from_ext = "application/octet-stream";
+					}
 				}
 			}
 #endif

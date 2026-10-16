@@ -5812,3 +5812,17 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    gelten nicht als gescheitert. Die Log-Warnung 0x800703E3 (ERROR_OPERATION_ABORTED) bei
    laufenden, abgebrochenen Downloads bleibt bewusst.
 ```
+
+## SeaDrive: Ordner-Badge nach "Cache leeren" und Aufklappen (16.10.2026)
+
+```text
+ Vom Nutzer getestet.
+ - Ursache: Beim Aufklappen eines Ordners (sond_tvfm_item_load_fs_dir) wurden nicht geladene
+   Dateien mit unbekannter Endung (z.B. "x.pdf.tmp_open") wie lokale Dateien gelesen
+   (mime_from_extension liefert NULL); das löste den Download aus. Die Dateien wechselten von
+   offline auf geladen, der Ordner-Badge von Lila (komplett offline) auf Grau (gemischt).
+ - Fix: Ist eine Datei offline, wird sie nie gelesen; bei unbekannter Endung gilt
+   application/octet-stream (sond_tvfm_item.c). Betrifft auch Dateien ohne Endung.
+ - Die Watcher-Zähler (sond_seadrive.c) waren korrekt (ADDED-Doppelzählung war nur eine
+   verworfene Vermutung).
+```
