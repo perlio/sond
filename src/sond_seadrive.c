@@ -1821,12 +1821,12 @@ static void load_sync_destroy(gpointer data)
 
 /*
  * sond_seadrive_load_sync:
- * Wie ensure_loaded(), wartet aber (verschachtelte Hauptschleife,
- * das modale Fenster bleibt bedienbar) bis alle Dateien geladen sind. TRUE:
- * alle lokal, der Aufrufer macht weiter. FALSE: der Nutzer hat abgebrochen
- * oder Downloads sind gescheitert (schon gemeldet), der Aufrufer bricht ab.
- * Für Abläufe mit Zwischenschritten (Dialoge, Dateiauswahl), die sich nicht
- * einfach erneut starten lassen.
+ * Wie ensure_loaded(), wartet aber (verschachtelte Hauptschleife, das modale
+ * Fenster bleibt bedienbar) bis alle Dateien geladen sind. TRUE: alle lokal,
+ * der Aufrufer macht weiter. FALSE: der Nutzer hat abgebrochen oder Downloads
+ * sind gescheitert (schon gemeldet), der Aufrufer bricht ab. Für Abläufe mit
+ * Zwischenschritten (Dialoge, Dateiauswahl), die sich nicht einfach erneut
+ * starten lassen.
  */
 gboolean sond_seadrive_load_sync(GtkWindow *parent, GPtrArray *full_paths)
 {

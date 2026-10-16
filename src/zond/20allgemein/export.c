@@ -21,6 +21,8 @@
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
 #include "../../sond_password.h"
+#include "../../sond_seadrive.h"
+#include "../../sond_treeviewfm.h"
 
 #include "export.h"
 #include "export_selection.h"
@@ -32,6 +34,56 @@
 //zuletzt gewählte Optionen, gelten bis zum Programmende
 static ExportOptionen optionen = { EXPORT_FORMAT_ODT, FALSE, EXPORT_TIEFE_ALLE,
 		TRUE, TRUE, FALSE, FALSE, TRUE, FALSE };
+
+/* Lädt die angebundenen Dateien der Einträge, soweit sie nicht geladene
+ * SeaDrive-Platzhalter sind (Fortschrittsfenster mit Abbrechen). FALSE:
+ * Abbruch oder Download gescheitert (gemeldet), der Export findet nicht statt. */
+static gboolean export_dateien_laden(Projekt *zond, GPtrArray *eintraege) {
+	SondTreeviewFM *stvfm = NULL;
+	gchar const *root = NULL;
+	GHashTable *ht = NULL;
+	GPtrArray *pfade = NULL;
+	gboolean ok = TRUE;
+
+	if (!zond->treeview[BAUM_FS])
+		return TRUE;
+
+	stvfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	root = sond_treeviewfm_get_root(stvfm);
+	if (!root)
+		return TRUE;
+
+	ht = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	pfade = g_ptr_array_new_with_free_func(g_free);
+
+	for (guint i = 0; i < eintraege->len; i++) {
+		ExportEintrag *e = g_ptr_array_index(eintraege, i);
+		gchar const *sep = NULL;
+		gchar *rel = NULL;
+
+		if (!e->datei)
+			continue;
+
+		//bei Containern ist der Teil vor dem ersten "//" die reale Datei
+		sep = strstr(e->datei, "//");
+		rel = sep ? g_strndup(e->datei, sep - e->datei) : g_strdup(e->datei);
+		if (g_hash_table_contains(ht, rel)) {
+			g_free(rel);
+
+			continue;
+		}
+		g_ptr_array_add(pfade, g_strconcat(root, "/", rel, NULL));
+		g_hash_table_add(ht, rel); //Besitz geht über
+	}
+
+	if (pfade->len > 0)
+		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+
+	g_ptr_array_unref(pfade);
+	g_hash_table_destroy(ht);
+
+	return ok;
+}
 
 gint export_activate(Projekt *zond, GError **error) {
 	Baum baum = KEIN_BAUM;
@@ -87,6 +139,14 @@ gint export_activate(Projekt *zond, GError **error) {
 		g_free(filename);
 
 		return -1;
+	}
+
+	//nicht geladene SeaDrive-Dateien vorab laden; Abbruch: kein Export
+	if (optionen.dokumente && !export_dateien_laden(zond, eintraege)) {
+		g_ptr_array_unref(eintraege);
+		g_free(filename);
+
+		return 0;
 	}
 
 	//Passwortabfragen dieses Exports: Überspringen/Alle überspringen/Abbrechen

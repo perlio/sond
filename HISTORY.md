@@ -5848,8 +5848,9 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    Zwischenablage am Anfang von sond_treeviewfm_paste_clipboard, ohne Obergrenze; Verschieben
    ausgenommen), Öffnen in BAUM_INHALT/AUSWERTUNG inkl. Auszug (zond_treeview_open_node), Treffer
    der Index-Suche, Seiten einfügen (Datei nach der Auswahl), PDF öffnen im Stand-alone-Viewer,
-   Entsperren.
+   Entsperren, Export (export_dateien_laden in export.c, nur mit "angebundene Dokumente
+   ausgeben"; Abbruch oder gescheiterter Download: kein Export).
  - HydrateBatch, der alte Multi-Dialog, sond_seadrive_ensure_hydrated(_multi) und die
    Fortsetzungs-Mechanik entfallen.
- - Offen: Etappe C (Export, Fehler im Dokument), D (Indizieren).
+ - Offen: Etappe D (Indizieren).
 ```
