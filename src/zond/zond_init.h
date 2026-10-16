@@ -121,7 +121,6 @@ struct _Menu {
 	GSimpleAction *speichern;
 	GSimpleAction *schliessen;
 	GSimpleAction *export_odt;
-	GSimpleAction *pdf;
 	GSimpleAction *struktur;   /* Gruppe: alle Struktur-Actions */
 	GSimpleAction *ansicht;    /* Gruppe: alle Ansicht-Actions */
 	GSimpleAction *extras;

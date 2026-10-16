@@ -5864,3 +5864,11 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    bereits Indiziertes wird also nicht geladen). zond_index_lauf (headerbar.c) lädt sie vor dem
    Start des Indizier-Threads; Abbruch oder gescheiterter Download: keine Indexerstellung.
 ```
+
+## Funktion "PDF reparieren" entfernt (16.10.2026)
+
+```text
+ Menü "PDF-Dateien" mit "PDF reparieren" (headerbar.c: selection_abfragen_pdf, clean_pdf,
+ cb_win_pdf_reparieren, Aktion pdf-reparieren), zond->menu.pdf (zond_init.h, project.c) und der
+ README-Absatz sind entfernt; die Funktion wurde nicht gebraucht.
+```

@@ -966,145 +966,6 @@ static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 }
 
 /* ============================================================================
- * CALLBACKS - PDF
- * ========================================================================== */
-
-static GPtrArray* selection_abfragen_pdf(Projekt *zond, GError **error) {
-	GPtrArray *arr_sfp = g_ptr_array_new_with_free_func(
-			(GDestroyNotify) g_object_unref);
-	if (zond_baum_aktuell(zond) == KEIN_BAUM)
-		return NULL;
-	GList *selected = gtk_tree_selection_get_selected_rows(
-			zond->selection[zond_baum_aktuell(zond)], NULL);
-	if (!selected)
-		return NULL;
-	for (GList *l = selected; l; l = l->next) {
-		GtkTreeIter iter = { 0 };
-		gint node_id = 0;
-		gchar *file_part = NULL;
-		SondFilePart *sfp = NULL;
-		if (!gtk_tree_model_get_iter(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(
-						zond->treeview[zond_baum_aktuell(zond)])),
-				&iter, l->data)) {
-			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			g_ptr_array_unref(arr_sfp);
-			g_set_error(error, SOND_ERROR, 0, "Iter konnte nicht ermittelt werden");
-			return NULL;
-		}
-		gtk_tree_model_get(gtk_tree_view_get_model(
-				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)])),
-				&iter, 2, &node_id, -1);
-		if (zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
-				NULL, NULL, &file_part, NULL, NULL, NULL, NULL, error)) {
-			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			g_ptr_array_unref(arr_sfp);
-			return NULL;
-		}
-		if (!file_part)
-			continue;
-		sfp = sond_file_part_from_filepart(file_part, error);
-		g_free(file_part);
-		if (!sfp) {
-			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			g_ptr_array_unref(arr_sfp);
-			return NULL;
-		}
-		if (SOND_IS_FILE_PART_PDF(sfp) && !g_ptr_array_find(arr_sfp, sfp, NULL))
-			g_ptr_array_add(arr_sfp, sfp);
-		else
-			g_object_unref(sfp);
-	}
-	g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-	return arr_sfp;
-}
-
-static gint clean_pdf(fz_context *ctx, SondFilePartPDF *sfp_pdf, GError **error) {
-	pdf_document *doc = NULL;
-	gint *pages = NULL;
-	gint count = 0;
-	gchar *path_tmp = NULL;
-	GError *error_rem = NULL;
-
-	if (zond_pdf_document_is_open(sfp_pdf)) {
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"Datei '%s' ist geöffnet",
-				sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
-		return -1;
-	}
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
-	if (!doc) {
-		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) {
-			g_clear_error(error);
-			return 1;
-		}
-		return -1;
-	}
-	count = pdf_count_pages(ctx, doc);
-	pages = g_malloc(sizeof(gint) * count);
-	for (gint i = 0; i < count; i++) pages[i] = i;
-	fz_try(ctx)
-#ifdef __WIN32__
-		pdf_rearrange_pages(ctx, doc, count, pages, PDF_CLEAN_STRUCTURE_KEEP);
-#elif defined(__linux__)
-		pdf_rearrange_pages(ctx, doc, count, pages);
-#endif
-	fz_always(ctx)
-		g_free(pages);
-	fz_catch(ctx) {
-		pdf_drop_document(ctx, doc);
-		g_object_unref(sfp_pdf);
-		if (!sond_remove(path_tmp, &error_rem)) {
-			LOG_WARN("Arbeitskopie konnte nicht gelöscht werden: %s",
-					error_rem->message);
-			g_error_free(error_rem);
-		}
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"%s\npdf_rearrange_pages\n%s", __func__, fz_caught_message(ctx));
-		g_free(path_tmp);
-		return -1;
-	}
-	gint rc = sond_file_part_pdf_save_and_close(ctx, doc, sfp_pdf, error);
-	g_object_unref(sfp_pdf);
-	if (!sond_remove(path_tmp, &error_rem)) {
-		LOG_WARN("Arbeitskopie konnte nicht gelöscht werden: %s", error_rem->message);
-		g_error_free(error_rem);
-	}
-	g_free(path_tmp);
-	if (rc)
-		return -1;
-	return 0;
-}
-
-static void cb_win_pdf_reparieren(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d;
-	GError *error = NULL;
-	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &error);
-	if (!arr_sfp) {
-		if (error) {
-			display_message(zond->app_window,
-					"PDF kann nicht gereinigt werden\n\n", error->message, NULL);
-			g_error_free(error);
-		}
-		return;
-	}
-	if (arr_sfp->len == 0) {
-		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_unref(arr_sfp);
-		return;
-	}
-	for (gint i = 0; i < arr_sfp->len; i++) {
-		GError *error = NULL;
-		if (clean_pdf(zond->ctx, g_ptr_array_index(arr_sfp, i), &error) == -1) {
-			display_message(zond->app_window, "PDF säubern nicht möglich\n\n",
-					error->message, NULL);
-			g_error_free(error);
-		}
-	}
-	g_ptr_array_unref(arr_sfp);
-}
-
-/* ============================================================================
  * CALLBACKS - ANSICHT
  * ========================================================================== */
 
@@ -1421,11 +1282,6 @@ static void init_win_actions(Projekt *zond) {
 		g_free(name);
 	}
 
-	{ GSimpleAction *a = g_simple_action_new("pdf-reparieren", NULL);
-	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_pdf_reparieren), zond);
-	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.pdf = a; }
-
 	WIN_ACT("alle-erweitern",  cb_win_alle_erweitern);
 	WIN_ACT("zweig-erweitern", cb_win_zweig_erweitern);
 	WIN_ACT("reduzieren",      cb_win_reduzieren);
@@ -1626,12 +1482,6 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append_submenu(menubar, "Bearbeiten", G_MENU_MODEL(m_bear));
 	g_object_unref(m_bear);
 
-	/* ---- PDF-Dateien ---- */
-	GMenu *m_pdf = g_menu_new();
-	g_menu_append(m_pdf, "PDF reparieren", "win.pdf-reparieren");
-	g_menu_append_submenu(menubar, "PDF-Dateien", G_MENU_MODEL(m_pdf));
-	g_object_unref(m_pdf);
-
 	/* ---- Ansicht ---- */
 	GMenu *m_ans = g_menu_new();
 	GMenu *sub_erw = g_menu_new();
@@ -1710,7 +1560,6 @@ void init_headerbar(Projekt *zond) {
 	g_simple_action_set_enabled(zond->menu.speichern,      FALSE);
 	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
 	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);
-	g_simple_action_set_enabled(zond->menu.pdf,            FALSE);
 	headerbar_set_seadrive_sensitive(zond, FALSE);
 
 #ifdef _WIN32

@@ -566,7 +566,6 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 
 	g_simple_action_set_enabled(zond->menu.schliessen,  active);
 	g_simple_action_set_enabled(zond->menu.export_odt,  active);
-	g_simple_action_set_enabled(zond->menu.pdf,         active);
 	g_simple_action_set_enabled(zond->menu.struktur,    active);
 	g_simple_action_set_enabled(zond->menu.ansicht,     active);
 	gtk_widget_set_sensitive(zond->fs_button,           active);

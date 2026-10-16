@@ -103,8 +103,6 @@ Von den oben beschriebenen gemeinsamen Bearbeiten-Funktionen wirken **Kopieren**
 
 Unabhängig davon können aus dem Dateiverzeichnis kopierte oder ausgeschnittene Dateien/Verzeichnisse auch in das Bestands- oder Auswertungsverzeichnis eingefügt werden; dort werden sie dann "angebunden" (neuer Anbindungsknoten je Datei, bei Verzeichnissen rekursiv mit Strukturpunkten je Unterordner); bereits angebundene Dateien werden dabei übersprungen und im Info-Fenster gemeldet.
 
-**PDF reparieren** wendet auf alle im Dateiverzeichnis (oder einem der beiden anderen Bäume, sofern dort gerade aktiv) markierten PDF-Dateien - ohne weitere Rückfrage - einen Strukturneuaufbau an, der von MuPDF stammende, aber fehlerhafte oder verwaiste interne Objekte bereinigt; die Seitenreihenfolge bleibt dabei unverändert. Die Originaldatei wird direkt überschrieben. Ist eine der markierten Dateien bereits in einem Viewer-Fenster geöffnet, wird die Reparatur für diese Datei mit einer Fehlermeldung abgelehnt. Bei Erfolg erscheint keine Bestätigung, nur Fehler werden gemeldet.
-
 **Öffnen**: Bei einer PDF-Datei wird stets die gesamte Datei angezeigt; mit gedrückter Strg-Taste wird stattdessen nur der angeklickte Abschnitt selbst angezeigt (ist ein Abschnitt bereits selbst angeklickt, springt der Viewer ohne Strg an dessen Anfang bzw. mit gedrückter Alt-Taste an dessen Ende).
 
 ## Bestandsverzeichnis
