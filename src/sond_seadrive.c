@@ -812,6 +812,48 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
     return TRUE;
 }
 
+void sond_seadrive_pin_note_failure(GPtrArray *failed, const gchar *full_path,
+        GError *error)
+{
+    gchar *base = NULL;
+    const gchar *reason = error ? error->message : "unbekannter Fehler";
+    const gchar *sep = strstr(reason, "): ");
+
+    if (!failed)
+        return;
+
+    //die Meldung von sond_seadrive_set_pin_state() beginnt mit dem Pfad
+    if (sep)
+        reason = sep + 3;
+
+    base = g_path_get_basename(full_path);
+    g_ptr_array_add(failed, g_strdup_printf("%s - %s", base, reason));
+    g_free(base);
+}
+
+void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
+{
+    GString *text = NULL;
+
+    if (!failed || failed->len == 0)
+        return;
+
+    text = g_string_new(NULL);
+    if (failed->len == 1)
+        g_string_append(text, "1 Eintrag konnte nicht geändert werden:\n");
+    else
+        g_string_append_printf(text,
+                "%u Einträge konnten nicht geändert werden:\n", failed->len);
+    for (guint i = 0; i < MIN(failed->len, 5); i++)
+        g_string_append_printf(text, "\n%s",
+                (const gchar*) g_ptr_array_index(failed, i));
+    if (failed->len > 5)
+        g_string_append_printf(text, "\n... und %u weitere", failed->len - 5);
+
+    display_message(parent, "SeaDrive\n\n", text->str, NULL);
+    g_string_free(text, TRUE);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Public API: sond_seadrive_hydrate                                 */
 /* ------------------------------------------------------------------ */
@@ -988,10 +1030,22 @@ static void hydrating_entry_free(gpointer data)
     g_free(entry);
 }
 
+/* Mehrere Dateien, die zusammen angestoßen werden (sond_seadrive_ensure_
+ * hydrated_multi()): Fehlschläge werden gesammelt und am Ende in EINEM Dialog
+ * gemeldet, statt je Datei einen zu zeigen. */
+typedef struct {
+    GMutex     mutex;
+    gint       remaining; /* nicht beendete Aufgaben, +1 Wächter bis alle
+                           * eingereiht sind */
+    GPtrArray *failed;    /* Namen gescheiterter Dateien (g_free) */
+    GWeakRef   parent;
+} HydrateBatch;
+
 typedef struct {
     gchar *full_path;
     GWeakRef parent;   /* Fenster für die Fehlermeldung, kann leer sein */
     gboolean notify;
+    HydrateBatch *batch; /* Sammelmeldung statt Einzeldialog, kann NULL sein */
 } HydrateThreadData;
 
 typedef struct {
@@ -1038,9 +1092,89 @@ static void hydrate_report_error(HydrateThreadData *td, gchar const *message)
     g_idle_add(hydrate_report_idle, report);
 }
 
-static gpointer hydrate_thread_func(gpointer data)
+static HydrateBatch* hydrate_batch_new(GtkWindow *parent)
 {
-    HydrateThreadData *td = (HydrateThreadData *) data;
+    HydrateBatch *batch = g_new0(HydrateBatch, 1);
+
+    g_mutex_init(&batch->mutex);
+    batch->remaining = 1; /* Wächter */
+    batch->failed = g_ptr_array_new_with_free_func(g_free);
+    g_weak_ref_init(&batch->parent, parent);
+
+    return batch;
+}
+
+static void hydrate_batch_free(HydrateBatch *batch)
+{
+    g_weak_ref_clear(&batch->parent);
+    g_ptr_array_unref(batch->failed);
+    g_mutex_clear(&batch->mutex);
+    g_free(batch);
+}
+
+static gboolean hydrate_batch_report_idle(gpointer data)
+{
+    HydrateBatch *batch = (HydrateBatch *) data;
+    GtkWidget *parent = g_weak_ref_get(&batch->parent);
+
+    if (parent) {
+        GString *text = g_string_new(NULL);
+
+        if (batch->failed->len == 1)
+            g_string_append(text, (const gchar *) g_ptr_array_index(
+                    batch->failed, 0));
+        else {
+            g_string_append_printf(text,
+                    "%u Dateien - Download gescheitert:\n", batch->failed->len);
+            for (guint i = 0; i < MIN(batch->failed->len, 5); i++)
+                g_string_append_printf(text, "\n%s",
+                        (const gchar *) g_ptr_array_index(batch->failed, i));
+            if (batch->failed->len > 5)
+                g_string_append_printf(text, "\n... und %u weitere",
+                        batch->failed->len - 5);
+        }
+        if (batch->failed->len == 1)
+            g_string_append(text, " - Download gescheitert");
+
+        display_message(parent, text->str, NULL);
+        g_string_free(text, TRUE);
+        g_object_unref(parent);
+    }
+
+    hydrate_batch_free(batch);
+
+    return G_SOURCE_REMOVE;
+}
+
+//eine Aufgabe des Batches ist beendet (oder der Wächter wird abgegeben)
+static void hydrate_batch_done(HydrateBatch *batch)
+{
+    gboolean last = FALSE;
+
+    g_mutex_lock(&batch->mutex);
+    last = (--batch->remaining == 0);
+    g_mutex_unlock(&batch->mutex);
+
+    if (!last)
+        return;
+
+    if (batch->failed->len > 0)
+        g_idle_add(hydrate_batch_report_idle, batch);
+    else
+        hydrate_batch_free(batch);
+}
+
+static void hydrate_batch_failed(HydrateBatch *batch, const gchar *full_path)
+{
+    gchar *base = g_path_get_basename(full_path);
+
+    g_mutex_lock(&batch->mutex);
+    g_ptr_array_add(batch->failed, base);
+    g_mutex_unlock(&batch->mutex);
+}
+
+static void hydrate_run(HydrateThreadData *td)
+{
     GError *error = NULL;
     HydratingEntry *entry;
     HANDLE thread_handle_dup = NULL;
@@ -1083,7 +1217,9 @@ static gpointer hydrate_thread_func(gpointer data)
         pre_cancelled = entry && entry->cancel_requested;
         g_mutex_unlock(&g_hydrating_mutex);
 
-        if (td->notify && !pre_cancelled)
+        if (!pre_cancelled && td->batch)
+            hydrate_batch_failed(td->batch, td->full_path);
+        else if (td->notify && !pre_cancelled)
             hydrate_report_error(td, error ? error->message : NULL);
         g_clear_error(&error);
     }
@@ -1093,10 +1229,46 @@ static gpointer hydrate_thread_func(gpointer data)
             thread_handle_dup via hydrating_entry_free(), falls gesetzt */
     g_mutex_unlock(&g_hydrating_mutex);
 
+    if (td->batch)
+        hydrate_batch_done(td->batch);
+
     g_weak_ref_clear(&td->parent);
     g_free(td->full_path);
     g_free(td);
+}
+
+static gpointer hydrate_thread_func(gpointer data)
+{
+    hydrate_run((HydrateThreadData *) data);
+
     return NULL;
+}
+
+/* Bei vielen Dateien (Kopieren, Auszug) nicht ein Thread je Datei, sondern ein
+ * Pool mit wenigen Arbeitern: SeaDrive lädt ohnehin nicht beliebig parallel,
+ * und Hunderte gleichzeitige CfHydratePlaceholder()-Aufrufe belasten Rechner
+ * und Server unnötig. Die Dateien gelten ab dem Einreihen als "wird geladen"
+ * (g_hydrating_paths), Fortschritt und Abbrechen funktionieren unverändert. */
+#define HYDRATE_POOL_THREADS   4
+#define HYDRATE_POOL_MIN_FILES 8
+
+static void hydrate_pool_func(gpointer data, gpointer user_data)
+{
+    (void) user_data;
+    hydrate_run((HydrateThreadData *) data);
+}
+
+static GThreadPool *g_hydrate_pool = NULL;
+
+static GThreadPool* hydrate_pool_get(void)
+{
+    g_mutex_lock(&g_hydrating_mutex);
+    if (!g_hydrate_pool)
+        g_hydrate_pool = g_thread_pool_new(hydrate_pool_func, NULL,
+                HYDRATE_POOL_THREADS, FALSE, NULL);
+    g_mutex_unlock(&g_hydrating_mutex);
+
+    return g_hydrate_pool;
 }
 
 /*
@@ -1113,11 +1285,14 @@ static gpointer hydrate_thread_func(gpointer data)
  * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
  * i.d.R. noch läuft.
  */
-void sond_seadrive_hydrate_async_notify(const gchar *full_path,
-        GtkWindow *parent)
+/* Reiht die Hydrierung von full_path ein. TRUE, wenn sie neu eingereiht wurde,
+ * FALSE, wenn schon eine läuft oder das Einreihen scheiterte. parent und
+ * batch schließen sich aus (Einzeldialog bzw. Sammelmeldung); use_pool: Pool
+ * statt eigenem Thread. */
+static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
+        HydrateBatch *batch, gboolean use_pool)
 {
     HydrateThreadData *td = NULL;
-    GThread *thread = NULL;
 
     g_mutex_lock(&g_hydrating_mutex);
     if (!g_hydrating_paths)
@@ -1127,7 +1302,7 @@ void sond_seadrive_hydrate_async_notify(const gchar *full_path,
     if (g_hash_table_contains(g_hydrating_paths, full_path)) {
         /* schon ein Hydrier-Thread für diese Datei unterwegs - No-Op */
         g_mutex_unlock(&g_hydrating_mutex);
-        return;
+        return FALSE;
     }
     g_hash_table_insert(g_hydrating_paths, g_strdup(full_path),
             g_new0(HydratingEntry, 1));
@@ -1137,21 +1312,47 @@ void sond_seadrive_hydrate_async_notify(const gchar *full_path,
     td->full_path = g_strdup(full_path);
     td->notify = (parent != NULL);
     g_weak_ref_init(&td->parent, parent);
+    td->batch = batch;
 
-    thread = g_thread_new("seadrive-hydrate", hydrate_thread_func, td);
-    if (!thread) {
-        /* Thread-Erzeugung fehlgeschlagen - Eintrag wieder entfernen,
-         * sonst bliebe die Datei für immer fälschlich als "läuft schon"
-         * markiert. */
-        g_mutex_lock(&g_hydrating_mutex);
-        g_hash_table_remove(g_hydrating_paths, td->full_path);
-        g_mutex_unlock(&g_hydrating_mutex);
-        g_weak_ref_clear(&td->parent);
-        g_free(td->full_path);
-        g_free(td);
-        return;
+    if (batch) {
+        g_mutex_lock(&batch->mutex);
+        batch->remaining++;
+        g_mutex_unlock(&batch->mutex);
     }
-    g_thread_unref(thread); /* fire-and-forget, kein g_thread_join() */
+
+    if (use_pool) {
+        g_thread_pool_push(hydrate_pool_get(), td, NULL);
+        return TRUE;
+    }
+
+    {
+        GThread *thread = g_thread_new("seadrive-hydrate", hydrate_thread_func,
+                td);
+
+        if (!thread) {
+            /* Thread-Erzeugung fehlgeschlagen - Eintrag wieder entfernen,
+             * sonst bliebe die Datei für immer fälschlich als "läuft schon"
+             * markiert. */
+            g_mutex_lock(&g_hydrating_mutex);
+            g_hash_table_remove(g_hydrating_paths, td->full_path);
+            g_mutex_unlock(&g_hydrating_mutex);
+            if (batch)
+                hydrate_batch_done(batch);
+            g_weak_ref_clear(&td->parent);
+            g_free(td->full_path);
+            g_free(td);
+            return FALSE;
+        }
+        g_thread_unref(thread); /* fire-and-forget, kein g_thread_join() */
+    }
+
+    return TRUE;
+}
+
+void sond_seadrive_hydrate_async_notify(const gchar *full_path,
+        GtkWindow *parent)
+{
+    hydrate_start(full_path, parent, NULL, FALSE);
 }
 
 void sond_seadrive_hydrate_async(const gchar *full_path)
@@ -1210,10 +1411,10 @@ void sond_seadrive_hydrate_cancel(const gchar *full_path)
     entry = g_hydrating_paths ?
             g_hash_table_lookup(g_hydrating_paths, full_path) : NULL;
     if (entry) {
+        //immer merken: abgebrochene Dateien gelten nicht als gescheitert
+        entry->cancel_requested = TRUE;
         if (entry->thread_handle)
             CancelSynchronousIo(entry->thread_handle);
-        else
-            entry->cancel_requested = TRUE;
     }
     g_mutex_unlock(&g_hydrating_mutex);
 }
@@ -1329,11 +1530,19 @@ typedef struct {
     gboolean   done;
 } HydrateProgressEntryMulti;
 
+/* Ab so vielen Dateien statt einer Zeile je Datei nur eine Sammelanzeige:
+ * je Datei zwei Widgets und je Aktualisierung ein Dateizugriff wären bei
+ * Hunderten Dateien zu langsam. */
+#define HYDRATE_PROGRESS_AGGREGATE_MIN 20
+
 typedef struct {
     GPtrArray *entries; /* HydrateProgressEntryMulti*, eigene Kopien */
     GtkWidget *dialog;
     GtkWidget *abbrechen_button;
     guint      timeout_id;
+    gboolean   aggregate;    /* Sammelanzeige: entries ohne Widgets */
+    GtkWidget *agg_label;
+    GtkWidget *agg_bar;
 } HydrateProgressUiMulti;
 
 /* Ermittelt per CfGetPlaceholderInfo() den Hydrierungs-Fortschritt eines
@@ -1416,6 +1625,28 @@ static void hydrate_progress_update_multi(HydrateProgressUiMulti *ui)
 {
     guint i;
 
+    if (ui->aggregate) {
+        guint done = 0;
+        gchar *text = NULL;
+
+        for (i = 0; i < ui->entries->len; i++) {
+            HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+
+            if (!entry->done && !sond_seadrive_is_hydrating(entry->full_path))
+                entry->done = TRUE;
+            if (entry->done)
+                done++;
+        }
+
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->agg_bar),
+                ui->entries->len ? (gdouble) done / ui->entries->len : 1.0);
+        text = g_strdup_printf("%u von %u Dateien", done, ui->entries->len);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(ui->agg_bar), text);
+        g_free(text);
+
+        return;
+    }
+
     for (i = 0; i < ui->entries->len; i++) {
         HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
 
@@ -1486,9 +1717,13 @@ static void cb_hydrate_progress_abbrechen_clicked_multi(GtkButton *button,
         HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
         if (!entry->done) {
             sond_seadrive_hydrate_cancel(entry->full_path);
-            gtk_label_set_text(GTK_LABEL(entry->label), "Wird abgebrochen...");
+            if (entry->label)
+                gtk_label_set_text(GTK_LABEL(entry->label),
+                        "Wird abgebrochen...");
         }
     }
+    if (ui->agg_label)
+        gtk_label_set_text(GTK_LABEL(ui->agg_label), "Wird abgebrochen...");
     gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
 }
 
@@ -1539,7 +1774,30 @@ void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
 
-    for (i = 0; i < full_paths->len; i++) {
+    ui->aggregate = (full_paths->len > HYDRATE_PROGRESS_AGGREGATE_MIN);
+    if (ui->aggregate) {
+        gchar *text = g_strdup_printf("%u Dateien werden geladen",
+                full_paths->len);
+
+        ui->agg_label = gtk_label_new(text);
+        g_free(text);
+        gtk_widget_set_halign(ui->agg_label, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(vbox), ui->agg_label, FALSE, FALSE, 0);
+
+        ui->agg_bar = gtk_progress_bar_new();
+        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(ui->agg_bar), TRUE);
+        gtk_box_pack_start(GTK_BOX(vbox), ui->agg_bar, FALSE, FALSE, 0);
+
+        for (i = 0; i < full_paths->len; i++) {
+            HydrateProgressEntryMulti *entry =
+                    g_new0(HydrateProgressEntryMulti, 1);
+
+            entry->full_path = g_strdup(g_ptr_array_index(full_paths, i));
+            g_ptr_array_add(ui->entries, entry);
+        }
+    }
+
+    for (i = 0; !ui->aggregate && i < full_paths->len; i++) {
         const gchar *full_path = g_ptr_array_index(full_paths, i);
         HydrateProgressEntryMulti *entry = g_new0(HydrateProgressEntryMulti, 1);
         gchar *basename;
@@ -1627,9 +1885,15 @@ gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
     }
 
     if (pending->len > 0) {
+        /* Fehlschläge gesammelt in einem Dialog melden, ab einigen Dateien
+         * mit begrenzter Zahl gleichzeitiger Downloads */
+        HydrateBatch *batch = hydrate_batch_new(parent);
+        gboolean use_pool = (pending->len >= HYDRATE_POOL_MIN_FILES);
+
         for (i = 0; i < pending->len; i++)
-            sond_seadrive_hydrate_async_notify(
-                    (const gchar *) g_ptr_array_index(pending, i), parent);
+            hydrate_start((const gchar *) g_ptr_array_index(pending, i), NULL,
+                    batch, use_pool);
+        hydrate_batch_done(batch); /* Wächter abgeben */
 
         if (any_hydrating)
             sond_seadrive_show_hydrate_progress_dialog_multi(parent, pending);
@@ -1721,7 +1985,8 @@ static void clear_attr_on_parents(const gchar *full_path, const gchar *root,
 /*  Internal: apply pin state to one item                             */
 /* ------------------------------------------------------------------ */
 
-static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state)
+static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state,
+        GPtrArray *failed)
 {
     SondFilePart *sfp;
     gchar *full_path;
@@ -1749,6 +2014,7 @@ static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state)
     if (!sond_seadrive_set_pin_state(full_path, pin_state, is_dir, &error)) {
         LOG_WARN("SeaDrive set_pin_state('%s'): %s",
                  full_path, error ? error->message : "?");
+        sond_seadrive_pin_note_failure(failed, full_path, error);
         g_clear_error(&error);
     }
     else if (pin_state != STVFM_PIN_STATE_PINNED) {
@@ -1772,15 +2038,21 @@ static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state)
 /*  Internal: foreach callback                                        */
 /* ------------------------------------------------------------------ */
 
+typedef struct {
+    guint      pin_state;
+    GPtrArray *failed; /* Meldungen gescheiterter Einträge (g_free) */
+} PinForeachData;
+
 static gint seadrive_pin_foreach(SondTreeview *stv, GtkTreeIter *iter,
                                  gpointer data, GError **error)
 {
     SondTVFMItem *item = NULL;
+    PinForeachData *pd = (PinForeachData*) data;
     (void)error;
     gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
                        iter, 0, &item, -1);
     if (item) {
-        apply_pin_state_to_item(item, GPOINTER_TO_UINT(data));
+        apply_pin_state_to_item(item, pd->pin_state, pd->failed);
         g_object_unref(item);
     }
     return 0;
@@ -1831,14 +2103,21 @@ void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm,
         return;
     }
 
+    PinForeachData pd = { pin_state, g_ptr_array_new_with_free_func(g_free) };
+
     gint rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-                  seadrive_pin_foreach, GUINT_TO_POINTER(pin_state), &error);
+                  seadrive_pin_foreach, &pd, &error);
     if (rc == -1) {
         display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
                         "SeaDrive: Fehler\n\n",
                         error ? error->message : "", NULL);
         g_clear_error(&error);
     }
+
+    //gescheiterte Einträge gesammelt melden
+    sond_seadrive_pin_report_failures(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+            pd.failed);
+    g_ptr_array_unref(pd.failed);
 
     /* Bei UNSPECIFIED/UNPINNED ändert sich das PINNED-Attribut sofort
      * (synchron), das Overlay-Icon muss also sofort neu gezeichnet werden.

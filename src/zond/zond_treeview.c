@@ -3719,6 +3719,7 @@ void zond_treeview_seadrive_apply_to_selection(ZondTreeview *ztv,
 	{
 		GHashTableIter piter;
 		gpointer pkey = NULL;
+		GPtrArray *failed = g_ptr_array_new_with_free_func(g_free);
 
 		g_hash_table_iter_init(&piter, ht_paths);
 		while (g_hash_table_iter_next(&piter, &pkey, NULL)) {
@@ -3728,9 +3729,15 @@ void zond_treeview_seadrive_apply_to_selection(ZondTreeview *ztv,
 				LOG_WARN("SeaDrive set_pin_state('%s'): %s",
 						(const gchar*) pkey,
 						path_error ? path_error->message : "?");
+				sond_seadrive_pin_note_failure(failed, (const gchar*) pkey,
+						path_error);
 				g_clear_error(&path_error);
 			}
 		}
+
+		//gescheiterte Dateien gesammelt melden
+		sond_seadrive_pin_report_failures(GTK_WIDGET(zond->app_window), failed);
+		g_ptr_array_unref(failed);
 	}
 	g_hash_table_destroy(ht_paths);
 }

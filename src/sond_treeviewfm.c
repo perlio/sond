@@ -1496,7 +1496,72 @@ typedef struct {
 	gboolean move;
 	gboolean aborted; //Nutzer hat abgebrochen bzw. beim Verschieben übersprungen
 	gchar *failure;   //Fehlermeldung, wenn nicht gefragt werden konnte
+	GPtrArray *not_loaded; //absolute Pfade nicht (vollständig) geladener SeaDrive-Dateien (g_free)
 } SFMPreflight;
+
+#ifdef _WIN32
+static gchar* sond_treeviewfm_root_file_path(SondTreeviewFM*, SondFilePart*);
+
+//nicht geladene Dateien unterhalb von abs_dir sammeln
+static void preflight_scan_dir(SFMPreflight *pf, gchar const *abs_dir) {
+	SondDir *dir = sond_dir_open(abs_dir, NULL);
+	gchar const *name = NULL;
+
+	if (!dir)
+		return;
+
+	while ((name = sond_dir_read_name(dir)) != NULL) {
+		gchar *path = g_strconcat(abs_dir, "/", name, NULL);
+		GStatBuf st = { 0 };
+
+		if (sond_stat(path, &st, NULL))
+			g_free(path);
+		else if (S_ISDIR(st.st_mode)) {
+			preflight_scan_dir(pf, path);
+			g_free(path);
+		}
+		else if (sond_seadrive_needs_hydration(path))
+			g_ptr_array_add(pf->not_loaded, path);
+		else
+			g_free(path);
+	}
+	sond_dir_close(dir);
+}
+
+//Kopieren: nicht (vollständig) geladene SeaDrive-Dateien des Eintrags vormerken.
+//Datei bzw. Teil einer Datei: die oberste Datei; Verzeichnis: alle Dateien darunter
+static void preflight_collect_not_loaded(SFMPreflight *pf, SondTreeviewFM *stvfm,
+		SondTVFMItemPrivate *item_priv) {
+	if (!sond_treeviewfm_is_seadrive_path(stvfm))
+		return;
+
+	if (!pf->not_loaded)
+		pf->not_loaded = g_ptr_array_new_with_free_func(g_free);
+
+	if (item_priv->sond_file_part) {
+		gchar *full_path = sond_treeviewfm_root_file_path(stvfm,
+				item_priv->sond_file_part);
+
+		if (full_path && sond_seadrive_needs_hydration(full_path))
+			g_ptr_array_add(pf->not_loaded, full_path);
+		else
+			g_free(full_path);
+	}
+	else { //Dateisystem-Verzeichnis
+		gchar const *root = sond_treeviewfm_get_root(stvfm);
+		gchar *dir = NULL;
+
+		if (!root)
+			return;
+
+		dir = item_priv->path_or_section ?
+				g_strconcat(root, "/", item_priv->path_or_section, NULL) :
+				g_strdup(root);
+		preflight_scan_dir(pf, dir);
+		g_free(dir);
+	}
+}
+#endif
 
 //Ein Eintrag prüfen; FALSE = Aktion abbrechen
 static gboolean preflight_entry(SFMPreflight *pf, SondFilePart *sfp_zip,
@@ -1551,6 +1616,12 @@ static gint sond_treeviewfm_preflight_foreach(SondTreeview *stv,
 		return 0;
 	item_priv = sond_tvfm_item_get_priv(stvfm_item);
 	g_object_unref(stvfm_item); //der Baum hält die Referenz
+
+#ifdef _WIN32
+	//Kopieren liest die Dateien; Verschieben im selben Laufwerk benennt nur um
+	if (!pf->move)
+		preflight_collect_not_loaded(pf, SOND_TREEVIEWFM(stv), item_priv);
+#endif
 
 	sfp = item_priv->sond_file_part;
 	if (!sfp)
@@ -1814,13 +1885,56 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	 * beim Verschieben verloren gehen). Abbruch oder Fehler: nichts kopieren
 	 * oder verschieben. */
 	{
-		SFMPreflight pf = { &s_paste_sel, clipboard->ausschneiden, FALSE, NULL };
+		SFMPreflight pf = { &s_paste_sel, clipboard->ausschneiden, FALSE, NULL, NULL };
 		GPtrArray *arr_skipped = NULL;
 
 		sond_password_action_begin(!clipboard->ausschneiden);
 
 		rc = sond_treeview_clipboard_foreach(sond_treeviewfm_preflight_foreach,
 				(gpointer) &pf, error);
+
+#ifdef _WIN32
+		//Ist eine Datei noch nicht (vollständig) geladen, wird gar nichts
+		//kopiert: Downloads anstoßen (ein erneuter Versuch während des Ladens
+		//zeigt den Fortschritt), der Nutzer fügt danach erneut ein
+		if (rc != -1 && !pf.aborted && !pf.failure && pf.not_loaded
+				&& pf.not_loaded->len > 0) {
+			gboolean any_hydrating = FALSE;
+
+			for (guint i = 0; i < pf.not_loaded->len && !any_hydrating; i++)
+				any_hydrating = sond_seadrive_is_hydrating(
+						(gchar const*) g_ptr_array_index(pf.not_loaded, i));
+
+			//noch nicht angestoßene Downloads werden mit gestartet; läuft
+			//schon einer, zeigt das Fortschrittsfenster alles, ohne Meldung
+			sond_seadrive_ensure_hydrated_multi(
+					GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), pf.not_loaded);
+			if (any_hydrating)
+				pf.aborted = TRUE;
+		}
+
+		if (rc != -1 && !pf.aborted && !pf.failure && pf.not_loaded
+				&& pf.not_loaded->len > 0) {
+			GString *names = g_string_new(NULL);
+
+			g_string_append_printf(names, "%u %s nicht (vollständig) geladen. "
+					"Der Download wurde gestartet, bitte danach erneut "
+					"einfügen:\n", pf.not_loaded->len,
+					(pf.not_loaded->len == 1) ? "Datei ist" : "Dateien sind");
+			for (guint i = 0; i < MIN(pf.not_loaded->len, 5); i++) {
+				gchar *base = g_path_get_basename(
+						(gchar const*) g_ptr_array_index(pf.not_loaded, i));
+
+				g_string_append_printf(names, "\n%s", base);
+				g_free(base);
+			}
+			if (pf.not_loaded->len > 5)
+				g_string_append_printf(names, "\n... und %u weitere",
+						pf.not_loaded->len - 5);
+			pf.failure = g_string_free(names, FALSE);
+		}
+#endif
+
 		if (rc == -1 || pf.aborted || pf.failure) {
 			if (rc != -1 && pf.failure) {
 				if (error)
@@ -1838,6 +1952,8 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 					sond_treeviewfm_paste_clipboard_foreach,
 					(gpointer) &s_paste_sel, error);
 		g_free(pf.failure);
+		if (pf.not_loaded)
+			g_ptr_array_unref(pf.not_loaded);
 
 		//übersprungene Einträge dem Nutzer nennen
 		arr_skipped = sond_password_action_skipped();
@@ -2091,28 +2207,21 @@ static gboolean error_is_cancelled(GError *error) {
 }
 
 #ifdef _WIN32
-/* Ist die Datei des Elements (bei Elementen in Containern die oberste Datei)
- * lokal vorhanden? Liegt sie als nicht geladener Platzhalter auf SeaDrive,
- * wird der Download angestoßen bzw. beim erneuten Aufruf der Fortschritt
- * gezeigt (sond_seadrive_ensure_hydrated(): Doppelklick und Klick auf den
- * Pfeil eines nicht geladenen Containers verhalten sich gleich) und FALSE
- * geliefert; kein SeaDrive-Projekt oder lokal: TRUE.
- *
- * Es wird immer zum obersten Vorfahren (ohne Parent) hochgelaufen: nur der
- * trägt in path den echten, projektrelativen Pfad (s.
- * sond_file_part_do_create()); bei verschachtelten Teilen (ZIP-Eintrag,
- * PDF-Anhang, Mimepart) ist path nur ein container-interner Bezeichner. */
-static gboolean sond_treeviewfm_ensure_local(SondTreeviewFM *stvfm,
+/* Absoluter Pfad der Datei, die zum Element gehört: bei Elementen in
+ * Containern die oberste Datei (ohne Parent). Nur diese trägt in path den
+ * echten, projektrelativen Pfad (s. sond_file_part_do_create()); bei
+ * verschachtelten Teilen (ZIP-Eintrag, PDF-Anhang, Mimepart) ist path nur
+ * ein container-interner Bezeichner. NULL (kein Fehler), wenn das Projekt
+ * nicht auf SeaDrive liegt, sfp NULL ist oder kein Pfad zu ermitteln ist. */
+static gchar* sond_treeviewfm_root_file_path(SondTreeviewFM *stvfm,
 		SondFilePart *sfp) {
 	SondFilePart *sfp_root = sfp;
 	SondFilePart *sfp_parent = NULL;
 	gchar const *root = NULL;
 	gchar const *sfp_path = NULL;
-	gchar *full_path = NULL;
-	gboolean is_local = TRUE;
 
 	if (!sfp || !sond_treeviewfm_is_seadrive_path(stvfm))
-		return TRUE;
+		return NULL;
 
 	while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
 		sfp_root = sfp_parent;
@@ -2120,14 +2229,49 @@ static gboolean sond_treeviewfm_ensure_local(SondTreeviewFM *stvfm,
 	root = sond_treeviewfm_get_root(stvfm);
 	sfp_path = sond_file_part_get_path(sfp_root);
 	if (!root || !sfp_path)
+		return NULL;
+
+	return g_strconcat(root, "/", sfp_path, NULL);
+}
+#endif
+
+#ifdef _WIN32
+/* Ist die Datei des Elements (bei Elementen in Containern die oberste Datei)
+ * lokal vorhanden? Liegt sie als nicht geladener Platzhalter auf SeaDrive,
+ * wird der Download angestoßen bzw. beim erneuten Aufruf der Fortschritt
+ * gezeigt (sond_seadrive_ensure_hydrated(): Doppelklick und Klick auf den
+ * Pfeil eines nicht geladenen Containers verhalten sich gleich) und FALSE
+ * geliefert; kein SeaDrive-Projekt oder lokal: TRUE. */
+static gboolean sond_treeviewfm_ensure_local(SondTreeviewFM *stvfm,
+		SondFilePart *sfp) {
+	gchar *full_path = sond_treeviewfm_root_file_path(stvfm, sfp);
+	gboolean is_local = TRUE;
+
+	if (!full_path)
 		return TRUE;
 
-	full_path = g_strconcat(root, "/", sfp_path, NULL);
 	is_local = sond_seadrive_ensure_hydrated(
 			GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
 	g_free(full_path);
 
 	return is_local;
+}
+
+/* Ist die Datei des Elements ein nicht geladener SeaDrive-Platzhalter?
+ * Stößt anders als sond_treeviewfm_ensure_local() keinen Download an (für
+ * die Dateisuche, die nicht geladene Container überspringt). */
+static gboolean sond_treeviewfm_not_loaded(SondTreeviewFM *stvfm,
+		SondFilePart *sfp) {
+	gchar *full_path = sond_treeviewfm_root_file_path(stvfm, sfp);
+	gboolean not_loaded = FALSE;
+
+	if (!full_path)
+		return FALSE;
+
+	not_loaded = sond_seadrive_needs_hydration(full_path);
+	g_free(full_path);
+
+	return not_loaded;
 }
 #endif
 
@@ -2284,6 +2428,7 @@ typedef struct {
 	GPtrArray *arr_hits;
 	GHashTable *ht_seen; //Trefferstrings (gehören arr_hits), gegen Doppelte
 	guint n_skipped;
+	guint n_not_loaded; //nicht geladene SeaDrive-Container, nicht durchsucht
 	gint ready;
 	gint cancelled;
 } SearchCtx;
@@ -2391,6 +2536,16 @@ static gint sond_treeviewfm_search_item(SearchCtx *ctx, SondTVFMItem *item,
 	if (container_root && !ctx->opts.in_containers)
 		return 0;
 
+#ifdef _WIN32
+	//nicht geladener Container: nicht lesen, das löste sonst einen Download aus
+	if (container_root && sond_treeviewfm_not_loaded(priv->stvfm,
+			priv->sond_file_part)) {
+		ctx->n_not_loaded++;
+
+		return 0;
+	}
+#endif
+
 	if (sond_tvfm_item_load_children(item, &arr_children, NULL, &error_load)) {
 		if (top) {
 			g_propagate_error(error, error_load);
@@ -2454,7 +2609,7 @@ static gint sond_treeviewfm_search_collect_start(SondTreeview *stv,
 
 GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 		SondTVFMSearchOpts const *opts, gboolean selected_only,
-		guint *n_skipped, GError **error) {
+		guint *n_skipped, guint *n_not_loaded, GError **error) {
 	SearchCtx ctx = { 0 };
 	SearchThreadData data_thread = { 0 };
 	GPtrArray *arr_start = NULL;
@@ -2468,6 +2623,8 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 
 	if (n_skipped)
 		*n_skipped = 0;
+	if (n_not_loaded)
+		*n_not_loaded = 0;
 
 	arr_start = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
 	if (selected_only) {
@@ -2516,6 +2673,8 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 		arr_hits = ctx.arr_hits;
 		if (n_skipped)
 			*n_skipped = ctx.n_skipped;
+		if (n_not_loaded)
+			*n_not_loaded = ctx.n_not_loaded;
 	}
 
 	g_hash_table_destroy(ctx.ht_seen);
@@ -3279,6 +3438,7 @@ static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
 	GPtrArray *arr_hits = NULL;
 	gchar *msg_skipped = NULL;
 	guint n_skipped = 0;
+	guint n_not_loaded = 0;
 	gboolean selected_only = FALSE;
 	GError *error = NULL;
 	SondTVFMSearchOpts opts = { 0 };
@@ -3293,7 +3453,7 @@ static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
 	opts.text = stvfm_priv->search_text;
 
 	arr_hits = sond_treeviewfm_search(stvfm, &opts, selected_only, &n_skipped,
-			&error);
+			&n_not_loaded, &error);
 	if (!arr_hits) {
 		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Fehler bei Dateisuche\n\n", error->message, NULL);
@@ -3305,6 +3465,15 @@ static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
 	if (n_skipped)
 		msg_skipped = g_strdup_printf("\n\n%u Verzeichnis(se) konnten nicht "
 				"gelesen werden und wurden übersprungen", n_skipped);
+
+	if (n_not_loaded) {
+		gchar *msg_not_loaded = g_strdup_printf("%s\n\n%u nicht geladene "
+				"Container (ZIP, E-Mail) wurden nicht durchsucht",
+				msg_skipped ? msg_skipped : "", n_not_loaded);
+
+		g_free(msg_skipped);
+		msg_skipped = msg_not_loaded;
+	}
 
 	if (arr_hits->len == 0)
 		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden",

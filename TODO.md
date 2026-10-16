@@ -2,17 +2,25 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #243.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #244.
 
 ## Inhalt
 
-Offen: -
+Offen: #243
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
 
-Zur Zeit keine offenen Punkte.
+### #243 Absturz beim Schließen des Projekts (SIGSEGV in sqlite3_close)
+
+Zweimal beobachtet (zuletzt nach Kopieren mit abgebrochenem Download), danach nicht mehr
+reproduzierbar. Stacktrace: zond_dbase_finalize() (zond_dbase.c) -> project_clear_dbase_zond()
+-> project_close() -> cb_delete_event(); Absturz in RtlEnterCriticalSection innerhalb
+sqlite3_close(), also eine ungültige oder schon geschlossene Verbindung. Gefunden wurde keine
+doppelte Freigabe von zond_dbase_store/_work und kein Zugriff anderer Threads auf die
+Store-Verbindung. Bei erneutem Auftreten: Stacks aller Threads und die vorausgehende Aktion
+(Indizieren, Kopieren/Verschieben, Viewer-Speichern) festhalten.
 
 ## Zurückgestellt
 

@@ -48,6 +48,16 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
                                      GError     **error);
 
 /*
+ * Sammelmeldung für gescheiterte sond_seadrive_set_pin_state()-Aufrufe
+ * ("Cache leeren", "Immer verfügbar" auf mehrere Einträge): note_failure
+ * merkt einen Fehlschlag in failed (GPtrArray mit g_free), report_failures
+ * zeigt am Ende einen einzigen Dialog (Namen und Ursache, die ersten fünf).
+ */
+void sond_seadrive_pin_note_failure(GPtrArray *failed, const gchar *full_path,
+                                    GError *error);
+void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed);
+
+/*
  * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
  * Cloud-Datei über die offizielle CfHydratePlaceholder()-API an. Der Trick
  * CreateFileW(GENERIC_READ)+ReadFile() schlägt unter aktuellem Windows
@@ -200,6 +210,19 @@ sond_seadrive_set_pin_state(const gchar *full_path,
 {
     (void)full_path; (void)pin_state; (void)recurse; (void)error;
     return FALSE;
+}
+
+static inline void
+sond_seadrive_pin_note_failure(GPtrArray *failed, const gchar *full_path,
+                               GError *error)
+{
+    (void)failed; (void)full_path; (void)error;
+}
+
+static inline void
+sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
+{
+    (void)parent; (void)failed;
 }
 
 static inline gboolean

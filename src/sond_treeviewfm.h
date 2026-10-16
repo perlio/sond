@@ -122,9 +122,11 @@ typedef struct {
  * erwartet, oder NULL und error. Läuft mit Fortschrittsfenster und
  * Abbrechen; bei Abbruch kommen die bis dahin gefundenen Treffer zurück.
  * selected_only: nur unterhalb der markierten Punkte, sonst ab Wurzel.
- * n_skipped (optional): Zahl nicht lesbarer, übersprungener Verzeichnisse. */
+ * n_skipped (optional): Zahl nicht lesbarer, übersprungener Verzeichnisse.
+ * n_not_loaded (optional): Zahl nicht geladener SeaDrive-Container (ZIP,
+ * E-Mail), die nicht durchsucht wurden (die Suche löst keinen Download aus). */
 GPtrArray* sond_treeviewfm_search(SondTreeviewFM*, SondTVFMSearchOpts const*,
-		gboolean selected_only, guint *n_skipped, GError**);
+		gboolean selected_only, guint *n_skipped, guint *n_not_loaded, GError**);
 
 /* Dateisuche mit Dialog und Ergebnisfenster, wie im Kontextmenü. */
 void sond_treeviewfm_search_activate(SondTreeviewFM*);

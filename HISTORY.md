@@ -5789,3 +5789,26 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    (cached_archive in SondFilePartZip) bis zum Freigeben des Objekts (Baumzeile); das spielte
    beim "Cache leeren" keine Rolle (ein SeaDrive-Aussetzer war die Ursache).
 ```
+
+## SeaDrive: Suche, Pin-Meldung, Kopieren nur bei geladenen Dateien (16.10.2026)
+
+```text
+ Vom Nutzer getestet.
+ - Dateisuche (sond_treeviewfm_search): nicht geladene Container (ZIP, E-Mail) werden
+   übersprungen, ein Download wird nicht ausgelöst; die Ergebnismeldung nennt die Zahl
+   (neuer Parameter n_not_loaded).
+ - "Cache leeren"/"Immer verfügbar" auf mehrere Einträge: gescheiterte Einträge werden in einer
+   Sammelmeldung gezeigt (sond_seadrive_pin_note_failure/_report_failures), auch im
+   Auswertungsbaum (zond_treeview.c).
+ - Kopieren/Einfügen: Vorabdurchlauf (preflight_collect_not_loaded, auch Verzeichnisse, ohne
+   Obergrenze). Ist eine Datei nicht (vollständig) geladen, wird nichts kopiert; die Downloads
+   aller fehlenden Dateien werden angestoßen. Erstes Einfügen: Meldung mit Zahl und
+   Beispielen; läuft schon ein Download, nur das Fortschrittsfenster, keine Meldung.
+   Verschieben im selben Laufwerk ist ausgenommen (nur Umbenennen).
+ - Viele Downloads: Thread-Pool mit 4 Arbeitern ab 8 Dateien (hydrate_start, use_pool);
+   Gescheiterte Downloads eines Auftrags (HydrateBatch) in einer Sammelmeldung statt je ein
+   Fenster. Fortschrittsdialog ab 20 Dateien als Sammelanzeige ("N von M Dateien").
+ - Abbrechen: sond_seadrive_hydrate_cancel() setzt cancel_requested immer; abgebrochene Dateien
+   gelten nicht als gescheitert. Die Log-Warnung 0x800703E3 (ERROR_OPERATION_ABORTED) bei
+   laufenden, abgebrochenen Downloads bleibt bewusst.
+```
