@@ -1510,6 +1510,70 @@ static gchar* collapse_group(gchar const* key) {
 	return NULL;
 }
 
+/* Projektrelative Pfade der realen Dateien (bei Teilen in Containern die
+ * oberste Datei, ohne Doppelte), die sond_process_fileparts() für files
+ * tatsächlich lesen würde. Wendet dieselben Vorab-Prüfungen an wie dort
+ * (schon vollständig abgedeckt, am Namen nicht indizierbar) und muss mit ihnen
+ * übereinstimmen: bereits indizierte Dateien sollen nicht geladen werden
+ * (SeaDrive). Aufrufer: g_ptr_array_unref(). */
+GPtrArray* sond_process_fileparts_roots_to_read(SondProcessFileCtx* wctx,
+		GHashTable* files) {
+	GPtrArray* roots = g_ptr_array_new_with_free_func(g_free);
+	GHashTable* seen = g_hash_table_new(g_str_hash, g_str_equal);
+	GHashTableIter iter = { 0 };
+	gpointer key = NULL;
+	gpointer value = NULL;
+
+	g_hash_table_iter_init(&iter, files);
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
+		SondPageRange* range = (SondPageRange*) value;
+		gboolean gmessage_message = range ? range->gmessage_message : FALSE;
+		gboolean gmessage_header_only = range ?
+				(range->gmessage_header_only || gmessage_message) : FALSE;
+		gboolean pdf_pagetree_only = range ? range->pdf_pagetree_only : FALSE;
+		gboolean pages_key = range && !gmessage_header_only &&
+				(pdf_pagetree_only || range->von >= 0);
+		SondFilePart* sfp = SOND_FILE_PART(key);
+		gchar* file_part = sond_file_part_get_filepart(sfp);
+		gchar* coverage_key = gmessage_header_only ?
+				g_strdup_printf("%s//header", file_part) :
+				pages_key ? g_strdup_printf("%s//", file_part) : file_part;
+		gboolean skip = FALSE;
+
+		if (wctx->index_ctx && wctx->ocr_mode != SOND_OCR_MODE_FORCE &&
+				(gmessage_message ?
+						gmessage_message_covered(wctx, file_part) :
+						sond_index_ctx_coverage_get(wctx->index_ctx, coverage_key)
+								>= wctx->ocr_mode))
+			skip = TRUE;
+		else if (file_part_not_indexable(sfp, file_part))
+			skip = TRUE;
+
+		if (coverage_key != file_part) g_free(coverage_key);
+		g_free(file_part);
+
+		if (!skip) {
+			SondFilePart* sfp_root = sfp;
+			SondFilePart* sfp_parent = NULL;
+			gchar const* path = NULL;
+
+			while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
+				sfp_root = sfp_parent;
+
+			path = sond_file_part_get_path(sfp_root);
+			if (path && !g_hash_table_contains(seen, path)) {
+				gchar* dup = g_strdup(path);
+
+				g_ptr_array_add(roots, dup);
+				g_hash_table_add(seen, dup);
+			}
+		}
+	}
+	g_hash_table_destroy(seen);
+
+	return roots;
+}
+
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTableIter iter = { 0 };
 	gpointer key = NULL;

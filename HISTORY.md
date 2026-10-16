@@ -5852,5 +5852,9 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    ausgeben"; Abbruch oder gescheiterter Download: kein Export).
  - HydrateBatch, der alte Multi-Dialog, sond_seadrive_ensure_hydrated(_multi) und die
    Fortsetzungs-Mechanik entfallen.
- - Offen: Etappe D (Indizieren).
+ - Indizieren (Etappe D): sond_process_fileparts_roots_to_read() (sond_process_file.c) liefert die
+   realen Dateien, die der Lauf wirklich liest (dieselben Vorab-Prüfungen wie
+   sond_process_fileparts: schon abgedeckt und am Namen nicht indizierbar werden übersprungen,
+   bereits Indiziertes wird also nicht geladen). zond_index_lauf (headerbar.c) lädt sie vor dem
+   Start des Indizier-Threads; Abbruch oder gescheiterter Download: keine Indexerstellung.
 ```

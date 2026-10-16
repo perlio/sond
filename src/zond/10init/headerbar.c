@@ -223,6 +223,32 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 	InfoWindow *info_window = NULL;
 
 	zond->wctx->ocr_mode = ocr_mode;
+
+	/* Noch nicht geladene SeaDrive-Dateien, die der Lauf liest (nicht die schon
+	 * indizierten), vorab laden; Abbruch oder Fehlschlag: nicht indizieren. */
+	{
+		GPtrArray *roots = sond_process_fileparts_roots_to_read(zond->wctx,
+				ht_index);
+		gchar const *root_dir = sond_treeviewfm_get_root(
+				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+		GPtrArray *pfade = g_ptr_array_new_with_free_func(g_free);
+		gboolean loaded = TRUE;
+
+		for (guint i = 0; root_dir && i < roots->len; i++)
+			g_ptr_array_add(pfade, g_strconcat(root_dir, "/",
+					(gchar const*) g_ptr_array_index(roots, i), NULL));
+		if (pfade->len > 0)
+			loaded = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+		g_ptr_array_unref(pfade);
+		g_ptr_array_unref(roots);
+
+		if (!loaded) {
+			g_hash_table_destroy(ht_index);
+
+			return FALSE;
+		}
+	}
+
 	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
 			"Index erstellen");
 	zond->wctx->log_func_data = (gpointer) info_window;
@@ -361,6 +387,13 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 			NULL);
 	gboolean ok = zond_index_lauf(zond, ht_index, ocr_mode);
 	gboolean declined = FALSE;
+
+	//Abbruch beim Laden nicht geladener Dateien (oder Thread nicht erzeugt)
+	if (!ok) {
+		g_hash_table_destroy(ignored);
+
+		return FALSE;
+	}
 
 	while (ok) {
 		GPtrArray *items = index_locked_items(zond->wctx, ignored);

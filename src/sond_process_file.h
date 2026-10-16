@@ -185,6 +185,12 @@ void sond_process_file(SondProcessFileCtx* wctx,
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 
+/* Projektrelative Pfade der realen Dateien, die sond_process_fileparts() für
+ * files lesen würde (ohne bereits Indiziertes und Nicht-Indizierbares); für das
+ * vorherige Laden nicht geladener SeaDrive-Dateien. g_ptr_array_unref(). */
+GPtrArray* sond_process_fileparts_roots_to_read(SondProcessFileCtx* wctx,
+		GHashTable* files);
+
 /* Datei im Dateisystem, die sich allein am Namen (Pfad oder Dateiname) als
  * nicht indizierbar erkennen läßt: Index-DB, Projektdatei, Endung eines nicht
  * indizierbaren Typs. Unbekannte oder fehlende Endung: FALSE. */
