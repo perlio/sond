@@ -20,7 +20,8 @@ G_BEGIN_DECLS
 #define STVFM_PIN_STATE_EXCLUDED     3
 #define STVFM_PIN_STATE_INHERIT      4
 
-#ifdef _WIN32
+/* Der Viewer linkt sond_seadrive.c nicht (haengt am TreeviewFM): Stubs. */
+#if defined(_WIN32) && !defined(VIEWER)
 
 /*
  * Returns TRUE if full_path lies inside a CF-API sync root
@@ -165,7 +166,7 @@ void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
 gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data);
 void sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm, const gchar *full_path);
 
-#else /* !_WIN32 */
+#else /* !_WIN32 || VIEWER */
 
 /* Stub inlines for Linux - compile to nothing */
 static inline guint
@@ -276,9 +277,9 @@ sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
     (void)stvfm; (void)sensitive;
 }
 
-#endif /* _WIN32 */
+#endif /* _WIN32 && !VIEWER */
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(VIEWER)
 /* Rekursive Ordner-Statistik für den SeaDrive-Coverage-Badge (Ordner-
  * Ebene), jeweils im GANZEN Teilbaum unter dem Ordner (rekursiv), nicht
  * nur direkte Kinder - Rendering bleibt dadurch O(1) pro Zeile. S.
