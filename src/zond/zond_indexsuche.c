@@ -31,6 +31,7 @@
 #include "../sond_process_file.h"
 #include "../sond_renderer.h"
 #include "../sond_file_helper.h"
+#include "../sond_seadrive.h"
 #include "../sond_log_and_error.h"
 
 #include "zond_init.h"
@@ -92,6 +93,26 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
     if (char_pos_str && *char_pos_str)
         char_pos_in_page = atoi(char_pos_str);
     g_free(char_pos_str);
+
+    /* Nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts öffnen).
+     * filename ist projektrelativ, bei Containern ist der Teil vor dem
+     * ersten "//" die reale Datei. */
+    if (filename && zond->treeview[BAUM_FS]) {
+        gchar const *root_dir = sond_treeviewfm_get_root(
+                SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+        gchar const *sep = strstr(filename, "//");
+        g_autofree gchar *rel = sep ? g_strndup(filename, sep - filename) :
+                g_strdup(filename);
+        g_autofree gchar *full_path = root_dir ?
+                g_strconcat(root_dir, "/", rel, NULL) : NULL;
+
+        if (full_path && !sond_seadrive_load_file_sync(
+                GTK_WINDOW(zond->app_window), full_path)) {
+            g_free(filename);
+
+            return;
+        }
+    }
 
     /* SondFilePart direkt aus dem file_part-String aufbauen statt über
      * einen Tree-Walk in BAUM_FS (sond_treeviewfm_file_part_visible()):

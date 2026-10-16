@@ -26,6 +26,7 @@
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 #include "../../sond_process_file.h"
+#include "../../sond_seadrive.h"
 #include "../../misc.h"
 
 //#include "../zond_init.h"
@@ -1283,6 +1284,14 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 		//Datei auswählen
 		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
+
+		//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
+		if (path_merge && !sond_seadrive_load_file_sync(GTK_WINDOW(pv->vf),
+				path_merge)) {
+			g_free(path_merge);
+
+			return;
+		}
 
 		sfp = sond_file_part_from_filepart(path_merge, &error);
 		g_free(path_merge);

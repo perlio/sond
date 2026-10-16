@@ -2860,13 +2860,12 @@ static GPtrArray* zond_treeview_auszug_collect_paths(ZondTreeview *ztv,
 	return paths;
 }
 
-/* Wendet sond_seadrive_ensure_hydrated_multi() auf alle unter
- * iter_parent hängenden PDF-Anbindungen an (s.
- * zond_treeview_auszug_collect_paths() oben). Rückgabe: 0 = keine
- * Hydrierung nötig, Aufrufer soll normal per
- * zond_treeview_open_auszug() öffnen; 1 = Hydrierung wurde
- * angestoßen bzw. Fortschrittsdialog gezeigt, Aufrufer soll sofort mit
- * 0 zurückkehren, OHNE zu öffnen; -1 = echter Fehler (*error gesetzt),
+/* Lädt alle unter iter_parent hängenden PDF-Anbindungen (s.
+ * zond_treeview_auszug_collect_paths() oben) mit Fortschrittsfenster
+ * (sond_seadrive_load_sync()). Rückgabe: 0 = alle lokal, Aufrufer soll
+ * normal per zond_treeview_open_auszug() öffnen; 1 = abgebrochen oder
+ * Downloads gescheitert (schon gemeldet), Aufrufer soll mit 0
+ * zurückkehren, OHNE zu öffnen; -1 = echter Fehler (*error gesetzt),
  * Aufrufer soll mit -1 zurückkehren. */
 static gint zond_treeview_auszug_ensure_hydrated(Projekt *zond,
 		ZondTreeview *ztv, GtkTreeIter *iter_parent, GError **error) {
@@ -2891,8 +2890,7 @@ static gint zond_treeview_auszug_ensure_hydrated(Projekt *zond,
 		return -1;
 
 	if (paths->len > 0)
-		is_local = sond_seadrive_ensure_hydrated_multi(
-				GTK_WINDOW(zond->app_window), paths);
+		is_local = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), paths);
 
 	g_ptr_array_free(paths, TRUE);
 
@@ -3311,7 +3309,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	 * würde bei einem Klick auf eine Anbindung mit Strukturpunkt-Eltern
 	 * zunächst eine Einzeldatei-Hydrierung für nur diese eine Datei
 	 * angestoßen, bevor der Auszug-Pfad mit
-	 * sond_seadrive_ensure_hydrated_multi() ohnehin alle Geschwister
+	 * sond_seadrive_load_sync() ohnehin alle Geschwister
 	 * gebündelt behandelt. Die spätere Neuberechnung von iter_parent per
 	 * get_filepart_from_iter() weiter unten bleibt bestehen und
 	 * entscheidet weiterhin, ob zond_treeview_open_auszug() oder
@@ -3346,7 +3344,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			gchar *rel = sep ? g_strndup(file_part_target, sep - file_part_target)
 					: g_strdup(file_part_target);
 			gchar *full_path = g_strconcat(root, "/", rel, NULL);
-			gboolean is_local = sond_seadrive_ensure_hydrated(
+			gboolean is_local = sond_seadrive_load_file_sync(
 					GTK_WINDOW(zond->app_window), full_path);
 			g_free(rel);
 			g_free(full_path);

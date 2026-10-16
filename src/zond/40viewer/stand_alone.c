@@ -24,6 +24,7 @@
 #include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
+#include "../../sond_seadrive.h"
 
 #include "../zond_pdf_document.h"
 
@@ -168,6 +169,13 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 	gchar *filename = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
 	if (!filename)
 		return;
+
+	//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts öffnen)
+	if (!sond_seadrive_load_file_sync(GTK_WINDOW(pv->vf), filename)) {
+		g_free(filename);
+
+		return;
+	}
 
 	if (pv->dd) {
 		rc = pv_schliessen_datei(pv);

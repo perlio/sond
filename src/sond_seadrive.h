@@ -20,12 +20,6 @@ G_BEGIN_DECLS
 #define STVFM_PIN_STATE_EXCLUDED     3
 #define STVFM_PIN_STATE_INHERIT      4
 
-/*
- * Fortsetzung nach erfolgreichem Laden (Hauptthread): führt die ursprüngliche
- * Aktion erneut aus, dann ist alles lokal.
- */
-typedef void (*SondSeadriveLoadedFunc)(gpointer user_data);
-
 #ifdef _WIN32
 
 /*
@@ -121,45 +115,17 @@ gboolean sond_seadrive_is_hydrating(const gchar *full_path);
 void sond_seadrive_hydrate_cancel(const gchar *full_path);
 
 /*
- * Konsolidierte Check-und-Reagiere-Sequenz für Doppelklick-artige
- * Öffnen-Aktionen (s. ausführl. Doc-Kommentar an der Implementierung,
- * sond_treeviewfm_seadrive.c) - fasst needs_hydration()/is_hydrating()/
- * hydrate_async()/show_hydrate_progress_dialog_multi() zusammen, damit
- * diese Sequenz nicht an jeder Öffnen-Stelle (BAUM_FS, BAUM_INHALT/
- * AUSWERTUNG, ...) erneut dupliziert werden muss. full_path muss der
- * volle Pfad der realen Datei im Dateisystem sein (Container-Vorfahre
- * mit parent==NULL). Rückgabe: TRUE = Datei ist bereits lokal, Aufrufer
- * soll normal öffnen. FALSE = Hydrierung wurde angestoßen bzw. Dialog
- * gezeigt, Aufrufer soll sofort zurückkehren statt zu öffnen.
- *
- * Dünner Wrapper um sond_seadrive_ensure_hydrated_multi() (s.u.) mit einem
- * einelementigen Array.
+ * Lädt alle full_paths, die als nicht geladene SeaDrive-Platzhalter vorliegen: Downloads
+ * anstoßen, ein modales Fenster zeigt Fortschritt (Dateien und Volumen) mit
+ * "Abbrechen" und wartet in einer verschachtelten Hauptschleife, bis alle Dateien
+ * geladen sind. TRUE: alles
+ * lokal, der Aufrufer macht weiter. FALSE: Abbruch durch den Nutzer oder
+ * gescheiterte Downloads (schon gemeldet), der Aufrufer bricht still ab.
+ * Die _file-Variante prüft einen einzelnen absoluten Pfad (beliebige Datei,
+ * auch außerhalb des Projekts).
  */
-gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
-        const gchar *full_path);
-
-/*
- * Stellt sicher, dass alle full_paths lokal vorliegen. Ja: TRUE, der Aufrufer
- * macht synchron weiter (done_func/destroy werden nicht aufgerufen, user_data
- * bleibt beim Aufrufer). Nein: die Downloads der fehlenden Dateien werden
- * angestoßen, EIN modales Fenster zeigt den Fortschritt (Dateien und Volumen)
- * mit "Abbrechen" und schließt sich selbst, sobald alles beendet ist; FALSE,
- * der Aufrufer kehrt sofort zurück. Waren alle Downloads erfolgreich, ruft
- * der Hauptthread done_func(user_data) auf; bei Abbruch geschieht nichts,
- * gescheiterte Downloads werden gesammelt gemeldet. destroy(user_data) folgt
- * in jedem Fall. Bereits geladene Dateien bleiben geladen. full_paths wird
- * nur gelesen.
- */
-gboolean sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
-        SondSeadriveLoadedFunc done_func, gpointer user_data,
-        GDestroyNotify destroy);
-
-/*
- * Wie sond_seadrive_ensure_loaded() ohne Fortsetzung: der Nutzer wiederholt
- * die Aktion nach dem Laden selbst.
- */
-gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
-        GPtrArray *full_paths);
+gboolean sond_seadrive_load_sync(GtkWindow *parent, GPtrArray *full_paths);
+gboolean sond_seadrive_load_file_sync(GtkWindow *parent, const gchar *full_path);
 
 /*
  * Attach SeaDrive menu items to the context menu of stvfm.
@@ -265,26 +231,16 @@ sond_seadrive_hydrate_cancel(const gchar *full_path)
 }
 
 static inline gboolean
-sond_seadrive_ensure_hydrated(GtkWindow *parent, const gchar *full_path)
-{
-    (void)parent; (void)full_path;
-    return TRUE;
-}
-
-static inline gboolean
-sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
-        SondSeadriveLoadedFunc done_func, gpointer user_data,
-        GDestroyNotify destroy)
-{
-    (void)parent; (void)full_paths; (void)done_func; (void)user_data;
-    (void)destroy;
-    return TRUE;
-}
-
-static inline gboolean
-sond_seadrive_ensure_hydrated_multi(GtkWindow *parent, GPtrArray *full_paths)
+sond_seadrive_load_sync(GtkWindow *parent, GPtrArray *full_paths)
 {
     (void)parent; (void)full_paths;
+    return TRUE;
+}
+
+static inline gboolean
+sond_seadrive_load_file_sync(GtkWindow *parent, const gchar *full_path)
+{
+    (void)parent; (void)full_path;
     return TRUE;
 }
 

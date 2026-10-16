@@ -994,7 +994,7 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
  * unabhängig davon, ob die UI darauf wartet) - stattdessen sofort in die UI
  * zurückkehren (Fire-and-forget).
  *
- * Aktionen, die Dateien lesen, laden vorab über sond_seadrive_ensure_loaded()
+ * Aktionen, die Dateien lesen, laden vorab über sond_seadrive_load_sync()
  * (weiter unten): modales Fortschrittsfenster mit Abbrechen, danach läuft die
  * Aktion automatisch weiter.
  *
@@ -1179,8 +1179,7 @@ static GThreadPool* hydrate_pool_get(void)
  * sofort zurück (Fire-and-forget, s. Doc-Kommentar oben). Ein
  * erneuter Aufruf für denselben full_path, während bereits ein Thread
  * dafür läuft, ist ein No-Op (Aufrufer sollte in diesem Fall stattdessen
- * den Fortschrittsdialog zeigen, s. sond_seadrive_ensure_hydrated() und
- * sond_treeviewfm_open()). Fehler landen nur im Log (LOG_WARN in
+ * den Fortschrittsdialog zeigen, s. sond_seadrive_load_sync()). Fehler landen nur im Log (LOG_WARN in
  * hydrate_thread_func()) - ein synchroner Rückgabewert wäre ohnehin
  * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
  * i.d.R. noch läuft.
@@ -1347,55 +1346,12 @@ typedef struct {
     BYTE          FileIdentity[256];
 } SeaDrivePlaceholderStandardInfo;
 
-/* Gemeinsame Check-und-Reagiere-Sequenz vor dem Öffnen einer Datei
- * (BAUM_FS-Doppelklick in sond_treeviewfm_open() bzw. BAUM_INHALT/
- * AUSWERTUNG-Doppelklick in zond_treeview_open_node()): needs_hydration()/
- * is_hydrating()/hydrate_async()/show_hydrate_progress_dialog_multi(); danach
- * kehrt der Aufrufer sofort zurück.
- *
- * Bewusst NICHT als gemeinsame Stelle gewählt: sond_file_part_open()
- * (Öffnen mit externem Programm/ShellExecute) - erreicht PDFs mit internem
- * Viewer nicht (die laufen über zond_treeview_open_single_view()/
- * _open_auszug(), nie über sond_file_part_open()). Hydrierung bei "Öffnen
- * mit" wird nicht etwa vom gestarteten externen Programm bzw.
- * Windows-Explorer übernommen, sondern von zond ausgelöst: beide Aufrufer
- * durchlaufen diesen Check schon VOR der Verzweigung zu open_with/
- * sond_file_part_open(). Der Grund gegen sond_file_part_open() als
- * gemeinsame Stelle ist die fehlende Abdeckung des internen-Viewer-Pfads.
- * Die Ermittlung des vollen Pfads der realen Datei (Container-Vorfahre mit
- * parent==NULL) bleibt beim jeweiligen Aufrufer, da sie je nach Baum ein
- * anderes Datenmodell betrifft (SondTVFMItem bzw. SondFilePart) und sich
- * dafür keine gemeinsame Stelle anbietet. */
-/* Dünner Wrapper um sond_seadrive_ensure_hydrated_multi() mit einem
- * einelementigen GPtrArray - s. ausführl. Kommentar dort. full_path wird
- * nur gelesen (die Multi-Variante kopiert bei Bedarf selbst), der
- * einelementige Array trägt also nur full_path als rohen Zeiger und braucht
- * keine eigene free_func. */
-gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
-        const gchar *full_path)
-{
-    GPtrArray *full_paths;
-    gboolean result;
-
-    if (!full_path)
-        return TRUE;
-
-    full_paths = g_ptr_array_new();
-    g_ptr_array_add(full_paths, (gpointer) full_path);
-
-    result = sond_seadrive_ensure_hydrated_multi(parent, full_paths);
-
-    g_ptr_array_free(full_paths, TRUE);
-
-    return result;
-}
-
 /* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_ensure_hydrated_multi (Auszug-Fall)      */
+/*  Laden nicht geladener Dateien vor einer Aktion                     */
 /* ------------------------------------------------------------------ */
 
 /* Laden nicht geladener Dateien vor einer Aktion (Öffnen, Kopieren, Auszug,
- * Export, Indizieren ...): sond_seadrive_ensure_loaded() stößt die Downloads
+ * Export, Indizieren ...): ensure_loaded() stößt die Downloads
  * an und zeigt EIN modales Fenster mit Fortschritt (Dateien und Volumen in
  * der Titelzeile) und "Abbrechen". Es schließt sich selbst, sobald alle
  * Downloads beendet sind; waren alle erfolgreich, wird die Fertig-Funktion
@@ -1403,6 +1359,9 @@ gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
  * Abbruch geschieht nichts weiter, scheiterten Downloads, werden sie gesammelt
  * gemeldet. Bereits geladene Dateien bleiben geladen. Das Fenster zu
  * schließen (X, Esc) wirkt wie "Abbrechen". */
+
+//Fortsetzung nach erfolgreichem Laden (Hauptthread)
+typedef void (*SondSeadriveLoadedFunc)(gpointer user_data);
 
 typedef struct {
     gchar     *full_path;
@@ -1712,7 +1671,7 @@ static void cb_load_job_response(GtkDialog *dialog, gint response,
 }
 
 /*
- * sond_seadrive_ensure_loaded:
+ * ensure_loaded:
  * Sind alle full_paths lokal, wird TRUE geliefert (Aufrufer macht weiter,
  * done_func/destroy werden nicht aufgerufen, der Aufrufer behält user_data).
  * Sonst werden die Downloads der fehlenden Dateien angestoßen (ab
@@ -1721,7 +1680,7 @@ static void cb_load_job_response(GtkDialog *dialog, gint response,
  * der Hauptthread done_func(user_data) auf; destroy(user_data) folgt in jedem
  * Fall (auch bei Abbruch und Fehlern). full_paths wird nur gelesen.
  */
-gboolean sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
+static gboolean ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
         SondSeadriveLoadedFunc done_func, gpointer user_data,
         GDestroyNotify destroy)
 {
@@ -1845,16 +1804,59 @@ gboolean sond_seadrive_ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
     return FALSE;
 }
 
-/*
- * sond_seadrive_ensure_hydrated_multi:
- * Ohne Fortsetzung: lädt die fehlenden Dateien mit Fortschrittsfenster, die
- * Aktion muss der Nutzer danach selbst wiederholen. Rückgabe wie
- * sond_seadrive_ensure_loaded().
- */
-gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
-        GPtrArray *full_paths)
+typedef struct {
+    GMainLoop *loop;
+    gboolean   ok;
+} LoadSyncData;
+
+static void load_sync_done(gpointer data)
 {
-    return sond_seadrive_ensure_loaded(parent, full_paths, NULL, NULL, NULL);
+    ((LoadSyncData *) data)->ok = TRUE;
+}
+
+static void load_sync_destroy(gpointer data)
+{
+    g_main_loop_quit(((LoadSyncData *) data)->loop);
+}
+
+/*
+ * sond_seadrive_load_sync:
+ * Wie ensure_loaded(), wartet aber (verschachtelte Hauptschleife,
+ * das modale Fenster bleibt bedienbar) bis alle Dateien geladen sind. TRUE:
+ * alle lokal, der Aufrufer macht weiter. FALSE: der Nutzer hat abgebrochen
+ * oder Downloads sind gescheitert (schon gemeldet), der Aufrufer bricht ab.
+ * Für Abläufe mit Zwischenschritten (Dialoge, Dateiauswahl), die sich nicht
+ * einfach erneut starten lassen.
+ */
+gboolean sond_seadrive_load_sync(GtkWindow *parent, GPtrArray *full_paths)
+{
+    LoadSyncData sd = { NULL, FALSE };
+
+    if (ensure_loaded(parent, full_paths, load_sync_done, &sd,
+            load_sync_destroy))
+        return TRUE;
+
+    sd.loop = g_main_loop_new(NULL, FALSE);
+    g_main_loop_run(sd.loop);
+    g_main_loop_unref(sd.loop);
+
+    return sd.ok;
+}
+
+gboolean sond_seadrive_load_file_sync(GtkWindow *parent, const gchar *full_path)
+{
+    GPtrArray *arr;
+    gboolean ok;
+
+    if (!full_path)
+        return TRUE;
+
+    arr = g_ptr_array_new();
+    g_ptr_array_add(arr, (gpointer) full_path);
+    ok = sond_seadrive_load_sync(parent, arr);
+    g_ptr_array_free(arr, TRUE);
+
+    return ok;
 }
 
 /* ------------------------------------------------------------------ */
