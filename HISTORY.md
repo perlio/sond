@@ -5852,6 +5852,12 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
    ausgeben"; Abbruch oder gescheiterter Download: kein Export).
  - HydrateBatch, der alte Multi-Dialog, sond_seadrive_ensure_hydrated(_multi) und die
    Fortsetzungs-Mechanik entfallen.
+ - Einfügen/Verschieben in ein nicht geladenes Ziel (ZIP, eml, PDF): das Ziel wird mit den
+   Quellen geladen (paste_target_not_loaded in sond_treeviewfm.c); eine nicht geladene PDF wird
+   danach per sond_treeviewfm_seadrive_item_hydrated() im Baum als PDF dargestellt.
+ - XJustiz-Import (xjustiz_dateien_laden in xjustiz_import.c): die Nachricht und, wenn sie im
+   Projektverzeichnis liegt, die referenzierten PDFs werden vorab geladen; Abbruch oder
+   Fehlschlag beendet den Import still.
  - Indizieren (Etappe D): sond_process_fileparts_roots_to_read() (sond_process_file.c) liefert die
    realen Dateien, die der Lauf wirklich liest (dieselben Vorab-Prüfungen wie
    sond_process_fileparts: schon abgedeckt und am Namen nicht indizierbar werden übersprungen,

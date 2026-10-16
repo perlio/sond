@@ -31,6 +31,8 @@
 #include "../../sond_file_helper.h"
 #include "../../sond_fileparts.h"
 #include "../../misc.h"
+#include "../../sond_seadrive.h"
+#include "../../sond_treeviewfm.h"
 
 #include "../zond_init.h"
 #include "../10init/app_window.h"
@@ -305,6 +307,50 @@ static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
  * ÖFFENTLICHE FUNKTION
  * ========================================================================== */
 
+/* Lädt nicht geladene SeaDrive-Dateien vorab (Fortschrittsfenster mit
+ * Abbrechen): mit sfp_xml die oberste Datei der Nachricht, sonst die in arr_dok
+ * referenzierten PDFs im Projektverzeichnis (dir_prefix: Verzeichnisanteil der
+ * Nachricht). FALSE: Abbruch oder Download gescheitert (gemeldet). */
+static gboolean xjustiz_dateien_laden(Projekt *zond, SondFilePart *sfp_xml,
+		GPtrArray *arr_dok, gchar const *dir_prefix) {
+	gchar const *root_dir = NULL;
+	GPtrArray *pfade = NULL;
+	gboolean ok = TRUE;
+
+	if (!zond->treeview[BAUM_FS])
+		return TRUE;
+	root_dir = sond_treeviewfm_get_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+	if (!root_dir)
+		return TRUE;
+
+	pfade = g_ptr_array_new_with_free_func(g_free);
+	if (sfp_xml) {
+		SondFilePart *sfp_root = sfp_xml;
+		SondFilePart *sfp_up = NULL;
+
+		while ((sfp_up = sond_file_part_get_parent(sfp_root)))
+			sfp_root = sfp_up;
+		if (sond_file_part_get_path(sfp_root))
+			g_ptr_array_add(pfade, g_strconcat(root_dir, "/",
+					sond_file_part_get_path(sfp_root), NULL));
+	}
+	else {
+		for (guint i = 0; arr_dok && i < arr_dok->len; i++) {
+			XJustizDatei *d = g_ptr_array_index(arr_dok, i);
+
+			g_ptr_array_add(pfade, (dir_prefix && dir_prefix[0] != '\0') ?
+					g_strconcat(root_dir, "/", dir_prefix, "/", d->dateiname,
+					NULL) : g_strconcat(root_dir, "/", d->dateiname, NULL));
+		}
+	}
+
+	if (pfade->len > 0)
+		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+	g_ptr_array_unref(pfade);
+
+	return ok;
+}
+
 gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		gint *n_vorhanden, GPtrArray **arr_nicht_gefunden, GError **error) {
 	gint rc = 0;
@@ -367,6 +413,14 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	sfp_xml = filepart_oeffnen(zond, error);
 	if (!sfp_xml)
 		return (error && *error) ? -1 : 1; //1: Dialog abgebrochen
+
+	//nicht geladene SeaDrive-Datei: erst laden (Abbruch oder Fehlschlag: still
+	//beenden, der Fehler ist gemeldet)
+	if (!xjustiz_dateien_laden(zond, sfp_xml, NULL, NULL)) {
+		g_object_unref(sfp_xml);
+
+		return 1;
+	}
 
 	//Lesen über die sond_file_part-Maschinerie statt eigener libzip-
 	//Aufrufe - deckt Dateisystem/ZIP/etc. einheitlich und Windows-
@@ -435,6 +489,20 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 
 		dir_prefix = last_slash ?
 				g_strndup(xml_path, last_slash - xml_path) : g_strdup("");
+	}
+
+	//die referenzierten PDFs im Projektverzeichnis (nicht in einem Container,
+	//dessen Datei schon geladen ist) vorab laden: sie werden unten zur
+	//Typerkennung gelesen und würden sonst als "nicht gefunden" gemeldet
+	if (!sfp_parent_xml && !xjustiz_dateien_laden(zond, NULL, arr_dok,
+			dir_prefix)) {
+		g_free(produktname);
+		g_free(zeitpunkt_roh);
+		g_free(dir_prefix);
+		g_ptr_array_unref(arr_dok);
+		g_object_unref(sfp_xml);
+
+		return 1;
 	}
 
 	/* Benennung des gleich anzulegenden Strukturpunkts (s.u.): aus dem

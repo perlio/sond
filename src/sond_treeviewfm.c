@@ -1558,6 +1558,37 @@ static void preflight_collect_not_loaded(GPtrArray *arr, SondTreeviewFM *stvfm,
 	}
 }
 
+/* Datei des Einfügeziels (Zeile unter dem Cursor bzw. deren Elternzeile), falls
+ * sie ein nicht geladener SeaDrive-Platzhalter ist (Ziel ist ein ZIP, eine
+ * E-Mail oder eine PDF, in die eingefügt wird, das schreibt in die Datei);
+ * sonst NULL. g_free(). */
+static gchar* paste_target_not_loaded(SondTreeviewFM *stvfm, gboolean kind) {
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	GtkTreeIter iter_cursor = { 0 };
+	GtkTreeIter iter_target = { 0 };
+	SondTVFMItem *stvfm_item = NULL;
+	gchar *path = NULL;
+
+	if (!sond_treeview_get_cursor(SOND_TREEVIEW(stvfm), &iter_cursor))
+		return NULL;
+	if (kind)
+		iter_target = iter_cursor;
+	else if (!gtk_tree_model_iter_parent(model, &iter_target, &iter_cursor))
+		return NULL;
+
+	gtk_tree_model_get(model, &iter_target, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return NULL;
+	path = sond_treeviewfm_root_file_path(stvfm,
+			sond_tvfm_item_get_sond_file_part(stvfm_item));
+	g_object_unref(stvfm_item); //der Baum hält die Referenz
+
+	if (path && !sond_seadrive_needs_hydration(path))
+		g_clear_pointer(&path, g_free);
+
+	return path;
+}
+
 //Zeile der Zwischenablage: nicht geladene Dateien dazu sammeln
 static gint paste_load_scan_foreach(SondTreeview *stv, GtkTreeIter *iter,
 		gpointer data, GError **error) {
@@ -1761,21 +1792,42 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		return 0;
 
 #ifdef _WIN32
-	/* Kopieren liest die Dateien (Verschieben im selben Laufwerk benennt nur
-	 * um): ist eine noch nicht (vollständig) geladen, wird gar nichts kopiert,
-	 * bevor alle geladen sind (Fortschrittsfenster mit Abbrechen). Das
+	/* Nicht (vollständig) geladene SeaDrive-Dateien werden zuerst geladen
+	 * (Fortschrittsfenster mit Abbrechen), vorher geschieht nichts: die
+	 * Quellen beim Kopieren (Verschieben im selben Laufwerk benennt nur um)
+	 * und das Ziel, wenn in eine Datei eingefügt wird (ZIP, E-Mail, PDF). Das
 	 * geschieht vor dem Holen von Iteratoren, denn während des Wartens kann
 	 * sich der Baum ändern. */
-	if (!clipboard->ausschneiden) {
+	{
 		GPtrArray *arr_not_loaded = g_ptr_array_new_with_free_func(g_free);
+		gchar *target_path = paste_target_not_loaded(stvfm, kind);
 		gboolean loaded = TRUE;
 
-		rc = sond_treeview_clipboard_foreach(paste_load_scan_foreach,
-				(gpointer) arr_not_loaded, error);
-		if (rc != -1 && arr_not_loaded->len > 0)
-			loaded = sond_seadrive_load_sync(
-					GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), arr_not_loaded);
+		rc = 0;
+		if (!clipboard->ausschneiden)
+			rc = sond_treeview_clipboard_foreach(paste_load_scan_foreach,
+					(gpointer) arr_not_loaded, error);
+		if (rc != -1) {
+			if (target_path) {
+				gboolean present = FALSE;
+
+				for (guint i = 0; i < arr_not_loaded->len && !present; i++)
+					present = !g_strcmp0(target_path,
+							g_ptr_array_index(arr_not_loaded, i));
+				if (!present)
+					g_ptr_array_add(arr_not_loaded, g_strdup(target_path));
+			}
+			if (arr_not_loaded->len > 0)
+				loaded = sond_seadrive_load_sync(
+						GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), arr_not_loaded);
+		}
 		g_ptr_array_unref(arr_not_loaded);
+
+		//eine nicht geladene PDF war ein Blatt im Baum: jetzt als PDF anzeigen
+		if (loaded && rc != -1 && target_path)
+			sond_treeviewfm_seadrive_item_hydrated(stvfm, target_path);
+		g_free(target_path);
+
 		if (rc == -1)
 			return -1;
 		if (!loaded)
