@@ -262,9 +262,6 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 
 		g_object_set(renderer, "markup", markuptxt, NULL);
 		g_free(markuptxt);
-
-		/* Hintergrund für Links nicht setzen – fertig */
-		return;
 	}
 
 	//Hintergrund icon rot wenn Text in textview
@@ -278,6 +275,7 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 		g_error_free(error);
 		gtk_label_set_text(ztv_priv->zond->label_status, text_label);
 		g_free(text_label);
+		g_object_set(renderer, "background-set", FALSE, NULL);
 	} else if (!text || !g_strcmp0(text, ""))
 		g_object_set(renderer, "background-set", FALSE, NULL);
 	else
