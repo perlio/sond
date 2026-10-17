@@ -597,6 +597,42 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 // Database Creation and Cleanup
 // ============================================================================
 
+/* Wiederherstellung nach Neuaufbau der Verbindung (zond_dbase_rollback(),
+ * restart_con() in zond_dbase.c): store braucht work wieder als Schema, idx
+ * ist weg (wird je Transaktion neu angehängt); work braucht seinen Hook. */
+static gint project_restart_store(ZondDBase *zond_dbase, gpointer data,
+		GError **error) {
+	Projekt *zond = (Projekt*) data;
+	gchar *sql = NULL;
+	gchar *errmsg = NULL;
+	gint rc = 0;
+
+	zond->dbase_zond->index_attached = FALSE;
+
+	sql = sqlite3_mprintf("ATTACH DATABASE %Q AS work;",
+			zond_dbase_get_path(zond->dbase_zond->zond_dbase_work));
+	rc = sqlite3_exec(zond_dbase_get_dbase(zond_dbase), sql, NULL, NULL,
+			&errmsg);
+	sqlite3_free(sql);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, SOND_ERROR, 0, "%s: ATTACH work: %s", __func__,
+				errmsg ? errmsg : "?");
+		sqlite3_free(errmsg);
+
+		return -1;
+	}
+
+	return 0;
+}
+
+static gint project_restart_work(ZondDBase *zond_dbase, gpointer data,
+		GError **error) {
+	sqlite3_update_hook(zond_dbase_get_dbase(zond_dbase),
+			(void*) project_set_changed, data);
+
+	return 0;
+}
+
 /**
  * Create and initialize the project databases
  * @param zond The project structure
@@ -685,6 +721,9 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 
 	sqlite3_update_hook(zond_dbase_get_dbase(zond_dbase_work),
 			(void*) project_set_changed, (gpointer) zond);
+
+	zond_dbase_set_restart_func(zond_dbase_store, project_restart_store, zond);
+	zond_dbase_set_restart_func(zond_dbase_work, project_restart_work, zond);
 
 	zond->dbase_zond = g_malloc0(sizeof(DBaseZond));
 

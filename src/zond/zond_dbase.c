@@ -32,17 +32,21 @@
 
 #include "../misc.h"
 
+/* Fehlercode und -text werden vor dem Rollback gesichert: die erfolgreichen
+ * Rollback-Statements überschreiben sonst die Meldung der eigentlichen
+ * Fehlerursache. */
 #define ROLLBACK_TO_STATEMENT { \
         gint res = 0; \
         GError* error_tmp = NULL; \
+        gint errcode_orig = sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ); \
+        gchar* errmsg_orig = g_strdup( sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
         \
         res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp ); \
         \
         if ( error ) \
         { \
             *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
+                    errcode_orig, "%s\n%s", __func__, errmsg_orig ); \
             \
             if ( res ) \
             { \
@@ -57,6 +61,7 @@
         { \
             if ( res ) g_error_free( error_tmp ); \
         }\
+        g_free( errmsg_orig ); \
         \
         return -1; \
     }
@@ -68,6 +73,9 @@ typedef enum {
 typedef struct {
 	gchar *path;
 	sqlite3 *dbase;
+	GPtrArray *stmt_keys; //Schlüssel des Statement-Caches (s. zond_dbase_prepare)
+	ZondDBaseRestartFunc restart_func;
+	gpointer restart_data;
 } ZondDBasePrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondDBase, zond_dbase, G_TYPE_OBJECT)
@@ -131,6 +139,8 @@ static void zond_dbase_finalize(GObject *self) {
 		zond_dbase_finalize_stmts(priv->dbase);
 	sqlite3_close(priv->dbase);
 
+	if (priv->stmt_keys)
+		g_ptr_array_unref(priv->stmt_keys);
 	g_free(priv->path);
 
 	G_OBJECT_CLASS(zond_dbase_parent_class)->finalize(self);
@@ -162,7 +172,9 @@ static void zond_dbase_class_init(ZondDBaseClass *klass) {
 }
 
 static void zond_dbase_init(ZondDBase *self) {
-//    ZondDBasePrivate* priv = zond_dbase_get_instance_private( self );
+	ZondDBasePrivate *priv = zond_dbase_get_instance_private(self);
+
+	priv->stmt_keys = g_ptr_array_new_with_free_func(g_free);
 
 	return;
 }
@@ -655,6 +667,16 @@ zond_dbase_get_path(ZondDBase *zond_dbase) {
 	return priv->path;
 }
 
+void zond_dbase_set_restart_func(ZondDBase *zond_dbase,
+		ZondDBaseRestartFunc func, gpointer data) {
+	ZondDBasePrivate *priv = zond_dbase_get_instance_private(zond_dbase);
+
+	priv->restart_func = func;
+	priv->restart_data = data;
+
+	return;
+}
+
 gint zond_dbase_backup(ZondDBase *src, ZondDBase *dst, GError **error) {
 	gint rc = 0;
 	sqlite3 *db_src = NULL;
@@ -722,6 +744,8 @@ gint zond_dbase_prepare(ZondDBase *zond_dbase, const gchar *func,
 	if (!(*stmt = g_object_get_data(G_OBJECT(zond_dbase), func))) {
 		gint rc = 0;
 
+		ZondDBasePrivate *priv = zond_dbase_get_instance_private(zond_dbase);
+
 		*stmt = g_malloc0(sizeof(sqlite3_stmt*) * num_stmts);
 
 		rc = zond_dbase_prepare_stmts(zond_dbase, num_stmts, sql, *stmt, error);
@@ -732,6 +756,7 @@ gint zond_dbase_prepare(ZondDBase *zond_dbase, const gchar *func,
 		}
 
 		g_object_set_data_full(G_OBJECT(zond_dbase), func, *stmt, g_free);
+		g_ptr_array_add(priv->stmt_keys, g_strdup(func)); //für restart_con()
 	}
 	/* Reset erfolgt nicht mehr hier: jede aufrufende Funktion muß per
 	 g_auto(SondStmtResetGuard) selbst dafür sorgen, daß ihre Statements
@@ -806,27 +831,92 @@ static gint do_zond_dbase_rollback(ZondDBase *zond_dbase, GError **error) {
 	return 0;
 }
 
+/* Verbindung neu aufbauen: Statement-Cache verwerfen, alte Verbindung schließen
+ * (SQLite rollt dabei eine offene Transaktion zurück, ein liegengebliebenes
+ * Journal wird beim ersten Zugriff der neuen Verbindung zurückgespielt),
+ * Datei neu öffnen, Pragmas setzen. Danach stellt restart_func Zustand wieder
+ * her, der an der Verbindung hängt (ATTACH, Hooks).
+ * Statements, die ein Aufrufer über diesen Aufruf hinweg hält, werden
+ * ungültig - die Funktionen dieses Moduls halten keine über Aufrufe hinweg. */
 static gint restart_con(ZondDBase* zond_dbase, GError** error) {
-	//ToDo: Funktion schreiben
+	ZondDBasePrivate *priv = zond_dbase_get_instance_private(zond_dbase);
+	sqlite3 *db_new = NULL;
+	gchar *errmsg = NULL;
+	gint rc = 0;
+
+	for (guint i = 0; i < priv->stmt_keys->len; i++)
+		g_object_set_data(G_OBJECT(zond_dbase),
+				g_ptr_array_index(priv->stmt_keys, i), NULL); //gibt das Array frei
+	g_ptr_array_set_size(priv->stmt_keys, 0);
+
+	if (priv->dbase) {
+		zond_dbase_finalize_stmts(priv->dbase);
+		sqlite3_close_v2(priv->dbase);
+		priv->dbase = NULL;
+	}
+
+	rc = sqlite3_open_v2(priv->path, &db_new, SQLITE_OPEN_READWRITE, NULL);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, SOND_ERROR, 0, "%s: sqlite3_open_v2 ('%s'): %s",
+				__func__, priv->path, db_new ? sqlite3_errmsg(db_new) :
+				sqlite3_errstr(rc));
+		sqlite3_close(db_new);
+
+		return -1;
+	}
+	priv->dbase = db_new;
+
+	rc = sqlite3_exec(priv->dbase,
+			"PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = 1; ",
+			NULL, NULL, &errmsg);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, SOND_ERROR, 0, "%s: PRAGMA: %s", __func__, errmsg);
+		sqlite3_free(errmsg);
+
+		return -1;
+	}
+
+	rc = zond_dbase_check_journal_settings(zond_dbase, error);
+	if (rc)
+		return -1;
+
+	if (priv->restart_func) {
+		rc = priv->restart_func(zond_dbase, priv->restart_data, error);
+		if (rc)
+			return -1;
+	}
 
 	return 0;
 }
 
+/* Scheitert das ROLLBACK, gibt es zwei Fälle: Es ist gar keine Transaktion
+ * mehr offen (SQLite hat sie bei dem Fehler selbst zurückgerollt, oder es
+ * gab nie eine) - dann ist das Ziel erreicht. Sonst wird die Verbindung
+ * neu aufgebaut; scheitert auch das, ist der Zustand der Datenbank nicht
+ * mehr beherrschbar (fataler Fehler). *error bleibt unberührt: er enthält
+ * i.d.R. die Ursache, derentwegen zurückgerollt wird. */
 void zond_dbase_rollback(ZondDBase* zond_dbase, GError** error) {
 	gint rc = 0;
+	GError* error_rollback = NULL;
+	GError* error_restart = NULL;
 
-	rc = do_zond_dbase_rollback(zond_dbase, error);
-	if (rc) {
-		gint ret = 0;
-		GError* error_int = NULL;
+	rc = do_zond_dbase_rollback(zond_dbase, &error_rollback);
+	if (!rc)
+		return;
 
-		g_prefix_error(error, "%s\n", __func__);
+	if (sqlite3_get_autocommit(zond_dbase_get_dbase(zond_dbase))) {
+		g_clear_error(&error_rollback);
 
-		ret = restart_con(zond_dbase, &error_int);
-		if (ret)
-			g_error("Fehler - Rollback gescheitert: %s - Neustart DB-Con gescheitert: %s",
-					(*error)->message, error_int->message);
-	} //Wenn Neustart erfolgreich, dann tun wir so, als wäre Fehler beseitigt
+		return;
+	}
+
+	rc = restart_con(zond_dbase, &error_restart);
+	if (rc)
+		g_error("Fehler - Rollback gescheitert: %s - Neustart DB-Con gescheitert: %s",
+				error_rollback->message,
+				error_restart ? error_restart->message : "?");
+
+	g_clear_error(&error_rollback);
 
 	return;
 }
@@ -836,7 +926,9 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
-	const gchar *sql[] = { "ROLLBACK TO statement; " };
+	//ROLLBACK TO beendet den Savepoint nicht - ohne RELEASE bliebe er offen
+	//(außerhalb einer äußeren Transaktion damit die ganze Transaktion)
+	const gchar *sql[] = { "ROLLBACK TO statement; ", "RELEASE statement; " };
 
 	//Prüfen, ob schon Rollback vAw
 	if (sqlite3_get_autocommit(zond_dbase_get_dbase(zond_dbase)))
@@ -853,6 +945,10 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_step(stmt[0]);
+	if (rc != SQLITE_DONE)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_step(stmt[1]);
 	if (rc != SQLITE_DONE)
 		ERROR_Z_DBASE
 
@@ -1305,7 +1401,8 @@ gint zond_dbase_verschieben_knoten(ZondDBase *zond_dbase, gint node_id,
 			"(SELECT older_sibling_ID FROM knoten WHERE ID=?1)" //node_id
 			"WHERE older_sibling_ID=?1; ",
 
-	//zunächst Knoten, vor den eingefügt wird, ändern
+	//zunächst Knoten, vor den eingefügt wird, ändern; bei child ist das das
+	//bisherige erste Kind des Ankers (older_sibling_ID=0)
 			"UPDATE knoten SET "
 					"older_sibling_ID=?1 WHERE "
 					"parent_ID= "
@@ -1317,7 +1414,7 @@ gint zond_dbase_verschieben_knoten(ZondDBase *zond_dbase, gint node_id,
 					"older_sibling_ID= "
 					"CASE ?3 "
 					"WHEN 0 THEN ?2 "
-					"WHEN 1 THEN ?1 "
+					"WHEN 1 THEN 0 "
 					"END; ",
 
 			//zu verschiebenden Knoten einfügen
@@ -2044,6 +2141,52 @@ gint zond_dbase_is_file_part_copied(ZondDBase *zond_dbase, gint search_root,
 			*copied = TRUE;
 	} else if (copied)
 		*copied = FALSE;
+
+	return 0;
+}
+
+/* Zeigt von außerhalb des Teilbaums ab node_id (parent_ID-Nachkommen, node_id
+ * eingeschlossen) ein Link (type=4) auf einen Knoten im Teilbaum? Beim Löschen
+ * von node_id kaskadiert ON DELETE CASCADE dann über link auf den Link und von
+ * dort über older_sibling_ID auf dessen jüngere Geschwister. Links innerhalb des
+ * Teilbaums zählen nicht: sie fallen samt ihren Geschwistern mit dem Teilbaum. */
+gint zond_dbase_has_external_links(ZondDBase *zond_dbase, gint node_id,
+		gboolean *found, GError **error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] =
+			{
+					"WITH RECURSIVE cte_knoten (ID) AS ( "
+							"VALUES (?1) "
+							"UNION ALL "
+							"SELECT knoten.ID "
+							"FROM knoten JOIN cte_knoten WHERE knoten.parent_ID=cte_knoten.ID "
+							") SELECT knoten.ID "
+							"FROM knoten JOIN cte_knoten ON knoten.link=cte_knoten.ID "
+							"WHERE knoten.type=4 "
+							"AND knoten.ID NOT IN (SELECT ID FROM cte_knoten) LIMIT 1; " };
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
+	rc = sqlite3_bind_int(stmt[0], 1, node_id);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_step(stmt[0]);
+	if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+		ERROR_Z_DBASE
+
+	if (found)
+		*found = (rc == SQLITE_ROW);
 
 	return 0;
 }

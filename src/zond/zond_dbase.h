@@ -71,6 +71,13 @@ sqlite3* zond_dbase_get_dbase(ZondDBase*);
 
 const gchar* zond_dbase_get_path(ZondDBase*);
 
+/* Wird nach einem Neuaufbau der Verbindung (nach gescheitertem Rollback, s.
+ * zond_dbase_rollback()) aufgerufen, nachdem Pragmas gesetzt sind: hier
+ * Zustand wiederherstellen, der an der Verbindung hängt (ATTACH, Hooks). */
+typedef gint (*ZondDBaseRestartFunc)(ZondDBase*, gpointer, GError**);
+
+void zond_dbase_set_restart_func(ZondDBase*, ZondDBaseRestartFunc, gpointer);
+
 gint zond_dbase_backup(ZondDBase*, ZondDBase*, GError**);
 
 gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,
@@ -155,6 +162,11 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
 		GError**);
 
 gint zond_dbase_is_file_part_copied(ZondDBase*, gint, gboolean*, GError**);
+
+/* Zeigt von außerhalb des Teilbaums ab node_id ein Link (type=4) auf einen
+ * Knoten im Teilbaum? Dann würde das Löschen von node_id per Kaskade auch
+ * die jüngeren Geschwister dieses Links löschen. */
+gint zond_dbase_has_external_links(ZondDBase*, gint, gboolean*, GError**);
 
 gint zond_dbase_get_arr_sections(ZondDBase*, gchar const*, GArray**, GError** );
 

@@ -2163,6 +2163,24 @@ static gboolean zond_treeview_node_still_linked(GtkTreeIter *iter) {
 	return FALSE;
 }
 
+/* Wie zond_treeview_node_still_linked(), aber über die Datenbank und für den
+ ganzen Teilbaum ab node_id: zeigt von außerhalb ein Link auf einen Nachkommen,
+ würde das Löschen per Kaskade den Link und dessen jüngere Geschwister mitreißen.
+ Rückgabe 2 wie bei node_still_linked(), -1 bei Fehler, sonst 0. Muss vor
+ jeder Änderung an Baum oder Datenbank stehen. */
+static gint zond_treeview_check_external_links(Projekt *zond, gint node_id,
+		GError **error) {
+	gint rc = 0;
+	gboolean found = FALSE;
+
+	rc = zond_dbase_has_external_links(zond->dbase_zond->zond_dbase_work,
+			node_id, &found, error);
+	if (rc)
+		return -1;
+
+	return (found) ? 2 : 0;
+}
+
 static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
@@ -2200,6 +2218,13 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 	if (zond_treeview_node_still_linked(iter))
 		return 2;
 
+	//Links auf Nachkommen (BAUM_INHALT: s. unten, dort hängt es vom Knotentyp ab)
+	if (tree_view != zond->treeview[BAUM_INHALT]) {
+		rc = zond_treeview_check_external_links(zond, node_id, error);
+		if (rc)
+			return rc;
+	}
+
 	if (tree_view == zond->treeview[BAUM_INHALT]) {
 		gint rc = 0;
 		gint baum_auswertung_copy = 0;
@@ -2215,6 +2240,11 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 
 		if (type == ZOND_DBASE_TYPE_BAUM_STRUKT) {
 			gint num_children = 0;
+
+			//vor dem Löschen der ersten Kinder prüfen, nicht erst mittendrin
+			rc = zond_treeview_check_external_links(zond, node_id, error);
+			if (rc)
+				return rc;
 
 			num_children = gtk_tree_model_iter_n_children(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)), iter);
@@ -2278,6 +2308,11 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 
 			if (baum_inhalt_file)
 				node_id = baum_inhalt_file;
+
+			//node_id ist jetzt der Knoten, der tatsächlich gelöscht wird
+			rc = zond_treeview_check_external_links(zond, node_id, error);
+			if (rc)
+				return rc;
 
 			//wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
 			if (!baum_inhalt_file && visible)

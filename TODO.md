@@ -265,6 +265,53 @@ Status: Idee
  Containers erkennbar - bei ZIP/PDF mit Passwort und SeaDrive-Platzhaltern
  heikel/teuer. Index-DB: Chunks, Coverage, pdf_embedded zu Pfaden, die es
  nicht mehr gibt.
+
+ Altlast "mehrere Köpfe" (Ursache behoben: zond_dbase_verschieben_knoten
+ setzte bei child=TRUE das bisherige erste Kind des Ankers nicht hinter den
+ verschobenen Knoten): Ausschneiden und als Unterpunkt in einen Knoten mit
+ Kindern einfügen (BAUM_INHALT wie BAUM_AUSWERTUNG) ließ unter einem
+ parent_ID<>0 zwei Knoten mit older_sibling_ID=0 zurück. Beim Laden holt
+ zond_dbase_get_first_child ohne ORDER BY nur die Zeile mit der kleineren ID;
+ die Kette des anderen Kopfes ist unsichtbar, aber vorhanden. Unsichtbar ist
+ nicht gleich harmlos: zond_dbase_insert_node und verschieben_knoten
+ aktualisieren per UPDATE alle Zeilen mit passendem parent/older, ein
+ weiteres Einfügen unter diesem Elternknoten kann also beide Köpfe zugleich
+ hinter den neuen Knoten hängen (Gabelung: ein Knoten mit zwei jüngeren
+ Geschwistern). Außerdem fehlen die unsichtbaren Knoten im Export, und
+ unsichtbare Anbindungen lassen die Datei in BAUM_FS als angebunden gelten.
+ Prüfung (je Schema main und work), alles reine SQL:
+   a) mehrere Köpfe: SELECT parent_ID, group_concat(ID) FROM knoten WHERE
+      older_sibling_ID=0 AND parent_ID<>0 GROUP BY parent_ID HAVING
+      count(*)>1;
+   b) Gabelungen: SELECT parent_ID, older_sibling_ID, group_concat(ID) FROM
+      knoten WHERE older_sibling_ID<>0 GROUP BY parent_ID, older_sibling_ID
+      HAVING count(*)>1;
+   c) Erreichbarkeit: je Elternknoten Länge der Kette ab dem Kopf (rekursiver
+      CTE mit Tiefenlimit) gegen count(*) der Kinder; Abweichung = Zyklus
+      oder abgetrennte Kette.
+ Reparatur (nur a, nur nach Bericht und Rückfrage, nach Sicherungskopie):
+ Ketten hintereinanderhängen. Köpfe nach ID sortieren (die ursprüngliche
+ Reihenfolge ist nicht mehr bekannt); Schwanz einer Kette = Knoten, auf den
+ kein older_sibling_ID zeigt; älteres Geschwister des nächsten Kopfes :=
+ dieser Schwanz. b) und c) nur melden. Reparatur muss idempotent sein
+ (zweiter Lauf: keine Treffer).
+ Test (Kopie von Test.ZND; BAUM_INHALT: 160 hat die Kinder 162, 164, 165,
+ 165 hat das Kind 166):
+   1. Schaden erzeugen: die drei UPDATEs der alten verschieben_knoten
+      (node 166, anchor 160, child 1, mit "WHEN 1 THEN ?1") per sqlite3
+      ausführen und speichern. Erwartung: Prüfung a) meldet genau parent
+      160 mit 162,166; Prüfung b) und c) bleiben bis auf die unsichtbare
+      Kette leer.
+   2. Reparatur ausführen. Erwartung: genau ein Kopf unter 160, Reihenfolge
+      162, 164, 165, 166; alle 4 Kinder erreichbar; Prüfung a) bis c) leer;
+      zweiter Lauf ändert nichts.
+   3. Variante Gabelung: nach Schritt 1 unter 160 einen neuen Unterpunkt
+      einfügen; Prüfung b) muss die Gabelung melden, die Reparatur sie
+      nicht anfassen.
+   4. Regression des behobenen Fehlers in der App: 166 ausschneiden, in 160
+      als Unterpunkt einfügen, speichern, neu öffnen; 166 muss unter 160
+      stehen, Prüfung a) bis c) leer. Dasselbe in BAUM_AUSWERTUNG (dort mit
+      selbst angelegten Punkten, die Datei hat keine).
 ```
 
 ### #232 BAUM_INHALT: Anbindungen in PDF einfügen und löschen
