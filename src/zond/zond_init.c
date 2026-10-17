@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
+#include <sqlite3.h>
 
 #ifdef __WIN32
 #include <libloaderapi.h>
@@ -46,8 +47,39 @@
 #include "10init/icons.h"
 #include "10init/app_window.h"
 
-static void recover(Projekt *zond, gchar *project, GApplication *app) {
+/* Ein liegengebliebenes Rollback-Journal (<path>-journal) gehört zum Dateinamen,
+ * nicht zum Inhalt. Würde die Datei vor dem Abspielen umbenannt, bliebe das
+ * Journal neben dem alten Namen liegen und würde später in eine andere
+ * Datenbank eingespielt (bzw. nie in diese). Deshalb vorher einmal öffnen und
+ * lesen: SQLite spielt ein Hot Journal dabei selbst ab. */
+static gboolean recover_settle_journal(gchar const *path, GError **error) {
+	g_autofree gchar *path_journal = g_strconcat(path, "-journal", NULL);
+	sqlite3 *db = NULL;
+	gchar *errmsg = NULL;
 	gint rc = 0;
+
+	if (!g_file_test(path_journal, G_FILE_TEST_EXISTS))
+		return TRUE;
+
+	rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL);
+	if (rc == SQLITE_OK)
+		rc = sqlite3_exec(db, "SELECT count(*) FROM sqlite_master;", NULL, NULL,
+				&errmsg);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"%s: Rollback-Journal konnte nicht abgespielt werden: %s", path,
+				errmsg ? errmsg : (db ? sqlite3_errmsg(db) : sqlite3_errstr(rc)));
+		sqlite3_free(errmsg);
+		sqlite3_close(db);
+
+		return FALSE;
+	}
+	sqlite3_close(db);
+
+	return TRUE;
+}
+
+static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	gchar *path_bak = NULL;
 	gchar *path_tmp = NULL;
 	GError* error = NULL;
@@ -60,15 +92,6 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	g_free(text_abfrage);
 
 	if (res == GTK_RESPONSE_YES) {
-		path_bak = g_strconcat(project, ".bak", NULL);
-		if (!sond_rename(project, path_bak, &error)) {
-			display_message(zond->app_window,
-					"Konnte Sicherungskopie (.bak) nicht erstellen: ",
-					error->message, NULL);
-			g_clear_error(&error);
-		}
-		g_free(path_bak);
-
 		/* Bewußt NICHT mehr <project>.tmp - s. Kommentar bei
 		 * project_get_local_tmp_path(). Derselbe project-Pfad wie beim
 		 * ursprünglichen Anlegen (project_create_dbase_zond()) liefert
@@ -79,19 +102,35 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 					"Konnte Pfad der temporären Datenbank nicht ermitteln: ",
 					error->message, NULL);
 			g_clear_error(&error);
+		} else if (!g_file_test(path_tmp, G_FILE_TEST_EXISTS)) {
+			//vor jeder Umbenennung prüfen: sonst wäre die Projektdatei weg
+			display_message(zond->app_window,
+					"Wiederherstellung nicht möglich - Arbeitskopie nicht "
+					"gefunden: ", path_tmp, NULL);
+		} else if (!recover_settle_journal(path_tmp, &error)
+				|| !recover_settle_journal(project, &error)) {
+			display_message(zond->app_window,
+					"Wiederherstellung abgebrochen, Projektdatei unverändert: ",
+					error->message, NULL);
+			g_clear_error(&error);
 		} else {
-			rc = sond_rename(path_tmp, project, &error);
-			if (rc) {
+			path_bak = g_strconcat(project, ".bak", NULL);
+			if (!sond_rename(project, path_bak, &error)) {
+				display_message(zond->app_window,
+						"Konnte Sicherungskopie (.bak) nicht erstellen: ",
+						error->message, NULL);
+				g_clear_error(&error);
+			} else if (!sond_rename(path_tmp, project, &error)) {
 				display_message(zond->app_window,
 						"Konnte wiederhergestellte Datei (.tmp) nicht umbenennen: ",
 						error->message, NULL);
 				g_clear_error(&error);
-			}
-			else
+			} else
 				display_message(zond->app_window, project,
 						" erfolgreich wiederhergestellt", NULL);
-			g_free(path_tmp);
+			g_free(path_bak);
 		}
+		g_free(path_tmp);
 	} else if (res != GTK_RESPONSE_NO)
 		g_application_quit(app);
 
