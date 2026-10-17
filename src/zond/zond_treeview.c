@@ -1790,6 +1790,66 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview *ztv, gint node_id,
 	if (rc)
 		return -1;
 
+	//Verschachtelter Link (Kind eines kopierten Punktes): bleibt Link auf
+	//dasselbe Ziel. Als Copy angelegt wäre er unbeschriftet und ohne Kinder,
+	//da der Link-Knoten in der DB weder Text noch Kinder trägt.
+	if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
+		gint root = 0;
+		GtkTreeIter *iter_target = NULL;
+
+		g_free(icon_name);
+		g_free(node_text);
+		g_free(text);
+
+		rc = zond_treeview_get_root(ztv, link, &root, error);
+		if (rc)
+			return -1;
+
+		if (root != BAUM_INHALT && root != BAUM_AUSWERTUNG) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nLink-Ziel (Knoten %d) hat keine gültige "
+						"Baum-Wurzel (root=%d)", __func__, link, root);
+
+			return -1;
+		}
+
+		iter_target = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(ztv_priv->zond->treeview[root]))), link);
+		if (!iter_target) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nKein Iter für Link-Ziel %d ermittelt", __func__,
+						link);
+
+			return -1;
+		}
+
+		node_id_new = zond_dbase_insert_node(
+				ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,
+				ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, link, NULL, NULL, NULL,
+				NULL, NULL, error);
+		if (node_id_new == -1) {
+			g_prefix_error(error, "%s\n", __func__);
+			gtk_tree_iter_free(iter_target);
+
+			return -1;
+		}
+
+		if (node_id_inserted)
+			*node_id_inserted = node_id_new;
+
+		zond_tree_store_insert_link(iter_target, node_id_new,
+				zond_tree_store_get_tree_store(iter),
+				zond_tree_store_iter_is_root(iter) ? NULL : iter, child,
+				iter_inserted);
+
+		gtk_tree_iter_free(iter_target);
+
+		return 0;
+	}
+
 	if (type != ZOND_DBASE_TYPE_BAUM_STRUKT) {
 		if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY
 				|| type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE)
