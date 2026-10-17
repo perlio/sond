@@ -47,6 +47,7 @@
 #include "../zond_tree_store.h"
 
 #include "project.h"
+#include "db_check.h"
 
 // Constants
 #define AUTOSAVE_INTERVAL_SECONDS (10 * 60)  // 10 minutes
@@ -1053,6 +1054,103 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
 	return path_tmp;
 }
 
+/* Prüft die Geschwisterketten der Arbeitskopie VOR dem Laden der Bäume (sonst
+ * würden unsichtbare Ketten gar nicht erst auffallen). Mehrfachköpfe werden nach
+ * Rückfrage und Sicherungskopie der Projektdatei repariert; die Reparatur wirkt
+ * nur in der Arbeitskopie und geht erst mit dem Speichern in die Projektdatei.
+ * Alles andere wird nur gemeldet. Fehler hier verhindern das Öffnen nicht.
+ * Rückgabe TRUE, wenn die Arbeitskopie geändert wurde (Projekt gilt dann als
+ * ungespeichert; project_open() setzt "changed" am Ende sonst zurück). */
+static gboolean project_pruefe_ketten(Projekt *zond) {
+	g_auto(DbCheckKetten) erg = { 0 };
+	GError *error = NULL;
+	ZondDBase *work = zond->dbase_zond->zond_dbase_work;
+	g_autoptr(GString) text = NULL;
+	g_autofree gchar *path_src = NULL;
+	g_autofree gchar *path_bak = NULL;
+	g_autofree gchar *zeit = NULL;
+	g_autoptr(GDateTime) jetzt = NULL;
+	gint n_repariert = 0;
+	gint n_uebersprungen = 0;
+
+	if (db_check_ketten(work, &erg, &error)) {
+		LOG_WARN("%s: %s", __func__, error->message);
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	if (db_check_ketten_ok(&erg))
+		return FALSE;
+
+	for (guint i = 0; i < erg.beispiele->len; i++)
+		LOG_WARN("Datenbank-Prüfung: %s",
+				(gchar const*) g_ptr_array_index(erg.beispiele, i));
+
+	text = g_string_new("Die Geschwisterketten des Projekts sind beschädigt:");
+	if (erg.n_koepfe)
+		g_string_append_printf(text, "\n- %d Elternknoten mit mehreren Köpfen "
+				"(Teile der Kinder sind unsichtbar)", erg.n_koepfe);
+	if (erg.n_gabelungen)
+		g_string_append_printf(text, "\n- %d Gabelungen", erg.n_gabelungen);
+	if (erg.n_luecken)
+		g_string_append_printf(text, "\n- %d fehlende oder falsch zugeordnete "
+				"ältere Geschwister", erg.n_luecken);
+	if (erg.n_unerreichbar)
+		g_string_append_printf(text, "\n- %d Elternknoten mit nicht "
+				"erreichbaren Kindern", erg.n_unerreichbar);
+
+	if (!erg.n_koepfe) {
+		g_string_append(text, "\n\nDafür ist keine automatische Reparatur "
+				"vorgesehen. Einzelheiten stehen im Log.");
+		display_message(zond->app_window, text->str, NULL);
+
+		return FALSE;
+	}
+
+	if (erg.n_gabelungen || erg.n_luecken || erg.n_unerreichbar)
+		g_string_append(text, "\n\nNur die Mehrfachköpfe können repariert werden, "
+				"der Rest wird nur gemeldet (Einzelheiten im Log).");
+	g_string_append(text, "\n\nMehrfachköpfe jetzt reparieren? Vorher wird eine "
+			"Sicherungskopie der Projektdatei angelegt.");
+
+	if (abfrage_frage(zond->app_window, "Datenbank-Prüfung", text->str, NULL)
+			!= GTK_RESPONSE_YES)
+		return FALSE;
+
+	jetzt = g_date_time_new_now_local();
+	zeit = g_date_time_format(jetzt, "%Y%m%d-%H%M%S");
+	path_src = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
+	path_bak = g_strdup_printf("%s.vor-reparatur-%s", path_src, zeit);
+
+	if (!sond_copy(path_src, path_bak, FALSE, &error)) {
+		display_message(zond->app_window, "Sicherungskopie fehlgeschlagen, "
+				"es wurde nichts repariert:\n\n", error->message, NULL);
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	if (db_repair_koepfe(work, &n_repariert, &n_uebersprungen, &error)) {
+		display_message(zond->app_window, "Reparatur fehlgeschlagen "
+				"(zurückgerollt):\n\n", error->message, NULL);
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	{
+		g_autofree gchar *meldung = g_strdup_printf("%d Elternknoten repariert, "
+				"%d übersprungen.\n\nSicherungskopie: %s\n\nDie Reparatur gilt "
+				"erst nach dem Speichern.", n_repariert, n_uebersprungen,
+				path_bak);
+
+		display_message(zond->app_window, meldung, NULL);
+	}
+
+	return n_repariert > 0;
+}
+
 /**
  * Open a project (create new or open existing)
  * @param zond The project structure
@@ -1063,6 +1161,7 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
  */
 gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError **error) {
 	gint rc = 0;
+	gboolean repariert = FALSE;
 
 	// Close current project if open
 	rc = project_close(zond, error);
@@ -1107,6 +1206,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 
 	// Load tree structures if opening existing project
 	if (!create) {
+		repariert = project_pruefe_ketten(zond);
+
 		rc = project_load_trees(zond, error);
 		if (rc) {
 			project_open_cleanup(zond);
@@ -1219,7 +1320,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	// Save project path to settings
 	g_settings_set_string(zond->settings, "project", abs_path);
 
-	project_reset_changed(zond, FALSE);
+	//nach einer Reparatur der Ketten ist die Arbeitskopie nicht gespeichert
+	project_reset_changed(zond, repariert);
 
 	// Enable autosave if configured
 	if (g_settings_get_boolean(zond->settings, "autosave"))
