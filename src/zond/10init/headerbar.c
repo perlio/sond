@@ -51,6 +51,7 @@
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
 #include "../20allgemein/xjustiz_import.h"
+#include "../20allgemein/db_check_fenster.h"
 #include "../20allgemein/zond_update.h"
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"
@@ -1018,6 +1019,10 @@ static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
 	}
 }
 
+static void cb_win_db_pruefen(GSimpleAction *a, GVariant *p, gpointer d) {
+	db_check_fenster_oeffnen((Projekt*) d);
+}
+
 /* Extras -> "XJustiz-Import": öffnet einen Dialog zur Auswahl der
  * xjustiz_nachricht.xml (aus dem beA-Akteneinsichtsportal, s.
  * filepart_oeffnen() in project.c) und bindet die referenzierten
@@ -1292,6 +1297,11 @@ static void init_win_actions(Projekt *zond) {
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  zond->menu.extras = a; }
 
+	{ GSimpleAction *a = g_simple_action_new("db-pruefen", NULL);
+	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_db_pruefen), zond);
+	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
+	  zond->menu.db_pruefen = a; }
+
 	WIN_ACT("xjustiz-import-ge", cb_win_xjustiz_import_ge);
 	WIN_ACT("xjustiz-import-up", cb_win_xjustiz_import_up);
 
@@ -1501,6 +1511,7 @@ static GMenuModel* build_menu(Projekt *zond) {
 	/* ---- Extras ---- */
 	GMenu *m_ext = g_menu_new();
 	g_menu_append(m_ext, "Test", "win.test");
+	g_menu_append(m_ext, "Datenbank prüfen...", "win.db-pruefen");
 	GMenu *sub_xjustiz = g_menu_new();
 	g_menu_append(sub_xjustiz, "Gleiche Ebene", "win.xjustiz-import-ge");
 	g_menu_append(sub_xjustiz, "Unterebene",    "win.xjustiz-import-up");
@@ -1560,6 +1571,7 @@ void init_headerbar(Projekt *zond) {
 	g_simple_action_set_enabled(zond->menu.speichern,      FALSE);
 	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
 	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);
+	g_simple_action_set_enabled(zond->menu.db_pruefen,     FALSE);
 	headerbar_set_seadrive_sensitive(zond, FALSE);
 
 #ifdef _WIN32

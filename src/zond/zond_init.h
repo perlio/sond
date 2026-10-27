@@ -124,6 +124,7 @@ struct _Menu {
 	GSimpleAction *struktur;   /* Gruppe: alle Struktur-Actions */
 	GSimpleAction *ansicht;    /* Gruppe: alle Ansicht-Actions */
 	GSimpleAction *extras;
+	GSimpleAction *db_pruefen;
 };
 
 typedef struct _Menu Menu;

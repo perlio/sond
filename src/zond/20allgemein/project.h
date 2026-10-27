@@ -19,6 +19,7 @@ typedef struct _DBase_Zond {
 	ZondDBase *zond_dbase_work;
 	gboolean changed;
 	gboolean index_attached; //Index-DB als Schema idx an store gehängt
+	gboolean sicherung_gemacht; //Kopie der Projektdatei vor Reparatur angelegt
 } DBaseZond;
 
 // Database transaction functions
@@ -53,6 +54,10 @@ gboolean project_timeout_autosave(gpointer);
 gint project_close(Projekt*, GError**);
 gint project_save(Projekt*, GError**);
 gint project_load_trees(Projekt*, GError**);
+
+/* Kopie der Projektdatei neben dem Original, einmal pro geöffnetem Projekt
+ * (vor der ersten Reparatur). *path_bak (g_free) nur, wenn gerade angelegt. */
+gint project_sicherungskopie(Projekt*, gchar**, GError**);
 gint project_open(Projekt*, const gchar*, gboolean, GError**);
 gint project_load(Projekt* zond, GError** error);
 gint project_new(Projekt* zond, GError** error);

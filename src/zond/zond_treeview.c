@@ -838,6 +838,27 @@ gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 	if (rc == -1)
 		return -1;
 
+	if (rc == 1) { //defekter Eintrag übersprungen (s. zond_treeview_load_node)
+		if (with_younger_siblings) {
+			gint younger_sibling = 0;
+			gint rc_y = 0;
+
+			rc_y = zond_dbase_get_younger_sibling(
+					ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
+					&younger_sibling, error);
+			if (rc_y)
+				return -1;
+
+			//ohne Kinder; die jüngeren Geschwister an derselben Stelle
+			if (younger_sibling > 0)
+				return zond_treeview_walk_tree(ztv, TRUE, younger_sibling,
+						iter_anchor, child, iter_inserted, anchor_id,
+						node_id_inserted, walk_tree, error);
+		}
+
+		return 0;
+	}
+
 	rc = zond_dbase_get_first_child(
 			ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
 			&first_child, error);
@@ -3964,8 +3985,18 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 		rc = zond_treeview_walk_tree(ztv, FALSE, link, iter_anchor, child,
 				&iter_new, node_id, NULL, zond_treeview_insert_file_parts,
 				error);
-		if (rc)
-			return -1;
+		if (rc) {
+			/* Defekter Eintrag (z.B. Anbindung auf eine Datei, die es in der
+			 * Datenbank nicht gibt): nicht anzeigen, aber das Projekt trotzdem
+			 * laden, damit die Prüfung (Extras, Datenbank prüfen) den Fehler
+			 * zeigen und beheben kann. */
+			LOG_WARN("%s: Anbindung %d wird nicht angezeigt: %s", __func__,
+					node_id, (error && *error) ? (*error)->message : "?");
+			if (error)
+				g_clear_error(error);
+
+			return 1;
+		}
 	}
 	else //eigentlich nur link, copy oder strukt...
 	{
@@ -4034,28 +4065,34 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter_target = NULL;
 		gint root = 0;
 		gint rc = 0;
+		GtkTreeIter iter_next = *iter;
+		gboolean has_next = gtk_tree_model_iter_next(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)), &iter_next);
+		GError *error_root = NULL;
 
 		node_id *= -1;
 
-		rc = zond_treeview_get_root(ztv, node_id, &root, error);
-		if (rc)
-			return -1;
+		rc = zond_treeview_get_root(ztv, node_id, &root, &error_root);
 
 		/* root muss BAUM_INHALT oder BAUM_AUSWERTUNG sein, um gültig als
 		 * Index in zond->treeview[] zu dienen - alles andere (insbesondere
 		 * 0, was bei einer beschädigten Projektdatei mit fehlerhaft
 		 * verketteten Baum-Wurzeln vorkommen kann) würde auf treeview[BAUM_FS]
 		 * (falscher GObject-Typ) oder außerhalb des Arrays zeigen und
-		 * abstürzen. Siehe project.c/zond_dbase_insert_node für den
-		 * eigentlichen Schutz gegen die Entstehung solcher Daten. */
-		if (root != BAUM_INHALT && root != BAUM_AUSWERTUNG) {
-			if (error)
-				*error = g_error_new(ZOND_ERROR, 0,
-						"%s\nLink-Ziel (Knoten %d) hat keine gültige "
-						"Baum-Wurzel (root=%d) - Projektdatenbank "
-						"vermutlich beschädigt", __func__, node_id, root);
+		 * abstürzen. Ein solcher Link wird nicht angezeigt, das Projekt aber
+		 * trotzdem geladen, damit die Prüfung (Extras, Datenbank prüfen) den
+		 * Fehler zeigen und beheben kann. */
+		if (rc || (root != BAUM_INHALT && root != BAUM_AUSWERTUNG)) {
+			LOG_WARN("%s: Link auf Knoten %d wird nicht angezeigt (Ziel ohne "
+					"gültige Baum-Wurzel, root=%d): %s", __func__, node_id, root,
+					error_root ? error_root->message : "");
+			g_clear_error(&error_root);
+			zond_tree_store_remove(iter);
 
-			return -1;
+			if (has_next)
+				return zond_treeview_insert_links_foreach(ztv, &iter_next, error);
+
+			return 0;
 		}
 
 		//iter_anchor basteln
@@ -4075,11 +4112,14 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 						GTK_TREE_VIEW(ztv_priv->zond->treeview[root]))),
 				node_id);
 		if (!iter_target) {
-			if (error)
-				*error = g_error_new( ZOND_ERROR, 0, "%s\nKein Iter ermittelt",
-						__func__);
+			//der Link ist schon entfernt; defekte Ziele s.o.
+			LOG_WARN("%s: Link auf Knoten %d wird nicht angezeigt (Ziel im Baum "
+					"nicht gefunden)", __func__, node_id);
 
-			return -1;
+			if (has_next)
+				return zond_treeview_insert_links_foreach(ztv, &iter_next, error);
+
+			return 0;
 		}
 
 		zond_tree_store_insert_link(iter_target, head_nr,
