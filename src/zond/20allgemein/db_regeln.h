@@ -43,6 +43,7 @@ typedef struct _ZondDBase ZondDBase;
  *     leer oder Schleife in der Elternkette)
  *  E1 Anker, Copy oder Link ohne Verweisziel
  *  E2 Anker, Copy oder Link, dessen Ziel einen unzulässigen Typ hat
+ *  E3 Datei mehrfach angebunden (der Baum zeigt sie nur an einer Stelle)
  *  F1 Dateiintegrität (nur Anzeige)
  *
  * Typen: 0 Wurzel, 1 Punkt, 2 Anker, 3 Copy, 4 Link, 5 Datei oder Abschnitt. */
@@ -56,6 +57,7 @@ typedef enum {
 	DB_REGEL_D2,
 	DB_REGEL_E1,
 	DB_REGEL_E2,
+	DB_REGEL_E3,
 	DB_REGEL_F1,
 	DB_NUM_REGELN
 } DbRegel;
@@ -78,11 +80,13 @@ typedef struct {
 	gint64 eltern_id; //Elternknoten (Kontext), 0 wenn keiner
 	gint baum; //1 Inhalt, 2 Auswertung, 3 Dateibaum, 4 ohne Wurzel
 	gchar *text; //Beschreibung der Verletzung
-	guint aktionen; //Bitmaske 1 << DbAkt; je Knoten für alle seine Mängel gleich
+	guint aktionen; //Bitmaske 1 << DbAkt; Schnittmenge aller Mängel des Knotens
 	DbAkt standard;
 	DbAkt gewaehlt; //vom Aufrufer zu setzen, Voreinstellung = standard
 	gint ziel_baum; //für DB_AKT_SAMMELPUNKT: 1 Inhalt, 2 Auswertung
 	gboolean schleife; //D1: Einträge folgen im Kreis aufeinander (text zeigt A -> B -> A)
+	gboolean sichtbar; //der Eintrag wird im geladenen Baum angezeigt
+	gint64 gehoert_unter; //nicht sichtbar: nächster sichtbarer übergeordneter Eintrag, sonst 0
 } DbMangel;
 
 typedef struct {
@@ -128,7 +132,7 @@ gchar const* db_regel_erklaerung(DbRegel);
 //was die Aktion bewirkt
 gchar const* db_akt_beschreibung(DbAkt);
 
-//Bezeichnung der Knotenart für den Nutzer (Punkt, Anbindung, Kopie ...)
+//Bezeichnung der Knotenart für den Nutzer (Punkt, Anbindung, Copy ...)
 gchar const* db_typ_name(gint typ);
 
 gchar const* db_akt_name(DbAkt);
