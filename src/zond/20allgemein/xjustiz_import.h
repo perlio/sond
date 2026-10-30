@@ -88,6 +88,8 @@
  * Vorakten, wo jedes Dokument bei 1 beginnt); Sammelordner zeigen die
  * Summe. Wo die Blattnummern springen, wird zwischen den Dokumenten ein
  * Strukturpunkt "Bl. x - y fehlt" mit Fehlersymbol eingefügt.
+ * In fortlaufend paginierten Ordnern steht vor dem Namen jedes Dokuments
+ * dessen Blattzahl: "x-y: Name", bei einem Blatt "x: Name".
  *
  * Feldnamen aus der offiziellen XJustiz-Spezifikation ("Einheitlicher
  * XJustiz-Strukturdatensatz für die Übermittlung von Schriftgutobjekten")

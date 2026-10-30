@@ -359,8 +359,10 @@ static xmlNodePtr xjustiz_platzhalter_ziel(XJustizCtx *ctx,
  * Enthält der Knoten nur Dokumente und sind sie fortlaufend paginiert,
  * kommt der Blattbereich dazu: "Name - Bl. x - y (N Seiten)", und wo die
  * Nummern springen, ein Platzhalter "Bl. x - y fehlt" zwischen den
- * Dokumenten. Nicht paginiert (Nummern fallen zurück oder jedes Dokument
- * beginnt bei 1, wie in Vorakten) gibt es nur "Name (N Seiten)", und für
+ * Dokumenten; den Dokumenten selbst wird ihre Blattzahl vorangestellt
+ * ("x-y: Name", bei einem Blatt "x: Name"). Nicht paginiert (Nummern
+ * fallen zurück oder jedes Dokument beginnt bei 1, wie in Vorakten) gibt
+ * es nur "Name (N Seiten)" und unveränderte Dokumentnamen, und für
  * Knoten ohne verwertbare Seitennummern bleibt der Name unverändert. */
 static void xjustiz_node_finalize(XJustizNode *node) {
 	gboolean rueckgang = FALSE;
@@ -425,6 +427,23 @@ static void xjustiz_node_finalize(XJustizNode *node) {
 				}
 				prev = d->letzte;
 				hat_prev = TRUE;
+
+				//Blattzahl(en) vor den Namen des Dokuments: "x-y: Name",
+				//bei nur einem Blatt "x: Name"
+				{
+					gchar e_s[G_ASCII_DTOSTR_BUF_SIZE];
+					gchar l_s[G_ASCII_DTOSTR_BUF_SIZE];
+					gchar *mit_blatt = NULL;
+
+					g_ascii_formatd(e_s, sizeof(e_s), "%g", d->erste);
+					g_ascii_formatd(l_s, sizeof(l_s), "%g", d->letzte);
+					mit_blatt = (d->erste == d->letzte) ?
+							g_strdup_printf("%s: %s", e_s, d->anzeigename) :
+							g_strdup_printf("%s-%s: %s", e_s, l_s,
+									d->anzeigename);
+					g_free(d->anzeigename);
+					d->anzeigename = mit_blatt;
+				}
 			}
 			g_ptr_array_add(neu, d);
 		}
