@@ -18,6 +18,10 @@
 
 #include <gtk/gtk.h>
 
+#ifdef _WIN32
+#include <stdio.h> /* _setmaxstdio() */
+#endif
+
 #include "../misc.h"
 #include "../sond_log_and_error.h"
 #include "zond_init.h"
@@ -106,6 +110,17 @@ int main(int argc, char **argv) {
 	GtkApplication *app = NULL;
 	Projekt zond = { 0 };
 	gint status = 0;
+
+#ifdef _WIN32
+	/* Nutzer-Fund 2026-10: "_fdopen: Too many open files" aus sond_fopen()
+	 * beim Öffnen eines Auszugs mit sehr vielen Dateien - die Windows-CRT
+	 * begrenzt die Anzahl gleichzeitig offener "lowio"-Deskriptoren
+	 * (_open_osfhandle()/_fdopen() - NICHT das viel höhere Win32-HANDLE-
+	 * Limit) standardmäßig auf 512. _setmaxstdio() hebt das auf das
+	 * CRT-Maximum von 8192 an - muss einmalig und so früh wie möglich im
+	 * Programm passieren, bevor irgendwo Dateien geöffnet werden. */
+	_setmaxstdio(8192);
+#endif
 
 	//ApplicationApp erzeugen
 	app = gtk_application_new("de.perlio.zond", G_APPLICATION_HANDLES_OPEN);
