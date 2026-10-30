@@ -19,10 +19,7 @@
 /*
  * xjustiz_import.c/.h: Extras-Menüpunkt "XJustiz-Import", der eine
  * xjustiz_nachricht.xml (aus dem beA-Akteneinsichtsportal) auswertet
- * und die darin referenzierten PDF-Dokumente anbindet. Als Baum-Beschriftung
- * der einzelnen Dokumente wird "anzeigename" aus der XML verwendet
- * (physischer Dateiname bleibt unverändert - analog zum bestehenden
- * anbinden_label-Mechanismus, s. sond_tvfm_item.c).
+ * und die darin referenzierten PDF-Dokumente anbindet.
  *
  * Ausgangspunkt ist die xjustiz_nachricht.xml selbst, ausgewählt über
  * filepart_oeffnen() (project.c/.h) - ein eigener, container-bewusster
@@ -43,25 +40,61 @@
  * XJustiz-Datensatz ist (Element "schriftgutobjekte" vorhanden) - sonst
  * Fehlermeldung statt stillschweigend 0 Dokumente anzubinden.
  *
- * Die Dokumente werden nicht direkt an der markierten Stelle im
- * Bestandsverzeichnis angebunden, sondern dort wird zunächst EIN neuer
- * Strukturpunkt eingefügt, in den anschließend alle Dokumente eingefügt
- * werden. Benennung des Strukturpunkts aus dem Nachrichtenkopf/
- * Grunddaten der xjustiz_nachricht.xml: Name des Produkts und
- * Erstellungszeitpunkt (beide laut Spezifikation optional, s.
- * xjustiz_parse_nachricht()/xjustiz_format_zeitpunkt() in xjustiz_import.c).
+ * STRUKTUR DER NACHRICHT (anhand eines realen beA-Akteneinsichtsportal-
+ * Datensatzes analysiert - weicht in der Verschachtelung von einer naiven
+ * Lesart der Spezifikation ab, s. xjustiz_import.c für Details):
+ *
+ *   schriftgutobjekte
+ *     akte[]                     - FLACH, nicht verschachtelt. Eine davon
+ *       |                          ist die Hauptakte (hat i.d.R.
+ *       |                          "anzeigename"), die übrigen sind
+ *       |                          Beiakten (haben i.d.R. KEIN
+ *       |                          "anzeigename", aber ein eigenes
+ *       |                          "aktenzeichen"). Verknüpft sind sie NICHT
+ *       |                          durch Verschachtelung, sondern über
+ *       |                          "aktenreferenzen" (Code "002": Hauptakte
+ *       |                          -> Beiakte; Code "001": Beiakte ->
+ *       |                          Hauptakte zurück). Die Hauptakte enthält
+ *       |                          dazu je einen "Verweis auf: <Aktenzeichen>"
+ *       |                          -Platzhalter unter ihren eigenen
+ *       |                          teilakte - diese Platzhalter tragen
+ *       |                          selbst nie Dokumente.
+ *       |
+ *       +-- inhalt/teilakte[]     - rekursiv: eine teilakte kann WEITER
+ *             |                     nur teilakte ODER nur dokument als
+ *             |                     Kinder haben (beliebig tief, in der
+ *             |                     Praxis bisher max. 2 Ebenen beobachtet -
+ *             |                     z.B. Teilakten wie "FA 1 - ehemals ..."
+ *             |                     die selbst wieder "Vorakte"/"Hauptakte"
+ *             |                     als Unter-Teilakten enthalten).
+ *             |
+ *             +-- inhalt/dokument[] - Blattebene: datei/dateiname (physischer
+ *                                     Dateiname) + anzeigename.
+ *
+ * Für den Import wird diese Hierarchie 1:1 nachgebildet: pro akte/teilakte
+ * ein Strukturpunkt (Ordner), benannt nach "anzeigename" - bei einer Beiakte
+ * ohne "anzeigename" ersatzweise nach ihrem Aktenzeichen. Ein Strukturpunkt
+ * wird NUR angelegt, wenn in seinem Teilbaum mindestens ein Dokument liegt -
+ * leere Zweige werden komplett ausgelassen, nicht als leere Ordner angelegt.
+ * Ein "Verweis auf: ..."-Platzhalter, dessen Aktenzeichen zu einer Akte der
+ * Nachricht passt, wird durch diese Akte ersetzt: sie erscheint (benannt
+ * nach ihrem Aktenzeichen bzw. anzeigename) an der Stelle des Platzhalters
+ * statt als eigener Punkt auf oberster Ebene. Akten, auf die kein
+ * Platzhalter verweist, bleiben auf oberster Ebene.
+ *
+ * Seitenangaben im Namen (aus ersteSeitennummer/letzteSeitennummer der
+ * Dokumente, nur dort stehen sie in der XML): "Name - Bl. x - y (N Seiten)"
+ * bei fortlaufend paginierten Dokumenten, sonst "Name (N Seiten)" (z.B. in
+ * Vorakten, wo jedes Dokument bei 1 beginnt); Sammelordner zeigen die
+ * Summe. Wo die Blattnummern springen, wird zwischen den Dokumenten ein
+ * Strukturpunkt "Bl. x - y fehlt" mit Fehlersymbol eingefügt.
  *
  * Feldnamen aus der offiziellen XJustiz-Spezifikation ("Einheitlicher
  * XJustiz-Strukturdatensatz für die Übermittlung von Schriftgutobjekten")
- * sowie Abgleich mit dem quelloffenen Viewer openXJV: pro referenziertem
- * Dokument <dokument> (unterhalb <schriftgutobjekte>, Namespace bewußt
- * per local-name() ignoriert - robust gegenüber Präfix-/Fachmodul-
- * Varianten) je ein <datei><dateiname> (physischer Dateiname) und ein
- * <anzeigename> (menschenlesbarer Titel). Für die Strukturpunkt-Benennung
- * zusätzlich <nameDesProdukts> (laut Spezifikation unter grunddaten/
- * herstellerinformation) und <erstellungszeitpunkt> (laut Spezifikation
- * direkt unter nachrichtenkopf) - beide ebenfalls per local-name() und
- * ohne feste Verschachtelungstiefe gesucht.
+ * sowie Abgleich mit einem realen Datensatz. Gesucht wird bewußt per
+ * local-name() bzw. (bei der strukturellen Navigation akte/teilakte/
+ * dokument) über den von libxml2 bereits präfixfreien Knotennamen -
+ * robust gegenüber Namespace-Präfix-Varianten ("tns:", "xjustiz:" o.ä.).
  */
 
 #ifndef XJUSTIZ_IMPORT_H_INCLUDED
@@ -80,30 +113,28 @@ typedef int gboolean;
  * xjustiz_nachricht.xml (kein Verzeichnis - container-bewusst, kann auch
  * in eine noch nicht entpackte ZIP hineinsehen), prüft, ob es sich
  * überhaupt um einen XJustiz-Datensatz handelt, wertet die darin
- * referenzierten PDF-Dokumente aus (gesucht als Geschwister von
- * xjustiz_nachricht.xml im selben Verzeichnis/Container) und bindet sie an
- * der aktuellen Cursor-Position im Bestandsverzeichnis an (Voraussetzung
+ * referenzierten PDF-Dokumente hierarchisch aus (gesucht als Geschwister
+ * von xjustiz_nachricht.xml im selben Verzeichnis/Container) und bindet sie
+ * an der aktuellen Cursor-Position im Bestandsverzeichnis an (Voraussetzung
  * wie beim normalen "Einfügen": Bestandsverzeichnis muß der aktive Baum
  * sein und eine Zielposition markiert sein - wird VOR dem Dialog geprüft).
  *
- * An der markierten Stelle wird zunächst ein neuer Strukturpunkt eingefügt;
- * die einzelnen Dokumente werden als dessen Unterpunkte angebunden (nicht
- * mehr direkt an der markierten Stelle). Die Benennung des Strukturpunkts
- * erfolgt aus dem Nachrichtenkopf der XJustiz-Nachricht: Produktname
- * (Element "nameDesProdukts") und Erstellungszeitpunkt (Element
- * "erstellungszeitpunkt", umformatiert als "TT.MM.JJJJ hh:mm"), durch
- * Leerzeichen getrennt. Fehlt eines der beiden Felder, wird nur das
- * vorhandene verwendet; fehlen beide, "XJustiz-Import" als Fallback-Label.
- * Beide Felder werden unabhängig von ihrer genauen Verschachtelungstiefe
- * per lokalem Elementnamen gesucht (wie auch sonst in dieser Datei üblich),
- * da Namespace-Präfix und Schachtelungstiefe laut XJustiz-Spezifikation
- * je Fachmodul variieren können.
+ * An der markierten Stelle wird zunächst EIN neuer, oberster Strukturpunkt
+ * eingefügt (Benennung s.u.); darunter wird die komplette Akte/Teilakte/
+ * Dokument-Hierarchie der Nachricht nachgebildet (s. ausführlichen Kommentar
+ * oben und in xjustiz_import.c) - NICHT mehr flach wie zuvor.
+ *
+ * Benennung des obersten Strukturpunkts: aus dem Nachrichtenkopf,
+ * "<Erstellungszeitpunkt kompakt, z.B. 20260805> Az. <Aktenzeichen>"
+ * (nachrichtenkopf/erstellungszeitpunkt bzw. nachrichtenkopf/absender/
+ * aktenzeichen). Beide Felder laut Spezifikation optional - fehlt das
+ * Aktenzeichen, entfällt auch das "Az. "-Trennwort; fehlen beide, wird
+ * "XJustiz-Import" als Fallback-Label verwendet.
  *
  * child: wie bei "Punkt einfügen"/"Einfügen" (win.einf-ge/-up,
- * win.paste-ge/-up) - TRUE bindet den neuen Strukturpunkt als Unterebene der
- * markierten Stelle an, FALSE auf gleicher Ebene (als Geschwister). Die
- * Dokumente selbst werden immer als Unterpunkte des Strukturpunkts angehängt,
- * hintereinander als Geschwister.
+ * win.paste-ge/-up) - TRUE bindet den neuen obersten Strukturpunkt als
+ * Unterebene der markierten Stelle an, FALSE auf gleicher Ebene (als
+ * Geschwister).
  *
  * Rückgabe: 0 Erfolg (auch wenn 0 Dokumente angebunden wurden - s.
  * *n_angebunden, *n_vorhanden und *arr_nicht_gefunden für die Details),
