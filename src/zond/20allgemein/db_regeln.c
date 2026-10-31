@@ -1133,6 +1133,7 @@ static void vereinheitliche(GPtrArray *m) {
 static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 	guint n = c->rows->len;
 	gboolean *unsichtbar = g_new0(gboolean, n);
+	gboolean *mehrfach = g_new0(gboolean, n);
 	g_autoptr(GArray) stapel = g_array_new(FALSE, FALSE, sizeof(gint));
 
 	//ohne Verbindung zu einer Wurzel
@@ -1162,7 +1163,9 @@ static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 				if (x >= 0)
 					unsichtbar[x] = TRUE;
 			}
-		else if (mg->regel == DB_REGEL_D2 || mg->regel == DB_REGEL_E3)
+		else if (mg->regel == DB_REGEL_E3)
+			mehrfach[idx] = TRUE; //Zeile wandert zur letzten Anbindung, Unterpunkte bleiben sichtbar
+		else if (mg->regel == DB_REGEL_D2)
 			unsichtbar[idx] = TRUE;
 		else if (mg->regel == DB_REGEL_E1 || mg->regel == DB_REGEL_E2) {
 			//beim Laden übergangen: Anbindung ohne Ziel, Link ohne brauchbares Ziel
@@ -1198,6 +1201,10 @@ static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 			}
 	}
 
+	for (guint i = 0; i < n; i++)
+		if (mehrfach[i])
+			unsichtbar[i] = TRUE;
+
 	for (guint i = 0; i < m->len; i++) {
 		DbMangel *mg = g_ptr_array_index(m, i);
 		gint idx = finde(c, mg->knoten_id);
@@ -1228,6 +1235,7 @@ static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 	}
 
 	g_free(unsichtbar);
+	g_free(mehrfach);
 
 	return;
 }

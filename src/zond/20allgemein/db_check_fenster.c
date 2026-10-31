@@ -51,7 +51,7 @@ enum {
 	ZEILE_FEHLER, //ein Fehler eines Knotens
 	ZEILE_MANGEL, //ein Knoten mit Fehlern; trägt das Auswahlfeld
 	ZEILE_KNOTEN, //Glied eines nicht angezeigten Zweigs
-	ZEILE_ABSCHNITT, //Oberste Ebene: sichtbar / nicht sichtbar / Datei
+	ZEILE_ABSCHNITT, //Oberste Ebene: Art der Einträge (Gruppe)
 	ZEILE_DATENKOPF, //Überschrift »Datensatz«
 	ZEILE_FELD, //ein Feld des Datensatzes
 	ZEILE_NACHBAR, //Feld, das auf einen anderen Knoten zeigt; füllt sich beim Aufklappen
@@ -59,11 +59,35 @@ enum {
 	ZEILE_PLATZHALTER //Kind einer noch nicht gefüllten Nachbarzeile
 };
 
-//Abschnitte der obersten Ebene (in SP_REGEL der Abschnittszeile)
-enum {
-	ABSCHNITT_SICHTBAR,
-	ABSCHNITT_UNSICHTBAR,
-	ABSCHNITT_DATEI
+//Gruppen der obersten Ebene: Art des Eintrags (in SP_REGEL der Gruppenzeile)
+#define GRUPPE_UNBEKANNT 6
+#define GRUPPE_DATEI 7
+
+static struct {
+	gchar const *titel;
+	gchar const *gilt;
+} const gruppen[] = {
+	{ "Punkte", "Ein Punkt hat Symbol und Text (Notiz möglich), aber keinen Verweis "
+			"und keinen Dateipfad. Er steht unter einer Wurzel, einem Punkt oder "
+			"einer Copy." },
+	{ "Anbindungen", "Eine Anbindung steht im Bestandsverzeichnis unter einem "
+			"Punkt und verweist auf eine Datei oder einen Abschnitt. Sie trägt sonst "
+			"keine Angaben und hat keine Einträge unter sich. Jede Datei ist nur "
+			"einmal angebunden." },
+	{ "Copies", "Eine Copy steht in der Auswertung und verweist auf eine Anbindung "
+			"oder eine Datei. Sie hat Symbol und Text (Notiz möglich) und darf "
+			"Einträge unter sich haben." },
+	{ "Links", "Ein Link steht in der Auswertung und verweist auf einen Punkt, eine "
+			"Anbindung, eine Copy oder eine Datei, nie auf einen anderen Link. Er "
+			"trägt sonst keine Angaben und hat keine Einträge unter sich." },
+	{ "Dateien und Abschnitte", "Dateien und Abschnitte bilden den Dateibaum: eine "
+			"Datei mit Dateipfad, darunter ihre Abschnitte. Sie werden nie "
+			"automatisch gelöscht." },
+	{ "Wurzeln", "Es gibt genau zwei Wurzeln: Bestandsverzeichnis und Auswertung." },
+	{ "Einträge mit unbekanntem Typ", "Jeder Eintrag ist ein Punkt, eine Anbindung, "
+			"eine Copy, ein Link oder eine Datei/ein Abschnitt." },
+	{ "Datenbankdatei", "Ergebnis der Prüfung der Datenbankdatei durch SQLite. Wird "
+			"nur angezeigt." }
 };
 
 typedef struct {
@@ -247,12 +271,48 @@ static void cb_aktion_geaendert(GtkCellRendererCombo *renderer, gchar *pfad,
 
 /* ---- Anzeige ---------------------------------------------------------------- */
 
-//Gehört der Mangel in den Abschnitt (sichtbar / nicht sichtbar / Datei)?
-static gboolean in_abschnitt(DbMangel const *m, gint abschnitt) {
-	if (m->regel == DB_REGEL_F1)
-		return abschnitt == ABSCHNITT_DATEI;
+//Typ des Knotens, -1 ohne Angabe oder ohne Knoten
+static gint knoten_typ(ZondDBase *work, gint64 id) {
+	sqlite3_stmt *stmt = NULL;
+	gint typ = -1;
 
-	return abschnitt == (m->sichtbar ? ABSCHNITT_SICHTBAR : ABSCHNITT_UNSICHTBAR);
+	if (id <= 0 || sqlite3_prepare_v2(zond_dbase_get_dbase(work),
+			"SELECT type FROM knoten WHERE ID=?1;", -1, &stmt, NULL) != SQLITE_OK)
+		return -1;
+
+	sqlite3_bind_int64(stmt, 1, id);
+	if (sqlite3_step(stmt) == SQLITE_ROW
+			&& sqlite3_column_type(stmt, 0) != SQLITE_NULL)
+		typ = sqlite3_column_int(stmt, 0);
+	sqlite3_finalize(stmt);
+
+	return typ;
+}
+
+//Gruppe (Art des Eintrags), in der der Mangel steht
+static gint gruppe_von(ZondDBase *work, DbMangel const *m) {
+	gint typ = 0;
+
+	if (m->regel == DB_REGEL_F1 || m->knoten_id <= 0)
+		return GRUPPE_DATEI;
+
+	typ = knoten_typ(work, m->knoten_id);
+	switch (typ) {
+	case 1:
+		return 0;
+	case 2:
+		return 1;
+	case 3:
+		return 2;
+	case 4:
+		return 3;
+	case 5:
+		return 4;
+	case 0:
+		return 5;
+	default:
+		return GRUPPE_UNBEKANNT;
+	}
 }
 
 //Gibt es den Knoten?
@@ -586,25 +646,30 @@ static gboolean gehoert_zu(DbMangel const *m, DbMangel const *erster) {
 }
 
 //Legt die Zeile eines Knotens an: Beschreibung = alle seine Fehler, darunter die Felder
-static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, gint abschnitt,
-		DbMangel *erster) {
+static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, DbMangel *erster) {
 	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
 	GtkTreeIter iter_k = { 0 };
 	g_autofree gchar *kt = (erster->knoten_id > 0) ?
 			nr_bezeichnung(work, erster->knoten_id) : g_strdup("Datenbankdatei");
 	GString *texte = g_string_new(NULL);
-	gint64 sprung = erster->sichtbar ? erster->knoten_id : erster->gehoert_unter;
+	//ein nicht angezeigter Knoten springt nicht selbst, sondern über seine Nachbarzeilen
+	gint64 sprung = (erster->knoten_id > 0 && erster->sichtbar) ? erster->knoten_id : 0;
+	gchar const *im_baum = "";
+
+	if (erster->knoten_id > 0)
+		im_baum = !erster->sichtbar ? "nein" :
+				((knoten_typ(work, erster->knoten_id) == 2) ? "über die Datei" : "ja");
 
 	for (guint i = 0; i < f->erg.maengel->len; i++) {
 		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
 
-		if (gehoert_zu(m, erster) && in_abschnitt(m, abschnitt))
+		if (gehoert_zu(m, erster))
 			g_string_append_printf(texte, "%s%s", texte->len ? " | " : "", m->text);
 	}
 
 	gtk_tree_store_append(f->store, &iter_k, iter_a);
 	gtk_tree_store_set(f->store, &iter_k, SP_TEXT, kt, SP_DETAIL, texte->str, SP_ORT,
-			"", SP_AKTION, db_akt_name(erster->gewaehlt), SP_MODEL,
+			im_baum, SP_AKTION, db_akt_name(erster->gewaehlt), SP_MODEL,
 			modell_fuer(f, erster->aktionen), SP_PTR, erster, SP_ZEILE,
 			ZEILE_MANGEL, SP_KNOTEN, sprung, SP_REGEL, 0, -1);
 	g_string_free(texte, TRUE);
@@ -615,8 +680,7 @@ static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, gint abschnitt,
 	for (guint i = 0; i < f->erg.maengel->len; i++) {
 		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
 
-		if (!gehoert_zu(m, erster) || !in_abschnitt(m, abschnitt)
-				|| m->regel != DB_REGEL_D1 || m->schleife)
+		if (!gehoert_zu(m, erster) || m->regel != DB_REGEL_D1 || m->schleife)
 			continue;
 
 		for (guint k = 0; k < m->knoten_ids->len; k++) {
@@ -652,12 +716,10 @@ static void fenster_fuellen(Fenster *f) {
 	g_autofree gchar *summe = NULL;
 	gint n_aktiv = 0;
 	gint n_knoten = 0;
-	static gchar const *const abschnitt_titel[] = { "Im Baum sichtbar",
-			"Im Baum nicht sichtbar", "Datenbankdatei" };
 
 	gtk_tree_store_clear(f->store);
 
-	for (gint abschnitt = 0; abschnitt < 3; abschnitt++) {
+	for (gint g = 0; g < (gint) G_N_ELEMENTS(gruppen); g++) {
 		GtkTreeIter iter_a = { 0 };
 		GHashTable *fertig = g_hash_table_new_full(g_int64_hash, g_int64_equal,
 				g_free, NULL);
@@ -668,7 +730,7 @@ static void fenster_fuellen(Fenster *f) {
 		for (guint i = 0; i < f->erg.maengel->len; i++) {
 			DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
 
-			if (!in_abschnitt(m, abschnitt))
+			if (gruppe_von(f->zond->dbase_zond->zond_dbase_work, m) != g)
 				continue;
 			if (m->knoten_id > 0) {
 				gint64 *k = NULL;
@@ -683,12 +745,11 @@ static void fenster_fuellen(Fenster *f) {
 		}
 
 		if (erste->len) {
-			titel_a = g_strdup_printf("%s (%u)", abschnitt_titel[abschnitt],
-					erste->len);
+			titel_a = g_strdup_printf("%s (%u)", gruppen[g].titel, erste->len);
 			gtk_tree_store_append(f->store, &iter_a, NULL);
-			gtk_tree_store_set(f->store, &iter_a, SP_TEXT, titel_a, SP_DETAIL, "",
-					SP_ORT, "", SP_AKTION, "", SP_PTR, NULL, SP_ZEILE,
-					ZEILE_ABSCHNITT, SP_KNOTEN, (gint64) 0, SP_REGEL, abschnitt, -1);
+			gtk_tree_store_set(f->store, &iter_a, SP_TEXT, titel_a, SP_DETAIL,
+					gruppen[g].gilt, SP_ORT, "", SP_AKTION, "", SP_PTR, NULL, SP_ZEILE,
+					ZEILE_ABSCHNITT, SP_KNOTEN, (gint64) 0, SP_REGEL, g, -1);
 
 			for (guint i = 0; i < erste->len; i++) {
 				DbMangel *m = g_ptr_array_index(erste, i);
@@ -696,7 +757,7 @@ static void fenster_fuellen(Fenster *f) {
 				if (m->aktionen & ~M(DB_AKT_BEHALTEN))
 					n_aktiv++;
 				n_knoten++;
-				knoten_anfuegen(f, &iter_a, abschnitt, m);
+				knoten_anfuegen(f, &iter_a, m);
 			}
 		}
 
@@ -772,7 +833,7 @@ static void cb_standard(GtkButton *button, gpointer data) {
 //Tooltip passend zur Zelle unter dem Mauszeiger
 static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 		GtkTooltip *tip, gpointer data) {
-	static gint const spalten[] = { SP_TEXT, SP_DETAIL, SP_AKTION };
+	static gint const spalten[] = { SP_TEXT, SP_DETAIL, SP_ORT, SP_AKTION };
 	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
 	GtkTreePath *path = NULL;
 	GtkTreeViewColumn *col = NULL;
@@ -814,16 +875,8 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 			&m, -1);
 
 	if (zeile == ZEILE_ABSCHNITT) {
-		if (regel == ABSCHNITT_SICHTBAR)
-			text = g_strdup("Diese Einträge werden im Baum angezeigt. Ein "
-					"Doppelklick auf einen Eintrag springt dorthin.");
-		else if (regel == ABSCHNITT_UNSICHTBAR)
-			text = g_strdup("Diese Einträge sind in der Datei vorhanden, werden "
-					"aber im Baum nicht angezeigt. Ein Doppelklick springt zu dem "
-					"sichtbaren Eintrag, an dem sie hängen.");
-		else
-			text = g_strdup("Ergebnis der Prüfung der Datenbankdatei durch "
-					"SQLite. Wird nur angezeigt.");
+		if (regel >= 0 && regel < (gint) G_N_ELEMENTS(gruppen))
+			text = g_strdup(gruppen[regel].gilt);
 	} else if (zeile == ZEILE_MANGEL && idx == 1 && m) { //Erklärung der Fehler
 		GString *t = g_string_new(NULL);
 		Fenster *fe = data;
@@ -837,7 +890,12 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 						db_regel_gilt(mm->regel), db_regel_erklaerung(mm->regel));
 		}
 		text = g_string_free(t, FALSE);
-	} else if (idx == 2) { //Aktion: was sie bewirkt
+	} else if (zeile == ZEILE_MANGEL && idx == 2) {
+		text = g_strdup("Ob der Eintrag im geladenen Baum angezeigt wird. "
+				"Anbindungen haben keine eigene Zeile, sie erscheinen als ihre Datei. "
+				"Bei »nein« springt ein Doppelklick zum nächsten sichtbaren "
+				"übergeordneten Eintrag.");
+	} else if (idx == 3) { //Aktion: was sie bewirkt
 		if (m)
 			text = g_strdup_printf("%s\n\n%s", db_akt_name(m->gewaehlt),
 					db_akt_beschreibung(m->gewaehlt));
@@ -1045,8 +1103,8 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 
 /* ---- Springen --------------------------------------------------------------- */
 
-//Springt im Inhalts- oder Auswertungsbaum zum Knoten
-static void springe_zu(Fenster *f, gint64 id) {
+//Springt im Inhalts- oder Auswertungsbaum zum Knoten; FALSE, wenn er dort nicht steht
+static gboolean springe_versuch(Fenster *f, gint64 id) {
 	Projekt *zond = f->zond;
 	gint root = 0;
 	GError *error = NULL;
@@ -1054,15 +1112,19 @@ static void springe_zu(Fenster *f, gint64 id) {
 	GtkTreeIter *iter = NULL;
 	gint type = 0;
 	gint link = 0;
+	gint root_anker = 0;
 
 	/* Anbindungen stehen im Baum unter der Nummer ihres Ziels (Datei/Abschnitt),
 	 * Links als Kopfzeile mit der Nummer des Links unter der Nummer ihres Ziels
 	 * (diese Kopfzeile liegt in dem Baum, in dem der Link steht). */
 	if (!zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
 			(gint) id, &type, &link, &error) && link > 0) {
-		if (type == 2)
+		if (type == 2) {
+			//die Datei liegt in der Datenbank im Dateibaum; im Baum steht sie dort, wo die Anbindung steht
+			zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work, (gint) id,
+					&root_anker, NULL);
 			id = link;
-		else if (type == 4) {
+		} else if (type == 4) {
 			gint root_link = 0;
 			gint root_ziel = 0;
 
@@ -1087,7 +1149,7 @@ static void springe_zu(Fenster *f, gint64 id) {
 					gtk_window_present(GTK_WINDOW(zond->app_window));
 					gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[b_link]));
 
-					return;
+					return TRUE;
 				}
 			}
 			id = link;
@@ -1095,13 +1157,13 @@ static void springe_zu(Fenster *f, gint64 id) {
 	}
 	g_clear_error(&error);
 
-	if (zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work, (gint) id,
+	if (root_anker == 1 || root_anker == 2)
+		root = root_anker;
+	else if (zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work, (gint) id,
 			&root, &error)) {
 		g_clear_error(&error);
-		display_message(f->fenster, "Der Knoten hat keine Verbindung zu einer "
-				"Wurzel.", NULL);
 
-		return;
+		return FALSE;
 	}
 
 	if (root == 1)
@@ -1109,20 +1171,16 @@ static void springe_zu(Fenster *f, gint64 id) {
 	else if (root == 2)
 		baum = BAUM_AUSWERTUNG;
 	else {
-		display_message(f->fenster, "Der Knoten gehört zum Dateibaum und kann "
-				"nicht angezeigt werden.", NULL);
 
-		return;
+		return FALSE;
 	}
 
 	iter = zond_tree_store_get_iter_by_node_id(
 			ZOND_TREE_STORE(gtk_tree_view_get_model(
 					GTK_TREE_VIEW(zond->treeview[baum]))), (gint) id);
 	if (!iter) {
-		display_message(f->fenster, "Der Knoten ist im Baum nicht sichtbar.",
-				NULL);
 
-		return;
+		return FALSE;
 	}
 
 	sond_treeview_expand_to_row(zond->treeview[baum], iter);
@@ -1131,6 +1189,41 @@ static void springe_zu(Fenster *f, gint64 id) {
 
 	gtk_window_present(GTK_WINDOW(zond->app_window));
 	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[baum]));
+
+	return TRUE;
+}
+
+//Springt zum Knoten, sonst zum nächsten übergeordneten, der im Baum steht
+static void springe_zu(Fenster *f, gint64 id) {
+	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	gint64 cur = id;
+
+	if (springe_versuch(f, id))
+		return;
+
+	for (gint schritt = 0; schritt < 200 && cur > 0; schritt++) {
+		gint parent = 0;
+		GError *error = NULL;
+
+		if (zond_dbase_get_parent(work, (gint) cur, &parent, &error)) {
+			g_clear_error(&error);
+
+			break;
+		}
+		if (parent <= 0)
+			break;
+		cur = parent;
+		if (springe_versuch(f, cur)) {
+			display_message(f->fenster, "Der Eintrag ist im Baum nicht sichtbar. "
+					"Angezeigt wird der nächste sichtbare übergeordnete Eintrag.",
+					NULL);
+
+			return;
+		}
+	}
+
+	display_message(f->fenster, "Der Eintrag ist im Baum nicht sichtbar, und kein "
+			"übergeordneter Eintrag wird dort angezeigt.", NULL);
 
 	return;
 }
@@ -1164,8 +1257,8 @@ static void cb_row_activated(GtkTreeView *tv, GtkTreePath *path,
 	}
 	if (id <= 0) {
 		display_message(f->fenster, "Dieser Eintrag wird im Baum nicht "
-				"angezeigt und hat keinen übergeordneten Eintrag, zu dem man "
-				"springen könnte.", NULL);
+				"angezeigt. Ein Doppelklick auf Übergeordnet, Vorgänger oder "
+				"Nachfolger darunter springt zu seiner Umgebung.", NULL);
 
 		return;
 	}
@@ -1327,9 +1420,9 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 				"»Aktion« ist vorgeschlagen, was mit dem Eintrag geschehen soll; mit "
 				"einem Klick auf die Zelle können Sie etwas anderes wählen. »Nichts "
 				"tun« lässt einen Eintrag unverändert.\n"
-				"Oben stehen die Einträge, die im Baum angezeigt werden (Doppelklick "
-				"springt hin), darunter die nicht angezeigten (Doppelklick springt "
-				"zu dem Eintrag, an dem sie hängen).\n"
+				"Die Einträge sind nach ihrer Art gruppiert. Ein Doppelklick springt im "
+				"Baum zum Eintrag; ist er nicht sichtbar, zum nächsten sichtbaren "
+				"übergeordneten.\n"
 				"Einträge, die nirgends hinpassen oder nicht angezeigt wurden, "
 				"werden in einem neuen Punkt »Wiedergefundene Knoten« abgelegt. "
 				"Dort können Sie sie einsortieren oder löschen.\n"
@@ -1369,6 +1462,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	g_signal_connect(f->treeview, "query-tooltip", G_CALLBACK(cb_tooltip), f);
 	spalte_hinzu(f->treeview, "Eintrag", SP_TEXT, TRUE);
 	spalte_hinzu(f->treeview, "Beschreibung", SP_DETAIL, TRUE);
+	spalte_hinzu(f->treeview, "Im Baum", SP_ORT, FALSE);
 	spalte_aktion_hinzu(f);
 	g_signal_connect(f->treeview, "row-activated", G_CALLBACK(cb_row_activated),
 			f);
