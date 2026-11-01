@@ -56,52 +56,42 @@ static struct {
 		"fehlt einer oder ist verändert. Ohne diese Einträge lässt sich das "
 		"Projekt nicht sauber laden.\n"
 		"»Neu anlegen« bzw. »Angaben korrigieren« stellt sie wieder her." },
-	[DB_REGEL_A2] = { "A2", "Einträge mit unbekanntem Typ", "Unbekannter Typ",
-		"Jeder Eintrag ist ein Punkt, eine Anbindung, eine Copy, ein Link oder eine Datei/ein Abschnitt.",
-		"Jeder Eintrag im Projekt hat eine feste Art: Punkt (Gliederung), Anbindung "
+	[DB_REGEL_C1] = { "C1", "Einträge mit unbekanntem Typ", "Unbekannter Typ",
+		"Jeder Eintrag ist ein Strukturpunkt, eine Anbindung, eine Copy, ein Link oder eine Datei/ein Abschnitt.",
+		"Jeder Eintrag im Projekt hat eine feste Art: Strukturpunkt (Gliederung), Anbindung "
 		"(angebundene Datei im Bestandsverzeichnis), Copy, Link (beide in "
 		"der Auswertung) oder Datei/Abschnitt. Dieser Eintrag hat eine andere oder "
 		"gar keine Art und wird von keiner Funktion des Programms verstanden.\n"
-		"»In normalen Punkt umwandeln« macht ihn zu einem Punkt; sein Text bleibt "
+		"»In Strukturpunkt umwandeln« macht ihn zu einem Strukturpunkt; sein Text bleibt "
 		"erhalten. »Löschen« entfernt ihn mit allem, was darunter hängt." },
-	[DB_REGEL_B1] = { "B1", "Einträge an unzulässiger Stelle", "Unzulässige Stelle",
+	[DB_REGEL_C2] = { "C2", "Einträge an unzulässiger Stelle", "Unzulässige Stelle",
 		"Unter Anbindungen und Links steht nichts; Abschnitte stehen nur unter Dateien oder Abschnitten.",
 		"Nicht jeder Eintrag darf unter jedem stehen. Anbindungen und "
 		"Links haben keine Unterpunkte. Abschnitte stehen nur unter einer "
 		"Datei oder einem Abschnitt, alles andere nur unter dem Anfang des "
-		"Bestandsverzeichnisses bzw. der Auswertung, unter einem Punkt oder (in "
+		"Bestandsverzeichnisses bzw. der Auswertung, unter einem Strukturpunkt oder (in "
 		"der Auswertung) unter einer Copy. Dieser Eintrag steht an einer Stelle, "
 		"an die er nicht gehört.\n"
 		"»In »Wiedergefundene Knoten« ablegen« verschiebt ihn samt allem, was "
 		"darunter hängt, in einen neuen Sammelpunkt, von wo Sie ihn einsortieren "
 		"können." },
-	[DB_REGEL_B2] = { "B2", "Einträge im falschen Bereich", "Falscher Bereich",
+	[DB_REGEL_C3] = { "C3", "Einträge im falschen Bereich", "Falscher Bereich",
 		"Anbindungen gehören ins Bestandsverzeichnis, Copies und Links in die Auswertung.",
 		"Das Bestandsverzeichnis enthält die angebundenen Dateien (Anbindungen), "
 		"die Auswertung enthält Copies und Links. Dieser Eintrag steht im "
 		"jeweils anderen Bereich.\n"
 		"»In »Wiedergefundene Knoten« ablegen« legt ihn im richtigen Bereich "
 		"ab." },
-	[DB_REGEL_B3] = { "B3", "Einträge mit unpassenden Angaben", "Unpassende Angaben",
-		"Jede Art von Eintrag hat bestimmte Angaben: Punkte Symbol und Text, Anbindungen und Links nur einen Verweis.",
-		"Zu jeder Art von Eintrag gehören bestimmte Angaben: Ein Punkt hat Symbol "
+	[DB_REGEL_C4] = { "C4", "Einträge mit unpassenden Angaben", "Unpassende Angaben",
+		"Jede Art von Eintrag hat bestimmte Angaben: Strukturpunkte Symbol und Text, Anbindungen und Links nur einen Verweis.",
+		"Zu jeder Art von Eintrag gehören bestimmte Angaben: Ein Strukturpunkt hat Symbol "
 		"und Text, aber keinen Verweis. Eine Anbindung oder ein Link hat nur "
 		"einen Verweis und weder Text noch Symbol. Hier fehlt eine nötige Angabe "
 		"oder es ist eine gesetzt, die nicht zur Art passt.\n"
 		"»Angaben korrigieren« ergänzt Standardwerte (Symbol, Text) und entfernt "
 		"Überflüssiges. Bei Dateien und Abschnitten ist keine automatische "
 		"Korrektur möglich." },
-	[DB_REGEL_D1] = { "D1", "Einträge, die im Baum nicht angezeigt werden", "Nicht angezeigt",
-		"Die Einträge unter einem Eintrag bilden eine lückenlose Kette; nur eine solche wird angezeigt.",
-		"Die Einträge unter einem Punkt sind in der Datei wie eine Kette "
-		"aufgereiht: Jeder verweist auf den, der vor ihm kommt. Hier ist die "
-		"Kette gerissen oder verzweigt sich, deshalb zeigt das Programm nur einen "
-		"Teil an. Die übrigen Einträge sind in der Datei vorhanden, werden aber "
-		"nicht angezeigt.\n"
-		"»In »Wiedergefundene Knoten« ablegen« macht sie wieder sichtbar. Bei "
-		"Abschnitten stellt »An die richtige Stelle einordnen« die Reihenfolge "
-		"nach der Lage in der Datei her." },
-	[DB_REGEL_D2] = { "D2", "Einträge ohne Verbindung zum Baum", "Ohne Verbindung",
+	[DB_REGEL_B1] = { "B1", "Einträge ohne Verbindung zum Baum", "Ohne Verbindung",
 		"Jeder Eintrag muss über seine übergeordneten Einträge bis zum Bestandsverzeichnis oder zur Auswertung führen.",
 		"Jeder Eintrag gehört zu einem übergeordneten Eintrag, und dessen Kette "
 		"führt bis zum Anfang des Bestandsverzeichnisses oder der Auswertung. "
@@ -110,29 +100,59 @@ static struct {
 		"vom Baum abgeschnitten und deshalb unsichtbar.\n"
 		"»In »Wiedergefundene Knoten« ablegen« hängt ihn in den passenden Bereich "
 		"(Anbindungen ins Bestandsverzeichnis, sonst in die Auswertung)." },
-	[DB_REGEL_E1] = { "E1", "Verweise ohne Ziel", "Verweis ohne Ziel",
-		"Anbindungen, Copies und Links müssen auf etwas verweisen, das es gibt.",
+	[DB_REGEL_B2] = { "B2", "Einträge, die im Baum nicht angezeigt werden", "Nicht angezeigt",
+		"Die Einträge unter einem Eintrag bilden eine lückenlose Kette; nur eine solche wird angezeigt.",
+		"Die Einträge unter einem Strukturpunkt sind in der Datei wie eine Kette "
+		"aufgereiht: Jeder verweist auf den, der vor ihm kommt. Hier ist die "
+		"Kette gerissen oder verzweigt sich, deshalb zeigt das Programm nur einen "
+		"Teil an. Die übrigen Einträge sind in der Datei vorhanden, werden aber "
+		"nicht angezeigt.\n"
+		"»In »Wiedergefundene Knoten« ablegen« macht sie wieder sichtbar. Bei "
+		"Abschnitten stellt »An die richtige Stelle einordnen« die Reihenfolge "
+		"nach der Lage in der Datei her." },
+	[DB_REGEL_D1] = { "D1", "Verweise mit ungültigem Ziel", "Ungültiges Ziel",
+		"Ein Verweis zeigt auf einen Eintrag, den es gibt und der von der richtigen Art ist.",
 		"Anbindungen, Copies und Links zeigen auf etwas: eine Datei, einen "
-		"Abschnitt oder einen anderen Eintrag. Hier ist das Ziel gelöscht worden "
-		"oder wurde nie gesetzt. Eine solche Anbindung oder ein solcher Link ist "
-		"nutzlos und kann beim Laden Fehler verursachen.\n"
+		"Abschnitt oder einen anderen Eintrag. Hier ist das Ziel gelöscht worden, "
+		"wurde nie gesetzt oder ist von einer Art, auf die so nicht verwiesen werden "
+		"darf: Eine Anbindung verweist nur auf eine Datei oder einen Abschnitt, "
+		"eine Copy auf eine Anbindung oder Datei, ein Link auf einen "
+		"Strukturpunkt, eine Anbindung, eine Copy oder eine Datei, aber nie auf "
+		"einen anderen Link. Ein solcher Verweis ist nutzlos und kann beim Laden "
+		"Fehler verursachen.\n"
 		"Anbindungen und Links werden gelöscht. Eine Copy behält ihren "
-		"eigenen Text und wird »in einen normalen Punkt umgewandelt«." },
-	[DB_REGEL_E2] = { "E2", "Verweise auf ein unzulässiges Ziel", "Unzulässiges Ziel",
-		"Anbindungen verweisen nur auf Dateien/Abschnitte, Links nie auf Links.",
-		"Das Ziel des Verweises existiert, ist aber von einer Art, auf die so "
-		"nicht verwiesen werden darf: Eine Anbindung verweist nur auf eine Datei "
-		"oder einen Abschnitt, eine Copy auf eine Anbindung oder Datei, ein "
-		"Link auf einen Punkt, eine Anbindung, eine Copy oder eine "
-		"Datei, aber nie auf einen anderen Link.\n"
-		"Behandlung wie bei »Verweise ohne Ziel«." },
-	[DB_REGEL_E3] = { "E3", "Datei mehrfach angebunden", "Mehrfach angebunden",
+		"eigenen Text und wird »in einen Strukturpunkt umgewandelt«." },
+	[DB_REGEL_D2] = { "D2", "Datei mehrfach angebunden", "Mehrfach angebunden",
 		"Jede Datei und jeder Abschnitt darf nur einmal angebunden sein.",
 		"Der Baum zeigt eine Datei oder einen Abschnitt nur an einer Stelle. Ist "
 		"sie mehrfach angebunden, wandert der Eintrag zur zuletzt geladenen "
 		"Anbindung; die übrigen erscheinen leer oder gar nicht.\n"
 		"Die überzähligen Anbindungen lassen sich löschen; die Datei selbst "
 		"bleibt dabei erhalten." },
+	[DB_REGEL_E1] = { "E1", "Abschnitte in der falschen Datei", "Falsche Datei",
+		"Ein Abschnitt steht unter der Datei oder dem Abschnitt, zu dem er gehört.",
+		"Jeder Abschnitt gehört zu einer Datei und hängt unter dieser Datei oder "
+		"unter einem Abschnitt derselben Datei. Hier gehört der Abschnitt zu einer "
+		"anderen Datei als der Eintrag, unter dem er steht.\n"
+		"»Löschen« entfernt den Abschnitt samt Unterabschnitten, wenn nichts "
+		"darauf verweist." },
+	[DB_REGEL_E2] = { "E2", "Doppelte Dateien oder Abschnitte", "Doppelt vorhanden",
+		"Jede Datei und jeder Abschnitt steht nur einmal in der Dateiliste.",
+		"Die Dateiliste enthält zu jeder Datei und zu jedem Abschnitt genau eine "
+		"Zeile. Hier gibt es dieselbe Zeile mehrfach, zum Beispiel nach einem "
+		"Fehler beim Verschieben. Anbindungen und der Volltextindex können dadurch "
+		"auf die falsche Zeile zeigen.\n"
+		"»Löschen« entfernt die überzählige Zeile samt ihren Abschnitten, wenn "
+		"nichts darauf verweist. Zusammenführen ist nicht möglich, weil dabei "
+		"Verweise umgehängt werden müssten." },
+	[DB_REGEL_E3] = { "E3", "Abschnitte, die nicht zusammenpassen", "Abschnitte passen nicht",
+		"Abschnitte einer Datei liegen nebeneinander oder ganz ineinander, nie überschneidend.",
+		"Die Abschnitte einer Datei gliedern sie nach Seite und Position. Zwei "
+		"Abschnitte auf derselben Ebene dürfen sich nicht überschneiden, und ein "
+		"Abschnitt muss ganz in seinem übergeordneten Abschnitt liegen. Hier ist "
+		"das verletzt, zum Beispiel weil sich die Datei nachträglich geändert hat.\n"
+		"»Löschen« entfernt den Abschnitt samt Unterabschnitten, wenn nichts "
+		"darauf verweist." },
 	[DB_REGEL_F1] = { "F1", "Zustand der Datenbankdatei", "Datenbankdatei",
 		"Die Datenbankdatei selbst muss für SQLite in Ordnung sein.",
 		"SQLite hat bei der Prüfung der Datei selbst (nicht der Baumstruktur) "
@@ -147,7 +167,7 @@ static gchar const *const akt_namen[DB_NUM_AKT] = {
 	[DB_AKT_LOESCHEN] = "Löschen",
 	[DB_AKT_SAMMELPUNKT] = "In »Wiedergefundene Knoten« ablegen",
 	[DB_AKT_EINORDNEN] = "An die richtige Stelle einordnen",
-	[DB_AKT_UMWANDELN] = "In normalen Punkt umwandeln",
+	[DB_AKT_UMWANDELN] = "In Strukturpunkt umwandeln",
 	[DB_AKT_BEREINIGEN] = "Angaben korrigieren",
 	[DB_AKT_ANLEGEN] = "Neu anlegen"
 };
@@ -170,7 +190,7 @@ gchar const* db_typ_name(gint typ) {
 	case 0:
 		return "Wurzel";
 	case 1:
-		return "Punkt";
+		return "Strukturpunkt";
 	case 2:
 		return "Anbindung";
 	case 3:
@@ -202,18 +222,20 @@ gchar const* db_akt_beschreibung(DbAkt akt) {
 	case DB_AKT_BEHALTEN:
 		return "Der Eintrag bleibt unverändert, der Befund bleibt bestehen.";
 	case DB_AKT_LOESCHEN:
-		return "Der Eintrag wird samt allem, was darunter hängt, gelöscht. "
-				"Dateien und Abschnitte werden nie gelöscht, ebenso nichts, "
-				"worauf noch etwas von außerhalb verweist.";
+		return "Der Eintrag wird samt allem, was darunter hängt, gelöscht; die "
+				"folgenden Einträge rücken nach. Dateien und Abschnitte werden nur "
+				"gelöscht, wenn sie doppelt sind oder nicht zusammenpassen, und nie, "
+				"wenn noch etwas darauf verweist. Die Datei auf der Festplatte "
+				"bleibt immer erhalten.";
 	case DB_AKT_SAMMELPUNKT:
 		return "Der Eintrag (bzw. die nicht angezeigten Einträge) wird mit allem "
-				"Darunterliegenden in einen neuen Punkt »Wiedergefundene Knoten« "
+				"Darunterliegenden in einen neuen Strukturpunkt »Wiedergefundene Knoten« "
 				"gelegt. Dort können Sie ihn einsortieren oder löschen.";
 	case DB_AKT_EINORDNEN:
 		return "Die Abschnitte werden nach ihrer Lage in der Datei neu "
 				"angeordnet.";
 	case DB_AKT_UMWANDELN:
-		return "Der Eintrag wird zu einem normalen Punkt. Sein Text bleibt "
+		return "Der Eintrag wird zu einem Strukturpunkt. Sein Text bleibt "
 				"erhalten, der Verweis entfällt.";
 	case DB_AKT_BEREINIGEN:
 		return "Fehlende Angaben (Symbol, Text) werden ergänzt, nicht passende "
@@ -263,6 +285,9 @@ void db_regel_ergebnis_clear(DbRegelErgebnis *erg) {
 	if (erg->maengel)
 		g_ptr_array_unref(erg->maengel);
 	erg->maengel = NULL;
+	if (erg->unsichtbar)
+		g_hash_table_unref(erg->unsichtbar);
+	erg->unsichtbar = NULL;
 
 	return;
 }
@@ -593,7 +618,7 @@ static void pruefe_a1(Ctx *c, GPtrArray *m) {
 	return;
 }
 
-/* ---- Regeln A2, B1, B2, B3, D2, E1, E2 -------------------------------------- */
+/* ---- Regeln B1, C1, C2, C3, C4, D1 -------------------------------------- */
 
 static gboolean eltern_zulaessig(gint kind, gint eltern) {
 	switch (kind) {
@@ -643,16 +668,16 @@ static void mangel_d2(Ctx *c, GPtrArray *m, gint i, gchar *text) {
 	klassifiziere(c, i, &anker, &copylink, &filepart);
 
 	if (filepart || z->type == 5) {
-		mg = neu_mangel(m, DB_REGEL_D2, z->id, z->parent, 4, M(DB_AKT_BEHALTEN),
+		mg = neu_mangel(m, DB_REGEL_B1, z->id, z->parent, 4, M(DB_AKT_BEHALTEN),
 				DB_AKT_BEHALTEN, g_strdup_printf("%s (enthält Dateien oder "
 						"Abschnitte)", text));
 	} else if (anker && copylink) {
-		mg = neu_mangel(m, DB_REGEL_D2, z->id, z->parent, 4,
+		mg = neu_mangel(m, DB_REGEL_B1, z->id, z->parent, 4,
 				M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
 				g_strdup_printf("%s (darunter sowohl Anbindungen als auch "
 						"Copies oder Links)", text));
 	} else {
-		mg = neu_mangel(m, DB_REGEL_D2, z->id, z->parent, 4,
+		mg = neu_mangel(m, DB_REGEL_B1, z->id, z->parent, 4,
 				M(DB_AKT_SAMMELPUNKT) | M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN),
 				DB_AKT_SAMMELPUNKT, g_strdup(text));
 		mg->ziel_baum = anker ? 1 : 2;
@@ -701,7 +726,7 @@ static void pruefe_b3(Ctx *c, GPtrArray *m, gint i) {
 
 	for (guint k = 0; k < G_N_ELEMENTS(spalten); k++) {
 		if ((z->flags & spalten[k].f) && (darf_nicht & spalten[k].f))
-			g_string_append_printf(probleme, "%s»%s« darf hier nicht gesetzt sein",
+			g_string_append_printf(probleme, "%s»%s« darf nicht gesetzt sein",
 					probleme->len ? "; " : "", spalten[k].name);
 		else if (!(z->flags & spalten[k].f) && (muss & spalten[k].f)) {
 			g_string_append_printf(probleme, "%s»%s« fehlt", probleme->len ? "; " : "",
@@ -716,7 +741,7 @@ static void pruefe_b3(Ctx *c, GPtrArray *m, gint i) {
 		bereinigbar = FALSE;
 
 	if (probleme->len)
-		neu_mangel(m, DB_REGEL_B3, z->id, z->parent, c->baum[i],
+		neu_mangel(m, DB_REGEL_C4, z->id, z->parent, c->baum[i],
 				bereinigbar ? (M(DB_AKT_BEREINIGEN) | M(DB_AKT_LOESCHEN)
 						| M(DB_AKT_BEHALTEN)) : M(DB_AKT_BEHALTEN),
 				bereinigbar ? DB_AKT_BEREINIGEN : DB_AKT_BEHALTEN,
@@ -747,7 +772,7 @@ static void pruefe_verweis(Ctx *c, GPtrArray *m, gint i) {
 	}
 
 	if (!(z->flags & F_LINK)) {
-		neu_mangel(m, DB_REGEL_E1, z->id, z->parent, c->baum[i], aktionen,
+		neu_mangel(m, DB_REGEL_D1, z->id, z->parent, c->baum[i], aktionen,
 				standard, g_strdup("Verweist auf nichts"));
 
 		return;
@@ -755,9 +780,8 @@ static void pruefe_verweis(Ctx *c, GPtrArray *m, gint i) {
 
 	t = finde(c, z->link);
 	if (t < 0) {
-		neu_mangel(m, DB_REGEL_E1, z->id, z->parent, c->baum[i], aktionen,
-				standard, g_strdup("Das Ziel, auf das verwiesen wird, existiert "
-						"nicht mehr"));
+		neu_mangel(m, DB_REGEL_D1, z->id, z->parent, c->baum[i], aktionen,
+				standard, g_strdup("Ziel existiert nicht mehr"));
 
 		return;
 	}
@@ -777,18 +801,15 @@ static void pruefe_verweis(Ctx *c, GPtrArray *m, gint i) {
 			break;
 		}
 		if (!ok)
-			neu_mangel(m, DB_REGEL_E2, z->id, z->parent, c->baum[i], aktionen,
-					standard, g_strdup_printf("Das Ziel ist von der Art »%s« - darauf darf "
-							"%s nicht verweisen", db_typ_name(tt),
-							(z->type == 2) ? "eine Anbindung" :
-									((z->type == 3) ? "eine Copy" :
-											"ein Link")));
+			neu_mangel(m, DB_REGEL_D1, z->id, z->parent, c->baum[i], aktionen,
+					standard, g_strdup_printf("Ziel »%s« - nicht erlaubt für %s",
+							db_typ_name(tt), db_typ_name(z->type)));
 	}
 
 	return;
 }
 
-//E3: mehrere Anbindungen auf dieselbe Datei/denselben Abschnitt; die mit der höchsten ID bleibt
+//D2: mehrere Anbindungen auf dieselbe Datei/denselben Abschnitt; die mit der höchsten ID bleibt
 static void pruefe_mehrfach(Ctx *c, GPtrArray *m) {
 	g_autoptr(GHashTable) letzte = g_hash_table_new_full(g_int64_hash,
 			g_int64_equal, NULL, g_free);
@@ -808,13 +829,185 @@ static void pruefe_mehrfach(Ctx *c, GPtrArray *m) {
 			continue;
 		id = g_hash_table_lookup(letzte, &z->link);
 		if (id && *id != z->id)
-			neu_mangel(m, DB_REGEL_E3, z->id, z->parent, c->baum[i],
+			neu_mangel(m, DB_REGEL_D2, z->id, z->parent, c->baum[i],
 					M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
-					g_strdup("Dieselbe Datei ist noch einmal angebunden - im Baum "
-							"erscheint sie nur an einer Stelle"));
+					g_strdup("Datei mehrfach angebunden - im Baum nur einmal"));
 	}
 
 	return;
+}
+
+/* ---- Regeln E1 bis E3: Dateibaum --------------------------------------------- */
+
+typedef struct {
+	gint64 id;
+	gint64 parent;
+	gchar *fp;
+	gchar *sec;
+	gint vs, vi, bs, bi; //Anfang und Ende des Abschnitts (Seite, Index)
+	gboolean ok; //Abschnitt lesbar
+} DateiZeile;
+
+static void dateizeile_free(gpointer p) {
+	DateiZeile *d = p;
+
+	g_free(d->fp);
+	g_free(d->sec);
+	g_free(d);
+
+	return;
+}
+
+static gint pos_vergleich(gint s1, gint i1, gint s2, gint i2) {
+	if (s1 != s2)
+		return (s1 < s2) ? -1 : 1;
+
+	return (i1 > i2) - (i1 < i2);
+}
+
+static gboolean gleicher_bereich(DateiZeile const *a, DateiZeile const *b) {
+	return a->vs == b->vs && a->vi == b->vi && a->bs == b->bs && a->bi == b->bi;
+}
+
+static gint cmp_dateizeile(gconstpointer pa, gconstpointer pb) {
+	DateiZeile const *a = *(DateiZeile* const*) pa;
+	DateiZeile const *b = *(DateiZeile* const*) pb;
+	gint c = pos_vergleich(a->vs, a->vi, b->vs, b->vi);
+
+	if (c)
+		return c;
+
+	return (a->id > b->id) - (a->id < b->id);
+}
+
+static gint pruefe_dateibaum(sqlite3 *db, Ctx *c, GPtrArray *m, GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	gint rc = 0;
+	g_autoptr(GPtrArray) alle = g_ptr_array_new_with_free_func(dateizeile_free);
+	g_autoptr(GHashTable) erste = g_hash_table_new_full(g_str_hash, g_str_equal,
+			g_free, NULL);
+	g_autoptr(GHashTable) nach_id = g_hash_table_new(g_int64_hash, g_int64_equal);
+	g_autoptr(GHashTable) geschwister = g_hash_table_new_full(g_int64_hash,
+			g_int64_equal, g_free, (GDestroyNotify) g_ptr_array_unref);
+	GHashTableIter it;
+	gpointer key, value;
+
+	rc = sqlite3_prepare_v2(db, "SELECT ID, parent_ID, file_part, section FROM "
+			"knoten WHERE type=5 ORDER BY ID;", -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		DateiZeile *d = g_new0(DateiZeile, 1);
+
+		d->id = sqlite3_column_int64(stmt, 0);
+		d->parent = sqlite3_column_int64(stmt, 1);
+		d->fp = g_strdup((gchar const*) sqlite3_column_text(stmt, 2));
+		d->sec = g_strdup((gchar const*) sqlite3_column_text(stmt, 3));
+		if (d->sec) {
+			if (sscanf(d->sec, "{{%d,%d}{%d,%d}}", &d->vs, &d->vi, &d->bs, &d->bi) == 4)
+				d->ok = TRUE;
+			else if (sscanf(d->sec, "{%d,%d}", &d->vs, &d->vi) == 2) {
+				d->bs = d->vs;
+				d->bi = d->vi;
+				d->ok = TRUE;
+			}
+		}
+		g_ptr_array_add(alle, d);
+	}
+	sqlite3_finalize(stmt);
+	if (rc != SQLITE_DONE) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+
+	//E2: gleicher Pfad und Abschnitt; die Zeile mit der kleinsten Nummer gilt als erste
+	for (guint i = 0; i < alle->len; i++) {
+		DateiZeile *d = g_ptr_array_index(alle, i);
+		g_autofree gchar *schluessel = g_strdup_printf("%s|%s", d->fp ? d->fp : "",
+				d->sec ? d->sec : "");
+		gpointer vorher = g_hash_table_lookup(erste, schluessel);
+		gint idx = finde(c, d->id);
+
+		g_hash_table_insert(nach_id, &d->id, d);
+		if (!vorher) {
+			g_hash_table_insert(erste, g_strdup(schluessel), d);
+
+			continue;
+		}
+		neu_mangel(m, DB_REGEL_E2, d->id, d->parent, (idx >= 0) ? c->baum[idx] : 3,
+				M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
+				g_strdup_printf("%s doppelt - schon vorhanden als Nr. %" G_GINT64_FORMAT,
+						d->sec ? "Abschnitt" : "Datei",
+						((DateiZeile*) vorher)->id));
+	}
+
+	//E1: ein Abschnitt hängt unter einem Eintrag derselben Datei
+	for (guint i = 0; i < alle->len; i++) {
+		DateiZeile *d = g_ptr_array_index(alle, i);
+		DateiZeile *p = g_hash_table_lookup(nach_id, &d->parent);
+		gint idx = finde(c, d->id);
+
+		if (d->sec && p && g_strcmp0(d->fp, p->fp))
+			neu_mangel(m, DB_REGEL_E1, d->id, d->parent, (idx >= 0) ? c->baum[idx] : 3,
+					M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
+					g_strdup_printf("Abschnitt gehört zu einer anderen Datei als "
+							"Nr. %" G_GINT64_FORMAT, p->id));
+	}
+
+	//E3: Abschnitte liegen im übergeordneten Abschnitt und überschneiden sich nicht
+	for (guint i = 0; i < alle->len; i++) {
+		DateiZeile *d = g_ptr_array_index(alle, i);
+		DateiZeile *p = g_hash_table_lookup(nach_id, &d->parent);
+		gint idx = finde(c, d->id);
+		GPtrArray *liste = NULL;
+
+		if (!d->ok)
+			continue;
+
+		if (p && p->ok && (pos_vergleich(d->vs, d->vi, p->vs, p->vi) < 0
+				|| pos_vergleich(d->bs, d->bi, p->bs, p->bi) > 0))
+			neu_mangel(m, DB_REGEL_E3, d->id, d->parent, (idx >= 0) ? c->baum[idx] : 3,
+					M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
+					g_strdup_printf("Abschnitt liegt nicht im Abschnitt Nr. %"
+							G_GINT64_FORMAT, p->id));
+
+		liste = g_hash_table_lookup(geschwister, &d->parent);
+		if (!liste) {
+			gint64 *k = g_new(gint64, 1);
+
+			*k = d->parent;
+			liste = g_ptr_array_new();
+			g_hash_table_insert(geschwister, k, liste);
+		}
+		g_ptr_array_add(liste, d);
+	}
+
+	g_hash_table_iter_init(&it, geschwister);
+	while (g_hash_table_iter_next(&it, &key, &value)) {
+		GPtrArray *liste = value;
+		DateiZeile *weit = NULL; //bisher am weitesten reichender Abschnitt
+
+		g_ptr_array_sort(liste, cmp_dateizeile);
+		for (guint i = 0; i < liste->len; i++) {
+			DateiZeile *d = g_ptr_array_index(liste, i);
+			gint idx = finde(c, d->id);
+
+			if (weit && !gleicher_bereich(weit, d)
+					&& pos_vergleich(d->vs, d->vi, weit->bs, weit->bi) <= 0)
+				neu_mangel(m, DB_REGEL_E3, d->id, d->parent,
+						(idx >= 0) ? c->baum[idx] : 3,
+						M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN, g_strdup_printf("Abschnitt überschneidet "
+								"sich mit Nr. %" G_GINT64_FORMAT, weit->id));
+			if (!weit || pos_vergleich(d->bs, d->bi, weit->bs, weit->bi) > 0)
+				weit = d;
+		}
+	}
+
+	return 0;
 }
 
 static void pruefe_zeilen(Ctx *c, GPtrArray *m) {
@@ -826,12 +1019,11 @@ static void pruefe_zeilen(Ctx *c, GPtrArray *m) {
 			continue;
 
 		if (!typ_gueltig(z->type)) {
-			neu_mangel(m, DB_REGEL_A2, z->id, z->parent, c->baum[i],
+			neu_mangel(m, DB_REGEL_C1, z->id, z->parent, c->baum[i],
 					M(DB_AKT_UMWANDELN) | M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN),
 					DB_AKT_UMWANDELN, (z->type < 0) ?
-							g_strdup("Der Eintrag hat keinen Typ") :
-							g_strdup_printf("Der Eintrag hat einen unbekannten Typ "
-									"(%d)", z->type));
+							g_strdup("Keine Art") :
+							g_strdup_printf("Unbekannte Art (Typ %d)", z->type));
 
 			continue;
 		}
@@ -839,40 +1031,38 @@ static void pruefe_zeilen(Ctx *c, GPtrArray *m) {
 		if (z->parent != 0)
 			p = finde(c, z->parent);
 
-		//D2: keine Verbindung zu einer Wurzel
+		//B1: keine Verbindung zu einer Wurzel
 		if (z->parent == 0 && z->type != 5)
-			mangel_d2(c, m, (gint) i, g_strdup("Gehört zu keinem übergeordneten Eintrag"));
+			mangel_d2(c, m, (gint) i, g_strdup("Kein übergeordneter Eintrag"));
 		else if (z->parent != 0 && p < 0)
-			mangel_d2(c, m, (gint) i, g_strdup("Der übergeordnete Eintrag existiert nicht mehr"));
+			mangel_d2(c, m, (gint) i, g_strdup("Übergeordneter Eintrag existiert nicht mehr"));
 		else if (c->zyklus[i])
-			mangel_d2(c, m, (gint) i, g_strdup("Die übergeordneten Einträge verweisen "
-					"im Kreis aufeinander"));
+			mangel_d2(c, m, (gint) i, g_strdup("Übergeordnete Einträge im Kreis"));
 
-		//B1: Elternknoten passt nicht zum Typ
+		//C2: Elternknoten passt nicht zum Typ
 		if (p >= 0 && z->parent != 0) {
 			Zeile *pz = zeile(c, p);
 			gboolean pt_gueltig = typ_gueltig(pz->type) || (pz->type == 0
 					&& (pz->id == 1 || pz->id == 2));
 
 			if (pt_gueltig && !eltern_zulaessig(z->type, pz->type)) {
-				DbMangel *mg = neu_mangel(m, DB_REGEL_B1, z->id, z->parent,
+				DbMangel *mg = neu_mangel(m, DB_REGEL_C2, z->id, z->parent,
 						c->baum[i], (z->type == 5) ? M(DB_AKT_BEHALTEN) :
 								(M(DB_AKT_SAMMELPUNKT) | M(DB_AKT_LOESCHEN)
 										| M(DB_AKT_BEHALTEN)),
 						(z->type == 5) ? DB_AKT_BEHALTEN : DB_AKT_SAMMELPUNKT,
-						g_strdup_printf("%s steht unter einem Eintrag der Art "
-								"»%s« - dort darf er nicht stehen",
+						g_strdup_printf("%s steht unter %s - nicht erlaubt",
 								db_typ_name(z->type), db_typ_name(pz->type)));
 
 				mg->ziel_baum = ziel_nach_typ(c, (gint) i);
 			}
 		}
 
-		//B2: falscher Baum - nur der oberste betroffene Knoten
+		//C3: falscher Baum - nur der oberste betroffene Knoten
 		if (falscher_baum(c, (gint) i) && !(p >= 0 && falscher_baum(c, p))) {
-			DbMangel *mg = neu_mangel(m, DB_REGEL_B2, z->id, z->parent, c->baum[i],
+			DbMangel *mg = neu_mangel(m, DB_REGEL_C3, z->id, z->parent, c->baum[i],
 					M(DB_AKT_SAMMELPUNKT) | M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN),
-					DB_AKT_SAMMELPUNKT, g_strdup_printf("%s steht %s, gehört aber %s",
+					DB_AKT_SAMMELPUNKT, g_strdup_printf("%s steht %s, gehört %s",
 							db_typ_name(z->type),
 							(z->type == 2) ? "in der Auswertung" :
 									"im Bestandsverzeichnis",
@@ -889,7 +1079,7 @@ static void pruefe_zeilen(Ctx *c, GPtrArray *m) {
 	return;
 }
 
-/* ---- Regel D1: unsichtbare Zweige ------------------------------------------- */
+/* ---- Regel B2: unsichtbare Zweige ------------------------------------------- */
 
 //Text eines Knotens für Meldungen; ohne Text die Art
 static gchar* kurzname(sqlite3 *db, Ctx *c, gint64 id) {
@@ -915,7 +1105,7 @@ static gchar* kurzname(sqlite3 *db, Ctx *c, gint64 id) {
 /* Beschreibung einer Schleife kurz als "A -> B -> A"; die Liste der Knoten
  * steht in Kettenreihenfolge, der Rest wird nicht aufgezählt. */
 static gchar* schleifentext(sqlite3 *db, Ctx *c, GArray const *ids) {
-	GString *s = g_string_new("Folgen im Kreis aufeinander: ");
+	GString *s = g_string_new("Folgen im Kreis: ");
 	guint max = MIN(ids->len, 5);
 	gint idx_erster = finde(c, g_array_index(ids, gint64, 0));
 	gboolean geschlossen = idx_erster >= 0 && zeile(c, idx_erster)->older
@@ -952,7 +1142,7 @@ static gint pruefe_d1(ZondDBase *zond_dbase, Ctx *c, GPtrArray *m,
 		DbAkt standard = DB_AKT_BEHALTEN;
 
 		if (b->eltern_typ < 0)
-			continue; //Waisen: D2
+			continue; //Waisen: B1
 
 		if (b->eltern_typ == 5) {
 			aktionen = M(DB_AKT_EINORDNEN) | M(DB_AKT_BEHALTEN);
@@ -969,16 +1159,13 @@ static gint pruefe_d1(ZondDBase *zond_dbase, Ctx *c, GPtrArray *m,
 			if (z->sichtbar || !z->knoten_ids->len)
 				continue;
 
-			mg = neu_mangel(m, DB_REGEL_D1, g_array_index(z->knoten_ids, gint64, 0),
+			mg = neu_mangel(m, DB_REGEL_B2, g_array_index(z->knoten_ids, gint64, 0),
 					b->eltern_id, (e >= 0) ? c->baum[e] : 4, aktionen, standard,
 					(z->knoten_ids->len == 1) ?
-							g_strdup("1 Eintrag wird im Baum nicht angezeigt, weil "
-									"die Reihenfolge der Geschwister fehlerhaft "
-									"ist") :
-							g_strdup_printf("%u Einträge werden im Baum nicht "
-									"angezeigt, weil die Reihenfolge der "
-									"Geschwister fehlerhaft ist",
-									z->knoten_ids->len));
+							g_strdup("1 Eintrag nicht angezeigt (Reihenfolge "
+									"fehlerhaft)") :
+							g_strdup_printf("%u Einträge nicht angezeigt "
+									"(Reihenfolge fehlerhaft)", z->knoten_ids->len));
 			g_array_set_size(mg->knoten_ids, 0);
 			g_array_append_vals(mg->knoten_ids, z->knoten_ids->data,
 					z->knoten_ids->len);
@@ -1130,7 +1317,7 @@ static void vereinheitliche(GPtrArray *m) {
 }
 
 //Wird der Eintrag im geladenen Baum angezeigt? Bestimmt auch den nächsten sichtbaren Vorfahren.
-static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
+static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m, GHashTable *versteckt) {
 	guint n = c->rows->len;
 	gboolean *unsichtbar = g_new0(gboolean, n);
 	gboolean *mehrfach = g_new0(gboolean, n);
@@ -1156,26 +1343,25 @@ static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 		if (mg->knoten_id <= 0 || idx < 0)
 			continue;
 
-		if (mg->regel == DB_REGEL_D1) //nicht angezeigte Zweige
+		if (mg->regel == DB_REGEL_B2) //nicht angezeigte Zweige
 			for (guint k = 0; k < mg->knoten_ids->len; k++) {
 				gint x = finde(c, g_array_index(mg->knoten_ids, gint64, k));
 
 				if (x >= 0)
 					unsichtbar[x] = TRUE;
 			}
-		else if (mg->regel == DB_REGEL_E3)
-			mehrfach[idx] = TRUE; //Zeile wandert zur letzten Anbindung, Unterpunkte bleiben sichtbar
 		else if (mg->regel == DB_REGEL_D2)
+			mehrfach[idx] = TRUE; //Zeile wandert zur letzten Anbindung, Unterpunkte bleiben sichtbar
+		else if (mg->regel == DB_REGEL_B1)
 			unsichtbar[idx] = TRUE;
-		else if (mg->regel == DB_REGEL_E1 || mg->regel == DB_REGEL_E2) {
+		else if (mg->regel == DB_REGEL_D1) {
 			//beim Laden übergangen: Anbindung ohne Ziel, Link ohne brauchbares Ziel
 			Zeile *z = zeile(c, idx);
 			gint t = (z->flags & F_LINK) ? finde(c, z->link) : -1;
 
-			if (z->type == 2 && mg->regel == DB_REGEL_E1)
+			if (z->type == 2 && t < 0)
 				unsichtbar[idx] = TRUE;
-			else if (z->type == 4 && (mg->regel == DB_REGEL_E1
-					|| (t >= 0 && zeile(c, t)->type == 4)))
+			else if (z->type == 4 && (t < 0 || zeile(c, t)->type == 4))
 				unsichtbar[idx] = TRUE;
 		}
 	}
@@ -1234,6 +1420,10 @@ static void berechne_sichtbarkeit(Ctx *c, GPtrArray *m) {
 		}
 	}
 
+	for (guint i = 0; i < n; i++)
+		if (unsichtbar[i])
+			g_hash_table_add(versteckt, GINT_TO_POINTER((gint) zeile(c, i)->id));
+
 	g_free(unsichtbar);
 	g_free(mehrfach);
 
@@ -1257,6 +1447,7 @@ gint db_regeln_pruefen(ZondDBase *zond_dbase, gboolean mit_integritaet,
 
 	db_regel_ergebnis_clear(erg);
 	erg->maengel = g_ptr_array_new_with_free_func((GDestroyNotify) db_mangel_free);
+	erg->unsichtbar = g_hash_table_new(g_direct_hash, g_direct_equal);
 
 	if (ctx_laden(db, &c, error))
 		return -1;
@@ -1265,12 +1456,17 @@ gint db_regeln_pruefen(ZondDBase *zond_dbase, gboolean mit_integritaet,
 	pruefe_a1(&c, erg->maengel);
 	pruefe_zeilen(&c, erg->maengel);
 	pruefe_mehrfach(&c, erg->maengel);
+	if (pruefe_dateibaum(db, &c, erg->maengel, error)) {
+		ctx_leeren(&c);
+
+		return -1;
+	}
 	if (pruefe_d1(zond_dbase, &c, erg->maengel, error)) {
 		ctx_leeren(&c);
 
 		return -1;
 	}
-	berechne_sichtbarkeit(&c, erg->maengel);
+	berechne_sichtbarkeit(&c, erg->maengel, erg->unsichtbar);
 	ctx_leeren(&c);
 
 	if (mit_integritaet && pruefe_f1(db, erg->maengel, error))
@@ -1458,12 +1654,14 @@ static gint loesche_gruppe(sqlite3 *db, GArray *roots, DbRegelAktionErgebnis *er
 		g_autofree gchar *sql = NULL;
 		gint64 anzahl = 0;
 
-		//Dateien und Abschnitte werden nie gelöscht
+		//Dateien und Abschnitte unter anderen Einträgen werden nie mitgelöscht; ein
+		//Eintrag der Dateiliste selbst nur auf Wahl bei den Regeln des Dateibaums
 		sql = g_strdup_printf("WITH RECURSIVE sub(ID) AS (SELECT ID FROM knoten "
 				"WHERE ID=%" G_GINT64_FORMAT " UNION SELECT k.ID FROM knoten k "
 				"JOIN sub ON k.parent_ID=sub.ID) SELECT count(*) FROM knoten WHERE "
 				"ID IN (SELECT ID FROM sub) AND type IN (5,6) AND file_part IS NOT "
-				"NULL;", id);
+				"NULL AND (SELECT ifnull(type,-1) FROM knoten WHERE ID=%"
+				G_GINT64_FORMAT ") <> 5;", id, id);
 		if (hole_zahl(db, sql, &anzahl, error))
 			return -1;
 		if (anzahl) {
@@ -1564,7 +1762,7 @@ static gint schicht1(sqlite3 *db, GPtrArray *m, GHashTable *eff,
 	for (guint i = 0; i < m->len; i++) {
 		DbMangel *mg = g_ptr_array_index(m, i);
 
-		if (mg->regel == DB_REGEL_D1)
+		if (mg->regel == DB_REGEL_B2)
 			idmenge_fuege_ein(d1, mg->knoten_id);
 	}
 
@@ -1581,12 +1779,12 @@ static gint schicht1(sqlite3 *db, GPtrArray *m, GHashTable *eff,
 			rc = a1_bereinigen(db, mg->knoten_id, erg, error);
 	}
 
-	//Verschieben und Löschen von Knoten, die nicht zu einem D1-Zweig gehören
+	//Verschieben und Löschen von Knoten, die nicht zu einem B2-Zweig gehören
 	for (guint i = 0; i < m->len && !rc; i++) {
 		DbMangel *mg = g_ptr_array_index(m, i);
 		DbAkt a = eff_aktion(eff, mg->knoten_id);
 
-		if (mg->regel == DB_REGEL_D1 || mg->regel == DB_REGEL_A1
+		if (mg->regel == DB_REGEL_B2 || mg->regel == DB_REGEL_A1
 				|| mg->regel == DB_REGEL_F1 || mg->knoten_id <= 2
 				|| g_hash_table_contains(d1, &mg->knoten_id)
 				|| !(mg->aktionen & M(a)))
@@ -1701,10 +1899,10 @@ static gint schicht2(ZondDBase *zond_dbase, sqlite3 *db, GPtrArray *m,
 		if (!(mg->aktionen & M(a)) || a == DB_AKT_BEHALTEN)
 			continue;
 
-		if (mg->regel == DB_REGEL_B3 && a == DB_AKT_BEREINIGEN) {
+		if (mg->regel == DB_REGEL_C4 && a == DB_AKT_BEREINIGEN) {
 			if (idmenge_fuege_ein(erledigt, mg->knoten_id))
 				rc = bereinige_knoten(db, mg->knoten_id, erg, error);
-		} else if (mg->regel == DB_REGEL_A2 && a == DB_AKT_UMWANDELN) {
+		} else if (mg->regel == DB_REGEL_C1 && a == DB_AKT_UMWANDELN) {
 			if (idmenge_fuege_ein(erledigt, mg->knoten_id)) {
 				g_autofree gchar *sql = g_strdup_printf("UPDATE knoten SET type=1, "
 						"link=NULL, file_part=NULL, section=NULL, "
@@ -1716,8 +1914,7 @@ static gint schicht2(ZondDBase *zond_dbase, sqlite3 *db, GPtrArray *m,
 				if (!rc)
 					erg->n_umgewandelt++;
 			}
-		} else if ((mg->regel == DB_REGEL_E1 || mg->regel == DB_REGEL_E2)
-				&& a == DB_AKT_UMWANDELN) {
+		} else if (mg->regel == DB_REGEL_D1 && a == DB_AKT_UMWANDELN) {
 			if (idmenge_fuege_ein(erledigt, mg->knoten_id)) {
 				g_autofree gchar *sql = g_strdup_printf("UPDATE knoten SET type=1, "
 						"link=NULL, file_part=NULL, section=NULL, "
@@ -1729,7 +1926,7 @@ static gint schicht2(ZondDBase *zond_dbase, sqlite3 *db, GPtrArray *m,
 				if (!rc)
 					erg->n_umgewandelt++;
 			}
-		} else if (mg->regel == DB_REGEL_D1
+		} else if (mg->regel == DB_REGEL_B2
 				&& (a == DB_AKT_SAMMELPUNKT || a == DB_AKT_EINORDNEN
 						|| a == DB_AKT_LOESCHEN)) {
 			GHashTable *tab = (a == DB_AKT_LOESCHEN) ? bef_verwerfen : bef_ordnen;

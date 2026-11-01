@@ -2,17 +2,38 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #243.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #244.
 
 ## Inhalt
 
-Offen: -
+Offen: #243
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
 Ideen: #167, #169, #205, #231, #232, #233
 
 ## Offen
 
-Zur Zeit keine offenen Punkte.
+### #243 Endlosschleife bei "alles darunter aufklappen" (Kreise, selbstbezügliche Links)
+
+Status: offen (Fenster "Datenbank prüfen" behoben, Hauptbäume ungeprüft)
+
+Entdeckt beim Fenster "Datenbank prüfen" (#231): Zeilen, die sich erst beim Aufklappen
+füllen, erzeugen bei einem Kreis (A ist Eltern von B, B von A) mit "alles darunter
+aufklappen" (Taste *, Umschalt+Pfeil rechts) endlos neue Zeilen. Im Prüffenster
+abgefangen (Knoten, der oberhalb schon steht, bekommt keine Unterzeilen,
+"(siehe oben)").
+
+```text
+ Vermutung für BAUM_INHALT/BAUM_AUSWERTUNG: Links dürfen auf Knoten zeigen, die den
+ Link selbst enthalten (selbstbezüglicher Link). Der Link-Kopf bekommt ein
+ Dummy-Kind (zond_tree_store_insert_link_at_pos), das beim Aufklappen mit den
+ Kindern des Ziels gefüllt wird; enthalten diese den Link wieder, entsteht beim
+ rekursiven Aufklappen kein Ende. Zu klären: tritt das real auf (Testdatei mit
+ Link auf einen Vorfahren anlegen, "alles darunter aufklappen")? Lösung: beim
+ Aufklappen prüfen, ob das Ziel des Links schon Vorfahr ist, und dann nicht
+ füllen (Dummy entfernen, Kennzeichnung "Verweis auf übergeordneten Eintrag"),
+ oder rekursives Aufklappen an Link-Köpfen anhalten. Auch zu prüfen: BAUM_FS
+ (Verknüpfungen/Symlinks).
+```
 
 ## Zurückgestellt
 

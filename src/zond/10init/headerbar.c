@@ -973,7 +973,7 @@ static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_alle_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
-	gtk_tree_view_expand_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
+	zond_treeview_expand_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
 }
 
 static void cb_win_zweig_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -983,8 +983,8 @@ static void cb_win_zweig_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]),
 			&path, NULL);
 	if (path) {
-		gtk_tree_view_expand_row(
-				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]), path, TRUE);
+		zond_treeview_expand_row_rekursiv(
+				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]), path);
 		gtk_tree_path_free(path);
 	}
 }

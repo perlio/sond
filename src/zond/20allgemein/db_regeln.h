@@ -29,30 +29,38 @@ typedef struct _ZondDBase ZondDBase;
  * mit der Nummer der verletzten Regel. Zu jeder Regel gibt es eine Liste
  * zulässiger Aktionen mit einem Standard; der Nutzer wählt pro Knoten.
  *
- * Regeln:
+ * Regeln (nach Wichtigkeit geordnet):
  *  A1 Zeile 0 (Version) sowie die Wurzeln 1 (Inhalt) und 2 (Auswertung)
  *     fehlen oder haben falsche Werte
- *  A2 Knotentyp unbekannt (gültig sind 0 bis 5; Typ 0 nur bei ID 1 und 2)
- *  B1 Knoten unter einem Elternknoten, unter dem sein Typ nicht stehen darf
- *  B2 Knoten im falschen Baum (Anker nur im Inhalt, Copy und Link nur in der
- *     Auswertung)
- *  B3 Spalten passen nicht zum Typ
- *  D1 Unsichtbare Zweige: Kinder, die nicht in der einen lückenlosen Kette vom
- *     Kopf stehen (mehrere Köpfe, Gabelungen, Lücken, Zyklen)
- *  D2 Knoten ohne Verbindung zu einer Wurzel (Elternknoten fehlt, parent_ID
+ *  B1 Knoten ohne Verbindung zu einer Wurzel (Elternknoten fehlt, parent_ID
  *     leer oder Schleife in der Elternkette)
- *  E1 Anker, Copy oder Link ohne Verweisziel
- *  E2 Anker, Copy oder Link, dessen Ziel einen unzulässigen Typ hat
- *  E3 Datei mehrfach angebunden (der Baum zeigt sie nur an einer Stelle)
+ *  B2 Unsichtbare Zweige: Kinder, die nicht in der einen lückenlosen Kette vom
+ *     Kopf stehen (mehrere Köpfe, Gabelungen, Lücken, Zyklen)
+ *  C1 Knotentyp unbekannt (gültig sind 0 bis 5; Typ 0 nur bei ID 1 und 2)
+ *  C2 Knoten unter einem Elternknoten, unter dem sein Typ nicht stehen darf
+ *  C3 Knoten im falschen Baum (Anker nur im Inhalt, Copy und Link nur in der
+ *     Auswertung)
+ *  C4 Spalten passen nicht zum Typ
+ *  D1 Verweisziel: Anker, Copy oder Link ohne Ziel oder mit einem Ziel
+ *     unzulässigen Typs
+ *  D2 Datei mehrfach angebunden (der Baum zeigt sie nur an einer Stelle)
+ *  E1 Abschnitt gehört zu einer anderen Datei als der Eintrag, unter dem er
+ *     steht (Löschen möglich, wenn nichts darauf verweist)
+ *  E2 Datei oder Abschnitt doppelt (gleicher Pfad und Abschnitt, Löschen
+ *     möglich, wenn nichts darauf verweist)
+ *  E3 Abschnitte überschneiden sich oder liegen nicht im übergeordneten
+ *     Abschnitt (Löschen möglich, wenn nichts darauf verweist)
  *  F1 Dateiintegrität (nur Anzeige)
  *
  * Typen: 0 Wurzel, 1 Punkt, 2 Anker, 3 Copy, 4 Link, 5 Datei oder Abschnitt. */
 typedef enum {
 	DB_REGEL_A1,
-	DB_REGEL_A2,
 	DB_REGEL_B1,
 	DB_REGEL_B2,
-	DB_REGEL_B3,
+	DB_REGEL_C1,
+	DB_REGEL_C2,
+	DB_REGEL_C3,
+	DB_REGEL_C4,
 	DB_REGEL_D1,
 	DB_REGEL_D2,
 	DB_REGEL_E1,
@@ -75,8 +83,8 @@ typedef enum {
 
 typedef struct {
 	DbRegel regel;
-	gint64 knoten_id; //Schlüsselknoten (D1: erster Knoten des Zweigs)
-	GArray *knoten_ids; //gint64; D1: alle Knoten des Zweigs, sonst nur knoten_id
+	gint64 knoten_id; //Schlüsselknoten (B2: erster Knoten des Zweigs)
+	GArray *knoten_ids; //gint64; B2: alle Knoten des Zweigs, sonst nur knoten_id
 	gint64 eltern_id; //Elternknoten (Kontext), 0 wenn keiner
 	gint baum; //1 Inhalt, 2 Auswertung, 3 Dateibaum, 4 ohne Wurzel
 	gchar *text; //Beschreibung der Verletzung
@@ -84,13 +92,14 @@ typedef struct {
 	DbAkt standard;
 	DbAkt gewaehlt; //vom Aufrufer zu setzen, Voreinstellung = standard
 	gint ziel_baum; //für DB_AKT_SAMMELPUNKT: 1 Inhalt, 2 Auswertung
-	gboolean schleife; //D1: Einträge folgen im Kreis aufeinander (text zeigt A -> B -> A)
+	gboolean schleife; //B2: Einträge folgen im Kreis aufeinander (text zeigt A -> B -> A)
 	gboolean sichtbar; //der Eintrag wird im geladenen Baum angezeigt
 	gint64 gehoert_unter; //nicht sichtbar: nächster sichtbarer übergeordneter Eintrag, sonst 0
 } DbMangel;
 
 typedef struct {
 	GPtrArray *maengel; //DbMangel*, sortiert nach Regel und Knoten
+	GHashTable *unsichtbar; //Menge (GINT_TO_POINTER der Knoten-ID): im geladenen Baum nicht angezeigt
 } DbRegelErgebnis;
 
 typedef struct {
@@ -100,7 +109,7 @@ typedef struct {
 	gint n_umgewandelt;
 	gint n_bereinigt;
 	gint n_angelegt;
-	gint n_ketten; //D1: behandelte Zweige
+	gint n_ketten; //B2: behandelte Zweige
 	GPtrArray *meldungen; //gchar*: was nicht möglich war und warum
 } DbRegelAktionErgebnis;
 
@@ -114,7 +123,7 @@ void db_regel_aktion_ergebnis_clear(DbRegelAktionErgebnis*);
 
 G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(DbRegelAktionErgebnis, db_regel_aktion_ergebnis_clear)
 
-//"A1", "B2" ...
+//"A1", "C3" ...
 gchar const* db_regel_name(DbRegel);
 
 //Überschrift für den Nutzer
@@ -159,11 +168,12 @@ gint db_regeln_pruefen(ZondDBase*, gboolean mit_integritaet, DbRegelErgebnis*,
  *
  * Schicht 1: Anlegen und Bereinigen der Grundzeilen (A1), Verschieben in
  * Sammelpunkte, Löschen. Danach neue Prüfung (Befunde, die sich erledigt haben,
- * entfallen). Schicht 2: Umwandeln, Bereinigen, Ketten (D1) auf dem neuen Stand.
+ * entfallen). Schicht 2: Umwandeln, Bereinigen, Ketten (B2) auf dem neuen Stand.
  *
- * Schranken: Dateien und Abschnitte (Typ 5) werden nie gelöscht; nichts wird
- * gelöscht, worauf von außerhalb noch ein Verweis zeigt; Zeilen 0, 1 und 2
- * nie. Was nicht ausgeführt werden konnte, steht in ergebnis->meldungen. */
+ * Schranken: Dateien und Abschnitte (Typ 5) werden nur gelöscht, wenn sie selbst
+ * der gewählte Eintrag sind (Regeln E1 bis E3), nie als Teil eines anderen
+ * Eintrags; nichts wird gelöscht, worauf von außerhalb noch ein Verweis zeigt;
+ * Zeilen 0, 1 und 2 nie. Was nicht ausgeführt werden konnte, steht in ergebnis->meldungen. */
 gint db_regeln_ausfuehren(ZondDBase*, GPtrArray *maengel,
 		DbRegelAktionErgebnis*, GError**);
 

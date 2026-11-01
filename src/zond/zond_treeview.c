@@ -188,6 +188,91 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
     return;
 }
 
+//Tiefe der Zeile, ab der gerade rekursiv aufgeklappt wird (Taste *, Menü), 0 =
+//kein rekursives Aufklappen. Link-Kreise werden je Durchgang nach einer Ebene
+//nicht weiter geöffnet, sonst endet es nie.
+static gint rekursiv_aufklappen = 0;
+
+static gboolean zond_treeview_test_expand_row(GtkTreeView *tree_view,
+		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
+	GtkTreeModel *model = NULL;
+	GtkTreeIter cur = *iter;
+	GtkTreeIter up = { 0 };
+	gint node_id = 0;
+	gint tiefe = gtk_tree_path_get_depth(path);
+
+	if (!zond_tree_store_link_is_unloaded(iter))
+		return FALSE;
+
+	//Link vor dem Aufklappen laden, damit ein rekursives Aufklappen auch in
+	//seine Kinder geht (GTK baut die Kinder erst nach diesem Signal auf)
+	if (!rekursiv_aufklappen) {
+		zond_tree_store_load_link(iter);
+
+		return FALSE;
+	}
+
+	model = gtk_tree_view_get_model(tree_view);
+	gtk_tree_model_get(model, iter, 2, &node_id, -1);
+
+	//nur Vorfahren unterhalb der Startzeile dieses Durchgangs zählen: so wird
+	//in jedem Durchgang gleich viel geöffnet (Startzeile plus eine Link-Ebene)
+	while (--tiefe > rekursiv_aufklappen
+			&& gtk_tree_model_iter_parent(model, &up, &cur)) {
+		gint id = 0;
+
+		gtk_tree_model_get(model, &up, 2, &id, -1);
+		if (id == node_id)
+			return TRUE;
+
+		cur = up;
+	}
+
+	zond_tree_store_load_link(iter);
+
+	return FALSE;
+}
+
+static void zond_treeview_expand_collapse_cursor_row(GtkTreeView *tree_view,
+		gboolean logical, gboolean expand, gboolean open_all, gpointer data) {
+	GtkTreePath *path = NULL;
+
+	rekursiv_aufklappen = 0;
+	if (expand && open_all) {
+		gtk_tree_view_get_cursor(tree_view, &path, NULL);
+		if (path) {
+			rekursiv_aufklappen = gtk_tree_path_get_depth(path);
+			gtk_tree_path_free(path);
+		}
+	}
+
+	return;
+}
+
+static void zond_treeview_expand_collapse_cursor_row_after(
+		GtkTreeView *tree_view, gboolean logical, gboolean expand,
+		gboolean open_all, gpointer data) {
+	rekursiv_aufklappen = 0;
+
+	return;
+}
+
+void zond_treeview_expand_all(GtkTreeView *tv) {
+	rekursiv_aufklappen = 1;
+	gtk_tree_view_expand_all(tv);
+	rekursiv_aufklappen = 0;
+
+	return;
+}
+
+void zond_treeview_expand_row_rekursiv(GtkTreeView *tv, GtkTreePath *path) {
+	rekursiv_aufklappen = gtk_tree_path_get_depth(path);
+	gtk_tree_view_expand_row(tv, path, TRUE);
+	rekursiv_aufklappen = 0;
+
+	return;
+}
+
 static void zond_treeview_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	//link hat Kind das ist noch dummy: link laden
@@ -3955,6 +4040,14 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 	/* Doppelklick = angebundene Datei öffnen */
 	g_signal_connect(ztv, "row-activated",
 			G_CALLBACK(zond_treeview_row_activated), zond);
+
+	/* Rekursives Aufklappen: Link-Kreise nach einer Ebene stoppen */
+	g_signal_connect(ztv, "expand-collapse-cursor-row",
+			G_CALLBACK(zond_treeview_expand_collapse_cursor_row), NULL);
+	g_signal_connect_after(ztv, "expand-collapse-cursor-row",
+			G_CALLBACK(zond_treeview_expand_collapse_cursor_row_after), NULL);
+	g_signal_connect(ztv, "test-expand-row",
+			G_CALLBACK(zond_treeview_test_expand_row), NULL);
 
 	/* Zeile expandiert: Link nachladen + Spaltenbreite anpassen */
 	g_signal_connect(ztv, "row-expanded",

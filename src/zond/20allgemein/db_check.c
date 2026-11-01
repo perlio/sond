@@ -671,7 +671,7 @@ gint db_sammelpunkt_neu(sqlite3 *db, gint64 eltern, gint64 tail, gint64 *sp_id,
 	g_autofree gchar *notiz = g_strdup_printf("Diese Knoten waren in der "
 			"Datenbank vorhanden, aber an einer Stelle, an der sie nicht "
 			"hingehören oder nicht sichtbar waren. Sie wurden bei der Reparatur "
-			"am %s hier abgelegt. Bitte einsortieren oder diesen Punkt "
+			"am %s hier abgelegt. Bitte einsortieren oder diesen Strukturpunkt "
 			"löschen.", datum);
 	gint rc = 0;
 

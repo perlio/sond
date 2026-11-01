@@ -47,6 +47,10 @@ gint zond_treeview_jump_to_node_id(Projekt*, gint);
 
 ZondTreeview* zond_treeview_new(Projekt*, gint);
 
+void zond_treeview_expand_all(GtkTreeView*);
+
+void zond_treeview_expand_row_rekursiv(GtkTreeView*, GtkTreePath*);
+
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, DisplayedDocument*,
 		PdfPos*, GError**);
 

@@ -44,6 +44,9 @@ enum {
 	SP_ZEILE, //ZEILE_*
 	SP_KNOTEN, //Knoten-ID zum Springen, 0 ohne Ziel
 	SP_REGEL, //DbRegel (Regel-Zeilen)
+	SP_ICON, //Symbolname (Symbol-Zeile)
+	SP_NR, //Nummer des Knotens
+	SP_ART, //Art des Knotens (oberste Ebene)
 	N_SP
 };
 
@@ -67,24 +70,24 @@ static struct {
 	gchar const *titel;
 	gchar const *gilt;
 } const gruppen[] = {
-	{ "Punkte", "Ein Punkt hat Symbol und Text (Notiz möglich), aber keinen Verweis "
-			"und keinen Dateipfad. Er steht unter einer Wurzel, einem Punkt oder "
+	{ "Strukturpunkte", "Ein Strukturpunkt hat Symbol und Text (Notiz möglich), aber keinen Verweis "
+			"und keinen Dateipfad. Er steht unter einer Wurzel, einem Strukturpunkt oder "
 			"einer Copy." },
 	{ "Anbindungen", "Eine Anbindung steht im Bestandsverzeichnis unter einem "
-			"Punkt und verweist auf eine Datei oder einen Abschnitt. Sie trägt sonst "
+			"Strukturpunkt und verweist auf eine Datei oder einen Abschnitt. Sie trägt sonst "
 			"keine Angaben und hat keine Einträge unter sich. Jede Datei ist nur "
 			"einmal angebunden." },
 	{ "Copies", "Eine Copy steht in der Auswertung und verweist auf eine Anbindung "
 			"oder eine Datei. Sie hat Symbol und Text (Notiz möglich) und darf "
 			"Einträge unter sich haben." },
-	{ "Links", "Ein Link steht in der Auswertung und verweist auf einen Punkt, eine "
+	{ "Links", "Ein Link steht in der Auswertung und verweist auf einen Strukturpunkt, eine "
 			"Anbindung, eine Copy oder eine Datei, nie auf einen anderen Link. Er "
 			"trägt sonst keine Angaben und hat keine Einträge unter sich." },
 	{ "Dateien und Abschnitte", "Dateien und Abschnitte bilden den Dateibaum: eine "
-			"Datei mit Dateipfad, darunter ihre Abschnitte. Sie werden nie "
-			"automatisch gelöscht." },
+			"Datei mit Dateipfad, darunter ihre Abschnitte. Gelöscht werden "
+			"sie nur auf Ihre Wahl und nur, wenn nichts darauf verweist." },
 	{ "Wurzeln", "Es gibt genau zwei Wurzeln: Bestandsverzeichnis und Auswertung." },
-	{ "Einträge mit unbekanntem Typ", "Jeder Eintrag ist ein Punkt, eine Anbindung, "
+	{ "Einträge mit unbekanntem Typ", "Jeder Eintrag ist ein Strukturpunkt, eine Anbindung, "
 			"eine Copy, ein Link oder eine Datei/ein Abschnitt." },
 	{ "Datenbankdatei", "Ergebnis der Prüfung der Datenbankdatei durch SQLite. Wird "
 			"nur angezeigt." }
@@ -103,7 +106,18 @@ typedef struct {
 	gboolean vor_laden; //Bäume sind noch nicht geladen (Start des Projekts)
 	GMainLoop *loop; //nur vor dem Laden: der Aufrufer wartet auf das Schließen
 	gboolean *geaendert_out; //wird TRUE, sobald etwas geändert wurde
+	gint n_knoten; //Einträge mit Fehlern
+	gint n_aktiv; //davon mit wählbarer Aktion
+	gint sort_spalte; //SORT_*
+	gboolean sort_ab; //absteigend
+	GtkTreeViewColumn *sort_cols[3];
 } Fenster;
+
+enum {
+	SORT_NR,
+	SORT_ART,
+	SORT_BESCHREIBUNG
+};
 
 static Fenster *g_fenster = NULL;
 
@@ -219,29 +233,32 @@ static gboolean akt_aus_name(gchar const *name, DbAkt *akt) {
 	return FALSE;
 }
 
-//Zeigt die gewählte Aktion in allen Knotenzeilen
-static void aktionen_anzeigen(Fenster *f) {
+static void summe_anzeigen(Fenster *f);
+
+//Zeigt die gewählte Aktion in allen Zeilen mit Mangel (Knotenzeilen und Nachbarzeilen)
+static void aktionen_ab(Fenster *f, GtkTreeIter *eltern) {
 	GtkTreeModel *model = GTK_TREE_MODEL(f->store);
-	GtkTreeIter iter_a = { 0 };
+	GtkTreeIter iter = { 0 };
+	gboolean da = eltern ? gtk_tree_model_iter_children(model, &iter, eltern) :
+			gtk_tree_model_get_iter_first(model, &iter);
 
-	if (!gtk_tree_model_get_iter_first(model, &iter_a))
-		return;
+	while (da) {
+		DbMangel *m = NULL;
 
-	do {
-		GtkTreeIter iter_m = { 0 };
+		gtk_tree_model_get(model, &iter, SP_PTR, &m, -1);
+		if (m)
+			gtk_tree_store_set(f->store, &iter, SP_AKTION, db_akt_name(m->gewaehlt),
+					-1);
+		aktionen_ab(f, &iter);
+		da = gtk_tree_model_iter_next(model, &iter);
+	}
 
-		if (!gtk_tree_model_iter_children(model, &iter_m, &iter_a))
-			continue;
+	return;
+}
 
-		do {
-			DbMangel *m = NULL;
-
-			gtk_tree_model_get(model, &iter_m, SP_PTR, &m, -1);
-			if (m)
-				gtk_tree_store_set(f->store, &iter_m, SP_AKTION,
-						db_akt_name(m->gewaehlt), -1);
-		} while (gtk_tree_model_iter_next(model, &iter_m));
-	} while (gtk_tree_model_iter_next(model, &iter_a));
+static void aktionen_anzeigen(Fenster *f) {
+	aktionen_ab(f, NULL);
+	summe_anzeigen(f);
 
 	return;
 }
@@ -260,7 +277,7 @@ static void cb_aktion_geaendert(GtkCellRendererCombo *renderer, gchar *pfad,
 		return;
 
 	gtk_tree_model_get(model, &iter, SP_PTR, &m, SP_ZEILE, &zeile, -1);
-	if (zeile != ZEILE_MANGEL || !m)
+	if ((zeile != ZEILE_MANGEL && zeile != ZEILE_NACHBAR) || !m)
 		return;
 
 	db_mangel_setze_aktion(f->erg.maengel, m, akt);
@@ -338,6 +355,79 @@ static gchar* nr_bezeichnung(ZondDBase *work, gint64 id) {
 	return g_strdup_printf("Nr. %" G_GINT64_FORMAT ": %s", id, b);
 }
 
+//Wird der Knoten im geladenen Baum angezeigt? Leer bei Wurzeln, Dateien und unbekannten Knoten
+static gchar const* im_baum_text(Fenster *f, gint64 id) {
+	gint typ = knoten_typ(f->zond->dbase_zond->zond_dbase_work, id);
+
+	if (id <= 0 || typ <= 0)
+		return "";
+	if (typ == 5) { //Dateien und Abschnitte: angezeigt, wo ihre Datei angebunden ist
+		if (f->vor_laden)
+			return "";
+		for (gint k = 0; k < 2; k++) {
+			Baum baum = (k == 0) ? BAUM_INHALT : BAUM_AUSWERTUNG;
+			GtkTreeIter *iter = zond_tree_store_get_iter_by_node_id(
+					ZOND_TREE_STORE(gtk_tree_view_get_model(
+							GTK_TREE_VIEW(f->zond->treeview[baum]))), (gint) id);
+
+			if (iter) {
+				gtk_tree_iter_free(iter);
+
+				return "ja";
+			}
+		}
+
+		return "nein";
+	}
+	if (f->erg.unsichtbar && g_hash_table_contains(f->erg.unsichtbar,
+			GINT_TO_POINTER((gint) id)))
+		return "nein";
+
+	return (typ == 2) ? "über die Datei" : "ja";
+}
+
+//Erster Mangel des Knotens (für Beschreibung und Aktion in dessen Nachbarzeilen)
+static DbMangel* mangel_von(Fenster *f, gint64 id) {
+	for (guint i = 0; id > 0 && i < f->erg.maengel->len; i++) {
+		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
+
+		if (m->knoten_id == id)
+			return m;
+	}
+
+	return NULL;
+}
+
+//Text und Symbol, wie der Knoten im Baum steht; Anbindungen zeigen, was ihre Datei hat
+static void knoten_anzeige(ZondDBase *work, gint64 id, gchar **text, gchar **icon) {
+	sqlite3_stmt *stmt = NULL;
+
+	*text = NULL;
+	*icon = NULL;
+	if (id <= 0 || sqlite3_prepare_v2(zond_dbase_get_dbase(work),
+			"SELECT k.type, k.node_text, COALESCE(NULLIF(k.icon_name,''), "
+			"l.icon_name) FROM knoten k LEFT JOIN knoten l ON l.ID=k.link AND "
+			"k.type=2 WHERE k.ID=?1;", -1, &stmt, NULL) != SQLITE_OK)
+		return;
+
+	sqlite3_bind_int64(stmt, 1, id);
+	if (sqlite3_step(stmt) == SQLITE_ROW) {
+		gboolean anbindung = sqlite3_column_type(stmt, 0) != SQLITE_NULL
+				&& sqlite3_column_int(stmt, 0) == 2;
+
+		if (sqlite3_column_type(stmt, 1) != SQLITE_NULL
+				&& *sqlite3_column_text(stmt, 1))
+			*text = g_strdup((gchar const*) sqlite3_column_text(stmt, 1));
+		else if (anbindung)
+			*text = knoten_text(work, id);
+		if (sqlite3_column_type(stmt, 2) != SQLITE_NULL)
+			*icon = g_strdup((gchar const*) sqlite3_column_text(stmt, 2));
+	}
+	sqlite3_finalize(stmt);
+
+	return;
+}
+
 //Fehlertexte, die zu einem Feld des Datensatzes gehören (sonst leer)
 static gchar* feld_fehler(Fenster *f, gint64 id, gchar const *name) {
 	GString *s = g_string_new(NULL);
@@ -351,27 +441,26 @@ static gchar* feld_fehler(Fenster *f, gint64 id, gchar const *name) {
 			continue;
 
 		switch (m->regel) {
-		case DB_REGEL_A2:
+		case DB_REGEL_C1:
 			if (!g_strcmp0(name, "Art"))
 				g_string_append_printf(s, "%s%s", s->len ? " | " : "", m->text);
 			break;
+		case DB_REGEL_C2:
+		case DB_REGEL_C3:
 		case DB_REGEL_B1:
-		case DB_REGEL_B2:
-		case DB_REGEL_D2:
 			if (!g_strcmp0(name, "Übergeordnet"))
 				g_string_append_printf(s, "%s%s", s->len ? " | " : "", m->text);
 			break;
-		case DB_REGEL_D1:
+		case DB_REGEL_B2:
 			if (!g_strcmp0(name, "Vorgänger"))
 				g_string_append_printf(s, "%s%s", s->len ? " | " : "", m->text);
 			break;
-		case DB_REGEL_E1:
-		case DB_REGEL_E2:
-		case DB_REGEL_E3:
+		case DB_REGEL_D1:
+		case DB_REGEL_D2:
 			if (verweis)
 				g_string_append_printf(s, "%s%s", s->len ? " | " : "", m->text);
 			break;
-		case DB_REGEL_B3: {
+		case DB_REGEL_C4: {
 			gchar **teile = g_strsplit(m->text, "; ", -1);
 
 			for (gint k = 0; teile[k]; k++)
@@ -392,12 +481,19 @@ static gchar* feld_fehler(Fenster *f, gint64 id, gchar const *name) {
 static void feld_voll_anfuegen(Fenster *f, GtkTreeIter *eltern, gchar const *name,
 		gchar const *wert, gchar const *fehler, gint64 sprung, gchar const *voll) {
 	GtkTreeIter iter = { 0 };
-	g_autofree gchar *text = g_strdup_printf("%s: %s", name, wert);
+	gboolean fehlerhaft = fehler && *fehler;
+	g_autofree gchar *text = g_strdup_printf("%s%s: %s", fehlerhaft ? "⚠ " : "", name,
+			wert);
+	g_autofree gchar *tipp = NULL;
+
+	if (fehlerhaft) //Problem des Knotens an diesem Feld
+		tipp = g_strdup_printf("%s%sFehler an diesem Feld:\n%s", voll ? voll : "",
+				voll ? "\n\n" : "", fehler);
 
 	gtk_tree_store_append(f->store, &iter, eltern);
 	gtk_tree_store_set(f->store, &iter, SP_TEXT, text, SP_DETAIL, fehler, SP_ORT, "",
-			SP_AUCH, voll ? voll : "", SP_AKTION, "", SP_PTR, NULL, SP_ZEILE,
-			ZEILE_FELD, SP_KNOTEN, sprung, SP_REGEL, 0, -1);
+			SP_AUCH, tipp ? tipp : (voll ? voll : ""), SP_AKTION, "", SP_PTR, NULL,
+			SP_ZEILE, ZEILE_FELD, SP_KNOTEN, sprung, SP_REGEL, 0, -1);
 
 	return;
 }
@@ -409,16 +505,78 @@ static void feld_anfuegen(Fenster *f, GtkTreeIter *eltern, gchar const *name,
 	return;
 }
 
-//Zeile, die sich beim Aufklappen füllt (id steht im Platzhalter darunter)
+//Steht der Knoten schon in einer Nachbarzeile oberhalb (Kreis)? Dann bleibt die Zeile ohne Unterzeilen.
+static gboolean schon_oben(Fenster *f, GtkTreeIter *eltern, gint64 id) {
+	GtkTreeModel *model = GTK_TREE_MODEL(f->store);
+	GtkTreeIter cur = *eltern;
+	GtkTreeIter up = { 0 };
+
+	while (TRUE) {
+		gint zeile = 0;
+		gint nr = 0;
+
+		gtk_tree_model_get(model, &cur, SP_ZEILE, &zeile, SP_REGEL, &nr, -1);
+		if (zeile == ZEILE_NACHBAR && nr == (gint) id) //die Hauptzeile zählt nicht
+			return TRUE;
+		if (!gtk_tree_model_iter_parent(model, &up, &cur))
+			return FALSE;
+		cur = up;
+	}
+}
+
+//Zeile, die sich beim Aufklappen füllt (id steht im Platzhalter darunter). Eine
+//Nachbarzeile zeigt Beschreibung, Im Baum und Aktion des Nachbarknotens; fehler ist
+//dann ein Fehler am Feld des Besitzers und wird nur am Eintrag markiert.
 static void aufklappzeile_anfuegen(Fenster *f, GtkTreeIter *eltern, gchar const *text,
 		gchar const *fehler, gint zeile, gint64 id, gint64 sprung) {
 	GtkTreeIter iter = { 0 };
 	GtkTreeIter platz = { 0 };
+	g_autofree gchar *anzeige = NULL;
+	g_autofree gchar *tipp = NULL;
+	g_autofree gchar *eigene = NULL;
+	gchar const *detail = fehler;
+	gchar const *im_baum = "";
+	DbMangel *m = NULL;
+	gboolean oben = zeile == ZEILE_NACHBAR && schon_oben(f, eltern, id);
+	g_autofree gchar *nr = (zeile == ZEILE_NACHBAR) ?
+			g_strdup_printf("%" G_GINT64_FORMAT, id) : g_strdup("");
+
+	if (zeile == ZEILE_NACHBAR) {
+		GString *s = g_string_new(NULL);
+
+		for (guint i = 0; i < f->erg.maengel->len; i++) {
+			DbMangel *mm = g_ptr_array_index(f->erg.maengel, i);
+
+			if (mm->knoten_id == id)
+				g_string_append_printf(s, "%s%s", s->len ? " | " : "", mm->text);
+		}
+		eigene = g_string_free(s, FALSE);
+		detail = eigene;
+		im_baum = im_baum_text(f, id);
+		m = mangel_von(f, id);
+		if (fehler && *fehler) {
+			anzeige = g_strdup_printf("⚠ %s", text);
+			tipp = g_strdup_printf("Fehler an diesem Feld:\n%s", fehler);
+			text = anzeige;
+		}
+		if (oben) {
+			gchar *mit = g_strdup_printf("%s (siehe oben)", text);
+
+			g_free(anzeige);
+			anzeige = mit;
+			text = anzeige;
+		}
+	}
 
 	gtk_tree_store_append(f->store, &iter, eltern);
-	gtk_tree_store_set(f->store, &iter, SP_TEXT, text, SP_DETAIL, fehler, SP_ORT, "",
-			SP_AKTION, "", SP_PTR, NULL, SP_ZEILE, zeile, SP_KNOTEN, sprung,
-			SP_REGEL, 0, -1);
+	gtk_tree_store_set(f->store, &iter, SP_TEXT, text, SP_DETAIL, detail, SP_ORT,
+			im_baum, SP_AUCH, tipp ? tipp : "", SP_AKTION,
+			m ? db_akt_name(m->gewaehlt) : "", SP_MODEL,
+			m ? modell_fuer(f, m->aktionen) : NULL, SP_PTR, m, SP_ZEILE, zeile,
+			SP_KNOTEN, sprung, SP_REGEL, (zeile == ZEILE_NACHBAR) ? (gint) id : 0,
+			SP_NR, nr, -1);
+	if (oben)
+		return;
 	gtk_tree_store_append(f->store, &platz, &iter);
 	gtk_tree_store_set(f->store, &platz, SP_TEXT, "", SP_DETAIL, "", SP_ORT, "",
 			SP_AKTION, "", SP_PTR, NULL, SP_ZEILE, ZEILE_PLATZHALTER, SP_KNOTEN, id,
@@ -479,7 +637,8 @@ static GArray* ids_abfragen(ZondDBase *work, gchar const *sql, gint64 p1, gint64
 	return ids;
 }
 
-//Fügt unter eltern die Felder des Knotens ein (ohne Text; der steht in der Überschrift)
+//Fügt unter eltern die Beschreibung des Knotens (Art, Notiz, Pfad, Abschnitt) und
+//seine Verbindungen zu anderen Knoten ein; Symbol und Text stehen in der Hauptzeile
 static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 		gint64 sprung) {
 	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
@@ -489,18 +648,16 @@ static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 	gint64 older = 0;
 	gint64 link = 0;
 	gboolean hat_link = FALSE;
-	gchar *werte[5] = { NULL };
-	gchar *voll[5] = { NULL };
-	gchar const *felder[] = { "Dateipfad", "Abschnitt", "Symbol", "Text", "Notiz" };
-	g_autofree gchar *art = NULL;
-	g_autofree gchar *fehler_art = NULL;
+	gchar *werte[4] = { NULL };
+	gchar *voll[4] = { NULL };
+	gchar const *felder[] = { "Dateipfad", "Abschnitt", "Text", "Notiz" };
 	g_autoptr(GArray) nachfolger = NULL;
 	g_autoptr(GArray) kinder = NULL;
 
 	if (id <= 0 || sqlite3_prepare_v2(zond_dbase_get_dbase(work),
 			"SELECT parent_ID, older_sibling_ID, type, link, file_part, section, "
-			"icon_name, node_text, text FROM knoten WHERE ID=?1;", -1, &stmt,
-			NULL) != SQLITE_OK)
+			"node_text, text FROM knoten WHERE ID=?1;", -1, &stmt, NULL)
+			!= SQLITE_OK)
 		return;
 
 	sqlite3_bind_int64(stmt, 1, id);
@@ -516,7 +673,7 @@ static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 		type = sqlite3_column_int(stmt, 2);
 	hat_link = sqlite3_column_type(stmt, 3) != SQLITE_NULL;
 	link = sqlite3_column_int64(stmt, 3);
-	for (gint k = 0; k < 5; k++)
+	for (gint k = 0; k < 4; k++)
 		if (sqlite3_column_type(stmt, 4 + k) != SQLITE_NULL) {
 			werte[k] = g_strdup((gchar const*) sqlite3_column_text(stmt, 4 + k));
 			voll[k] = g_strdup(werte[k]);
@@ -531,12 +688,36 @@ static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 	kinder = ids_abfragen(work, "SELECT ID FROM knoten WHERE parent_ID=?1 "
 			"AND ID<>?1 ORDER BY ID;", id, 0);
 
-	art = (type >= 0 && type <= 5) ? g_strdup_printf("%s (Typ %d)", db_typ_name(type),
-			type) : ((type < 0) ? g_strdup("keine Angabe") :
-					g_strdup_printf("unbekannt (Typ %d)", type));
-	fehler_art = feld_fehler(f, id, "Art");
-	feld_anfuegen(f, eltern, "Art", art, fehler_art, sprung);
+	//Art des Knotens
+	{
+		g_autofree gchar *art = (type >= 0 && type <= 5) ? g_strdup_printf("%s (Typ %d)",
+				db_typ_name(type), type) : ((type < 0) ? g_strdup("keine Angabe") :
+						g_strdup_printf("unbekannt (Typ %d)", type));
+		g_autofree gchar *fehler_art = feld_fehler(f, id, "Art");
 
+		feld_anfuegen(f, eltern, "Art", art, fehler_art, sprung);
+	}
+
+	//Notiz, Dateipfad und Abschnitt, soweit vorhanden oder fehlerhaft
+	{
+		gint reihe[] = { 3, 0, 1 }; //Notiz, Dateipfad, Abschnitt
+		for (guint r = 0; r < G_N_ELEMENTS(reihe); r++) {
+			gint k = reihe[r];
+			g_autofree gchar *fehler = feld_fehler(f, id, felder[k]);
+
+			if (werte[k])
+				feld_voll_anfuegen(f, eltern, felder[k], werte[k], fehler, sprung,
+						voll[k]);
+			else if (*fehler)
+				feld_anfuegen(f, eltern, felder[k], "(leer)", fehler, sprung);
+		}
+	}
+	for (gint k = 0; k < 4; k++) {
+		g_free(werte[k]);
+		g_free(voll[k]);
+	}
+
+	//Verbindungen zu anderen Knoten
 	nachbar_anfuegen(f, eltern, "Übergeordnet", parent, "keiner (0)", sprung, id);
 	nachbar_anfuegen(f, eltern, "Vorgänger", older, "keiner (erster Eintrag)", sprung,
 			id);
@@ -547,20 +728,6 @@ static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 				"", sprung, 0);
 	if (hat_link)
 		nachbar_anfuegen(f, eltern, "Verweis auf", link, "", sprung, id);
-
-	for (gint k = 0; k < 5; k++) {
-		g_autofree gchar *fehler = feld_fehler(f, id, felder[k]);
-
-		if (k == 3 && !*fehler) //Text steht schon in der Überschrift
-			;
-		else if (werte[k])
-			feld_voll_anfuegen(f, eltern, felder[k], werte[k], fehler, sprung,
-					voll[k]);
-		else if (*fehler)
-			feld_anfuegen(f, eltern, felder[k], "(leer)", fehler, sprung);
-		g_free(werte[k]);
-		g_free(voll[k]);
-	}
 
 	if (!kinder->len)
 		feld_anfuegen(f, eltern, "Kinder", "keine", "", sprung);
@@ -640,6 +807,25 @@ static gboolean cb_test_expand_row(GtkTreeView *tv, GtkTreeIter *iter,
 	return FALSE;
 }
 
+//»Alles darunter aufklappen« (Taste *, Umschalt+Pfeil rechts) klappt nur die Zeile selbst auf:
+//die Nachbarzeilen füllen sich beim Aufklappen immer weiter, das gäbe einen riesigen Baum
+static gboolean cb_aufklappen_rekursiv(GtkTreeView *tv, gboolean logical,
+		gboolean expand, gboolean open_all, gpointer data) {
+	GtkTreePath *path = NULL;
+
+	if (!expand || !open_all)
+		return FALSE;
+
+	g_signal_stop_emission_by_name(tv, "expand-collapse-cursor-row");
+	gtk_tree_view_get_cursor(tv, &path, NULL);
+	if (path) {
+		gtk_tree_view_expand_row(tv, path, FALSE);
+		gtk_tree_path_free(path);
+	}
+
+	return TRUE;
+}
+
 static gboolean gehoert_zu(DbMangel const *m, DbMangel const *erster) {
 	return m == erster || (erster->knoten_id > 0
 			&& m->knoten_id == erster->knoten_id);
@@ -649,16 +835,25 @@ static gboolean gehoert_zu(DbMangel const *m, DbMangel const *erster) {
 static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, DbMangel *erster) {
 	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
 	GtkTreeIter iter_k = { 0 };
-	g_autofree gchar *kt = (erster->knoten_id > 0) ?
-			nr_bezeichnung(work, erster->knoten_id) : g_strdup("Datenbankdatei");
+	g_autofree gchar *kt = NULL;
+	g_autofree gchar *kt_text = NULL;
+	g_autofree gchar *kt_icon = NULL;
+	g_autofree gchar *kt_tipp = NULL;
+	g_autofree gchar *kt_nr = NULL;
+	gint kt_typ = knoten_typ(work, erster->knoten_id);
 	GString *texte = g_string_new(NULL);
 	//ein nicht angezeigter Knoten springt nicht selbst, sondern über seine Nachbarzeilen
 	gint64 sprung = (erster->knoten_id > 0 && erster->sichtbar) ? erster->knoten_id : 0;
-	gchar const *im_baum = "";
+	gchar const *im_baum = im_baum_text(f, erster->knoten_id);
 
-	if (erster->knoten_id > 0)
-		im_baum = !erster->sichtbar ? "nein" :
-				((knoten_typ(work, erster->knoten_id) == 2) ? "über die Datei" : "ja");
+	if (erster->knoten_id > 0) {
+		knoten_anzeige(work, erster->knoten_id, &kt_text, &kt_icon);
+		kt = g_strdup(kt_text ? kt_text : "(kein Text)");
+		kt_tipp = g_strdup_printf("%s\n\nSymbol: %s", kt_text ? kt_text :
+				"(kein Text)", (kt_icon && *kt_icon) ? kt_icon : "keines");
+		kt_nr = g_strdup_printf("%" G_GINT64_FORMAT, erster->knoten_id);
+	} else
+		kt = g_strdup("Datenbankdatei");
 
 	for (guint i = 0; i < f->erg.maengel->len; i++) {
 		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
@@ -669,28 +864,16 @@ static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, DbMangel *erster) {
 
 	gtk_tree_store_append(f->store, &iter_k, iter_a);
 	gtk_tree_store_set(f->store, &iter_k, SP_TEXT, kt, SP_DETAIL, texte->str, SP_ORT,
-			im_baum, SP_AKTION, db_akt_name(erster->gewaehlt), SP_MODEL,
+			im_baum, SP_AUCH, kt_tipp ? kt_tipp : "", SP_ICON, kt_icon ? kt_icon : "",
+			SP_AKTION, db_akt_name(erster->gewaehlt), SP_MODEL,
 			modell_fuer(f, erster->aktionen), SP_PTR, erster, SP_ZEILE,
-			ZEILE_MANGEL, SP_KNOTEN, sprung, SP_REGEL, 0, -1);
+			ZEILE_MANGEL, SP_KNOTEN, sprung, SP_REGEL,
+			(gint) erster->knoten_id, SP_NR, kt_nr ? kt_nr : "", SP_ART,
+			(erster->knoten_id > 0) ? ((kt_typ >= 0) ? db_typ_name(kt_typ) : "ohne Art") :
+					"", -1);
 	g_string_free(texte, TRUE);
 
 	datensatz_anfuegen(f, &iter_k, erster->knoten_id, sprung);
-
-	//nicht angezeigte Zweigglieder
-	for (guint i = 0; i < f->erg.maengel->len; i++) {
-		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
-
-		if (!gehoert_zu(m, erster) || m->regel != DB_REGEL_D1 || m->schleife)
-			continue;
-
-		for (guint k = 0; k < m->knoten_ids->len; k++) {
-			gint64 kid = g_array_index(m->knoten_ids, gint64, k);
-			g_autofree gchar *b = nr_bezeichnung(work, kid);
-			g_autofree gchar *text = g_strdup_printf("Nicht angezeigt: %s", b);
-
-			aufklappzeile_anfuegen(f, &iter_k, text, "", ZEILE_NACHBAR, kid, sprung);
-		}
-	}
 
 	return;
 }
@@ -706,82 +889,138 @@ static gboolean cb_aufklappen(GtkTreeModel *model, GtkTreePath *path,
 	gint zeile = 0;
 
 	gtk_tree_model_get(model, iter, SP_ZEILE, &zeile, -1);
-	if (zeile == ZEILE_ABSCHNITT || (ad->knoten && zeile == ZEILE_MANGEL))
+	if (ad->knoten && zeile == ZEILE_MANGEL)
 		gtk_tree_view_expand_row(GTK_TREE_VIEW(ad->treeview), path, FALSE);
 
 	return FALSE;
 }
 
+//Sortierung der obersten Ebene nach Nr., Art oder Beschreibung; Einträge ohne Nr. zuletzt
+static gint cmp_mangel_sort(gconstpointer pa, gconstpointer pb, gpointer data) {
+	Fenster *f = data;
+	DbMangel const *a = *(DbMangel* const*) pa;
+	DbMangel const *b = *(DbMangel* const*) pb;
+	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	gint c = 0;
+
+	if ((a->knoten_id <= 0) != (b->knoten_id <= 0))
+		return (a->knoten_id <= 0) ? 1 : -1;
+
+	if (f->sort_spalte == SORT_ART)
+		c = gruppe_von(work, a) - gruppe_von(work, b);
+	else if (f->sort_spalte == SORT_BESCHREIBUNG)
+		c = g_utf8_collate(a->text, b->text);
+	if (!c)
+		c = (a->knoten_id > b->knoten_id) - (a->knoten_id < b->knoten_id);
+	if (!c)
+		c = (a->regel > b->regel) - (a->regel < b->regel);
+
+	return f->sort_ab ? -c : c;
+}
+
+//Pfeil an der sortierten Spaltenüberschrift
+static void sortierung_anzeigen(Fenster *f) {
+	for (gint k = 0; k < 3; k++) {
+		gtk_tree_view_column_set_sort_indicator(f->sort_cols[k], k == f->sort_spalte);
+		gtk_tree_view_column_set_sort_order(f->sort_cols[k], f->sort_ab ?
+				GTK_SORT_DESCENDING : GTK_SORT_ASCENDING);
+	}
+
+	return;
+}
+
 static void fenster_fuellen(Fenster *f) {
-	g_autofree gchar *summe = NULL;
 	gint n_aktiv = 0;
 	gint n_knoten = 0;
+	g_autoptr(GHashTable) fertig = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+			g_free, NULL);
+	g_autoptr(GPtrArray) erste = g_ptr_array_new();
 
 	gtk_tree_store_clear(f->store);
 
-	for (gint g = 0; g < (gint) G_N_ELEMENTS(gruppen); g++) {
-		GtkTreeIter iter_a = { 0 };
-		GHashTable *fertig = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-				g_free, NULL);
-		GPtrArray *erste = g_ptr_array_new();
-		g_autofree gchar *titel_a = NULL;
+	//je Knoten der erste Befund; Befunde ohne Knoten (Datenbankdatei) einzeln
+	for (guint i = 0; i < f->erg.maengel->len; i++) {
+		DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
 
-		//je Knoten der erste Befund; Befunde ohne Knoten (Datei) einzeln
-		for (guint i = 0; i < f->erg.maengel->len; i++) {
-			DbMangel *m = g_ptr_array_index(f->erg.maengel, i);
+		if (m->knoten_id > 0) {
+			gint64 *k = NULL;
 
-			if (gruppe_von(f->zond->dbase_zond->zond_dbase_work, m) != g)
+			if (g_hash_table_contains(fertig, &m->knoten_id))
 				continue;
-			if (m->knoten_id > 0) {
-				gint64 *k = NULL;
-
-				if (g_hash_table_contains(fertig, &m->knoten_id))
-					continue;
-				k = g_new(gint64, 1);
-				*k = m->knoten_id;
-				g_hash_table_add(fertig, k);
-			}
-			g_ptr_array_add(erste, m);
+			k = g_new(gint64, 1);
+			*k = m->knoten_id;
+			g_hash_table_add(fertig, k);
 		}
+		g_ptr_array_add(erste, m);
+	}
+	g_ptr_array_sort_with_data(erste, cmp_mangel_sort, f);
+	sortierung_anzeigen(f);
 
-		if (erste->len) {
-			titel_a = g_strdup_printf("%s (%u)", gruppen[g].titel, erste->len);
-			gtk_tree_store_append(f->store, &iter_a, NULL);
-			gtk_tree_store_set(f->store, &iter_a, SP_TEXT, titel_a, SP_DETAIL,
-					gruppen[g].gilt, SP_ORT, "", SP_AKTION, "", SP_PTR, NULL, SP_ZEILE,
-					ZEILE_ABSCHNITT, SP_KNOTEN, (gint64) 0, SP_REGEL, g, -1);
+	for (guint i = 0; i < erste->len; i++) {
+		DbMangel *m = g_ptr_array_index(erste, i);
 
-			for (guint i = 0; i < erste->len; i++) {
-				DbMangel *m = g_ptr_array_index(erste, i);
-
-				if (m->aktionen & ~M(DB_AKT_BEHALTEN))
-					n_aktiv++;
-				n_knoten++;
-				knoten_anfuegen(f, &iter_a, m);
-			}
-		}
-
-		g_ptr_array_unref(erste);
-		g_hash_table_unref(fertig);
+		if (m->aktionen & ~M(DB_AKT_BEHALTEN))
+			n_aktiv++;
+		n_knoten++;
+		knoten_anfuegen(f, NULL, m);
 	}
 
+	f->n_knoten = n_knoten;
+	f->n_aktiv = n_aktiv;
 	aktionen_anzeigen(f);
 
-	if (f->erg.maengel->len == 0)
-		summe = g_strdup("Keine Befunde. Die Projektdatei ist stimmig.");
-	else
-		summe = g_strdup_printf("%d Einträge mit Fehlern (%u Befunde), bei %d davon "
-				"können Sie eine Aktion wählen.%s", n_knoten, f->erg.maengel->len,
-				n_aktiv, f->vor_laden ? "\nDer Baum wird nach dem Schließen "
-						"dieses Fensters aufgebaut." : "");
-	gtk_label_set_text(GTK_LABEL(f->label), summe);
-
-	//Abschnitte, bei wenigen Einträgen auch deren Knoten; Nachbarzeilen nie (Kreise)
+	//bei wenigen Einträgen auch deren Knoten; Nachbarzeilen nie (Kreise)
 	{
 		AufklappDaten ad = { f->treeview, n_knoten <= 15 };
 
 		gtk_tree_model_foreach(GTK_TREE_MODEL(f->store), cb_aufklappen, &ad);
 	}
+
+	return;
+}
+
+//Klick auf eine Spaltenüberschrift: danach sortieren, ein zweiter Klick dreht um
+static void cb_sortieren(GtkTreeViewColumn *col, gpointer data) {
+	Fenster *f = data;
+	gint k = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(col), "sort-key"));
+
+	if (k == f->sort_spalte)
+		f->sort_ab = !f->sort_ab;
+	else {
+		f->sort_spalte = k;
+		f->sort_ab = FALSE;
+	}
+	fenster_fuellen(f);
+
+	return;
+}
+
+
+static void zaehle_aktionen(Fenster *f, gint zahlen[DB_NUM_AKT]);
+
+//Zusammenfassung über der Tabelle, mit der Zahl der Einträge, bei denen eine Aktion gewählt ist
+static void summe_anzeigen(Fenster *f) {
+	g_autofree gchar *summe = NULL;
+	gint zahlen[DB_NUM_AKT];
+	gint gewaehlt = 0;
+
+	if (!f->erg.maengel || f->erg.maengel->len == 0) {
+		gtk_label_set_text(GTK_LABEL(f->label),
+				"Keine Befunde. Die Projektdatei ist stimmig.");
+
+		return;
+	}
+
+	zaehle_aktionen(f, zahlen);
+	for (gint a = 0; a < DB_NUM_AKT; a++)
+		if (a != DB_AKT_BEHALTEN)
+			gewaehlt += zahlen[a];
+
+	summe = g_strdup_printf("%d Einträge mit Fehlern (%u Befunde), bei %d davon "
+			"können Sie eine Aktion wählen. Gewählt: %d.%s", f->n_knoten,
+			f->erg.maengel->len, f->n_aktiv, gewaehlt, f->vor_laden ?
+					"\nDer Baum wird nach dem Schließen dieses Fensters aufgebaut." : "");
+	gtk_label_set_text(GTK_LABEL(f->label), summe);
 
 	return;
 }
@@ -808,6 +1047,10 @@ static void fenster_pruefen(Fenster *f) {
 		return;
 	}
 
+	//beim Öffnen und nach jeder Prüfung ist nichts gewählt
+	for (guint i = 0; i < f->erg.maengel->len; i++)
+		((DbMangel*) g_ptr_array_index(f->erg.maengel, i))->gewaehlt = DB_AKT_BEHALTEN;
+
 	fenster_fuellen(f);
 
 	return;
@@ -833,7 +1076,8 @@ static void cb_standard(GtkButton *button, gpointer data) {
 //Tooltip passend zur Zelle unter dem Mauszeiger
 static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 		GtkTooltip *tip, gpointer data) {
-	static gint const spalten[] = { SP_TEXT, SP_DETAIL, SP_ORT, SP_AKTION };
+	static gint const spalten[] = { SP_NR, SP_TEXT, SP_ART, SP_DETAIL, SP_ORT,
+			SP_AKTION };
 	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
 	GtkTreePath *path = NULL;
 	GtkTreeViewColumn *col = NULL;
@@ -843,7 +1087,6 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 	gint by = 0;
 	gint idx = 0;
 	gint zeile = 0;
-	gint regel = 0;
 	DbMangel *m = NULL;
 	g_autofree gchar *zelltext = NULL;
 	g_autofree gchar *text = NULL;
@@ -871,13 +1114,20 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 		return FALSE;
 	}
 
-	gtk_tree_model_get(model, &iter, SP_ZEILE, &zeile, SP_REGEL, &regel, SP_PTR,
-			&m, -1);
+	gtk_tree_model_get(model, &iter, SP_ZEILE, &zeile, SP_PTR, &m, -1);
 
-	if (zeile == ZEILE_ABSCHNITT) {
-		if (regel >= 0 && regel < (gint) G_N_ELEMENTS(gruppen))
-			text = g_strdup(gruppen[regel].gilt);
-	} else if (zeile == ZEILE_MANGEL && idx == 1 && m) { //Erklärung der Fehler
+	if (idx == 0) {
+		gtk_tree_path_free(path);
+
+		return FALSE;
+	}
+	if (zeile == ZEILE_MANGEL && idx == 2 && m) { //was für diese Art gilt
+		gint g = gruppe_von(((Fenster*) data)->zond->dbase_zond->zond_dbase_work, m);
+
+		if (g >= 0 && g < (gint) G_N_ELEMENTS(gruppen))
+			text = g_strdup(gruppen[g].gilt);
+	} else if ((zeile == ZEILE_MANGEL || zeile == ZEILE_NACHBAR) && idx == 3
+			&& m) { //Erklärung der Fehler
 		GString *t = g_string_new(NULL);
 		Fenster *fe = data;
 
@@ -886,22 +1136,23 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 
 			if (mm == m || (m->knoten_id > 0 && mm->knoten_id == m->knoten_id))
 				g_string_append_printf(t, "%s%s\n\nWas gilt: %s\n\n%s", t->len ?
-						"\n\n----\n\n" : "", db_regel_titel(mm->regel),
-						db_regel_gilt(mm->regel), db_regel_erklaerung(mm->regel));
+						"\n\n----\n\n" : "", mm->text, db_regel_gilt(mm->regel),
+						db_regel_erklaerung(mm->regel));
 		}
 		text = g_string_free(t, FALSE);
-	} else if (zeile == ZEILE_MANGEL && idx == 2) {
+	} else if ((zeile == ZEILE_MANGEL || zeile == ZEILE_NACHBAR) && idx == 4) {
 		text = g_strdup("Ob der Eintrag im geladenen Baum angezeigt wird. "
 				"Anbindungen haben keine eigene Zeile, sie erscheinen als ihre Datei. "
-				"Bei »nein« springt ein Doppelklick zum nächsten sichtbaren "
-				"übergeordneten Eintrag.");
-	} else if (idx == 3) { //Aktion: was sie bewirkt
+				"Bei »nein« springt die Zeile nicht selbst; Übergeordnet, Vorgänger "
+				"und Nachfolger darunter führen zur Umgebung.");
+	} else if (idx == 5) { //Aktion: was sie bewirkt
 		if (m)
 			text = g_strdup_printf("%s\n\n%s", db_akt_name(m->gewaehlt),
 					db_akt_beschreibung(m->gewaehlt));
 	} else {
 		gtk_tree_model_get(model, &iter, spalten[idx], &zelltext, -1);
-		if (zeile == ZEILE_FELD && idx == 0) { //gekürztes Feld: voller Text
+		if ((zeile == ZEILE_FELD || zeile == ZEILE_NACHBAR || zeile == ZEILE_MANGEL)
+				&& idx == 1) { //voller Text bzw. Feldfehler
 			gchar *voll = NULL;
 
 			gtk_tree_model_get(model, &iter, SP_AUCH, &voll, -1);
@@ -1033,9 +1284,10 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 		if (a != DB_AKT_BEHALTEN && zahlen[a])
 			g_string_append_printf(frage, "\n- %s: %d", db_akt_name(a), zahlen[a]);
 	if (zahlen[DB_AKT_LOESCHEN])
-		g_string_append(frage, "\n\nGelöscht wird samt Unterbäumen. Dateien und "
-				"Abschnitte werden nie gelöscht, ebenso nichts, worauf noch "
-				"etwas von außerhalb verweist.");
+		g_string_append(frage, "\n\nGelöscht wird samt Unterbäumen, die folgenden "
+				"Einträge rücken nach. Nichts wird gelöscht, worauf noch etwas von "
+				"außerhalb verweist. Die Dateien auf der Festplatte bleiben "
+				"erhalten.");
 	if (!f->zond->dbase_zond->sicherung_gemacht)
 		g_string_append(frage, "\n\nVorher wird eine Sicherungskopie der "
 				"Projektdatei angelegt.");
@@ -1086,7 +1338,7 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 	if (ae.n_angelegt)
 		g_string_append_printf(meldung, "\n- %d angelegt", ae.n_angelegt);
 	if (ae.n_sammelpunkte)
-		g_string_append_printf(meldung, "\n\n%d Punkt(e) »Wiedergefundene Knoten« "
+		g_string_append_printf(meldung, "\n\n%d Strukturpunkt(e) »Wiedergefundene Knoten« "
 				"angelegt.", ae.n_sammelpunkte);
 	for (guint i = 0; ae.meldungen && i < ae.meldungen->len; i++)
 		g_string_append_printf(meldung, "\n! %s",
@@ -1166,22 +1418,20 @@ static gboolean springe_versuch(Fenster *f, gint64 id) {
 		return FALSE;
 	}
 
-	if (root == 1)
-		baum = BAUM_INHALT;
-	else if (root == 2)
-		baum = BAUM_AUSWERTUNG;
-	else {
+	//Dateien und Abschnitte liegen in der Datenbank im Dateibaum; angezeigt werden
+	//sie dort, wo ihre Datei angebunden ist
+	for (gint k = 0; k < 2 && !iter; k++) {
+		Baum b = (k == 0) ? BAUM_INHALT : BAUM_AUSWERTUNG;
 
-		return FALSE;
+		if ((root == 1 && b != BAUM_INHALT) || (root == 2 && b != BAUM_AUSWERTUNG))
+			continue;
+		iter = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(zond->treeview[b]))), (gint) id);
+		baum = b;
 	}
-
-	iter = zond_tree_store_get_iter_by_node_id(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(zond->treeview[baum]))), (gint) id);
-	if (!iter) {
-
+	if (!iter)
 		return FALSE;
-	}
 
 	sond_treeview_expand_to_row(zond->treeview[baum], iter);
 	sond_treeview_set_cursor(zond->treeview[baum], iter);
@@ -1240,8 +1490,7 @@ static void cb_row_activated(GtkTreeView *tv, GtkTreePath *path,
 		return;
 
 	gtk_tree_model_get(model, &iter, SP_KNOTEN, &id, SP_ZEILE, &zeile, -1);
-	if (zeile == ZEILE_DATENKOPF || zeile == ZEILE_ABSCHNITT
-			|| zeile == ZEILE_KINDER) {
+	if (zeile == ZEILE_DATENKOPF || zeile == ZEILE_KINDER) {
 		if (gtk_tree_view_row_expanded(tv, path))
 			gtk_tree_view_collapse_row(tv, path);
 		else
@@ -1283,7 +1532,7 @@ static void cb_destroy(GtkWidget *widget, gpointer data) {
 	return;
 }
 
-static void spalte_hinzu(GtkWidget *tv, gchar const *titel, gint spalte,
+static GtkTreeViewColumn* spalte_hinzu(GtkWidget *tv, gchar const *titel, gint spalte,
 		gboolean expand) {
 	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
 	GtkTreeViewColumn *col = NULL;
@@ -1291,12 +1540,30 @@ static void spalte_hinzu(GtkWidget *tv, gchar const *titel, gint spalte,
 	g_object_set(renderer, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
 	col = gtk_tree_view_column_new_with_attributes(titel, renderer, "text",
 			spalte, NULL);
+	if (spalte == SP_TEXT) { //Symbol des Knotens direkt vor dem Text
+		GtkCellRenderer *symbol = gtk_cell_renderer_pixbuf_new();
+
+		g_object_set(symbol, "xpad", 2, NULL);
+		gtk_tree_view_column_pack_start(col, symbol, FALSE);
+		gtk_tree_view_column_add_attribute(col, symbol, "icon-name", SP_ICON);
+		gtk_cell_layout_reorder(GTK_CELL_LAYOUT(col), symbol, 0);
+	}
 
 	gtk_tree_view_column_set_resizable(col, TRUE);
 	gtk_tree_view_column_set_min_width(col, 60);
 	gtk_tree_view_column_set_max_width(col, 450);
 	gtk_tree_view_column_set_expand(col, expand);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(tv), col);
+
+	return col;
+}
+
+//Spalte, die sich durch Klick auf die Überschrift sortieren lässt
+static void spalte_sortierbar(Fenster *f, GtkTreeViewColumn *col, gint k) {
+	f->sort_cols[k] = col;
+	g_object_set_data(G_OBJECT(col), "sort-key", GINT_TO_POINTER(k));
+	gtk_tree_view_column_set_clickable(col, TRUE);
+	g_signal_connect(col, "clicked", G_CALLBACK(cb_sortieren), f);
 
 	return;
 }
@@ -1305,9 +1572,11 @@ static void spalte_hinzu(GtkWidget *tv, gchar const *titel, gint spalte,
 static void aktion_zelldaten(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
 		GtkTreeModel *model, GtkTreeIter *iter, gpointer data) {
 	gint zeile = ZEILE_KNOTEN;
+	DbMangel *m = NULL;
 
-	gtk_tree_model_get(model, iter, SP_ZEILE, &zeile, -1);
-	g_object_set(renderer, "editable", zeile == ZEILE_MANGEL, NULL);
+	gtk_tree_model_get(model, iter, SP_ZEILE, &zeile, SP_PTR, &m, -1);
+	g_object_set(renderer, "editable", zeile == ZEILE_MANGEL
+			|| (zeile == ZEILE_NACHBAR && m), NULL);
 
 	return;
 }
@@ -1347,11 +1616,12 @@ static gboolean cb_button_press(GtkWidget *tv, GdkEventButton *ev, gpointer data
 	if (col == f->spalte_aktion) {
 		GtkTreeIter iter = { 0 };
 		gint zeile = ZEILE_KNOTEN;
+		DbMangel *m = NULL;
 		GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
 
 		if (gtk_tree_model_get_iter(model, &iter, path)) {
-			gtk_tree_model_get(model, &iter, SP_ZEILE, &zeile, -1);
-			if (zeile == ZEILE_MANGEL) {
+			gtk_tree_model_get(model, &iter, SP_ZEILE, &zeile, SP_PTR, &m, -1);
+			if (zeile == ZEILE_MANGEL || (zeile == ZEILE_NACHBAR && m)) {
 				gtk_tree_view_set_cursor(GTK_TREE_VIEW(tv), path, col, TRUE);
 				behandelt = TRUE;
 			}
@@ -1416,15 +1686,17 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	{
 		GtkWidget *hilfe = gtk_label_new("Hier stehen Einträge, bei denen die "
 				"Projektdatei nicht stimmig ist. Zu jedem Eintrag sind alle seine "
-				"Fehler aufgelistet, dazu sein Datensatz (aufklappbar). In der Spalte "
-				"»Aktion« ist vorgeschlagen, was mit dem Eintrag geschehen soll; mit "
-				"einem Klick auf die Zelle können Sie etwas anderes wählen. »Nichts "
-				"tun« lässt einen Eintrag unverändert.\n"
-				"Die Einträge sind nach ihrer Art gruppiert. Ein Doppelklick springt im "
-				"Baum zum Eintrag; ist er nicht sichtbar, zum nächsten sichtbaren "
-				"übergeordneten.\n"
+				"Fehler aufgelistet, dazu seine Angaben und Verbindungen (aufklappbar). "
+				"In der Spalte »Aktion« steht zunächst überall »Nichts tun«; mit einem "
+				"Klick auf die Zelle wählen Sie, was mit dem Eintrag geschehen soll. "
+				"»Standard vorschlagen« belegt die Aktionen mit dem üblichen Vorschlag "
+				"vor.\n"
+				"Ein Klick auf die Überschrift Nr., Art oder Beschreibung sortiert die Liste. "
+				"Ein Doppelklick springt im "
+				"Baum zum Eintrag; ist er nicht sichtbar, springen die Zeilen "
+				"Übergeordnet, Vorgänger und Nachfolger zu seiner Umgebung.\n"
 				"Einträge, die nirgends hinpassen oder nicht angezeigt wurden, "
-				"werden in einem neuen Punkt »Wiedergefundene Knoten« abgelegt. "
+				"werden in einem neuen Strukturpunkt »Wiedergefundene Knoten« abgelegt. "
 				"Dort können Sie sie einsortieren oder löschen.\n"
 				"Mit »Ausführen« werden die Änderungen vorgenommen; vorher wird "
 				"eine Sicherungskopie der Projektdatei angelegt.");
@@ -1451,7 +1723,8 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 
 	f->store = gtk_tree_store_new(N_SP, G_TYPE_STRING, G_TYPE_STRING,
 			G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, GTK_TYPE_TREE_MODEL,
-			G_TYPE_POINTER, G_TYPE_INT, G_TYPE_INT64, G_TYPE_INT);
+			G_TYPE_POINTER, G_TYPE_INT, G_TYPE_INT64, G_TYPE_INT, G_TYPE_STRING,
+			G_TYPE_STRING, G_TYPE_STRING);
 	f->treeview = gtk_tree_view_new_with_model(GTK_TREE_MODEL(f->store));
 	g_object_unref(f->store);
 	gtk_tree_view_set_enable_tree_lines(GTK_TREE_VIEW(f->treeview), TRUE);
@@ -1460,14 +1733,26 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 			GTK_SELECTION_SINGLE);
 	gtk_widget_set_has_tooltip(f->treeview, TRUE);
 	g_signal_connect(f->treeview, "query-tooltip", G_CALLBACK(cb_tooltip), f);
-	spalte_hinzu(f->treeview, "Eintrag", SP_TEXT, TRUE);
-	spalte_hinzu(f->treeview, "Beschreibung", SP_DETAIL, TRUE);
+	{
+		GtkTreeViewColumn *c_nr = spalte_hinzu(f->treeview, "Nr.", SP_NR, FALSE);
+		GtkTreeViewColumn *c_eintrag = spalte_hinzu(f->treeview, "Eintrag", SP_TEXT, TRUE);
+		GtkTreeViewColumn *c_art = spalte_hinzu(f->treeview, "Art", SP_ART, FALSE);
+		GtkTreeViewColumn *c_beschr = spalte_hinzu(f->treeview, "Beschreibung",
+				SP_DETAIL, TRUE);
+
+		gtk_tree_view_set_expander_column(GTK_TREE_VIEW(f->treeview), c_eintrag);
+		spalte_sortierbar(f, c_nr, SORT_NR);
+		spalte_sortierbar(f, c_art, SORT_ART);
+		spalte_sortierbar(f, c_beschr, SORT_BESCHREIBUNG);
+	}
 	spalte_hinzu(f->treeview, "Im Baum", SP_ORT, FALSE);
 	spalte_aktion_hinzu(f);
 	g_signal_connect(f->treeview, "row-activated", G_CALLBACK(cb_row_activated),
 			f);
 	g_signal_connect(f->treeview, "test-expand-row",
 			G_CALLBACK(cb_test_expand_row), f);
+	g_signal_connect(f->treeview, "expand-collapse-cursor-row",
+			G_CALLBACK(cb_aufklappen_rekursiv), f);
 	g_signal_connect(f->treeview, "button-press-event",
 			G_CALLBACK(cb_button_press), f);
 
@@ -1480,7 +1765,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	gtk_box_set_spacing(GTK_BOX(buttons), 6);
 	b_legende = gtk_button_new_with_label("Erklärung der Befunde");
 	b_pruefen = gtk_button_new_with_label("Erneut prüfen");
-	b_standard = gtk_button_new_with_label("Alles auf Standard");
+	b_standard = gtk_button_new_with_label("Standard vorschlagen");
 	b_ausfuehren = gtk_button_new_with_label("Ausführen");
 	gtk_container_add(GTK_CONTAINER(buttons), b_legende);
 	gtk_container_add(GTK_CONTAINER(buttons), b_pruefen);
