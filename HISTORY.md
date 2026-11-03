@@ -5872,3 +5872,62 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  cb_win_pdf_reparieren, Aktion pdf-reparieren), zond->menu.pdf (zond_init.h, project.c) und der
  README-Absatz sind entfernt; die Funktion wurde nicht gebraucht.
 ```
+
+## Rekursives Aufklappen bei Link-Kreisen (01.11.2026) (#243)
+
+```text
+ Hauptbäume BAUM_INHALT/BAUM_AUSWERTUNG: Ein Link auf einen Vorfahren (oder Kreis über
+ mehrere Links) ließ "alles darunter aufklappen" (Taste *, Umschalt+Pfeil rechts, Menü
+ "alle/Zweig erweitern") endlos neue Link-Zeilen laden. zond_treeview.c:
+ zond_treeview_test_expand_row lädt ungeladene Links vor dem Aufklappen (damit GTK die
+ Kinder mit aufklappt) und lehnt bei rekursivem Aufklappen einen Link ab, wenn unterhalb
+ der Startzeile des Durchgangs schon eine Zeile mit derselben Knoten-ID darüber steht.
+ Je Durchgang wird so die Startzeile plus eine Link-Ebene geöffnet. Der Durchgang wird
+ über expand-collapse-cursor-row bzw. zond_treeview_expand_all/_expand_row_rekursiv
+ (headerbar.c) erkannt. Einzelnes Aufklappen bleibt unbegrenzt.
+```
+
+## Konsistenzprüfung der Projektdatenbank (Extras) (13.10. bis 03.11.2026) (#231)
+
+```text
+ Extras > "Datenbank prüfen..." (db_check_fenster.c) und beim Projektstart, wenn es Befunde
+ mit wählbarer Aktion gibt (ohne Dateiprüfung). Regelwerk in db_regeln.c/.h, Ketten und
+ Sammelpunkt in db_check.c. Fenster: flache, sortierbare Liste (Nr., Eintrag, Art,
+ Beschreibung, Im Baum, Aktion); je Knoten alle Befunde mit Unterzeilen (Art, Notiz, Pfad,
+ Abschnitt, Übergeordnet, Vorgänger, Nachfolger, Verweis, Kinder, aufklappbar und
+ anspringbar); Mehrfachauswahl setzt eine Aktion für alle markierten, die sie erlauben;
+ beim Öffnen überall "Nichts tun", "Standard vorschlagen" belegt vor; Sicherungskopie
+ vor dem Ausführen; "alles darunter aufklappen" im Fenster auf die Zeile beschränkt.
+
+ Regeln (nach Wichtigkeit):
+   A1 Grundstruktur (Zeilen 0, 1, 2)
+   B1 Elternkette (Elternknoten fehlt oder Kreis), B2 Geschwisterkette (Köpfe,
+      Gabelungen, Lücken, Zyklen: nicht angezeigte Zweige)
+   C1 Art, C2 Stelle (was unter was stehen darf), C3 Bereich (Anbindung im
+      Bestandsverzeichnis, Copy/Link in der Auswertung), C4 Angaben (Spalten zur Art)
+   D1 Verweisziel (fehlt oder unzulässige Art), D2 Datei mehrfach angebunden
+   E1 Abschnitt in falscher Datei, E2 doppelte Datei/Abschnitt, E3 Abschnitte passen nicht,
+      E4 Datei fehlt auf der Festplatte (nur auf Wunsch: Häkchen, Hintergrund-Thread mit
+      Fortschritt und Abbrechen; Abbruch bei nicht erreichbarem Projektordner oder ab 90 %
+      fehlender Dateien; Prüfung mit sond_exists() wegen langer SeaDrive-Pfade, absolute
+      Pfade gelten wie gespeichert), E5 absoluter Pfad (Umwandeln in den relativen Pfad,
+      oder Löschen, wenn der relative schon da ist oder die Datei außerhalb liegt und nichts
+      darauf verweist)
+   F1 Datenbankdatei (quick_check, immer im Fenster, nur Anzeige)
+ Aktionen: Löschen (Knoten samt Unterbau, Nachfolger rücken nach, nichts, worauf von außerhalb
+ verwiesen wird; Dateizeilen nur bei E1 bis E5 als gewählter Eintrag), Sammelpunkt
+ ("Wiedergefundene Knoten"), Einordnen, Umwandeln in Strukturpunkt, Bereinigen, Anlegen,
+ In relativen Pfad umwandeln.
+ Nicht verfolgt (vom Nutzer gestrichen): Prüfung der Index-DB, Unterschiede main/work,
+ restliche Review-Befunde, "einfacher Modus". Rest als #245 (Containerprüfung) im TODO.
+```
+
+## SeaDrive-Anzeige in der Titelzeile nach Schließen des Projekts (03.11.2026) (#244)
+
+```text
+ Nach dem Schließen eines SeaDrive-Projekts blieben "SeaDrive: ✓" in der Titelzeile stehen.
+ sond_treeviewfm_set_root(NULL) (sond_treeviewfm.c) sendet über
+ sond_seadrive_reset_ground_truth() das Statussignal, solange is_seadrive_path noch TRUE ist;
+ danach wird der Wert FALSE, aber kein Signal mehr gesendet. Behebung: im Zweig root == NULL
+ ein zweites Statussignal (0, 0) nach dem Zurücksetzen; das Label leert sich dann.
+```

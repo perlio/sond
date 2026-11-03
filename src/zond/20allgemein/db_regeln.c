@@ -153,13 +153,34 @@ static struct {
 		"das verletzt, zum Beispiel weil sich die Datei nachträglich geändert hat.\n"
 		"»Löschen« entfernt den Abschnitt samt Unterabschnitten, wenn nichts "
 		"darauf verweist." },
+	[DB_REGEL_E4] = { "E4", "Fehlende Dateien", "Datei fehlt",
+		"Zu jeder Datei der Dateiliste gibt es die Datei im Projektverzeichnis.",
+		"Zu jeder Datei der Dateiliste muss es die Datei (oder den Ordner) im "
+		"Projektverzeichnis geben. Hier fehlt sie, zum Beispiel weil sie gelöscht, "
+		"verschoben oder umbenannt wurde. Geprüft wird nur der Pfad der Datei, nicht "
+		"ihr Inhalt; Einträge innerhalb von ZIP-Dateien, E-Mails und PDFs werden "
+		"nicht geprüft.\n"
+		"Eine Dateizeile, auf die nichts verweist, lässt sich mit »Löschen« "
+		"entfernen. Ist die Datei angebunden, steht der Befund an der Anbindung; "
+		"sie lässt sich löschen, danach kann die Dateizeile entfernt werden." },
+	[DB_REGEL_E5] = { "E5", "Absolute Pfade in der Dateiliste", "Absoluter Pfad",
+		"Die Pfade der Dateiliste sind relativ zum Projektordner.",
+		"Die Dateiliste führt jede Datei mit ihrem Pfad relativ zum Projektordner. "
+		"Hier ist der Pfad absolut gespeichert (zum Beispiel »C:/Akten/x.pdf«). "
+		"Das Projekt findet die Datei dann nur noch an diesem einen Ort und nicht "
+		"mehr, wenn der Projektordner verschoben oder auf einem anderen Rechner "
+		"geöffnet wird.\n"
+		"Liegt die Datei im Projektordner, wandelt »In relativen Pfad umwandeln« "
+		"den Pfad um. Gibt es den relativen Pfad schon, oder liegt die Datei nicht im "
+		"Projektordner, lässt sich die Zeile mit »Löschen« samt ihren Abschnitten "
+		"entfernen, wenn nichts darauf verweist. Sonst wird der Befund nur "
+		"angezeigt." },
 	[DB_REGEL_F1] = { "F1", "Zustand der Datenbankdatei", "Datenbankdatei",
 		"Die Datenbankdatei selbst muss für SQLite in Ordnung sein.",
 		"SQLite hat bei der Prüfung der Datei selbst (nicht der Baumstruktur) "
 		"einen Fehler gefunden, zum Beispiel eine beschädigte Seite oder einen "
-		"Eintrag, der auf einen nicht vorhandenen verweist. Das wird nur "
-		"angezeigt und lässt sich hier nicht beheben. Im Zweifel hilft die letzte "
-		"Sicherungskopie." }
+		"Index, der nicht zur Tabelle passt. Das wird nur angezeigt und lässt "
+		"sich hier nicht beheben. Im Zweifel hilft die letzte Sicherungskopie." }
 };
 
 static gchar const *const akt_namen[DB_NUM_AKT] = {
@@ -169,7 +190,8 @@ static gchar const *const akt_namen[DB_NUM_AKT] = {
 	[DB_AKT_EINORDNEN] = "An die richtige Stelle einordnen",
 	[DB_AKT_UMWANDELN] = "In Strukturpunkt umwandeln",
 	[DB_AKT_BEREINIGEN] = "Angaben korrigieren",
-	[DB_AKT_ANLEGEN] = "Neu anlegen"
+	[DB_AKT_ANLEGEN] = "Neu anlegen",
+	[DB_AKT_RELATIVIEREN] = "In relativen Pfad umwandeln"
 };
 
 gchar const* db_regel_gilt(DbRegel regel) {
@@ -242,6 +264,12 @@ gchar const* db_akt_beschreibung(DbAkt akt) {
 				"entfernt.";
 	case DB_AKT_ANLEGEN:
 		return "Der fehlende Grundeintrag wird neu angelegt.";
+	case DB_AKT_RELATIVIEREN:
+		return "Der absolute Pfad der Datei wird durch den Pfad relativ zum "
+				"Projektordner ersetzt, bei der Zeile und bei allen Abschnitten "
+				"darunter. Die Datei selbst bleibt unverändert. Der Volltextindex "
+				"kennt die Datei danach erst nach erneutem Indizieren unter dem "
+				"neuen Pfad.";
 	default:
 		return "";
 	}
@@ -261,6 +289,7 @@ gint db_akt_rang(DbAkt akt) {
 	case DB_AKT_UMWANDELN:
 		return 3;
 	case DB_AKT_BEREINIGEN:
+	case DB_AKT_RELATIVIEREN:
 		return 2;
 	case DB_AKT_ANLEGEN:
 		return 1;
@@ -276,6 +305,7 @@ void db_mangel_free(DbMangel *mangel) {
 	if (mangel->knoten_ids)
 		g_array_unref(mangel->knoten_ids);
 	g_free(mangel->text);
+	g_free(mangel->ziel_pfad);
 	g_free(mangel);
 
 	return;
@@ -1010,6 +1040,260 @@ static gint pruefe_dateibaum(sqlite3 *db, Ctx *c, GPtrArray *m, GError **error) 
 	return 0;
 }
 
+/* ---- Regel E4: Datei fehlt auf der Festplatte ------------------------------ */
+
+//Äußerer Pfad einer Dateizeile: der Teil vor dem ersten "//" (Inhalt von Containern
+//wird nicht geprüft)
+static gchar* aeusserer_pfad(gchar const *fp) {
+	gchar const *p = strstr(fp, "//");
+
+	return p ? g_strndup(fp, (gsize) (p - fp)) : g_strdup(fp);
+}
+
+GPtrArray* db_regeln_dateipfade(ZondDBase *zond_dbase, GError **error) {
+	sqlite3 *db = zond_dbase_get_dbase(zond_dbase);
+	sqlite3_stmt *stmt = NULL;
+	GPtrArray *pfade = NULL;
+	g_autoptr(GHashTable) gesehen = g_hash_table_new_full(g_str_hash, g_str_equal,
+			g_free, NULL);
+	gint rc = sqlite3_prepare_v2(db, "SELECT DISTINCT file_part FROM knoten WHERE "
+			"type=5 AND parent_ID=0 AND file_part IS NOT NULL;", -1, &stmt, NULL);
+
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return NULL;
+	}
+
+	pfade = g_ptr_array_new_with_free_func(g_free);
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		gchar *pfad = aeusserer_pfad((gchar const*) sqlite3_column_text(stmt, 0));
+
+		if (*pfad && g_hash_table_add(gesehen, g_strdup(pfad)))
+			g_ptr_array_add(pfade, pfad);
+		else
+			g_free(pfad);
+	}
+	sqlite3_finalize(stmt);
+	if (rc != SQLITE_DONE) {
+		set_sqlite_error(db, __func__, error);
+		g_ptr_array_unref(pfade);
+
+		return NULL;
+	}
+
+	return pfade;
+}
+
+//Menge: Ziel eines Verweises (Anbindung, Copy, Link) -> Indizes der Zeilen, die darauf zeigen
+static GHashTable* verweise_sammeln(Ctx *c) {
+	GHashTable *verweise = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL,
+			(GDestroyNotify) g_array_unref);
+
+	for (guint i = 0; i < c->rows->len; i++) {
+		Zeile *z = zeile(c, i);
+		GArray *liste = NULL;
+
+		if (!(z->flags & F_LINK) || z->type < 2 || z->type > 4)
+			continue;
+		liste = g_hash_table_lookup(verweise, &z->link);
+		if (!liste) {
+			liste = g_array_new(FALSE, FALSE, sizeof(guint));
+			g_hash_table_insert(verweise, &z->link, liste);
+		}
+		g_array_append_val(liste, i);
+	}
+
+	return verweise;
+}
+
+//Zeigt etwas auf die Zeile idx oder auf einen ihrer Abschnitte? Anbindungen darauf
+//werden an anbindungen angehängt (darf NULL sein).
+static gboolean zeile_verwiesen(Ctx *c, GHashTable *verweise, guint idx,
+		GArray *anbindungen) {
+	g_autoptr(GArray) teil = g_array_new(FALSE, FALSE, sizeof(guint));
+	gboolean verwiesen = FALSE;
+
+	g_array_append_val(teil, idx);
+	for (guint k = 0; k < teil->len && teil->len <= c->rows->len; k++) { //Schutz vor Kreisen
+		guint cur = g_array_index(teil, guint, k);
+		GArray *refs = g_hash_table_lookup(verweise, &zeile(c, cur)->id);
+
+		for (guint r = 0; refs && r < refs->len; r++) {
+			guint ri = g_array_index(refs, guint, r);
+
+			verwiesen = TRUE;
+			if (anbindungen && zeile(c, ri)->type == 2)
+				g_array_append_val(anbindungen, ri);
+		}
+		if (c->kinder[cur])
+			for (guint j = 0; j < c->kinder[cur]->len; j++) {
+				guint kind = (guint) g_array_index(c->kinder[cur], gint, j);
+
+				g_array_append_val(teil, kind);
+			}
+	}
+
+	return verwiesen;
+}
+
+//Dateizeilen, deren Datei fehlt: Befund an der Dateizeile (Löschen nur, wenn nichts
+//darauf verweist) und an jeder Anbindung darauf
+static gint pruefe_dateien(sqlite3 *db, Ctx *c, GPtrArray *m, GHashTable *fehlend,
+		GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	gint rc = 0;
+	g_autoptr(GHashTable) verweise = verweise_sammeln(c);
+
+	rc = sqlite3_prepare_v2(db, "SELECT ID, file_part FROM knoten WHERE type=5 AND "
+			"parent_ID=0 AND file_part IS NOT NULL ORDER BY ID;", -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		gint64 id = sqlite3_column_int64(stmt, 0);
+		gchar const *gesamt = (gchar const*) sqlite3_column_text(stmt, 1);
+		g_autofree gchar *aussen = aeusserer_pfad(gesamt);
+		gint idx = finde(c, id);
+		g_autoptr(GArray) anbindungen = g_array_new(FALSE, FALSE, sizeof(guint));
+		gboolean verwiesen = FALSE;
+
+		if (idx < 0 || !g_hash_table_contains(fehlend, aussen))
+			continue;
+
+		//die Zeile samt ihren Abschnitten
+		verwiesen = zeile_verwiesen(c, verweise, (guint) idx, anbindungen);
+
+		//der geprüfte Pfad steht im Text: bei Einträgen in Containern fehlt der Container
+		neu_mangel(m, DB_REGEL_E4, id, 0, 3, verwiesen ? M(DB_AKT_BEHALTEN) :
+				(M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN)), DB_AKT_BEHALTEN,
+				g_strdup_printf("%s: %s - %s", strstr(gesamt, "//") ? "Container fehlt" :
+						"Datei fehlt", aussen, verwiesen ? "ist angebunden" :
+								"nirgends angebunden"));
+		for (guint a = 0; a < anbindungen->len; a++) {
+			guint ai = g_array_index(anbindungen, guint, a);
+			Zeile *az = zeile(c, ai);
+
+			neu_mangel(m, DB_REGEL_E4, az->id, az->parent, c->baum[ai],
+					M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
+					g_strdup("Angebundene Datei fehlt"));
+		}
+	}
+	sqlite3_finalize(stmt);
+	if (rc != SQLITE_DONE) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+
+	return 0;
+}
+
+/* ---- Regel E5: absolute Pfade in der Dateiliste ----------------------------- */
+
+//Relativer Pfad zum Projektordner, mit dem Rest hinter dem ersten "//" (Inhalt von
+//Containern); NULL, wenn die Datei nicht im Projektordner liegt
+static gchar* relativer_pfad(gchar const *projekt_dir, gchar const *fp) {
+	gchar const *rest = strstr(fp, "//");
+	g_autofree gchar *aussen = rest ? g_strndup(fp, (gsize) (rest - fp)) : g_strdup(fp);
+	g_autofree gchar *dir = NULL;
+	gsize len = 0;
+
+	if (!projekt_dir || !*projekt_dir)
+		return NULL;
+
+	dir = g_strdup(projekt_dir);
+	g_strdelimit(dir, "\\", '/');
+	g_strdelimit(aussen, "\\", '/');
+	len = strlen(dir);
+	while (len > 1 && dir[len - 1] == '/')
+		dir[--len] = '\0';
+
+#ifdef G_OS_WIN32
+	if (g_ascii_strncasecmp(aussen, dir, len))
+#else
+	if (strncmp(aussen, dir, len))
+#endif
+		return NULL;
+	if (aussen[len] != '/' || !aussen[len + 1])
+		return NULL;
+
+	return g_strconcat(aussen + len + 1, rest ? rest : "", NULL);
+}
+
+static gint pruefe_absolute(sqlite3 *db, Ctx *c, GPtrArray *m, gchar const *projekt_dir,
+		GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	gint rc = 0;
+	g_autoptr(GHashTable) vorhanden = g_hash_table_new_full(g_str_hash, g_str_equal,
+			g_free, NULL);
+	g_autoptr(GPtrArray) kandidaten = g_ptr_array_new_with_free_func(
+			(GDestroyNotify) g_strfreev);
+	g_autoptr(GHashTable) verweise = verweise_sammeln(c);
+
+	rc = sqlite3_prepare_v2(db, "SELECT ID, parent_ID, file_part FROM knoten WHERE "
+			"type=5 AND file_part IS NOT NULL ORDER BY ID;", -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		gchar const *fp = (gchar const*) sqlite3_column_text(stmt, 2);
+		gchar const *rest = strstr(fp, "//");
+		g_autofree gchar *aussen = rest ? g_strndup(fp, (gsize) (rest - fp)) :
+				g_strdup(fp);
+
+		g_hash_table_add(vorhanden, g_strdup(fp));
+		if (sqlite3_column_int64(stmt, 1) == 0 && g_path_is_absolute(aussen)) {
+			gchar **k = g_new0(gchar*, 4);
+
+			k[0] = g_strdup_printf("%" G_GINT64_FORMAT, sqlite3_column_int64(stmt, 0));
+			k[1] = g_strdup(fp);
+			g_ptr_array_add(kandidaten, k);
+		}
+	}
+	sqlite3_finalize(stmt);
+	if (rc != SQLITE_DONE) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+
+	for (guint i = 0; i < kandidaten->len; i++) {
+		gchar **k = g_ptr_array_index(kandidaten, i);
+		gint64 id = g_ascii_strtoll(k[0], NULL, 10);
+		gint idx = finde(c, id);
+		g_autofree gchar *rel = relativer_pfad(projekt_dir, k[1]);
+		gboolean doppelt = rel && g_hash_table_contains(vorhanden, rel);
+		//Umwandeln geht nicht (relativer Pfad schon da oder Datei außerhalb des
+		//Projektordners): Löschen, wenn nichts auf die Zeile zeigt
+		gboolean ohne_umwandlung = doppelt || (!rel && projekt_dir);
+		gboolean loeschbar = ohne_umwandlung && idx >= 0 && !zeile_verwiesen(c,
+				verweise, (guint) idx, NULL);
+		DbMangel *mg = NULL;
+
+		mg = neu_mangel(m, DB_REGEL_E5, id, 0, (idx >= 0) ? c->baum[idx] : 3,
+				(rel && !doppelt) ? (M(DB_AKT_RELATIVIEREN) | M(DB_AKT_BEHALTEN)) :
+						(loeschbar ? (M(DB_AKT_LOESCHEN) | M(DB_AKT_BEHALTEN)) :
+								M(DB_AKT_BEHALTEN)),
+				(rel && !doppelt) ? DB_AKT_RELATIVIEREN : DB_AKT_BEHALTEN,
+				!rel ? g_strdup_printf("%s%s", projekt_dir ? "Absoluter Pfad - die Datei "
+						"liegt nicht im Projektordner" : "Absoluter Pfad", (projekt_dir
+						&& !loeschbar) ? " (angebunden)" : "") :
+						(doppelt ? g_strdup_printf("Absoluter Pfad - der relative "
+								"Pfad »%s« ist schon vorhanden%s", rel, loeschbar ? "" :
+										" (angebunden)") :
+								g_strdup_printf("Absoluter Pfad - wird zu »%s«", rel)));
+		if (rel && !doppelt)
+			mg->ziel_pfad = g_strdup(rel);
+	}
+
+	return 0;
+}
+
 static void pruefe_zeilen(Ctx *c, GPtrArray *m) {
 	for (guint i = 0; i < c->rows->len; i++) {
 		Zeile *z = zeile(c, i);
@@ -1185,27 +1469,11 @@ static gint pruefe_d1(ZondDBase *zond_dbase, Ctx *c, GPtrArray *m,
 
 static gint pruefe_f1(sqlite3 *db, GPtrArray *m, GError **error) {
 	sqlite3_stmt *stmt = NULL;
-	GHashTable *bekannt = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free,
-			NULL);
 	gint n = 0;
-	gint rc = 0;
+	gint rc = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL);
 
-	//Knoten mit anderem Mangel werden nicht noch einmal als Integritätsfehler gemeldet
-	for (guint i = 0; i < m->len; i++) {
-		DbMangel *mg = g_ptr_array_index(m, i);
-
-		for (guint k = 0; k < mg->knoten_ids->len; k++) {
-			gint64 *key = g_new(gint64, 1);
-
-			*key = g_array_index(mg->knoten_ids, gint64, k);
-			g_hash_table_insert(bekannt, key, GINT_TO_POINTER(1));
-		}
-	}
-
-	rc = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, NULL);
 	if (rc != SQLITE_OK) {
 		set_sqlite_error(db, __func__, error);
-		g_hash_table_unref(bekannt);
 
 		return -1;
 	}
@@ -1220,37 +1488,6 @@ static gint pruefe_f1(sqlite3 *db, GPtrArray *m, GError **error) {
 		n++;
 	}
 	sqlite3_finalize(stmt);
-	if (rc != SQLITE_DONE) {
-		set_sqlite_error(db, __func__, error);
-		g_hash_table_unref(bekannt);
-
-		return -1;
-	}
-
-	n = 0;
-	rc = sqlite3_prepare_v2(db, "PRAGMA foreign_key_check;", -1, &stmt, NULL);
-	if (rc != SQLITE_OK) {
-		set_sqlite_error(db, __func__, error);
-		g_hash_table_unref(bekannt);
-
-		return -1;
-	}
-	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-		gint64 rowid = sqlite3_column_int64(stmt, 1);
-
-		if (n >= DB_REGELN_MAX_INTEGRITAET || g_hash_table_contains(bekannt, &rowid))
-			continue;
-
-		neu_mangel(m, DB_REGEL_F1, 0, 0, 4, M(DB_AKT_BEHALTEN), DB_AKT_BEHALTEN,
-				g_strdup_printf("Datenbankdatei: Eintrag %s (%s) verweist auf "
-						"nicht vorhandenen Eintrag (%s)",
-						(gchar const*) sqlite3_column_text(stmt, 0),
-						(gchar const*) sqlite3_column_text(stmt, 1),
-						(gchar const*) sqlite3_column_text(stmt, 2)));
-		n++;
-	}
-	sqlite3_finalize(stmt);
-	g_hash_table_unref(bekannt);
 	if (rc != SQLITE_DONE) {
 		set_sqlite_error(db, __func__, error);
 
@@ -1441,6 +1678,7 @@ static gint vergleiche_mangel(gconstpointer pa, gconstpointer pb) {
 }
 
 gint db_regeln_pruefen(ZondDBase *zond_dbase, gboolean mit_integritaet,
+		GHashTable *fehlende_pfade, gchar const *projekt_dir,
 		DbRegelErgebnis *erg, GError **error) {
 	sqlite3 *db = zond_dbase_get_dbase(zond_dbase);
 	Ctx c = { 0 };
@@ -1461,7 +1699,17 @@ gint db_regeln_pruefen(ZondDBase *zond_dbase, gboolean mit_integritaet,
 
 		return -1;
 	}
+	if (pruefe_absolute(db, &c, erg->maengel, projekt_dir, error)) {
+		ctx_leeren(&c);
+
+		return -1;
+	}
 	if (pruefe_d1(zond_dbase, &c, erg->maengel, error)) {
+		ctx_leeren(&c);
+
+		return -1;
+	}
+	if (fehlende_pfade && pruefe_dateien(db, &c, erg->maengel, fehlende_pfade, error)) {
 		ctx_leeren(&c);
 
 		return -1;
@@ -1642,6 +1890,51 @@ static gint a1_bereinigen(sqlite3 *db, gint64 id, DbRegelAktionErgebnis *erg,
 	return 0;
 }
 
+//E5: Pfad der Dateizeile (und aller Zeilen mit demselben Pfad) auf den relativen umstellen
+static gint e5_relativieren(sqlite3 *db, DbMangel *mg, DbRegelAktionErgebnis *erg,
+		GError **error) {
+	sqlite3_stmt *stmt = NULL;
+	g_autofree gchar *alt = NULL;
+	gint rc = 0;
+
+	if (!mg->ziel_pfad)
+		return 0;
+
+	rc = sqlite3_prepare_v2(db, "SELECT file_part FROM knoten WHERE ID=?1;", -1,
+			&stmt, NULL);
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	sqlite3_bind_int64(stmt, 1, mg->knoten_id);
+	if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_text(stmt, 0))
+		alt = g_strdup((gchar const*) sqlite3_column_text(stmt, 0));
+	sqlite3_finalize(stmt);
+	if (!alt)
+		return 0;
+
+	rc = sqlite3_prepare_v2(db, "UPDATE knoten SET file_part=?1 WHERE type=5 AND "
+			"file_part=?2;", -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	sqlite3_bind_text(stmt, 1, mg->ziel_pfad, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text(stmt, 2, alt, -1, SQLITE_TRANSIENT);
+	rc = sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
+	if (rc != SQLITE_DONE) {
+		set_sqlite_error(db, __func__, error);
+
+		return -1;
+	}
+	erg->n_relativ++;
+
+	return 0;
+}
+
 //Knoten samt Unterbäumen löschen, soweit die Schranken es zulassen
 static gint loesche_gruppe(sqlite3 *db, GArray *roots, DbRegelAktionErgebnis *erg,
 		GError **error) {
@@ -1790,7 +2083,10 @@ static gint schicht1(sqlite3 *db, GPtrArray *m, GHashTable *eff,
 				|| !(mg->aktionen & M(a)))
 			continue;
 
-		if (a == DB_AKT_SAMMELPUNKT) {
+		if (mg->regel == DB_REGEL_E5 && a == DB_AKT_RELATIVIEREN) {
+			if (idmenge_fuege_ein(gesehen, mg->knoten_id))
+				rc = e5_relativieren(db, mg, erg, error);
+		} else if (a == DB_AKT_SAMMELPUNKT) {
 			gint ziel = (mg->ziel_baum == 1) ? 1 : 2;
 
 			if (idmenge_fuege_ein(gesehen, mg->knoten_id))
@@ -2015,7 +2311,7 @@ static gint ausfuehren_ohne_fk(ZondDBase *zond_dbase, GPtrArray *maengel,
 		return -1;
 	}
 
-	if (db_regeln_pruefen(zond_dbase, FALSE, &neu, error)) {
+	if (db_regeln_pruefen(zond_dbase, FALSE, NULL, NULL, &neu, error)) {
 		zond_dbase_rollback(zond_dbase, NULL);
 
 		return -1;

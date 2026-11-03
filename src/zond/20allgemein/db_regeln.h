@@ -50,6 +50,9 @@ typedef struct _ZondDBase ZondDBase;
  *     möglich, wenn nichts darauf verweist)
  *  E3 Abschnitte überschneiden sich oder liegen nicht im übergeordneten
  *     Abschnitt (Löschen möglich, wenn nichts darauf verweist)
+ *  E4 Datei fehlt auf der Festplatte (nur auf Wunsch geprüft, Löschen möglich)
+ *  E5 Absoluter Pfad in der Dateiliste (Pfade sind relativ zum Projektordner;
+ *     Umwandeln möglich, wenn die Datei im Projektordner liegt)
  *  F1 Dateiintegrität (nur Anzeige)
  *
  * Typen: 0 Wurzel, 1 Punkt, 2 Anker, 3 Copy, 4 Link, 5 Datei oder Abschnitt. */
@@ -66,6 +69,8 @@ typedef enum {
 	DB_REGEL_E1,
 	DB_REGEL_E2,
 	DB_REGEL_E3,
+	DB_REGEL_E4,
+	DB_REGEL_E5,
 	DB_REGEL_F1,
 	DB_NUM_REGELN
 } DbRegel;
@@ -78,6 +83,7 @@ typedef enum {
 	DB_AKT_UMWANDELN, //Copy zum Punkt
 	DB_AKT_BEREINIGEN, //Spalten auf den Sollwert bringen
 	DB_AKT_ANLEGEN, //fehlende Grundzeile anlegen
+	DB_AKT_RELATIVIEREN, //absoluten Dateipfad in einen relativen umwandeln
 	DB_NUM_AKT
 } DbAkt;
 
@@ -95,6 +101,7 @@ typedef struct {
 	gboolean schleife; //B2: Einträge folgen im Kreis aufeinander (text zeigt A -> B -> A)
 	gboolean sichtbar; //der Eintrag wird im geladenen Baum angezeigt
 	gint64 gehoert_unter; //nicht sichtbar: nächster sichtbarer übergeordneter Eintrag, sonst 0
+	gchar *ziel_pfad; //E5: der relative Pfad (file_part), zu dem umgewandelt wird; NULL = nicht möglich
 } DbMangel;
 
 typedef struct {
@@ -109,6 +116,7 @@ typedef struct {
 	gint n_umgewandelt;
 	gint n_bereinigt;
 	gint n_angelegt;
+	gint n_relativ; //E5: auf relative Pfade umgestellt
 	gint n_ketten; //B2: behandelte Zweige
 	GPtrArray *meldungen; //gchar*: was nicht möglich war und warum
 } DbRegelAktionErgebnis;
@@ -160,9 +168,18 @@ void db_mangel_setze_aktion(GPtrArray *maengel, DbMangel const *mangel,
 void db_regel_ergebnis_standard(DbRegelErgebnis*);
 
 /* Prüft die ganze Tabelle gegen den Regelkatalog (nur lesend).
- * mit_integritaet: zusätzlich quick_check und foreign_key_check (F1). */
-gint db_regeln_pruefen(ZondDBase*, gboolean mit_integritaet, DbRegelErgebnis*,
+ * mit_integritaet: zusätzlich quick_check der Datei (F1).
+ * fehlende_pfade: Menge (gchar*) der äußeren Pfade von Dateizeilen, die auf der
+ * Festplatte fehlen; NULL = Dateien nicht geprüft (keine Befunde der Regel E4).
+ * projekt_dir: Projektordner; nur damit lässt sich ein absoluter Pfad (E5) in einen
+ * relativen umwandeln (NULL: E5 wird nur gemeldet). */
+gint db_regeln_pruefen(ZondDBase*, gboolean mit_integritaet,
+		GHashTable *fehlende_pfade, gchar const *projekt_dir, DbRegelErgebnis*,
 		GError**);
+
+/* Äußere Pfade (Teil vor dem ersten "//") aller Dateizeilen ohne Doppelte, für die
+ * Prüfung auf der Festplatte; NULL bei Fehler. Freigabe: g_ptr_array_unref. */
+GPtrArray* db_regeln_dateipfade(ZondDBase*, GError**);
 
 /* Führt die gewählten Aktionen aus, in einer Transaktion.
  *

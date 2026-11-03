@@ -2,37 +2,32 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #244.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #246.
 
 ## Inhalt
 
-Offen: #243
+Offen: #245
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
-Ideen: #167, #169, #205, #231, #232, #233
+Ideen: #167, #169, #205, #232, #233
 
 ## Offen
 
-### #243 Endlosschleife bei "alles darunter aufklappen" (Kreise, selbstbezügliche Links)
+### #245 Containerprüfung in der Konsistenzprüfung (Rest von #231)
 
-Status: offen (Fenster "Datenbank prüfen" behoben, Hauptbäume ungeprüft)
-
-Entdeckt beim Fenster "Datenbank prüfen" (#231): Zeilen, die sich erst beim Aufklappen
-füllen, erzeugen bei einem Kreis (A ist Eltern von B, B von A) mit "alles darunter
-aufklappen" (Taste *, Umschalt+Pfeil rechts) endlos neue Zeilen. Im Prüffenster
-abgefangen (Knoten, der oberhalb schon steht, bekommt keine Unterzeilen,
-"(siehe oben)").
+Status: offen (Idee, aufwendig)
 
 ```text
- Vermutung für BAUM_INHALT/BAUM_AUSWERTUNG: Links dürfen auf Knoten zeigen, die den
- Link selbst enthalten (selbstbezüglicher Link). Der Link-Kopf bekommt ein
- Dummy-Kind (zond_tree_store_insert_link_at_pos), das beim Aufklappen mit den
- Kindern des Ziels gefüllt wird; enthalten diese den Link wieder, entsteht beim
- rekursiven Aufklappen kein Ende. Zu klären: tritt das real auf (Testdatei mit
- Link auf einen Vorfahren anlegen, "alles darunter aufklappen")? Lösung: beim
- Aufklappen prüfen, ob das Ziel des Links schon Vorfahr ist, und dann nicht
- füllen (Dummy entfernen, Kennzeichnung "Verweis auf übergeordneten Eintrag"),
- oder rekursives Aufklappen an Link-Köpfen anhalten. Auch zu prüfen: BAUM_FS
- (Verknüpfungen/Symlinks).
+ Die Prüfung auf fehlende Dateien (#231, Regel E4) prüft nur den Pfad der obersten
+ Datei. Einträge innerhalb von Containern (ZIP-Dateien, E-Mails, PDF-Anhänge)
+ werden nicht geprüft: ob ein Eintrag "x.zip//a.pdf" im Container noch vorhanden ist,
+ zeigt erst das Öffnen des Containers.
+ Vorschlag (Nutzer): zusätzliches Häkchen "Container prüfen", sichtbar, wenn die
+ Dateiprüfung gewählt ist, mit Unterwahl "gesperrte öffnen".
+ Aufwand/Fragen: Container müssen geöffnet werden, bei SeaDrive vorher laden (Hydrierung,
+ Fortschritt und Abbruch wie bei E4); gesperrte ZIP/PDF brauchen das Passwort-Konzept
+ (bisher nur die Anzeige gebaut); zuerst klären, ob die Index-DB (container_entrycount,
+ pdf_embedded) das Öffnen erspart. Befunde: fehlender Eintrag im vorhandenen Container;
+ Aktionen wie bei E4 (Löschen, wenn nichts darauf verweist).
 ```
 
 ## Zurückgestellt
@@ -258,81 +253,6 @@ Status: Idee
  Prüfen, ob das besser geht (Überschriften, Listen, Tabellen, Fett/
  Kursiv, eingebettete Bilder). Was dabei entsteht, auch in den Export
  übernehmen (odt, docx und PDF-Ziel).
-```
-
-### #231 Konsistenzprüfung der Projektdatenbank (Extras)
-
-Status: Idee
-
-```text
- #231 Idee (13.10.2026, Nutzer): Funktion unter Extras, die eine
- Projektdatenbank auf Konsistenz prüft und ggf. korrigiert. Anlass: Reste
- in genutzten Projekten (FILE_PART-Zeilen zu Pfaden, die es nicht mehr gibt,
- doppelte Zeilen zum selben Pfad; beim Löschen einer PDF oder eines
- Verzeichnisses werden die FILE_PART-Zeilen der Anhänge bzw. Dateien darin
- nicht mitgelöscht). Unangebundene FILE_PART-Zeilen MIT
- Sections sind gewollt (BAUM_FS zeigt sie an, wiederverwendbar), nur melden,
- nicht löschen; "leere Wurzeln" ohne Sections ebenfalls nur melden.
- Ablauf: erst Bericht je Kategorie (ohne Änderung), dann je Kategorie
- "Korrigieren" mit Rückfrage; vorher Sicherungskopie der Projektdatei.
- Löschen nur bei unangebundenen Zeilen, Kaskade (link, parent_ID) beachten.
- Prüfungen, billig (nur DB): PRAGMA integrity_check/foreign_key_check;
- doppelte FILE_PART-Zeilen (gleicher file_part und section; unangebundene
- zusammenführen); Anker ohne Ziel, Copies/Links ohne Ziel; Geschwisterketten
- (older_sibling_ID/parent_ID lückenlos, ohne Zyklus); Unterschiede main/work.
- Prüfungen mit Dateizugriff (optional, mit Fortschrittsanzeige):
- FILE_PART-Zeilen, deren äußerer Pfad nicht mehr existiert; Reste innerhalb
- von Containern (z.B. emb_dup.pdf//vermddderk.txt) nur durch Öffnen des
- Containers erkennbar - bei ZIP/PDF mit Passwort und SeaDrive-Platzhaltern
- heikel/teuer. Index-DB: Chunks, Coverage, pdf_embedded zu Pfaden, die es
- nicht mehr gibt.
-
- Altlast "mehrere Köpfe" (Ursache behoben: zond_dbase_verschieben_knoten
- setzte bei child=TRUE das bisherige erste Kind des Ankers nicht hinter den
- verschobenen Knoten): Ausschneiden und als Unterpunkt in einen Knoten mit
- Kindern einfügen (BAUM_INHALT wie BAUM_AUSWERTUNG) ließ unter einem
- parent_ID<>0 zwei Knoten mit older_sibling_ID=0 zurück. Beim Laden holt
- zond_dbase_get_first_child ohne ORDER BY nur die Zeile mit der kleineren ID;
- die Kette des anderen Kopfes ist unsichtbar, aber vorhanden. Unsichtbar ist
- nicht gleich harmlos: zond_dbase_insert_node und verschieben_knoten
- aktualisieren per UPDATE alle Zeilen mit passendem parent/older, ein
- weiteres Einfügen unter diesem Elternknoten kann also beide Köpfe zugleich
- hinter den neuen Knoten hängen (Gabelung: ein Knoten mit zwei jüngeren
- Geschwistern). Außerdem fehlen die unsichtbaren Knoten im Export, und
- unsichtbare Anbindungen lassen die Datei in BAUM_FS als angebunden gelten.
- Prüfung (je Schema main und work), alles reine SQL:
-   a) mehrere Köpfe: SELECT parent_ID, group_concat(ID) FROM knoten WHERE
-      older_sibling_ID=0 AND parent_ID<>0 GROUP BY parent_ID HAVING
-      count(*)>1;
-   b) Gabelungen: SELECT parent_ID, older_sibling_ID, group_concat(ID) FROM
-      knoten WHERE older_sibling_ID<>0 GROUP BY parent_ID, older_sibling_ID
-      HAVING count(*)>1;
-   c) Erreichbarkeit: je Elternknoten Länge der Kette ab dem Kopf (rekursiver
-      CTE mit Tiefenlimit) gegen count(*) der Kinder; Abweichung = Zyklus
-      oder abgetrennte Kette.
- Reparatur (nur a, nur nach Bericht und Rückfrage, nach Sicherungskopie):
- Ketten hintereinanderhängen. Köpfe nach ID sortieren (die ursprüngliche
- Reihenfolge ist nicht mehr bekannt); Schwanz einer Kette = Knoten, auf den
- kein older_sibling_ID zeigt; älteres Geschwister des nächsten Kopfes :=
- dieser Schwanz. b) und c) nur melden. Reparatur muss idempotent sein
- (zweiter Lauf: keine Treffer).
- Test (Kopie von Test.ZND; BAUM_INHALT: 160 hat die Kinder 162, 164, 165,
- 165 hat das Kind 166):
-   1. Schaden erzeugen: die drei UPDATEs der alten verschieben_knoten
-      (node 166, anchor 160, child 1, mit "WHEN 1 THEN ?1") per sqlite3
-      ausführen und speichern. Erwartung: Prüfung a) meldet genau parent
-      160 mit 162,166; Prüfung b) und c) bleiben bis auf die unsichtbare
-      Kette leer.
-   2. Reparatur ausführen. Erwartung: genau ein Kopf unter 160, Reihenfolge
-      162, 164, 165, 166; alle 4 Kinder erreichbar; Prüfung a) bis c) leer;
-      zweiter Lauf ändert nichts.
-   3. Variante Gabelung: nach Schritt 1 unter 160 einen neuen Unterpunkt
-      einfügen; Prüfung b) muss die Gabelung melden, die Reparatur sie
-      nicht anfassen.
-   4. Regression des behobenen Fehlers in der App: 166 ausschneiden, in 160
-      als Unterpunkt einfügen, speichern, neu öffnen; 166 muss unter 160
-      stehen, Prüfung a) bis c) leer. Dasselbe in BAUM_AUSWERTUNG (dort mit
-      selbst angelegten Punkten, die Datei hat keine).
 ```
 
 ### #232 BAUM_INHALT: Anbindungen in PDF einfügen und löschen

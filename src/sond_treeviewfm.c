@@ -4341,6 +4341,13 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		stvfm_priv->root = NULL;
 		sfp_class->path_root = NULL;
 		stvfm_priv->is_seadrive_path = FALSE;
+#ifdef _WIN32
+		/* sond_seadrive_reset_ground_truth() hat das Statussignal gesendet, als
+		 * is_seadrive_path noch TRUE war; ohne dieses zweite Signal bliebe die
+		 * Anzeige "SeaDrive: ✓" nach dem Schließen stehen. */
+		g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status,
+				0, (guint) 0, (guint) 0);
+#endif
 
 		gtk_tree_store_clear(
 				GTK_TREE_STORE(

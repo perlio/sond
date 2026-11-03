@@ -22,6 +22,7 @@
 #include "../../misc.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_treeview.h"
+#include "../../sond_file_helper.h"
 
 #include "../zond_init.h"
 #include "../zond_dbase.h"
@@ -97,7 +98,12 @@ typedef struct {
 	Projekt *zond;
 	GtkWidget *fenster;
 	GtkWidget *label;
-	GtkWidget *check_integritaet;
+	GtkWidget *check_dateien;
+	GtkWidget *buttons;
+	GtkWidget *b_abbrechen;
+	struct _DateiPruefung *datei; //läuft gerade, sonst NULL
+	guint timer; //Fortschrittsanzeige
+	gboolean zerstoert; //Fenster wurde während der Prüfung geschlossen
 	GtkWidget *treeview;
 	GtkTreeViewColumn *spalte_aktion;
 	GtkTreeStore *store;
@@ -1025,10 +1031,8 @@ static void summe_anzeigen(Fenster *f) {
 	return;
 }
 
-static void fenster_pruefen(Fenster *f) {
+static void fenster_pruefen_mit(Fenster *f, GHashTable *fehlend) {
 	GError *error = NULL;
-	gboolean integritaet = gtk_toggle_button_get_active(
-			GTK_TOGGLE_BUTTON(f->check_integritaet));
 
 	if (!f->zond->dbase_zond) {
 		gtk_widget_destroy(f->fenster);
@@ -1036,8 +1040,8 @@ static void fenster_pruefen(Fenster *f) {
 		return;
 	}
 
-	if (db_regeln_pruefen(f->zond->dbase_zond->zond_dbase_work, integritaet,
-			&f->erg, &error)) {
+	if (db_regeln_pruefen(f->zond->dbase_zond->zond_dbase_work, TRUE,
+			fehlend, f->zond->project_dir, &f->erg, &error)) {
 		display_message(f->fenster, "Prüfung fehlgeschlagen:\n\n",
 				error->message, NULL);
 		g_clear_error(&error);
@@ -1052,6 +1056,191 @@ static void fenster_pruefen(Fenster *f) {
 		((DbMangel*) g_ptr_array_index(f->erg.maengel, i))->gewaehlt = DB_AKT_BEHALTEN;
 
 	fenster_fuellen(f);
+
+	return;
+}
+
+/* ---- Prüfung der Dateien auf der Festplatte (Regel E4) ----------------------- */
+
+typedef struct _DateiPruefung {
+	GPtrArray *pfade; //äußere Pfade der Dateizeilen
+	gchar *projekt_dir;
+	GHashTable *fehlend; //Ergebnis: fehlende Pfade
+	gint fortschritt; //atomar
+	gint abbruch; //atomar
+} DateiPruefung;
+
+static void datei_pruefung_free(DateiPruefung *d) {
+	if (!d)
+		return;
+
+	if (d->pfade)
+		g_ptr_array_unref(d->pfade);
+	if (d->fehlend)
+		g_hash_table_unref(d->fehlend);
+	g_free(d->projekt_dir);
+	g_free(d);
+
+	return;
+}
+
+//Läuft im Hintergrund, damit ein hängendes Laufwerk das Fenster nicht einfriert;
+//nur Pfade, keine Datenbank, keine Oberfläche. Nichts wird geöffnet oder geladen.
+static void datei_thread(GTask *task, gpointer source, gpointer data,
+		GCancellable *cancel) {
+	DateiPruefung *d = data;
+
+	for (guint i = 0; i < d->pfade->len && !g_atomic_int_get(&d->abbruch); i++) {
+		gchar const *pfad = g_ptr_array_index(d->pfade, i);
+		//absolute Pfade (ältere Einträge von Containern) gelten, wie sie sind
+		g_autofree gchar *voll = g_path_is_absolute(pfad) ? g_strdup(pfad) :
+				g_build_filename(d->projekt_dir, pfad, NULL);
+
+		//sond_exists kennt lange Pfade (über 260 Zeichen), wie sie auf SeaDrive vorkommen
+		if (!sond_exists(voll))
+			g_hash_table_add(d->fehlend, g_strdup(pfad));
+		g_atomic_int_inc(&d->fortschritt);
+	}
+	g_task_return_boolean(task, TRUE);
+
+	return;
+}
+
+static gboolean cb_datei_fortschritt(gpointer data) {
+	Fenster *f = data;
+	g_autofree gchar *text = NULL;
+
+	if (!f->datei)
+		return G_SOURCE_REMOVE;
+
+	text = g_strdup_printf("Prüfe Dateien … %d von %u",
+			g_atomic_int_get(&f->datei->fortschritt), f->datei->pfade->len);
+	gtk_label_set_text(GTK_LABEL(f->label), text);
+
+	return G_SOURCE_CONTINUE;
+}
+
+static void fenster_freigeben(Fenster *f) {
+	db_regel_ergebnis_clear(&f->erg);
+	g_hash_table_unref(f->modelle);
+	g_free(f);
+
+	return;
+}
+
+static void cb_datei_fertig(GObject *quelle, GAsyncResult *res, gpointer data) {
+	Fenster *f = data;
+	DateiPruefung *d = f->datei;
+	gboolean abgebrochen = g_atomic_int_get(&d->abbruch);
+	guint n = d->pfade->len;
+	guint fehlt = g_hash_table_size(d->fehlend);
+
+	f->datei = NULL;
+	if (f->timer)
+		g_source_remove(f->timer);
+	f->timer = 0;
+
+	if (f->zerstoert) {
+		datei_pruefung_free(d);
+		fenster_freigeben(f);
+
+		return;
+	}
+
+	gtk_widget_set_sensitive(f->buttons, TRUE);
+	gtk_widget_set_sensitive(f->check_dateien, TRUE);
+	gtk_widget_hide(f->b_abbrechen);
+
+	if (abgebrochen) {
+		display_message(f->fenster, "Die Prüfung der Dateien wurde abgebrochen. "
+				"Es werden nur die übrigen Regeln angezeigt.", NULL);
+		fenster_pruefen_mit(f, NULL);
+	} else if (n >= 5 && fehlt * 10 >= n * 9) {
+		g_autofree gchar *meldung = g_strdup_printf("Von %u Dateien fehlen %u. Das "
+				"liegt fast sicher an einem nicht verbundenen Laufwerk oder einem "
+				"falschen Pfad, nicht an den Dateien. Die Dateien werden deshalb "
+				"nicht als fehlend gemeldet; es werden nur die übrigen Regeln "
+				"angezeigt.", n, fehlt);
+
+		display_message(f->fenster, meldung, NULL);
+		fenster_pruefen_mit(f, NULL);
+	} else
+		fenster_pruefen_mit(f, d->fehlend);
+
+	datei_pruefung_free(d);
+
+	return;
+}
+
+static void cb_abbrechen(GtkButton *button, gpointer data) {
+	Fenster *f = data;
+
+	if (f->datei)
+		g_atomic_int_set(&f->datei->abbruch, 1);
+
+	return;
+}
+
+static void datei_pruefung_starten(Fenster *f) {
+	GError *error = NULL;
+	DateiPruefung *d = NULL;
+	GTask *task = NULL;
+
+	if (!f->zond->project_dir || !sond_exists(f->zond->project_dir)) {
+		display_message(f->fenster, "Das Projektverzeichnis ist nicht erreichbar "
+				"(Laufwerk verbunden?). Die Dateien werden nicht geprüft.", NULL);
+		fenster_pruefen_mit(f, NULL);
+
+		return;
+	}
+
+	d = g_new0(DateiPruefung, 1);
+	d->pfade = db_regeln_dateipfade(f->zond->dbase_zond->zond_dbase_work, &error);
+	if (!d->pfade) {
+		display_message(f->fenster, "Prüfung fehlgeschlagen:\n\n", error->message,
+				NULL);
+		g_clear_error(&error);
+		datei_pruefung_free(d);
+
+		return;
+	}
+	d->projekt_dir = g_strdup(f->zond->project_dir);
+	d->fehlend = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	if (!d->pfade->len) {
+		datei_pruefung_free(d);
+		fenster_pruefen_mit(f, NULL);
+
+		return;
+	}
+
+	f->datei = d;
+	gtk_widget_set_sensitive(f->buttons, FALSE);
+	gtk_widget_set_sensitive(f->check_dateien, FALSE);
+	gtk_widget_show(f->b_abbrechen);
+	gtk_widget_set_sensitive(f->b_abbrechen, TRUE);
+	cb_datei_fortschritt(f);
+	f->timer = g_timeout_add(200, cb_datei_fortschritt, f);
+
+	task = g_task_new(NULL, NULL, cb_datei_fertig, f);
+	g_task_set_task_data(task, d, NULL);
+	g_task_run_in_thread(task, datei_thread);
+	g_object_unref(task);
+
+	return;
+}
+
+static void fenster_pruefen(Fenster *f) {
+	if (!f->zond->dbase_zond) {
+		gtk_widget_destroy(f->fenster);
+
+		return;
+	}
+
+	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f->check_dateien)))
+		datei_pruefung_starten(f);
+	else
+		fenster_pruefen_mit(f, NULL);
 
 	return;
 }
@@ -1337,6 +1526,9 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 		g_string_append_printf(meldung, "\n- %d bereinigt", ae.n_bereinigt);
 	if (ae.n_angelegt)
 		g_string_append_printf(meldung, "\n- %d angelegt", ae.n_angelegt);
+	if (ae.n_relativ)
+		g_string_append_printf(meldung, "\n- %d auf relative Pfade umgestellt",
+				ae.n_relativ);
 	if (ae.n_sammelpunkte)
 		g_string_append_printf(meldung, "\n\n%d Strukturpunkt(e) »Wiedergefundene Knoten« "
 				"angelegt.", ae.n_sammelpunkte);
@@ -1524,10 +1716,15 @@ static void cb_destroy(GtkWidget *widget, gpointer data) {
 
 	if (f->loop)
 		g_main_loop_quit(f->loop);
-	db_regel_ergebnis_clear(&f->erg);
-	g_hash_table_unref(f->modelle);
-	g_free(f);
 	g_fenster = NULL;
+
+	if (f->datei) { //die Prüfung der Dateien läuft noch: sie gibt das Fenster frei
+		g_atomic_int_set(&f->datei->abbruch, 1);
+		f->zerstoert = TRUE;
+
+		return;
+	}
+	fenster_freigeben(f);
 
 	return;
 }
@@ -1598,22 +1795,94 @@ static void spalte_aktion_hinzu(Fenster *f) {
 	return;
 }
 
+/* Mehrfachauswahl: markierte Zeilen sammeln und die Aktion für alle setzen, die sie
+ * erlauben. */
+static void auswahl_sammeln(GtkTreeModel *model, GtkTreePath *path,
+		GtkTreeIter *iter, gpointer data) {
+	GPtrArray *liste = data;
+	DbMangel *m = NULL;
+	gint zeile = 0;
+
+	gtk_tree_model_get(model, iter, SP_PTR, &m, SP_ZEILE, &zeile, -1);
+	if (m && (zeile == ZEILE_MANGEL || zeile == ZEILE_NACHBAR))
+		g_ptr_array_add(liste, m);
+
+	return;
+}
+
+static void cb_menue_aktion(GtkMenuItem *item, gpointer data) {
+	Fenster *f = data;
+	DbAkt akt = (DbAkt) GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "akt"));
+	g_autoptr(GPtrArray) liste = g_ptr_array_new();
+
+	gtk_tree_selection_selected_foreach(
+			gtk_tree_view_get_selection(GTK_TREE_VIEW(f->treeview)),
+			auswahl_sammeln, liste);
+	for (guint i = 0; i < liste->len; i++) {
+		DbMangel *m = g_ptr_array_index(liste, i);
+
+		if (m->aktionen & M(akt))
+			db_mangel_setze_aktion(f->erg.maengel, m, akt);
+	}
+	aktionen_anzeigen(f);
+
+	return;
+}
+
+//Menü mit allen Aktionen, die mindestens eine markierte Zeile erlaubt
+static void aktionsmenue_zeigen(Fenster *f, GdkEventButton *ev) {
+	g_autoptr(GPtrArray) liste = g_ptr_array_new();
+	GtkWidget *menu = gtk_menu_new();
+	guint maske = 0;
+
+	gtk_tree_selection_selected_foreach(
+			gtk_tree_view_get_selection(GTK_TREE_VIEW(f->treeview)),
+			auswahl_sammeln, liste);
+	for (guint i = 0; i < liste->len; i++)
+		maske |= ((DbMangel*) g_ptr_array_index(liste, i))->aktionen;
+
+	for (gint a = 0; a < DB_NUM_AKT; a++) {
+		GtkWidget *item = NULL;
+
+		if (!(maske & M(a)))
+			continue;
+		item = gtk_menu_item_new_with_label(db_akt_name(a));
+		gtk_widget_set_tooltip_text(item, db_akt_beschreibung(a));
+		g_object_set_data(G_OBJECT(item), "akt", GINT_TO_POINTER(a));
+		g_signal_connect(item, "activate", G_CALLBACK(cb_menue_aktion), f);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+	}
+	gtk_widget_show_all(menu);
+	g_signal_connect(menu, "selection-done", G_CALLBACK(gtk_widget_destroy), NULL);
+	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*) ev);
+
+	return;
+}
+
 /* Ein Klick auf die Zelle "Aktion" öffnet gleich das Auswahlfeld (sonst erst
- * nach Auswählen der Zeile und einem zweiten Klick). */
+ * nach Auswählen der Zeile und einem zweiten Klick). Sind mehrere Zeilen markiert und
+ * der Klick trifft eine davon, erscheint stattdessen das Menü für alle markierten. */
 static gboolean cb_button_press(GtkWidget *tv, GdkEventButton *ev, gpointer data) {
 	Fenster *f = data;
 	GtkTreePath *path = NULL;
 	GtkTreeViewColumn *col = NULL;
 	gboolean behandelt = FALSE;
+	GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(tv));
+	gboolean ohne_taste = !(ev->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK));
 
-	if (ev->type != GDK_BUTTON_PRESS || ev->button != 1)
+	if (ev->type != GDK_BUTTON_PRESS || (ev->button != 1 && ev->button != 3))
 		return FALSE;
 
 	if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(tv), (gint) ev->x,
 			(gint) ev->y, &path, &col, NULL, NULL))
 		return FALSE;
 
-	if (col == f->spalte_aktion) {
+	if (ohne_taste && gtk_tree_selection_count_selected_rows(sel) > 1
+			&& gtk_tree_selection_path_is_selected(sel, path)
+			&& (ev->button == 3 || col == f->spalte_aktion)) {
+		aktionsmenue_zeigen(f, ev);
+		behandelt = TRUE;
+	} else if (ev->button == 1 && ohne_taste && col == f->spalte_aktion) {
 		GtkTreeIter iter = { 0 };
 		gint zeile = ZEILE_KNOTEN;
 		DbMangel *m = NULL;
@@ -1692,6 +1961,9 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 				"»Standard vorschlagen« belegt die Aktionen mit dem üblichen Vorschlag "
 				"vor.\n"
 				"Ein Klick auf die Überschrift Nr., Art oder Beschreibung sortiert die Liste. "
+				"Mit Strg oder Umschalt lassen sich mehrere Zeilen markieren; ein Klick auf "
+				"die Zelle Aktion einer markierten Zeile setzt dann die gewählte Aktion für "
+				"alle markierten, die sie erlauben. "
 				"Ein Doppelklick springt im "
 				"Baum zum Eintrag; ist er nicht sichtbar, springen die Zeilen "
 				"Übergeordnet, Vorgänger und Nachfolger zu seiner Umgebung.\n"
@@ -1711,15 +1983,15 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	gtk_label_set_line_wrap(GTK_LABEL(f->label), TRUE);
 	gtk_box_pack_start(GTK_BOX(box), f->label, FALSE, FALSE, 0);
 
-	f->check_integritaet = gtk_check_button_new_with_label(
-			"Zusätzlich die Datenbankdatei selbst prüfen (nur Anzeige, langsamer)");
-	gtk_widget_set_tooltip_text(f->check_integritaet, "Lässt SQLite prüfen, ob "
-			"die Datei beschädigt ist (quick_check: defekte Seiten oder Indizes) "
-			"und ob Zeilen auf nicht vorhandene Zeilen verweisen "
-			"(foreign_key_check). Das ist eine Prüfung der Datei, nicht der "
-			"Baumstruktur. Gefundenes wird nur angezeigt und lässt sich hier nicht "
-			"reparieren.");
-	gtk_box_pack_start(GTK_BOX(box), f->check_integritaet, FALSE, FALSE, 0);
+	f->check_dateien = gtk_check_button_new_with_label(
+			"Zusätzlich prüfen, ob die Dateien noch vorhanden sind (langsamer)");
+	gtk_widget_set_tooltip_text(f->check_dateien, "Prüft, ob es zu jeder Datei "
+			"der Dateiliste die Datei im Projektverzeichnis noch gibt. Es wird nur "
+			"der Pfad geprüft; nichts wird geöffnet oder aus der Cloud geladen. "
+			"Einträge innerhalb von ZIP-Dateien, E-Mails und PDFs werden nicht "
+			"geprüft. Die Prüfung läuft nie beim Start eines Projekts und lässt "
+			"sich abbrechen.");
+	gtk_box_pack_start(GTK_BOX(box), f->check_dateien, FALSE, FALSE, 0);
 
 	f->store = gtk_tree_store_new(N_SP, G_TYPE_STRING, G_TYPE_STRING,
 			G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, GTK_TYPE_TREE_MODEL,
@@ -1730,7 +2002,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	gtk_tree_view_set_enable_tree_lines(GTK_TREE_VIEW(f->treeview), TRUE);
 	gtk_tree_selection_set_mode(
 			gtk_tree_view_get_selection(GTK_TREE_VIEW(f->treeview)),
-			GTK_SELECTION_SINGLE);
+			GTK_SELECTION_MULTIPLE);
 	gtk_widget_set_has_tooltip(f->treeview, TRUE);
 	g_signal_connect(f->treeview, "query-tooltip", G_CALLBACK(cb_tooltip), f);
 	{
@@ -1767,12 +2039,17 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	b_pruefen = gtk_button_new_with_label("Erneut prüfen");
 	b_standard = gtk_button_new_with_label("Standard vorschlagen");
 	b_ausfuehren = gtk_button_new_with_label("Ausführen");
+	f->b_abbrechen = gtk_button_new_with_label("Abbrechen");
+	gtk_widget_set_no_show_all(f->b_abbrechen, TRUE);
+	f->buttons = buttons;
 	gtk_container_add(GTK_CONTAINER(buttons), b_legende);
 	gtk_container_add(GTK_CONTAINER(buttons), b_pruefen);
 	gtk_container_add(GTK_CONTAINER(buttons), b_standard);
 	gtk_container_add(GTK_CONTAINER(buttons), b_ausfuehren);
+	gtk_box_pack_start(GTK_BOX(box), f->b_abbrechen, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), buttons, FALSE, FALSE, 0);
 
+	g_signal_connect(f->b_abbrechen, "clicked", G_CALLBACK(cb_abbrechen), f);
 	g_signal_connect(b_legende, "clicked", G_CALLBACK(cb_legende), f);
 	g_signal_connect(b_pruefen, "clicked", G_CALLBACK(cb_pruefen), f);
 	g_signal_connect(b_standard, "clicked", G_CALLBACK(cb_standard), f);
@@ -1804,7 +2081,8 @@ static gboolean hat_aktive_maengel(Projekt *zond) {
 	if (!zond->dbase_zond)
 		return FALSE;
 
-	if (db_regeln_pruefen(zond->dbase_zond->zond_dbase_work, FALSE, &erg,
+	if (db_regeln_pruefen(zond->dbase_zond->zond_dbase_work, FALSE, NULL,
+			zond->project_dir, &erg,
 			&error)) {
 		LOG_WARN("%s: %s", __func__, error->message);
 		g_clear_error(&error);
