@@ -3135,8 +3135,12 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 
 		rc = get_filepart_from_iter(ztv,
 				&iter_tmp, &sfp, &anbindung_node, &node_id, error);
-		if (rc)
+		if (rc) {
+			//bereits geöffnete Teile wieder freigeben (*dd wird erst am Ende gesetzt)
+			document_free_displayed_documents(dd_first);
+
 			return -1;
+		}
 
 		if (!sfp)
 			continue;
@@ -3156,6 +3160,7 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 					anbindung_node, &anbindung_ges, error);
 			if (rc) {
 				g_object_unref(sfp);
+				document_free_displayed_documents(dd_first);
 
 				return -1;
 			}
@@ -3174,6 +3179,7 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 				&anbindung_ges, &anbindung_node, TRUE, &pdf_pos_loop, error);
 		if (!dd_tmp) {
 			g_object_unref(sfp);
+			document_free_displayed_documents(dd_first);
 
 			return -1;
 		}
@@ -3234,6 +3240,7 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 								&node_id_click, error);
 						if (rc2) {
 							g_object_unref(sfp);
+							document_free_displayed_documents(dd_first);
 
 							return -1;
 						}
