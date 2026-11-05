@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #247.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #248.
 
 ## Inhalt
 
-Offen: #245
+Offen: #245, #247
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
 Ideen: #167, #169, #205, #232, #233
 
@@ -28,6 +28,28 @@ Status: offen (Idee, aufwendig)
  (bisher nur die Anzeige gebaut); zuerst klären, ob die Index-DB (container_entrycount,
  pdf_embedded) das Öffnen erspart. Befunde: fehlender Eintrag im vorhandenen Container;
  Aktionen wie bei E4 (Löschen, wenn nichts darauf verweist).
+```
+
+### #247 Einfügen von Teilen in eine E-Mail (BAUM_FS)
+
+Status: offen (nicht implementiert)
+
+```text
+ Einfügen (Kopieren oder Verschieben, auch Umsortieren innerhalb derselben
+ E-Mail) in eine E-Mail scheitert in sond_file_part_insert() (sond_fileparts.c)
+ mit "Einfügen in E-Mail noch nicht unterstützt". Es gibt keine Datenschäden:
+ beim Kopieren bricht paste_clipboard_foreach vor der Baumänderung ab, beim
+ Ausschneiden rollt zond_treeviewfm_after(FALSE) zurück.
+ Bereits vorbereitet, aber heute nie erreicht: Platzhalter "alpha" und Renummerierung
+ der Mimepart-Indizes (zond_treeviewfm_before_move(), gmessage_index_renumber(),
+ dbase_zond_update_gmessage_index()), Nachführen der Geschwister-Pfade in
+ sond_treeviewfm_paste_clipboard_foreach(). Alles ungetestet.
+ Umgesetzt sind: Löschen eines Mimeparts (sond_file_part_gmessage_mod_part()),
+ Umbenennen (nur Anzeigename). Nicht umgesetzt: Löschen eines ganzen
+ Multipart-Verzeichnisses, Kopieren des Message-Eintrags.
+ Zu tun: Einfügen in sond_file_part_insert() für GMESSAGE (MIME-Baum ändern,
+ Mail zurückschreiben, Index-DB und DB-Pfade nachführen), danach die
+ vorbereiteten Teile testen.
 ```
 
 ## Zurückgestellt

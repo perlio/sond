@@ -563,24 +563,30 @@ static void sond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 
 	/* Dateipfad aus Spalte 0 holen */
 	model = gtk_tree_view_get_model(treeview);
-	gtk_tree_model_get_iter(model, &row_iter, tree_path);
+	if (!gtk_tree_model_get_iter(model, &row_iter, tree_path))
+		return;
 	gtk_tree_model_get(model, &row_iter, 0, &filepart, -1);
 
 	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, filepart, TRUE, &iter,
 			&error);
-	g_free(filepart);
 	if (rc == -1) {
 		display_message(SOND_GET_TOPLEVEL(stvfm),
-		"Fehler\n\n", error->message, NULL);
+				"Fehler\n\n", error ? error->message : "?", NULL);
 
-		g_error_free(error);
-		}
-		else if (rc == 0) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-		"Datei nicht gefunden", filepart, NULL);
+		g_clear_error(&error);
+		g_free(filepart);
 
 		return;
 	}
+	else if (rc == 0) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Datei nicht gefunden", filepart, NULL);
+		g_free(filepart);
+
+		return;
+	}
+
+	g_free(filepart);
 
 	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter);
 
@@ -832,6 +838,13 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 //		rc = insert_dir_in_pdf(stvfm_item_priv, child, &path, error);
 	else if (SOND_IS_FILE_PART_ZIP(stvfm_item_parent_priv->sond_file_part))
 		rc = insert_dir_in_zip(stvfm_item_parent_priv, child, &path, error);
+	else { //PDF, E-Mail: hier lassen sich keine Verzeichnisse anlegen
+		g_set_error(error, g_quark_from_static_string("sond"), 0,
+				"%s\nIn dieser Datei kann kein Verzeichnis angelegt werden",
+				__func__);
+
+		return -1;
+	}
 	if (rc)
 		return -1;
 
@@ -859,6 +872,10 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 	}
 	else { //wenn nicht sichtbar, dann öffnen
 		GtkTreeIter iter_child = { 0 };
+
+		//der evtl. vorab angelegte Dummy-Eintrag wird beim Aufklappen ersetzt
+		if (iter_new)
+			gtk_tree_iter_free(iter_new);
 
 		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter);
 
@@ -1202,15 +1219,16 @@ parent:
 							stvfm_item_sibling_priv->sond_file_part,
 							stvfm_item_sibling_priv->path_or_section, path_new);
 
-					//jetzt path von stvfm_item_sibling ändern
+					//jetzt path von stvfm_item_sibling ändern - path_new geht
+					//in dessen Besitz über
 					g_free(stvfm_item_sibling_priv->path_or_section);
 					stvfm_item_sibling_priv->path_or_section = path_new;
 				}
-				else //ist selbst sfp - dessen Pfad muß geändert werden
+				else { //ist selbst sfp - dessen Pfad muß geändert werden
 					sond_file_part_set_path(
 							stvfm_item_sibling_priv->sond_file_part, path_new);
-
-				g_free(path_new);
+					g_free(path_new);
+				}
 			} while (gtk_tree_model_iter_next(gtk_tree_view_get_model(
 					GTK_TREE_VIEW(stvfm)), iter));
 	}
@@ -1439,40 +1457,68 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				GTK_TREE_VIEW(stvfm_item_parent_priv->stvfm)), &iter_sibling)) {
 			SondTVFMItem* stvfm_item_sibling = NULL;
 			SondTVFMItemPrivate* stvfm_item_sibling_priv = NULL;
-			gchar* path_new = NULL;
+			gchar const* path_sibling = NULL;
+			gchar* path_sibling_new = NULL;
 			gint index = 0;
 
 			gtk_tree_model_get(gtk_tree_view_get_model(
 				GTK_TREE_VIEW(stvfm_item_parent_priv->stvfm)), &iter_sibling, 0,
 					&stvfm_item_sibling, -1);
+			if (!stvfm_item_sibling) //Dummy-Zeile
+				continue;
 			stvfm_item_sibling_priv =
 					sond_tvfm_item_get_priv(stvfm_item_sibling);
-			g_object_unref(stvfm_item_sibling);
+			g_object_unref(stvfm_item_sibling); //der Baum hält die Referenz
 
-			if (strchr(stvfm_item_sibling_priv->path_or_section, '/')) {
+			/* Message-Item (path_or_section == NULL, LEAF, sfp der ganzen
+			 * eml): kein numerischer Index - wie in remove_item_from_tree() */
+			if (!stvfm_item_sibling_priv->path_or_section &&
+					stvfm_item_sibling_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
+					SOND_IS_FILE_PART_GMESSAGE(stvfm_item_sibling_priv->sond_file_part))
+				continue;
+
+			//Multipart: Pfad im Item; Mimepart-Blatt: Pfad des sfp
+			path_sibling = stvfm_item_sibling_priv->path_or_section ?
+					stvfm_item_sibling_priv->path_or_section :
+					(stvfm_item_sibling_priv->sond_file_part ?
+							sond_file_part_get_path(
+									stvfm_item_sibling_priv->sond_file_part) : NULL);
+			if (!path_sibling)
+				continue;
+
+			if (strrchr(path_sibling, '/')) {
 				gchar const* base_old = NULL;
 				gchar* dir = NULL;
 
-				base_old = strrchr(stvfm_item_sibling_priv->path_or_section, '/');
+				base_old = strrchr(path_sibling, '/');
 				index = atoi(base_old + 1);
 
-				dir = g_path_get_dirname(stvfm_item_sibling_priv->path_or_section);
-				path_new = g_strdup_printf("%s/%u", dir, index + 1);
+				dir = g_path_get_dirname(path_sibling);
+				path_sibling_new = g_strdup_printf("%s/%u", dir, index + 1);
 				g_free(dir);
 			}
 			else {
-				index = atoi(stvfm_item_sibling_priv->path_or_section);
-				path_new = g_strdup_printf("%u", index + 1);
+				index = atoi(path_sibling);
+				path_sibling_new = g_strdup_printf("%u", index + 1);
 			}
 
-			//sfps im "scope" anpassen
-			adjust_sfps_in_dir(stvfm_item_sibling_priv->sond_file_part,
-					stvfm_item_sibling_priv->sond_file_part,
-					stvfm_item_sibling_priv->path_or_section, path_new);
+			if (stvfm_item_sibling_priv->path_or_section) {
+				//sfps im "scope" anpassen
+				adjust_sfps_in_dir(stvfm_item_sibling_priv->sond_file_part,
+						stvfm_item_sibling_priv->sond_file_part,
+						stvfm_item_sibling_priv->path_or_section,
+						path_sibling_new);
 
-			//jetzt path von stvfm_item_sibling ändern
-			g_free(stvfm_item_sibling_priv->path_or_section);
-			stvfm_item_sibling_priv->path_or_section = path_new;
+				//jetzt path von stvfm_item_sibling ändern - path_sibling_new
+				//geht in dessen Besitz über
+				g_free(stvfm_item_sibling_priv->path_or_section);
+				stvfm_item_sibling_priv->path_or_section = path_sibling_new;
+			}
+			else { //ist selbst sfp - dessen Pfad muß geändert werden
+				sond_file_part_set_path(stvfm_item_sibling_priv->sond_file_part,
+						path_sibling_new);
+				g_free(path_sibling_new);
+			}
 		}
 	}
 
@@ -2807,10 +2853,13 @@ static void sond_treeviewfm_action_paste_ge(GSimpleAction *a, GVariant *p,
 	gint rc = 0;
 	GError *error = NULL;
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
-	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), FALSE))
+	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), FALSE)) {
 		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Unzul\u00e4ssiges Ziel: Abk\u00f6mmling von zu verschiebendem Knoten",
 				NULL);
+
+		return;
+	}
 	rc = sond_treeviewfm_paste_clipboard(stvfm, FALSE, &error);
 	if (rc) {
 		if (!error_is_cancelled(error))
@@ -2825,10 +2874,13 @@ static void sond_treeviewfm_action_paste_up(GSimpleAction *a, GVariant *p,
 	gint rc = 0;
 	GError *error = NULL;
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
-	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), TRUE))
+	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), TRUE)) {
 		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Unzul\u00e4ssiges Ziel: Abk\u00f6mmling von zu verschiebendem Knoten",
 				NULL);
+
+		return;
+	}
 	rc = sond_treeviewfm_paste_clipboard(stvfm, TRUE, &error);
 	if (rc) {
 		if (!error_is_cancelled(error))
