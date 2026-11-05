@@ -5975,6 +5975,11 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Dateisuche, set_root-Fehlerpfad (path_root, SeaDrive-Watcher). Referenzmuster "get, unref,
  weiter benutzen" über g_autoptr bereinigt; ungenutzte Includes entfernt. render_eingang und die
  Spalte "Eingang" bleiben bewusst (soll evtl. wieder aktiviert werden).
+ sond_tvfm_item.c/.h: Leck in get_fileparts (arr_children), NULL-Zugriff auf error in load_zip_dir,
+ pfadloses sond_file_part in get_basename, Leck in mime_type_to_icon_name_manual;
+ load_children liefert bei Erfolg immer ein Array; Abschnitte (LEAF_SECTION) lassen sich
+ nicht kopieren oder verschieben (Meldung); ungenutztes SondTVFMItemClass::load_sections
+ entfernt.
  zond_treeviewfm.c: after() (Nachführung nach gescheitertem Commit), jump_activate, Leck in
  get_fileparts, changed-Flag beim Umbenennen einer Anbindung, Tiefenbegrenzung im readdir-Scanner,
  Fehlerwege gestrafft; zond_treeview.c: open_auszug gibt im Fehlerfall die schon geöffneten Teile

@@ -37,8 +37,6 @@ G_DECLARE_DERIVABLE_TYPE(SondTVFMItem, sond_tvfm_item, SOND, TVFM_ITEM, GObject)
 
 struct _SondTVFMItemClass {
 	GObjectClass parent_class;
-
-	gint (*load_sections)(SondTVFMItem*, GPtrArray**, GError**);
 };
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);

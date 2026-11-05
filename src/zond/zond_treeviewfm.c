@@ -1613,10 +1613,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 
 		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
 		if (rc)
-			return -1; //arr_children ist bei Fehler nie gesetzt
-
-		if (!arr_children) //Loader liefert ohne Fehler u.U. kein Array
-			return 0;
+			return -1;
 
 		for (guint i = 0; i < arr_children->len; i++) {
 			SondTVFMItem *child = g_ptr_array_index(arr_children, i);

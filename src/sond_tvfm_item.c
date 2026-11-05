@@ -82,8 +82,6 @@ static void sond_tvfm_item_finalize(GObject *self) {
 static void sond_tvfm_item_class_init(SondTVFMItemClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = sond_tvfm_item_finalize;
 
-	klass->load_sections = NULL;
-
 	return;
 }
 
@@ -189,6 +187,9 @@ gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 	else
 		return NULL;
 
+	if (!path) //pfadloses sond_file_part (z.B. nach fehlerhafter Kopie)
+		return NULL;
+
 	basename = strrchr(path, '/');
 
 	if (basename)
@@ -230,7 +231,7 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, SondTVFMProg
 static char const* mime_type_to_icon_name_manual(const char *mime_type)
 {
     if (!mime_type)
-        return g_strdup("text-x-generic");
+        return "text-x-generic";
 
     // Exakte Matches
     static const struct {
@@ -644,14 +645,15 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 			g_free(dir_path);
 		} else {
 			SondFilePart* sfp_child = NULL;
+			GError* error_create = NULL;
 
 			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
-					e->path, error);
+					e->path, &error_create);
 
 			if (!sfp_child) {
 				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
-						(*error)->message);
-				g_clear_error(error);
+						error_create ? error_create->message : "?");
+				g_clear_error(&error_create);
 
 				continue;
 			}
@@ -839,6 +841,10 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
+	g_return_val_if_fail(arr_children, -1);
+
+	*arr_children = NULL; //bei Fehler nie gesetzt
+
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
 		gint rc = 0;
 
@@ -872,6 +878,11 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 			return -1;
 		}
 	}
+
+	//Aufrufer erwarten bei Erfolg immer ein Array (ggf. leer)
+	if (!*arr_children)
+		*arr_children = g_ptr_array_new_with_free_func(
+				(GDestroyNotify) g_object_unref);
 
 	return 0;
 }
@@ -1188,6 +1199,15 @@ gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item_parent);
 
+	//Abschnitte (Anbindungen) sind keine Dateien oder Verzeichnisse
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Abschnitte (Anbindungen) lassen sich nicht kopieren oder "
+				"verschieben");
+
+		return -1;
+	}
+
 	base_real = (stvfm_item_parent_priv->sond_file_part &&
 			SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) ?
 					g_strdup_printf("%u", index_to) :
@@ -1300,6 +1320,15 @@ gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item_parent);
 
+	//vor den Signalen (diese öffnen Transaktionen): Abschnitte nicht verschiebbar
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Abschnitte (Anbindungen) lassen sich nicht kopieren oder "
+				"verschieben");
+
+		return -1;
+	}
+
 	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
@@ -1360,7 +1389,7 @@ gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
 			(stvfm_item_priv->path_or_section ||
 					!stvfm_item_priv->sond_file_part)) {
-		GPtrArray *arr_children = NULL;
+		g_autoptr(GPtrArray) arr_children = NULL;
 
 		gint rc = 0;
 
