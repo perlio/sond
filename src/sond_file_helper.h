@@ -135,7 +135,9 @@ gboolean sond_rename(const gchar *oldpath, const gchar *newpath, GError **error)
 gboolean sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
 
 /**
- * Kopiert ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
+ * Kopiert ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support).
+ * Liegt dest innerhalb von source (oder ist gleich), schlägt der Aufruf mit
+ * G_IO_ERROR_INVALID_ARGUMENT fehl, ohne etwas anzulegen.
  */
 gboolean sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
 

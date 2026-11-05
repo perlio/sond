@@ -5990,4 +5990,8 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  anbindung_bis_seite() (general.c); Einfügen eines Anhangs in eine PDF setzt die kodierte
  Adresse (pdf_emb_escape) als sfp-Pfad und zeigt den Dateinamen (vorher roher Name, bei "%"
  ungültige Adresse bis zum Neuladen).
+ sond_copy_r (sond_file_helper.c): ein Verzeichnis lässt sich nicht mehr in sich selbst kopieren
+ (Ziel innerhalb der Quelle liess die Rekursion die neu angelegten Einträge wieder einlesen und
+ tausende ineinander verschachtelte Ordner anlegen); Prüfung einmal im öffentlichen Einstieg,
+ die Rekursion läuft in copy_r_rek().
 ```

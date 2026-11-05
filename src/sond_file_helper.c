@@ -934,12 +934,41 @@ sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **e
 #endif
 }
 
-gboolean
-sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error)
+/* Ist path gleich base oder liegt darunter? Rein textuell nach Normalisierung
+ * (relative Pfade gelten vom Arbeitsverzeichnis, "." und ".." werden
+ * aufgelöst); Symlinks werden nicht aufgelöst. Unter Windows ohne Beachtung
+ * der Groß-/Kleinschreibung. */
+static gboolean
+path_is_inside(const gchar *path, const gchar *base)
 {
-    g_return_val_if_fail(source != NULL, FALSE);
-    g_return_val_if_fail(dest != NULL, FALSE);
+    g_autofree gchar *abs_path = g_canonicalize_filename(path, NULL);
+    g_autofree gchar *abs_base = g_canonicalize_filename(base, NULL);
+    g_autofree gchar *cmp_path = NULL;
+    g_autofree gchar *cmp_base = NULL;
+    gsize len_base = 0;
 
+#ifdef G_OS_WIN32
+    cmp_path = g_utf8_casefold(abs_path, -1);
+    cmp_base = g_utf8_casefold(abs_base, -1);
+#else
+    cmp_path = g_strdup(abs_path);
+    cmp_base = g_strdup(abs_base);
+#endif
+
+    len_base = strlen(cmp_base);
+    if (strncmp(cmp_path, cmp_base, len_base) != 0)
+        return FALSE;
+
+    //base endet selbst auf einen Trenner (Wurzel): alles darunter
+    if (len_base > 0 && G_IS_DIR_SEPARATOR(cmp_base[len_base - 1]))
+        return TRUE;
+
+    return cmp_path[len_base] == '\0' || G_IS_DIR_SEPARATOR(cmp_path[len_base]);
+}
+
+static gboolean
+copy_r_rek(const gchar *source, const gchar *dest, gboolean overwrite, GError **error)
+{
     GStatBuf st;
     if (sond_stat(source, &st, error) != 0)
         return FALSE;
@@ -973,7 +1002,7 @@ sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError *
         if (sond_stat(source_path, &entry_st, error) != 0) {
             success = FALSE;
         } else if (S_ISDIR(entry_st.st_mode)) {
-            success = sond_copy_r(source_path, dest_path, overwrite, error);
+            success = copy_r_rek(source_path, dest_path, overwrite, error);
         } else {
             success = sond_copy(source_path, dest_path, overwrite, error);
         }
@@ -986,6 +1015,29 @@ sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError *
 
     sond_dir_close(dir);
     return success;
+}
+
+gboolean
+sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error)
+{
+    GStatBuf st;
+
+    g_return_val_if_fail(source != NULL, FALSE);
+    g_return_val_if_fail(dest != NULL, FALSE);
+
+    /* Ein Verzeichnis lässt sich nicht in sich selbst kopieren: die Rekursion
+     * läse die neu angelegten Einträge des Ziels wieder ein und legte immer
+     * tiefere Verzeichnisse an. Nur einmal hier prüfen, nicht je
+     * Rekursionsschritt. */
+    if (sond_stat(source, &st, NULL) == 0 && S_ISDIR(st.st_mode) &&
+            path_is_inside(dest, source)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                "Das Zielverzeichnis liegt innerhalb des Quellverzeichnisses");
+
+        return FALSE;
+    }
+
+    return copy_r_rek(source, dest, overwrite, error);
 }
 
 gint
