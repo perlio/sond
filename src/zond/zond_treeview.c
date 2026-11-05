@@ -461,6 +461,16 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	GMenu *sec_oeffnen = g_menu_new();
 	g_menu_append(sec_oeffnen, "Öffnen",        "stv.oeffnen(false)");
 	g_menu_append(sec_oeffnen, "Öffnen mit",    "stv.oeffnen(true)");
+	{
+		GMenu *sub_neu = g_menu_new();
+
+		g_menu_append(sub_neu, "Ganze Anbindung", "stv.oeffnen-neu('anbindung')");
+		g_menu_append(sub_neu, "Auszug",          "stv.oeffnen-neu('auszug')");
+		g_menu_append(sub_neu, "Nur Section",     "stv.oeffnen-neu('section')");
+		g_menu_append_submenu(sec_oeffnen, "In neuem Fenster öffnen",
+				G_MENU_MODEL(sub_neu));
+		g_object_unref(sub_neu);
+	}
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_oeffnen));
 	g_object_unref(sec_oeffnen);
 
@@ -2808,11 +2818,12 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 }
 
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
-		DisplayedDocument* dd, PdfPos *pos_pdf, GError **error) {
+		DisplayedDocument* dd, PdfPos *pos_pdf, gboolean neue_instanz,
+		GError **error) {
 	PdfPos pos_von = { 0 };
 
 	//Neue Instanz oder bestehende?
-	if (!(zond->state & GDK_SHIFT_MASK)) {
+	if (!neue_instanz) {
 		//Testen, ob pv mit file_part schon geöffnet
 		for (gint i = 0; i < zond->arr_pv->len; i++) {
 			DisplayedDocument* dd_loop = dd;
@@ -3280,15 +3291,15 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 }
 
 static gint zond_treeview_open_single_view(Projekt* zond, SondFilePart* sfp,
-		Anbindung* anbindung_node, gint node_id, gboolean end,
-		DisplayedDocument** dd, PdfPos* pdf_pos, GError** error) {
+		Anbindung* anbindung_node, gint node_id, gboolean only_anbindung,
+		gboolean end, DisplayedDocument** dd, PdfPos* pdf_pos, GError** error) {
 	gint rc = 0;
 	Anbindung anbindung_ges = { 0 };
 
 	//Anbindung anpassen und Anfangsposition berechnen
 	if (!anbindung_is_empty(anbindung_node)) {
 		rc = get_anbindung_ges(zond, node_id,
-				zond->state & GDK_CONTROL_MASK, *anbindung_node,
+				only_anbindung, *anbindung_node,
 				&anbindung_ges, error);
 		if (rc) {
 			g_object_unref(sfp);
@@ -3421,8 +3432,69 @@ static gint zond_treeview_determine_iter_parent(ZondTreeview *ztv,
 	}
 }
 
+typedef enum {
+	OEFFNEN_ANBINDUNG = 0, //ganze Anbindung
+	OEFFNEN_AUSZUG,        //Auszug: alle Anbindungen unter dem Elternknoten
+	OEFFNEN_SECTION        //nur Section/Anbindung des Knotens
+} OeffnenUmfang;
+
+//Umfang aus den Modifiern: Strg vor Shift, sonst ganze Anbindung
+static OeffnenUmfang zond_treeview_umfang_aus_state(Projekt *zond) {
+	if (zond->state & GDK_CONTROL_MASK)
+		return OEFFNEN_SECTION;
+	if (zond->state & GDK_SHIFT_MASK)
+		return OEFFNEN_AUSZUG;
+
+	return OEFFNEN_ANBINDUNG;
+}
+
+/* Elternknoten für den Auszug eines Klicks in BAUM_INHALT: die Anbindung des
+ * angeklickten Knotens (der Klick selbst oder ein Vorfahre mit
+ * id_file_part) und davon der Elternknoten. *found == FALSE: keine Anbindung
+ * gefunden oder sie hat keinen Elternknoten (oberste Ebene). */
+static gint zond_treeview_inhalt_auszug_parent(Projekt *zond,
+		GtkTreeIter *iter, GtkTreeIter *iter_parent, gboolean *found,
+		GError **error) {
+	gint rc = 0;
+	GtkTreeIter iter_target = { 0 };
+	GtkTreeIter iter_anchor = *iter;
+	GtkTreeModel *model = NULL;
+	gint baum_inhalt_file = 0;
+	gint id_file_part = 0;
+
+	*found = FALSE;
+
+	zond_tree_store_get_iter_target(iter, &iter_target);
+
+	rc = zond_dbase_find_baum_inhalt_file(zond->dbase_zond->zond_dbase_work,
+			zond_tree_store_get_node_id(&iter_target), &baum_inhalt_file,
+			&id_file_part, NULL, error);
+	if (rc)
+		return -1;
+
+	if (!baum_inhalt_file)
+		return 0;
+
+	model = GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter));
+
+	//Section unterhalb der Anbindung: zur Anbindung hochgehen
+	while (zond_tree_store_get_node_id(&iter_anchor) != id_file_part) {
+		GtkTreeIter iter_up = { 0 };
+
+		if (!gtk_tree_model_iter_parent(model, &iter_up, &iter_anchor))
+			return 0;
+
+		iter_anchor = iter_up;
+	}
+
+	*found = gtk_tree_model_iter_parent(model, iter_parent, &iter_anchor);
+
+	return 0;
+}
+
 static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
-		gboolean open_with, GError **error) {
+		gboolean open_with, OeffnenUmfang umfang, gboolean neue_instanz,
+		GError **error) {
 	gint rc = 0;
 	SondFilePart* sfp = NULL;
 	gint node_id = 0;
@@ -3434,7 +3506,6 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	Baum baum_click = KEIN_BAUM;
 	GtkTreeIter iter_parent = { 0 };
 	gboolean have_iter_parent = FALSE;
-	gboolean single_view = FALSE;
 	gchar *file_part_target = NULL;
 
 	//Baum der KLICKPOSITION (unaufgelöst) - entscheidet, ob überhaupt
@@ -3445,13 +3516,12 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	baum = zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_target));
 
 	/* iter_parent wird hier EINMALIG ermittelt, sobald feststeht, dass der
-	 * Klick überhaupt in den Auszug-Pfad münden kann (Auswertungs-
-	 * verzeichnis, kein Strg-Override auf ein Ziel mit eigenem Inhalt).
-	 * Sowohl der SeaDrive-Hydrierungs-Vorabcheck unten (_WIN32) als auch
-	 * die open_auszug()-Weiche ganz unten verwenden danach nur noch diesen
-	 * Wert - zwischen beiden Stellen ändert sich der BAUM_AUSWERTUNG-Baum
-	 * nicht (SeaDrive-Hydrierung wirkt nur auf BAUM_FS), iter_parent
-	 * bleibt also gültig. Die leichte, rein DB-basierte
+	 * Klick in den Auszug-Pfad mündet: Umfang Auszug, oder Knoten ohne
+	 * eigenen Inhalt (Strukturpunkt). Sowohl der SeaDrive-Hydrierungs-
+	 * Vorabcheck unten (_WIN32) als auch die open_auszug()-Weiche ganz unten
+	 * verwenden danach nur noch diesen Wert - zwischen beiden Stellen ändert
+	 * sich der Baum nicht (SeaDrive-Hydrierung wirkt nur auf BAUM_FS),
+	 * iter_parent bleibt also gültig. Die leichte, rein DB-basierte
 	 * zond_treeview_get_filepart_and_section() reicht hier aus, da sie für
 	 * denselben Knoten dasselbe NULL/nicht-NULL-Ergebnis liefert wie das
 	 * spätere "echte" sfp aus get_filepart_from_iter(). */
@@ -3464,26 +3534,38 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		if (ret == -1)
 			return -1;
 
-		if (baum_click == BAUM_AUSWERTUNG
-				&& !(file_part_target && (zond->state & GDK_CONTROL_MASK))) {
-			ret = zond_treeview_determine_iter_parent(
-					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,
-					&iter_parent, error);
-			if (ret == -1) {
-				g_free(file_part_target);
-				return -1;
+		if (!open_with && (!file_part_target || umfang == OEFFNEN_AUSZUG)) {
+			if (baum_click == BAUM_AUSWERTUNG) {
+				ret = zond_treeview_determine_iter_parent(
+						ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,
+						&iter_parent, error);
+				if (ret == -1) {
+					g_free(file_part_target);
+					return -1;
+				}
+				have_iter_parent = TRUE;
 			}
-			have_iter_parent = TRUE;
+			else if (!file_part_target) {
+				iter_parent = *iter; //Strukturpunkt: Auszug seiner Kinder
+				have_iter_parent = TRUE;
+			}
+			else {
+				ret = zond_treeview_inhalt_auszug_parent(zond, iter,
+						&iter_parent, &have_iter_parent, error);
+				if (ret == -1) {
+					g_free(file_part_target);
+					return -1;
+				}
+			}
 
 			/* Kein echter Elternknoten (z.B. Copy auf oberster Ebene von
 			 * BAUM_AUSWERTUNG): determine_iter_parent() liefert dann den
 			 * Klick-Knoten selbst, dessen Kinder-Auszug leer wäre. Trägt
-			 * das Ziel eigenen Inhalt, stattdessen Einzelansicht wie bei
-			 * Strg - auch für den Hydrierungscheck unten (Einzeldatei). */
-			if (file_part_target && iter_parent.user_data == iter->user_data) {
+			 * das Ziel eigenen Inhalt, stattdessen ganze Anbindung - auch
+			 * für den Hydrierungscheck unten (Einzeldatei). */
+			if (file_part_target && have_iter_parent
+					&& iter_parent.user_data == iter->user_data)
 				have_iter_parent = FALSE;
-				single_view = TRUE;
-			}
 		}
 	}
 
@@ -3527,7 +3609,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			gint hyd_rc = 0;
 
 			hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
-					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+					ZOND_TREEVIEW(zond->treeview[baum_click]),
 					&iter_parent, error);
 			if (hyd_rc == -1) {
 				g_free(file_part_target);
@@ -3564,7 +3646,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	if (rc)
 		return -1;
 
-	if (!sfp && (open_with || baum_click != BAUM_AUSWERTUNG))
+	if (!sfp && (open_with || !have_iter_parent))
 		return 0;
 
 	//mit externem Programm oder mit renderer öffnen
@@ -3577,51 +3659,27 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		return 0;
 	}
 
-	if (baum_click == BAUM_INHALT) { //direkter Klick im Bestandsverzeichnis: internen Viewer verwenden
+	if (!have_iter_parent) {
+		//ganze Anbindung oder nur Section (Einzelansicht)
 		rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
-				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+				(umfang == OEFFNEN_SECTION), (zond->state & GDK_MOD1_MASK), &dd,
+				&pdf_pos, error);
 		if (rc)
 			return -1;
 	}
-	else if (sfp && ((zond->state & GDK_CONTROL_MASK) || single_view)) {
-		/* Strg gedrückt UND Ziel trägt selbst Inhalt: genereller "nur diese
-		 * eine Anbindung"-Override, unabhängig von iter_parent -
-		 * Einzelansicht wie Klick im Bestandsverzeichnis. (Ein Klick ohne
-		 * eigenen Inhalt - reiner Strukturpunkt - kennt kein "nur diese
-		 * eine Anbindung" und läuft deshalb immer über den Auszug-Zweig
-		 * unten, auch bei gedrücktem Strg.) single_view: kein Elternknoten
-		 * für einen Auszug vorhanden, s. Ermittlung von iter_parent oben. */
-		rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
-				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
-		if (rc)
-			return -1;
-	}
-	else { //Klick im Auswertungsverzeichnis, kein Strg-Override
+	else { //Auszug
 		if (sfp)
 			g_object_unref(sfp);
 
 		/* Hydrierungscheck (Multi) läuft bereits vorgezogen ganz oben in
 		 * dieser Funktion, hier nicht mehr nötig. iter_parent wurde dort
-		 * ebenfalls schon ermittelt (s. Kommentar an
-		 * zond_treeview_determine_iter_parent() und am Anfang dieser
-		 * Funktion) und wird hier nur noch verwendet. have_iter_parent muss
-		 * an dieser Stelle TRUE sein: file_part_target (leichte DB-Abfrage)
-		 * und sfp (echtes SondFilePart) werten denselben Knoten aus und
-		 * müssen bzgl. NULL/nicht-NULL übereinstimmen - der
-		 * Vollständigkeit halber trotzdem ein defensiver Fallback. */
-		if (!have_iter_parent) {
-			rc = zond_treeview_determine_iter_parent(
-					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,
-					&iter_parent, error);
-			if (rc)
-				return -1;
-		}
-
-		/* iter_pos == NULL genau dann, wenn iter_parent == iter selbst ist
+		 * ebenfalls schon ermittelt.
+		 *
+		 * iter_pos == NULL genau dann, wenn iter_parent == iter selbst ist
 		 * (direkter Strukturpunkt-Treffer, s. zond_treeview_determine_
-		 * iter_parent()) - dann soll wie bisher ohne Positions-Treffer
-		 * geöffnet werden (Anfang bzw. bei Alt Ende des letzten Kindes). */
-		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+		 * iter_parent()) - dann soll ohne Positions-Treffer geöffnet werden
+		 * (Anfang bzw. bei Alt Ende des letzten Kindes). */
+		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[baum_click]),
 				&iter_parent,
 				(iter_parent.user_data == iter->user_data) ? NULL : iter,
 				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
@@ -3636,7 +3694,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		gint rc = 0;
 
 		rc = zond_treeview_oeffnen_internal_viewer(zond, dd,
-				&pdf_pos, error);
+				&pdf_pos, neue_instanz, error);
 		if (rc) {
 			document_free_displayed_documents(dd);
 
@@ -3782,19 +3840,17 @@ static void zond_treeview_action_jump(GSimpleAction *a, GVariant *p, gpointer d)
 		if (rc) { display_message(zond->app_window, "Fehler Sprung zu Herkunft\n\n", error->message, NULL); g_error_free(error); }
 	}
 }
-static void zond_treeview_action_oeffnen(GSimpleAction *a,
-		GVariant *p, gpointer d) {
+static void zond_treeview_oeffnen_ausfuehren(Projekt *zond,
+		gboolean open_with, OeffnenUmfang umfang, gboolean neue_instanz) {
 	GtkTreeIter iter = { 0 };
 	GError *error = NULL;
 	gint rc = 0;
 
-	gboolean open_with = g_variant_get_boolean(p);
-	Projekt *zond = (Projekt*) d;
-
 	if (!sond_treeview_get_cursor(zond->treeview[zond_baum_aktuell(zond)], &iter))
 		return;
 
-	rc = zond_treeview_open_node(zond, &iter, open_with, &error);
+	rc = zond_treeview_open_node(zond, &iter, open_with, umfang, neue_instanz,
+			&error);
 	if (rc) {
 		//Abbruch des Passwortdialogs ist kein Fehler
 		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
@@ -3804,6 +3860,28 @@ static void zond_treeview_action_oeffnen(GSimpleAction *a,
 	}
 
 	return;
+}
+
+static void zond_treeview_action_oeffnen(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	zond_treeview_oeffnen_ausfuehren(zond, g_variant_get_boolean(p),
+			zond_treeview_umfang_aus_state(zond), FALSE);
+}
+
+//Parameter: "anbindung", "auszug" oder "section"
+static void zond_treeview_action_oeffnen_neu(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	const gchar *umfang_str = g_variant_get_string(p, NULL);
+	OeffnenUmfang umfang = OEFFNEN_ANBINDUNG;
+
+	if (!g_strcmp0(umfang_str, "auszug"))
+		umfang = OEFFNEN_AUSZUG;
+	else if (!g_strcmp0(umfang_str, "section"))
+		umfang = OEFFNEN_SECTION;
+
+	zond_treeview_oeffnen_ausfuehren((Projekt*) d, FALSE, umfang, TRUE);
 }
 
 static void zond_treeview_action_icon(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -3980,6 +4058,8 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 		{ "jump",          G_CALLBACK(zond_treeview_action_jump),			NULL},
 		{ "oeffnen",       G_CALLBACK(zond_treeview_action_oeffnen),
 				G_VARIANT_TYPE_BOOLEAN},
+		{ "oeffnen-neu",   G_CALLBACK(zond_treeview_action_oeffnen_neu),
+				G_VARIANT_TYPE_STRING},
 		{ "indexsuche-sel", G_CALLBACK(zond_treeview_action_indexsuche_auswahl), NULL},
 		{ "index-erstellen-sel", G_CALLBACK(zond_treeview_action_index_erstellen_auswahl), NULL},
 		{ "index-loeschen-sel", G_CALLBACK(zond_treeview_action_index_loeschen_auswahl), NULL},

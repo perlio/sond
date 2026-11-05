@@ -507,12 +507,14 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		{
 			gchar *abs_path_child = g_strconcat(stvfm_priv->root, "/",
 					rel_path_child, NULL);
-			gint rc_stat = sond_stat(abs_path_child, &st, error);
+			GError *error_stat = NULL;
+			gint rc_stat = sond_stat(abs_path_child, &st, &error_stat);
 
 			g_free(abs_path_child);
 			if (rc_stat) {
-				LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, (*error)->message);
-				g_clear_error(error);
+				LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child,
+						error_stat ? error_stat->message : "?");
+				g_clear_error(&error_stat);
 				g_free(rel_path_child);
 
 				continue;
@@ -568,6 +570,8 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			if (!sfp_child) {
 				g_free(rel_path_child);
 				sond_dir_close(dir);
+				if (loaded_children)
+					g_ptr_array_unref(loaded_children);
 				return -1;
 			}
 

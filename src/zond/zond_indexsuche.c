@@ -202,7 +202,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 }
 
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
-                        dd, &pos_pdf, &error);
+                        dd, &pos_pdf, (zond->state & GDK_SHIFT_MASK), &error);
                 if (rc) {
                     display_message(zond->app_window,
                             "Fehler beim Öffnen\n\n",

@@ -1,14 +1,14 @@
 # zond
 zond ist ein Programm zur Organisation auch großer Mengen digital gespeicherter Inhalte. Der Schwerpunkt liegt auf digitalen Dokumenten im PDF-Format.
 
-Mit zond können solche Inhalte strukturiert und gegliedert werden; PDF-Dokumente können auch in beliebigem Umfang untergliedert werden. Für die nahe Zukunft ist geplant, daß aus Abschnitten von PDF-Dateien beliebig "virtuelle PDFs" erzeugt werden können, die dann wie eine einheitliche PDF-Datei behandelt bzw. bearbeitet werden können.
+Mit zond können solche Inhalte strukturiert und gegliedert werden; PDF-Dokumente können auch in beliebigem Umfang untergliedert werden. Aus Abschnitten verschiedener PDF-Dateien lassen sich "virtuelle PDFs" (Auszüge) zusammenstellen, die im Viewer wie eine einheitliche PDF-Datei angezeigt werden (s. "Öffnen" bei den Baumansichten).
 
 # "Design"
 Digitale Inhalte werden projektbezogen organisiert. Es gibt ein Dateiverzeichnis, in welchem sich eine Projektdatei befindet. Sämtliche Dateien, die in dem Projekt erfaßt sind oder erfaßt werden können sollen, müssen sich ebenfalls in diesem Projektverzeichnis - oder seinen Unterverzeichnissen - befinden. Selbstverständlich können Dateien zu beliebigen Zeitpunkten hinzugefügt werden.
 
 Die Organisation der digitalen Inhalte geschieht in drei Ebenen, in denen die Informationen jeweils in Baumdiagrammen dargestellt werden.
 
-Die unterste Ebene ist das Projektverzeichnis selbst (**Dateiverzeichnis**). Hier werden alle Dateien und Unterverzeichnisse in einem Verzeichnisbaum angezeigt. Es handelt sich um eine erweiterte Ansicht, wobei hier das englische Wort "augmented" passender wäre; so werden etwa die zu PDF-Dateien gespeicherten Abschnitte angezeigt. Zukünftig sollen Dateien, die in Containern enthalten sind (E-Mails, Zip-Dateien, PDFs, die "associated files" enthalten, etc.), ebenfalls in dieser Ansicht angezeigt werden können und ein direkter Zugriff auf z.B. E-Mail-Anhänge oder zip-Archive möglich sein.
+Die unterste Ebene ist das Projektverzeichnis selbst (**Dateiverzeichnis**). Hier werden alle Dateien und Unterverzeichnisse in einem Verzeichnisbaum angezeigt. Es handelt sich um eine erweiterte Ansicht, wobei hier das englische Wort "augmented" passender wäre; so werden etwa die zu PDF-Dateien gespeicherten Abschnitte angezeigt. Ebenso werden Dateien, die in Containern enthalten sind (E-Mails, ZIP-Dateien, PDFs mit eingebetteten Dateien ("associated files")), als Unterknoten der Container-Datei angezeigt; auf E-Mail-Anhänge, ZIP-Inhalte und PDF-Anhänge kann dadurch direkt zugegriffen werden, sie lassen sich wie normale Dateien öffnen, indizieren und anbinden. Gesperrte (passwortgeschützte) Einträge werden beim Öffnen per Passwortabfrage entsperrt.
 
 Eine "Mittelschicht" bildet das **Bestandsverzeichnis**. Dieses kann zunächst durch einfügen von "Strukturpunkten" gegliedert werden. Strukturpunkte sind Knoten in der Baumdarstellung, denen keine Datei oder kein Dateiabschnitt zugeordnet ist. Strukturpunkte können beliebig benannt werden und in unbeschränkter Anzahl - auch als Unterpunkte von anderen Strukturpunkten - eingefügt werden. In das Bestandsverzeichnis kann weiterhin eine Auswahl der Dateien oder Dateibestandteile aus dem Dateiverzeichnis kopiert werden. Es muß nicht die ganze Datei in das Bestandsverzeichnis kopiert werden; sofern - z.B. - eine PDF-Datei in verschiedene Abschnitte unterteilt ist, können auch nur einzelne dieser Abschnitte in das Bestandsverzeichnis aufgenommen werden. Z.B. enthält eine PDF-Datei ein - belangloses - Übersendungsschreiben und auf den folgenden Seiten das - belangreiche - übersendete Schreiben; hier kann - wenn die PDF-Datei einen Abschnitt hat, der das übersendete Schreiben umfaßt - nur dieser in das Bestandsverzeichnis kopiert werden. Der Aufbau des Bestandsverzeichnisses folgt strengen Regeln: Jede Datei bzw. jeder Dateiteil kann nur einmal im Bestandsverzeichnis abgebildet sein. Die erfaßte Datei bzw. der erfaßte Dateiabschnitt enthält immer auch sämtliche Unterabschnitte. Strukturpunkte können an angebundene Dateien oder deren Unterabschnitte nicht angebunden werden.
 
@@ -61,7 +61,23 @@ Folgende Bearbeiten-Funktionen gibt es prinzipiell in allen drei Bäumen, mit je
 
 - **Kopieren** und **Ausschneiden** merken sich zunächst nur die markierten Zeilen (Referenz), ohne etwas zu verändern; ausgeschnittene Zeilen werden ausgegraut dargestellt.
 - **Einfügen** (gleiche Ebene / Unterebene) wird erst dadurch wirksam. Der Zielknoten darf dabei nie ein Abkömmling der zu verschiebenden/kopierenden Auswahl sein. Wird innerhalb desselben Baums ausgeschnitten und eingefügt, wird der Knoten in jedem Baum tatsächlich verschoben; was Einfügen einer Kopie bzw. das Einfügen aus einem anderen Baum bewirkt, unterscheidet sich dagegen von Baum zu Baum erheblich (s.u.).
-- **Öffnen** (Doppelklick auf das Icon einer Zeile, Menüpunkt "Öffnen"/"Öffnen mit", Tastenkürzel Strg+O) zeigt PDF-Dateien stets im internen Viewer an; bestimmte weitere Formate (Text, Bilder, ODT, DOCX, E-Mail-Bestandteile) werden über "Öffnen" ebenfalls immer intern angezeigt, "Öffnen mit" umgeht diese interne Anzeige. Andere Dateien werden mit der Standardanwendung des Systems geöffnet; "Öffnen mit" öffnet dafür unter Windows den systemeigenen Auswahldialog für die Anwendung. In Containern (ZIP, E-Mail, PDF) eingebettete Dateien werden dafür zunächst in eine temporäre Datei extrahiert. Was genau als PDF-Ausschnitt angezeigt wird und welche Wirkung dabei die Tasten Strg, Alt und Umschalt haben, hängt vom jeweiligen Baum ab und ist unten bei den einzelnen Bäumen beschrieben; Wird beim Doppelklick zusätzlich die Umschalttaste gehalten, öffnet sich in jedem Baum stets ein neues Viewer-Fenster, statt ein bereits offenes (das denselben Inhalt zeigt) wiederzuverwenden.
+- **Öffnen** (Doppelklick auf das Icon einer Zeile, Menüpunkt "Öffnen"/"Öffnen mit", Tastenkürzel Strg+O) zeigt PDF-Dateien stets im internen Viewer an; bestimmte weitere Formate (Text, Bilder, ODT, DOCX, E-Mail-Bestandteile) werden über "Öffnen" ebenfalls immer intern angezeigt, "Öffnen mit" umgeht diese interne Anzeige. Andere Dateien werden mit der Standardanwendung des Systems geöffnet; "Öffnen mit" öffnet dafür unter Windows den systemeigenen Auswahldialog für die Anwendung. In Containern (ZIP, E-Mail, PDF) eingebettete Dateien werden dafür zunächst in eine temporäre Datei extrahiert. Was genau als PDF-Ausschnitt angezeigt wird, bestimmt der **Umfang** (s. "Öffnen von PDF-Dateien" unten). Ein Viewer-Fenster mit identischem Inhalt wird wiederverwendet und nach vorne geholt, statt ein zweites zu öffnen; ein zusätzliches Fenster erzwingt im Bestands- und Auswertungsverzeichnis der Kontextmenüpunkt "In neuem Fenster öffnen", im Dateiverzeichnis die Umschalttaste beim Doppelklick.
+
+### Öffnen von PDF-Dateien: Umfang und Tasten
+
+Im Bestands- und Auswertungsverzeichnis gibt es drei Umfänge, die beim Doppelklick (bzw. Strg+O) über die gehaltene Taste gewählt werden:
+
+| Taste beim Doppelklick | Umfang |
+|---|---|
+| keine | **Ganze Anbindung**: die gesamte am Punkt angebundene Datei bzw. der gesamte angebundene Abschnitt. Ist der angeklickte Punkt ein Unterabschnitt einer größeren Anbindung, wird deren Umfang angezeigt und an den angeklickten Unterabschnitt gesprungen. Im Auswertungsverzeichnis wird die Anbindung über das Original bzw. Linkziel ermittelt. |
+| Umschalt | **Auszug**: die Anbindungen unter dem übergeordneten Punkt werden zu einem zusammenhängenden "virtuellen PDF" zusammengefaßt; die angeklickte Stelle erscheint darin als ein Teil unter mehreren, und der Viewer springt dorthin. |
+| Strg | **Nur Section/Anbindung**: ausschließlich der angeklickte Abschnitt selbst. Bei gleichzeitig gehaltener Umschalttaste gilt Strg. |
+
+Zusätzlich kann mit Alt an das Ende statt an den Anfang des angezeigten Teils gesprungen werden; Alt läßt sich mit jedem Umfang kombinieren. Punkte ohne eigenen Inhalt (reine Strukturpunkte) öffnen unabhängig von den Tasten immer den Auszug ihrer Kinder.
+
+Der Elternknoten des Auszugs ist im Bestandsverzeichnis der Elternknoten der Anbindung (bei einer Section unterhalb der Anbindung also nicht deren unmittelbarer Elternknoten, sondern der der Anbindung selbst). Im Auswertungsverzeichnis kommt es auf die Stelle des Klicks an (bei einem Link zunächst auf dessen Ziel). Gibt es keinen Elternknoten (oberste Ebene), wird statt des Auszugs die ganze Anbindung geöffnet.
+
+Ein zusätzliches Viewer-Fenster wird im Bestands- und Auswertungsverzeichnis über das Kontextmenü angefordert: "In neuem Fenster öffnen" mit den Untereinträgen "Ganze Anbindung", "Auszug" und "Nur Section" (Umfang wie in der Tabelle). Im Dateiverzeichnis gibt es keine Auszüge; dort entspricht der Doppelklick ohne Taste der ganzen Datei, mit Strg dem angeklickten Abschnitt, und Umschalt öffnet ein neues Viewer-Fenster.
 
 **Löschen** entfernt den markierten Knoten **ohne Sicherheitsabfrage** - in allen drei Bäumen, im Dateiverzeichnis u.a. auch für einzelne Dateien innerhalb eines ZIP-Archivs oder von MIME-Teilen (E-Mail-Anhängen). Bei reinen Strukturpunkten im Bestandsverzeichnis werden zuvor alle Unterpunkte rekursiv mitgelöscht. Ist der Punkt oder die zugehörige Datei an anderer Stelle (Auswertungsverzeichnis-Kopie) noch in Verwendung, wird das Löschen für diesen Knoten übersprungen, um verwaiste Kopien zu vermeiden. Ein Link, der nicht der Kopf ist, wird beim Löschen ignoriert.
 
@@ -89,9 +105,13 @@ Im Bestands- und Auswertungsverzeichnis stehen zusätzlich folgende, dort identi
 | Strg+Entf | Löschen |
 | Strg+J | Zu Ursprung springen |
 | Strg+O | Öffnen |
-| Umschalt (beim Öffnen aus dem Baum) | stets neues Viewer-Fenster öffnen, statt ein bereits offenes wiederzuverwenden |
-| Strg (beim Öffnen aus dem Baum) | nur die angeklickte Anbindung selbst anzeigen (Einzelheiten je Baum s.u.) |
+| Umschalt (beim Öffnen im Bestands-/Auswertungsverzeichnis) | Auszug (virtuelles PDF aus den Anbindungen unter dem Elternpunkt) |
+| Strg (beim Öffnen im Bestands-/Auswertungsverzeichnis) | nur die angeklickte Section/Anbindung selbst anzeigen; gewinnt gegen Umschalt |
+| Umschalt (beim Öffnen im Dateiverzeichnis) | stets neues Viewer-Fenster öffnen |
+| Strg (beim Öffnen im Dateiverzeichnis) | nur den angeklickten Abschnitt statt der ganzen Datei anzeigen |
 | Alt (beim Öffnen aus dem Baum) | an das Ende statt an den Anfang des angezeigten Abschnitts springen |
+
+Einzelheiten zum Öffnen s. "Öffnen von PDF-Dateien: Umfang und Tasten" oben.
 
 Weitere feste Interaktion ohne Menü-Accelerator: eine beliebige druckbare Taste öffnet das Such-Popover (s.o.).
 
@@ -103,7 +123,7 @@ Von den oben beschriebenen gemeinsamen Bearbeiten-Funktionen wirken **Kopieren**
 
 Unabhängig davon können aus dem Dateiverzeichnis kopierte oder ausgeschnittene Dateien/Verzeichnisse auch in das Bestands- oder Auswertungsverzeichnis eingefügt werden; dort werden sie dann "angebunden" (neuer Anbindungsknoten je Datei, bei Verzeichnissen rekursiv mit Strukturpunkten je Unterordner); bereits angebundene Dateien werden dabei übersprungen und im Info-Fenster gemeldet.
 
-**Öffnen**: Bei einer PDF-Datei wird stets die gesamte Datei angezeigt; mit gedrückter Strg-Taste wird stattdessen nur der angeklickte Abschnitt selbst angezeigt (ist ein Abschnitt bereits selbst angeklickt, springt der Viewer ohne Strg an dessen Anfang bzw. mit gedrückter Alt-Taste an dessen Ende).
+**Öffnen**: Bei einer PDF-Datei wird stets die gesamte Datei angezeigt; mit gedrückter Strg-Taste wird stattdessen nur der angeklickte Abschnitt selbst angezeigt (ist ein Abschnitt bereits selbst angeklickt, springt der Viewer ohne Strg an dessen Anfang bzw. mit gedrückter Alt-Taste an dessen Ende). Umschalt öffnet ein neues Viewer-Fenster. Auszüge gibt es in diesem Baum nicht.
 
 ## Bestandsverzeichnis
 
@@ -115,7 +135,7 @@ Unabhängig davon können aus dem Dateiverzeichnis kopierte oder ausgeschnittene
 
 **Anbindung entfernen** unterscheidet sich von "Löschen": Es wird nur der Anbindungspunkt selbst entfernt, seine Unterpunkte bleiben erhalten und rücken eine Ebene auf.
 
-**Öffnen**: Es wird stets nur die am angeklickten Punkt angebundene Datei bzw. der angebundene Abschnitt selbst angezeigt. Standardmäßig wird dabei der Umfang der übergeordneten, registrierten Anbindung angezeigt, sofern der angeklickte Punkt ein Unterabschnitt einer größeren Anbindung ist; mit gedrückter Strg-Taste wird stattdessen nur der angeklickte Abschnitt selbst angezeigt. Mit Alt wird an das Ende statt an den Anfang gesprungen.
+**Öffnen**: Ohne Taste wird die ganze Anbindung angezeigt, auch wenn der angeklickte Punkt ein Unterabschnitt einer größeren Anbindung ist (der Viewer springt dann an dessen Stelle). Umschalt öffnet den Auszug: die Anbindungen unter dem Elternknoten der Anbindung werden zu einem virtuellen PDF zusammengefaßt; ohne Elternknoten wird die ganze Anbindung geöffnet. Strg zeigt nur den angeklickten Abschnitt selbst. Ein Punkt ohne eigenen Inhalt (Strukturpunkt) öffnet immer den Auszug seiner Kinder. Mit Alt wird an das Ende statt an den Anfang gesprungen. Ein neues Fenster liefert "In neuem Fenster öffnen" im Kontextmenü (s. "Öffnen von PDF-Dateien: Umfang und Tasten").
 
 ## Auswertungsverzeichnis
 
@@ -125,11 +145,12 @@ Unabhängig davon können aus dem Dateiverzeichnis kopierte oder ausgeschnittene
 
 **Als Link einfügen** (gleiche Ebene / Unterebene) legt keine Kopie, sondern eine Referenz auf den Originalknoten an (im Auswertungs- oder Bestandsverzeichnis); Original und Link bleiben dadurch synchron – Änderungen am Original (Text, Unterpunkte) erscheinen auch am Link. Verweist die Quelle bereits selbst auf einen Link, wird direkt auf dessen Ziel verwiesen, damit keine Ketten entstehen. Ausschneiden und "Als Link einfügen" lassen sich nicht kombinieren. Verlinkte Punkte werden kursiv dargestellt, der "Kopf" eines Links (das Original des Links, an dem gelöscht/verschoben werden kann) zusätzlich violett.
 
-**Öffnen**: Da Punkte hier frei angeordnet und verschachtelt werden können, unabhängig von der tatsächlichen Gliederung einer PDF-Datei, gilt eine eigene Logik (bei einem Link wird zunächst dessen Ziel betrachtet):
+**Öffnen**: Die Umfänge sind dieselben wie im Bestandsverzeichnis (s. "Öffnen von PDF-Dateien: Umfang und Tasten"); bei einem Link wird zunächst dessen Ziel betrachtet:
 
-- Ist das Ziel ein Strukturpunkt, werden dessen unmittelbare Kinder - soweit PDFs oder Abschnitte - zu einem zusammenhängenden "virtuellen PDF" (Auszug) zusammengefaßt und geöffnet.
-- Ist das Ziel selbst eine Anbindung (Datei oder Abschnitt), kommt es auf den Elternknoten der angeklickten Stelle an (nicht auf den des Linkziels): Ist dieser ein Strukturpunkt, wird ebenfalls ein Auszug aus dessen Kindern geöffnet - die angeklickte Anbindung erscheint darin als ein Teil unter mehreren. Ist der Elternknoten dagegen selbst eine Anbindung, oder gibt es keinen Elternknoten (oberste Ebene), wird nur die Zielanbindung geöffnet - wie bei einem Klick im Bestandsverzeichnis, einschließlich Strg-Verhalten.
-- Mit gedrückter Strg-Taste wird die Auszug-Gruppierung generell übergangen, unabhängig vom Elternknoten: es wird immer nur die angeklickte Anbindung selbst geöffnet.
+- Ohne Taste wird die ganze Anbindung des Ziels geöffnet. Sie wird über das Original im Bestandsverzeichnis ermittelt, nicht über den Elternknoten der angeklickten Stelle.
+- Mit Umschalt wird der Auszug geöffnet. Maßgeblich ist der Elternknoten der angeklickten Stelle (nicht der des Linkziels): Ist dieser ein Strukturpunkt, werden dessen unmittelbare Kinder - soweit PDFs oder Abschnitte - zu einem virtuellen PDF zusammengefaßt, in dem die angeklickte Anbindung ein Teil unter mehreren ist. Ist der Elternknoten selbst eine Anbindung, oder gibt es keinen Elternknoten (oberste Ebene), wird stattdessen die ganze Anbindung geöffnet.
+- Mit Strg wird nur der angeklickte Abschnitt selbst angezeigt (Strg gewinnt gegen Umschalt).
+- Ist das Ziel ein Strukturpunkt ohne eigenen Inhalt, wird immer der Auszug seiner unmittelbaren Kinder geöffnet.
 - Mit Alt wird an das Ende statt an den Anfang des angezeigten (Teil-)Abschnitts gesprungen.
 
 ## Notizfeld
@@ -180,7 +201,7 @@ Seiten, die Teil einer bestehenden Anbindung sind, können nicht gelöscht werde
 | Umschalt (beim Doppelklick) | Abschnitt punktgenau statt seitengenau markieren |
 | Alt (beim Sprung zu einer Fundstelle der Volltextsuche) | Zielposition eine Bildschirmseite höher anzeigen |
 
-Die Wirkung von Umschalt, Strg und Alt beim Öffnen aus einem der drei Bäume ist oben unter "Hauptfenster" beschrieben.
+Die Wirkung von Umschalt, Strg und Alt beim Öffnen aus einem der drei Bäume ist oben unter "Öffnen von PDF-Dateien: Umfang und Tasten" beschrieben.
 
 ### Seiten einfügen
 

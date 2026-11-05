@@ -5,14 +5,12 @@
 
 #include "../misc.h"
 #include "../sond_fileparts.h"
-#include "../sond_renderer.h"
 #include "../sond_index.h"
+#include "../sond_pdf_helper.h"
 #include "../sond_process_file.h"
-#include "../sond_ocr.h"
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
 #include "../sond_mime.h"
-#include "../sond_pdf_helper.h"
 #include "zond_indexsuche.h"
 #include "zond_pdf_document.h"
 
@@ -26,11 +24,6 @@
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
 #include "99conv/general.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#include <shlwapi.h>
-#endif // _WIN32
 
 typedef struct {
 	Projekt *zond;
@@ -126,6 +119,35 @@ static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
 	return priv->index_tx_active ? &priv->index_tx : NULL;
 }
 
+//Transaktion verwerfen (Fehlerweg von before_delete/before_move)
+static void tx_abort(ZondTreeviewFMPrivate *priv) {
+	dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+	index_tx_end(priv);
+
+	return;
+}
+
+//Fehler der Index-DB (idx_err wird freigegeben) in *error übernehmen
+static void set_idx_error(GError **error, gchar const *func,
+		gchar const *what, GError **idx_err) {
+	if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+			"%s: %s: %s", func, what, *idx_err ? (*idx_err)->message : "?");
+	g_clear_error(idx_err);
+
+	return;
+}
+
+//Löschen gesperrt: Eintrag steht noch in der Speicher-Datenbank
+static void show_still_in_store(ZondTreeviewFMPrivate *priv) {
+	display_message(priv->zond->app_window,
+			"Die zu löschende Datei bzw. der Abschnitt ist "
+			"noch in der Speicher-Datenbank vorhanden.\n"
+			"Bitte zuerst das Projekt speichern, "
+			"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
+
+	return;
+}
+
 static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
 	gchar* filepart = NULL;
 	gchar* path = NULL;
@@ -179,6 +201,9 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 }
 
 static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
+	if (!sond_tvfm_item_get_sond_file_part(stvfm_item))
+		return FALSE;
+
 	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
 		if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
 			*index = strrchr(sond_tvfm_item_get_path_or_section(stvfm_item), '/') ?
@@ -307,12 +332,6 @@ static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
 	g_clear_pointer(&priv->pending_sibling_new, g_ptr_array_unref);
 }
 
-/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen
- * bzw. Herausverschieben (filename_new NULL) oder Umbenennen ggf. die
- * Adressen der übrigen Anhänge: wird ein doppelter Dateiname eindeutig,
- * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen.
- * Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
- * sie in priv->pending_sibling_* ab; nichts zu tun -> alles NULL. */
 /* Eingebettete Datei einer PDF (nicht PageTree, keine Section)? Ohne
  * Dateizugriff. */
 static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
@@ -325,6 +344,12 @@ static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
 	return SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(sfp));
 }
 
+/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen
+ * bzw. Herausverschieben (filename_new NULL) oder Umbenennen ggf. die
+ * Adressen der übrigen Anhänge: wird ein doppelter Dateiname eindeutig,
+ * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen.
+ * Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
+ * sie in priv->pending_sibling_* ab; nichts zu tun -> alles NULL. */
 static gint emb_sibling_changes(ZondTreeviewFMPrivate *priv,
 		SondTVFMItem *stvfm_item, gchar const *filename_new, GError **error) {
 	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
@@ -470,11 +495,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		if (rc == -1)
 			return -1;
 		else if (rc == 1) {
-			display_message(priv->zond->app_window,
-					"Die zu löschende Datei bzw. der Abschnitt ist "
-					"noch in der Speicher-Datenbank vorhanden.\n"
-					"Bitte zuerst das Projekt speichern, "
-					"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
+			show_still_in_store(priv);
 
 			return 1;
 		}
@@ -491,11 +512,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		if (rc == -1)
 			return -1;
 		else if (rc == 1) {
-			display_message(priv->zond->app_window,
-					"Die zu löschende Datei bzw. der Abschnitt ist "
-					"noch in der Speicher-Datenbank vorhanden.\n"
-					"Bitte zuerst das Projekt speichern, "
-					"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
+			show_still_in_store(priv);
 
 			return 1;
 		}
@@ -533,12 +550,8 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		GError *idx_err = NULL;
 
 		if (!sond_index_ctx_clear_file(index_tx(priv), path, &idx_err)) {
-			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-			index_tx_end(priv);
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_clear_file: %s", __func__,
-					idx_err ? idx_err->message : "?");
-			g_clear_error(&idx_err);
+			tx_abort(priv);
+			set_idx_error(error, __func__, "sond_index_ctx_clear_file", &idx_err);
 			return -1;
 		}
 
@@ -551,12 +564,9 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		 * NICHT angetastet - reines Löschen von Inhalt kann dessen Aussage
 		 * nicht verletzen, s. Kommentar bei sond_index_ctx_coverage_clear(). */
 		if (!sond_index_ctx_coverage_clear(index_tx(priv), path, &idx_err)) {
-			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-			index_tx_end(priv);
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_coverage_clear: %s", __func__,
-					idx_err ? idx_err->message : "?");
-			g_clear_error(&idx_err);
+			tx_abort(priv);
+			set_idx_error(error, __func__, "sond_index_ctx_coverage_clear",
+					&idx_err);
 			return -1;
 		}
 	}
@@ -570,8 +580,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		if (!rc && !section) //Index-DB ebenso
 			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
 		if (rc) {
-			dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-			index_tx_end(priv);
+			tx_abort(priv);
 			return -1;
 		}
 	}
@@ -580,8 +589,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (emb_sibling_changes(priv, stvfm_item, NULL, error) ||
 			emb_sibling_apply(priv, error)) {
 		emb_sibling_pending_clear(priv);
-		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-		index_tx_end(priv);
+		tx_abort(priv);
 		return -1;
 	}
 
@@ -590,8 +598,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (!section && !from_gmessage &&
 			dbase_zond_remove_filepart(priv->zond->dbase_zond, path, error)) {
 		emb_sibling_pending_clear(priv);
-		dbase_zond_rollback(priv->zond->dbase_zond, NULL);
-		index_tx_end(priv);
+		tx_abort(priv);
 		return -1;
 	}
 
@@ -777,24 +784,18 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		if (!rename_in_gmessage && index_to != -1 &&
 				!sond_index_ctx_coverage_invalidate(index_tx(ztvfm_priv),
 				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
-					idx_err ? idx_err->message : "?");
-			g_clear_error(&idx_err);
+			tx_abort(ztvfm_priv);
+			set_idx_error(error, __func__,
+					"sond_index_ctx_coverage_invalidate", &idx_err);
 			return -1;
 		}
 
 		if (!rename_in_gmessage &&
 				!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
 				prefix_old, prefix_new, &idx_err)) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_rename_file: %s", __func__,
-					idx_err ? idx_err->message : "?");
-			g_clear_error(&idx_err);
+			tx_abort(ztvfm_priv);
+			set_idx_error(error, __func__, "sond_index_ctx_rename_file",
+					&idx_err);
 			return -1;
 		}
 	}
@@ -804,8 +805,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	rc = rename_in_gmessage ? 0 :
 			dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
-		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
-		index_tx_end(ztvfm_priv);
+		tx_abort(ztvfm_priv); //Fehler von update_path bleibt erhalten
 		return -1;
 	}
 
@@ -824,8 +824,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 					index_from, FALSE, error);
 		g_free(prefix_gmessage);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
+			tx_abort(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -846,8 +845,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
 					index_to, TRUE, error);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
+			tx_abort(ztvfm_priv);
 			g_free(prefix_gmessage);
 
 			return -1;
@@ -866,17 +864,14 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 			if (!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
 					prefix_new, prefix_gmessage, &idx_err)) {
-				if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-						"%s: sond_index_ctx_rename_file: %s", __func__,
-						idx_err ? idx_err->message : "?");
-				g_clear_error(&idx_err);
+				set_idx_error(error, __func__, "sond_index_ctx_rename_file",
+						&idx_err);
 				rc = -1;
 			}
 		}
 		g_free(prefix_gmessage);
 		if (rc) {
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
+			tx_abort(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -894,8 +889,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 				same_pdf ? base_new : NULL, error) ||
 				emb_sibling_apply(ztvfm_priv, error)) {
 			emb_sibling_pending_clear(ztvfm_priv);
-			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, NULL);
-			index_tx_end(ztvfm_priv);
+			tx_abort(ztvfm_priv);
 			return -1;
 		}
 	}
@@ -1054,7 +1048,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 					priv->pending_move_is_physical = FALSE;
 					g_clear_pointer(&priv->pending_delete_path, g_free);
 
-					return;
+					//Commit gescheitert und zurückgenommen: keine
+					//Nachführung, aber changed-Flag und Aufräumen unten
+					goto aufraeumen;
 				}
 
 				/* Revert fehlgeschlagen oder keiner möglich (z.B. reine
@@ -1099,6 +1095,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 				display_message(priv->zond->app_window,
 						"Fehler beim Speichern:\n\n", error_int->message, NULL);
 				g_clear_error(&error_int);
+
+				//Commit gescheitert: weder Adressen noch Struktur nachführen
+				goto aufraeumen;
 			}
 		}
 		index_tx_end(priv);
@@ -1116,8 +1115,10 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 			zond_dbase_rollback(priv->zond->dbase_zond->zond_dbase_work, &error_int);
 
 		index_tx_end(priv);
+		g_clear_error(&error_int);
 	}
 
+aufraeumen:
 	if (dual_write)
 		project_reset_changed(priv->zond, changed_before);
 
@@ -1134,19 +1135,14 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		GtkTreeIter *iter, SondTVFMItem* stvfm_item, const gchar *new_text,
 		GError **error) {
-	gboolean changed = FALSE;
-
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
-
-	if (ztvfm_priv->zond->dbase_zond->changed)
-		changed = TRUE;
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		gint ID_section = 0;
 		g_autofree gchar* filepart = NULL;
 		gint rc = 0;
-		GtkTreeIter* iter = NULL;
+		GtkTreeIter* iter_tree = NULL;
 
 		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 
@@ -1169,27 +1165,30 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 			return -1;
 
 		//Text in treeview anpassen
-		iter = zond_tree_store_get_iter_by_node_id(
+		iter_tree = zond_tree_store_get_iter_by_node_id(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
 						GTK_TREE_VIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]))),
 				ID_section);
 
-		if (iter) {
-			zond_tree_store_set(iter, NULL, new_text, 0);
-			gtk_tree_iter_free(iter);
+		if (iter_tree) {
+			zond_tree_store_set(iter_tree, NULL, new_text, 0);
+			gtk_tree_iter_free(iter_tree);
 		}
+
+		/* Nur die Arbeitskopie wurde geändert (der Update-Hook hat das
+		 * changed-Flag gesetzt) - es bleibt gesetzt, sonst ginge der Text
+		 * beim Schließen ohne Rückfrage verloren. */
 	}
 	else { //chain-up, wenn nicht erledigt
 		gint rc = 0;
 
+		//Umbenennen schreibt in store und work; das changed-Flag stellt
+		//zond_treeviewfm_after() wieder her
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited(stvfm,
 				iter, stvfm_item, new_text, error);
 		if (rc)
 			return -1;
 	}
-
-	if (!changed)
-		project_reset_changed(ztvfm_priv->zond, FALSE);
 
 	return 0;
 }
@@ -1247,11 +1246,17 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 					LOG_WARN("Elter-Iter konnte nicht ermittelt werden");
 					//dann halt weiter mit ganzem PDF...
 				}
-				gtk_tree_model_get(model, &iter_parent, 0, &stvfm_item_parent, -1);
-				section_parent = sond_tvfm_item_get_path_or_section(stvfm_item_parent);
-				if (section_parent)
-					anbindung_parse_file_section(section, &anbindung_ges);
-				g_object_unref(stvfm_item_parent);
+				else {
+					gtk_tree_model_get(model, &iter_parent, 0, &stvfm_item_parent, -1);
+					if (stvfm_item_parent) {
+						section_parent = sond_tvfm_item_get_path_or_section(
+								stvfm_item_parent);
+						if (section_parent)
+							anbindung_parse_file_section(section_parent,
+									&anbindung_ges);
+						g_object_unref(stvfm_item_parent);
+					}
+				}
 			}
 		}
 
@@ -1261,7 +1266,7 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 			return -1;
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				dd, &pdf_pos, error);
+				dd, &pdf_pos, (ztvfm_priv->zond->state & GDK_SHIFT_MASK), error);
 		if (rc)
 			return -1;
 	}
@@ -1441,19 +1446,6 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
-/* zond_treeviewfm_get_fileparts() und Helfer:
- *
- * Eigene, zond-spezifische Variante von sond_treeviewfm_get_fileparts()
- * (sond_treeviewfm.c). Die generische Basisklasse kennt nur "ganze Datei"
- * (NULL) als Wert, weil sie bewusst nicht weiß, was eine "Section" eines
- * SOND_TVFM_ITEM_TYPE_LEAF_SECTION-Knotens bedeutet (bei PDF ein
- * Seitenbereich, bei anderen Dateitypen ggf. etwas ganz anderes - z.B.
- * ein Zeitausschnitt bei Audio/Video). Nur zond selbst weiß: in BAUM_FS
- * ist ein LEAF_SECTION-Knoten immer eine Anbindung (angelegt in
- * ziele.c), deren path_or_section ein Seitenbereich ist. Deshalb baut
- * diese Funktion die Hashtable komplett selbst, ausschließlich über die
- * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
- * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
 /* Reiner readdir-Scanner für "wirkliche" (nicht in einem Container liegende)
  * Dateisystem-Verzeichnisse - ersetzt für diesen Fall den Weg über
  * sond_tvfm_item_load_children()/sond_file_part_create() (Inhalts-Sniffing
@@ -1476,13 +1468,24 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
  * eine explizite Auswahl darin erreicht (sond_file_part != NULL UND
  * path_or_section gesetzt) - dafür dient der echte Weg in
  * zond_treeviewfm_item_get_fileparts(). */
-gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
+#define READDIR_MAX_DEPTH 64
+
+static gint zond_treeviewfm_readdir_rek(SondTreeviewFM *stvfm,
 		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
-		GError **error) {
+		guint depth, GError **error) {
 	gchar const *root = sond_treeviewfm_get_root(stvfm);
 	gchar *path_dir = NULL;
 	SondDir *dir = NULL;
 	gchar const *filename = NULL;
+
+	//Schutz vor Verzeichnis-Schleifen (Junction/Symlink auf einen Vorfahren)
+	if (depth > READDIR_MAX_DEPTH) {
+		LOG_WARN("%s: Verzeichnistiefe > %d bei '%s' - übersprungen "
+				"(Verzeichnisschleife?)", __func__, READDIR_MAX_DEPTH,
+				rel_dir ? rel_dir : "");
+
+		return 0;
+	}
 
 	/* Derselbe Verzeichnis-
 	 * Kurzschluss wie in scan_coverage_gaps_fs() (zond_indexsuche.c) - ein
@@ -1540,8 +1543,8 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 		}
 
 		if (S_ISDIR(st.st_mode)) {
-			gint rc = zond_treeviewfm_item_get_fileparts_readdir(stvfm,
-					rel_path_child, ht, skip_fully_covered, error);
+			gint rc = zond_treeviewfm_readdir_rek(stvfm, rel_path_child, ht,
+					skip_fully_covered, depth + 1, error);
 			g_free(rel_path_child);
 			if (rc) {
 				sond_dir_close(dir);
@@ -1565,6 +1568,26 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 	return 0;
 }
 
+gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
+		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
+		GError **error) {
+	return zond_treeviewfm_readdir_rek(stvfm, rel_dir, ht, skip_fully_covered,
+			0, error);
+}
+
+/* zond_treeviewfm_get_fileparts() und Helfer:
+ *
+ * Eigene, zond-spezifische Variante von sond_treeviewfm_get_fileparts()
+ * (sond_treeviewfm.c). Die generische Basisklasse kennt nur "ganze Datei"
+ * (NULL) als Wert, weil sie bewusst nicht weiß, was eine "Section" eines
+ * SOND_TVFM_ITEM_TYPE_LEAF_SECTION-Knotens bedeutet (bei PDF ein
+ * Seitenbereich, bei anderen Dateitypen ggf. etwas ganz anderes - z.B.
+ * ein Zeitausschnitt bei Audio/Video). Nur zond selbst weiß: in BAUM_FS
+ * ist ein LEAF_SECTION-Knoten immer eine Anbindung (angelegt in
+ * ziele.c), deren path_or_section ein Seitenbereich ist. Deshalb baut
+ * diese Funktion die Hashtable komplett selbst, ausschließlich über die
+ * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
+ * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GHashTable *ht, gboolean reject_unterseitig,
 		gboolean skip_fully_covered, GError **error) {
@@ -1585,12 +1608,15 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 	//echte Weg (der Nutzer hat diesen Container durch eigenes Navigieren
 	//bereits geöffnet, s. Kommentar an zond_treeviewfm_item_get_fileparts_readdir).
 	else if (type == SOND_TVFM_ITEM_TYPE_DIR && path_or_section) {
-		GPtrArray *arr_children = NULL;
+		g_autoptr(GPtrArray) arr_children = NULL;
 		gint rc = 0;
 
 		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
 		if (rc)
-			return -1;
+			return -1; //arr_children ist bei Fehler nie gesetzt
+
+		if (!arr_children) //Loader liefert ohne Fehler u.U. kein Array
+			return 0;
 
 		for (guint i = 0; i < arr_children->len; i++) {
 			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
@@ -1859,25 +1885,29 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 			GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) //Dummy-Zeile
 		return;
-	g_object_unref(stvfm_item);
 
-	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR)
+	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR) {
+		g_object_unref(stvfm_item);
+
 		return;
+	}
 
 	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
 	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work, filepart, section, &ID, &error);
 	g_free(filepart);
+	g_object_unref(stvfm_item); //section ist damit nicht mehr gültig
 	if (rc) {
-		display_message(zond->app_window, "Zur Anbindung springen nicht möglich\n\n"
-				"%s", error->message, NULL);
+		display_message(zond->app_window, "Zur Anbindung springen nicht möglich\n\n",
+				error->message, NULL);
 		g_error_free(error);
 
 		return;
 	}
 
-	zond_treeview_jump_to_node_id(zond, ID);
+	if (ID)
+		zond_treeview_jump_to_node_id(zond, ID);
 
 	return;
 }
@@ -2015,18 +2045,18 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 
 	do {
 		gchar const* section_child = NULL;
-		SondTVFMItem* stvfm_item = NULL;
+		SondTVFMItem* stvfm_item_child = NULL;
 		Anbindung anbindung_child = { 0 };
 
 		gtk_tree_model_get(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
-				&iter_child, 0, &stvfm_item, -1);
-		if (!stvfm_item) //Dummy-Zeile
+				&iter_child, 0, &stvfm_item_child, -1);
+		if (!stvfm_item_child) //Dummy-Zeile
 			continue;
 		section_child =
-				sond_tvfm_item_get_path_or_section(stvfm_item);
+				sond_tvfm_item_get_path_or_section(stvfm_item_child);
 		anbindung_parse_file_section(section_child, &anbindung_child);
-		g_object_unref(stvfm_item);
+		g_object_unref(stvfm_item_child);
 
 		if (anbindung_1_eltern_von_2(anbindung_child, anbindung)) {
 			gint rc = 0;
@@ -2149,11 +2179,10 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM *ztvfm,
  * werden. */
 #define G_NODE(node) ((GNode *)node)
 static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
-		GNode *node, gint pos) {
+		GNode *node) {
 	GNode *child = NULL;
 	GtkTreeIter iter = { 0 };
 	GtkTreePath *path = NULL;
-	gint pos_child = 0;
 
 	iter.stamp = stamp;
 	iter.user_data = node;
@@ -2174,10 +2203,9 @@ static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
 
 	child = node->children;
 	while (child) {
-		zond_treeviewfm_walk_tree(model, stamp, child, pos_child);
+		zond_treeviewfm_walk_tree(model, stamp, child);
 
 		child = child->next;
-		pos_child++;
 	}
 
 	return;
@@ -2188,7 +2216,6 @@ static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src
 	GNode *node_src = NULL;
 	GNode *node_src_parent = NULL;
 	GtkTreePath *path = NULL;
-	gint pos = 0;
 
 	node_src = iter_src->user_data;
 	node_src_parent = node_src->parent;
@@ -2226,11 +2253,9 @@ static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src
 	} else {
 		g_node_insert_after( G_NODE(anchor->user_data)->parent,
 				G_NODE(anchor->user_data), node_src);
-		pos = g_node_child_position( G_NODE(anchor->user_data)->parent,
-				node_src);
 	}
 
-	zond_treeviewfm_walk_tree(model, iter_src->stamp, node_src, pos);
+	zond_treeviewfm_walk_tree(model, iter_src->stamp, node_src);
 
 	return;
 }

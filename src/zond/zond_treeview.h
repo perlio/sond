@@ -52,7 +52,7 @@ void zond_treeview_expand_all(GtkTreeView*);
 void zond_treeview_expand_row_rekursiv(GtkTreeView*, GtkTreePath*);
 
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, DisplayedDocument*,
-		PdfPos*, GError**);
+		PdfPos*, gboolean neue_instanz, GError**);
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
