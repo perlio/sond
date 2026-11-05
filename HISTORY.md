@@ -5931,3 +5931,28 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  danach wird der Wert FALSE, aber kein Signal mehr gesendet. Behebung: im Zweig root == NULL
  ein zweites Statussignal (0, 0) nach dem Zurücksetzen; das Label leert sich dann.
 ```
+
+## Öffnen-Umfang vereinheitlicht, zond_treeviewfm durchgesehen (05.11.2026) (#246)
+
+```text
+ Öffnen in BAUM_INHALT und BAUM_AUSWERTUNG: drei Umfänge über die Taste beim Doppelklick
+ (zond_treeview_open_node(), Umfang-Parameter): keine Taste = ganze Anbindung, Umschalt =
+ Auszug, Strg = nur Section/Anbindung (Strg gewinnt gegen Umschalt); Alt (Ende) bleibt und
+ ist mit allen kombinierbar. Im Auswertungsbaum ist die ganze Anbindung jetzt Standard.
+ Bestandsbaum, Auszug auf eine Section unterhalb der Anbindung: Elternknoten der Anbindung
+ ist iter_parent (zond_treeview_inhalt_auszug_parent()), ohne Elternknoten ganze Anbindung.
+ Strukturpunkte öffnen immer den Auszug. "Weitere Instanz" ist als Modifier entfallen:
+ Kontextmenü "In neuem Fenster öffnen" mit Ganze Anbindung / Auszug / Nur Section (Aktion
+ stv.oeffnen-neu); zond_treeview_oeffnen_internal_viewer() hat dafür den Parameter
+ neue_instanz, Dateiverzeichnis und Indexsuche behalten Umschalt.
+
+ zond_treeviewfm.c: after() führte nach gescheitertem Commit Adressen und Struktur nach;
+ jump_activate (Unref vor Benutzung, Meldungstext, ID 0); Leck in get_fileparts (arr_children);
+ Strg-Öffnen mit Eltern-Section parste die falsche Section, fehlender Fallback ohne
+ Elternknoten; Umbenennen einer Anbindung setzte das changed-Flag zurück (Text ging beim
+ Schließen verloren); Tiefenbegrenzung (64) im readdir-Scanner gegen Verzeichnisschleifen;
+ Fehlerwege in before_delete/before_move über tx_abort()/set_idx_error() gestrafft;
+ ungenutzte Includes, toter Parameter pos, Kommentare. sond_tvfm_item.c: NULL-Zugriff auf
+ error und Leck in load_fs_dir. README: Design-Abschnitt (Auszüge, Container umgesetzt),
+ Abschnitt "Öffnen von PDF-Dateien: Umfang und Tasten".
+```

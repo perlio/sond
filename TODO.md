@@ -2,7 +2,7 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #246.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #247.
 
 ## Inhalt
 
