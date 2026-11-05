@@ -5984,4 +5984,10 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  get_fileparts, changed-Flag beim Umbenennen einer Anbindung, Tiefenbegrenzung im readdir-Scanner,
  Fehlerwege gestrafft; zond_treeview.c: open_auszug gibt im Fehlerfall die schon geöffneten Teile
  frei; sond_tvfm_item.c: NULL-Zugriff auf error, Leck in load_fs_dir.
+ Zusammenschau sond_treeviewfm/zond_treeviewfm: toter Code entfernt (get_wctx,
+ sond_treeviewfm_get_fileparts, sond_tvfm_item_get_fileparts); Helfer sond_tvfm_item_from_model/
+ _from_view (Item einer Zeile, NULL bei Dummy-Zeile) und sond_tvfm_item_get_filepart,
+ anbindung_bis_seite() (general.c); Einfügen eines Anhangs in eine PDF setzt die kodierte
+ Adresse (pdf_emb_escape) als sfp-Pfad und zeigt den Dateinamen (vorher roher Name, bei "%"
+ ungültige Adresse bis zum Neuladen).
 ```
