@@ -139,6 +139,11 @@ void anbindung_parse_file_section(gchar const *file_section,
 	return;
 }
 
+gint anbindung_bis_seite(Anbindung anbindung) {
+	return (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
+			anbindung.von.seite : anbindung.bis.seite;
+}
+
 void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
 	if (anbindung.bis.seite == 0 && anbindung.bis.index == 0)
 		*section = g_strdup_printf("{%d,%d}", anbindung.von.seite,

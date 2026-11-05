@@ -16,8 +16,6 @@
  * deren vfuncs SondTVFMItem* verwenden. */
 #include "sond_tvfm_item.h"
 
-typedef struct _SondProcessFileCtx SondProcessFileCtx;
-
 G_BEGIN_DECLS
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )
@@ -42,7 +40,6 @@ struct _SondTreeviewFMClass {
 	gint (*load_sections) (SondTVFMItem*, GPtrArray**, GError**);
 	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
-	SondProcessFileCtx* (*get_wctx) (SondTreeviewFM*);
 
 	/* Optional: TRUE, wenn die Datei gerade in Benutzung ist (z.B. in einem
 	 * Viewer geöffnet) und deshalb nicht verändert werden darf - "Dauerhaft
@@ -130,9 +127,6 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM*, SondTVFMSearchOpts const*,
 
 /* Dateisuche mit Dialog und Ergebnisfenster, wie im Kontextmenü. */
 void sond_treeviewfm_search_activate(SondTreeviewFM*);
-
-GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stv, gboolean selected_only,
-		GError **error);
 
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, GError**);
 

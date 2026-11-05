@@ -27,7 +27,7 @@
  * (Rename/Kopieren/Einfügen/Löschen-Kaskaden über mehrere Items) - über
  * den Freund-Accessor sond_tvfm_item_get_priv(). Die vormals file-
  * statischen Funktionen sond_tvfm_item_get_basename(), _rename(), _copy(),
- * _move(), _delete() (früher delete_item()) und _get_fileparts() werden
+ * _move() und _delete() (früher delete_item()) werden
  * auch von dort aufgerufen und sind deshalb nicht mehr static, sondern in
  * sond_treeviewfm_private.h (nicht der öffentlichen sond_tvfm_item.h) als
  * modul-interne Freund-API deklariert.
@@ -88,6 +88,38 @@ static void sond_tvfm_item_class_init(SondTVFMItemClass *klass) {
 static void sond_tvfm_item_init(SondTVFMItem *self) {
 
 	return;
+}
+
+SondTVFMItem* sond_tvfm_item_from_model(GtkTreeModel *model, GtkTreeIter *iter) {
+	SondTVFMItem *stvfm_item = NULL;
+
+	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
+
+	return stvfm_item;
+}
+
+SondTVFMItem* sond_tvfm_item_from_view(GtkTreeView *tree_view,
+		GtkTreeIter *iter) {
+	return sond_tvfm_item_from_model(gtk_tree_view_get_model(tree_view), iter);
+}
+
+gchar* sond_tvfm_item_get_filepart(SondTVFMItem *stvfm_item) {
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+	g_autofree gchar *filepart_sfp = NULL;
+
+	if (stvfm_item_priv->sond_file_part)
+		filepart_sfp = sond_file_part_get_filepart(stvfm_item_priv->sond_file_part);
+
+	if (filepart_sfp && stvfm_item_priv->path_or_section)
+		return g_strconcat(filepart_sfp, "//", stvfm_item_priv->path_or_section,
+				NULL);
+	if (filepart_sfp)
+		return g_steal_pointer(&filepart_sfp);
+	if (stvfm_item_priv->path_or_section)
+		return g_strdup(stvfm_item_priv->path_or_section);
+
+	return NULL;
 }
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem *stvfm_item) {
@@ -1376,47 +1408,6 @@ gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 			(rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
 		return -1;
-
-	return 0;
-}
-
-gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
-		GHashTable* ht, GError **error) {
-	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	//"Wirkliches" dir und root-dir - ITEM_TYPE_DIR mit path_or_section != NULL
-	//ist ja in echt filepart
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
-			(stvfm_item_priv->path_or_section ||
-					!stvfm_item_priv->sond_file_part)) {
-		g_autoptr(GPtrArray) arr_children = NULL;
-
-		gint rc = 0;
-
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
-		if (rc)
-			return -1;
-
-		for (guint i = 0; i < arr_children->len; i++) {
-			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
-
-			rc = sond_tvfm_item_get_fileparts(child, ht, error);
-			if (rc)
-				return -1;
-		}
-	}
-	else
-		/* ht wurde mit g_object_unref als key-destroy-func angelegt
-		 * (sond_treeviewfm_get_fileparts()) - erwartet also eine eigene
-		 * Ref pro Key. sond_file_part gehört sonst dem stvfm_item (dessen
-		 * eigene Ref), ohne g_object_ref() hier würde die Hashtable beim
-		 * Zerstören eine fremde Ref freigeben und damit ein Objekt, das noch
-		 * im Treeview angezeigt wird, vorzeitig finalisieren.
-		 * Wert explizit NULL (nicht g_hash_table_add(), das würde value ==
-		 * key setzen) - sond_process_fileparts() liest den Wert als
-		 * SondPageRange* (NULL == ganze Datei); dieser Baum (BAUM_FS) kennt
-		 * keine Anbindungen, hier ist immer die ganze Datei gemeint. */
-		g_hash_table_insert(ht, g_object_ref(stvfm_item_priv->sond_file_part), NULL);
 
 	return 0;
 }

@@ -14,7 +14,7 @@ void init_headerbar(Projekt*);
  * zond_index_erstellen_ht:
  * @zond:     Projekt
  * @ht_index: (transfer full) Map SondFilePart* -> SondPageRange* (NULL-Wert
- *            = ganze Datei), wie von sond_treeviewfm_get_fileparts()/
+ *            = ganze Datei), wie von zond_treeviewfm_get_fileparts()/
  *            zond_treeview_get_selected_fileparts() geliefert. Wird von
  *            dieser Funktion übernommen und am Ende freigegeben.
  *

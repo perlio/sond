@@ -148,24 +148,19 @@ static void show_still_in_store(ZondTreeviewFMPrivate *priv) {
 	return;
 }
 
+//Verzeichnis: sfp//Pfad ("" bei der Wurzel); sonst der Filepart der Datei (ohne Section)
 static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
-	gchar* filepart = NULL;
 	gchar* path = NULL;
 
-	if (sond_tvfm_item_get_sond_file_part(stvfm_item))
-		filepart = sond_file_part_get_filepart(
-				sond_tvfm_item_get_sond_file_part(stvfm_item));
+	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR) {
+		path = sond_tvfm_item_get_filepart(stvfm_item);
 
-	if (sond_tvfm_item_get_item_type(stvfm_item) ==
-			SOND_TVFM_ITEM_TYPE_DIR) {
-		path = g_strconcat((filepart) ? filepart : "",
-				(filepart && sond_tvfm_item_get_path_or_section(stvfm_item)) ? "//" : "",
-				(sond_tvfm_item_get_path_or_section(stvfm_item)) ?
-						sond_tvfm_item_get_path_or_section(stvfm_item) : "", NULL);
-		g_free(filepart);
+		return path ? path : g_strdup("");
 	}
-	else
-		path = filepart;
+
+	if (sond_tvfm_item_get_sond_file_part(stvfm_item))
+		path = sond_file_part_get_filepart(
+				sond_tvfm_item_get_sond_file_part(stvfm_item));
 
 	return path;
 }
@@ -1247,7 +1242,7 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 					//dann halt weiter mit ganzem PDF...
 				}
 				else {
-					gtk_tree_model_get(model, &iter_parent, 0, &stvfm_item_parent, -1);
+					stvfm_item_parent = sond_tvfm_item_from_model(model, &iter_parent);
 					if (stvfm_item_parent) {
 						section_parent = sond_tvfm_item_get_path_or_section(
 								stvfm_item_parent);
@@ -1577,17 +1572,14 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 
 /* zond_treeviewfm_get_fileparts() und Helfer:
  *
- * Eigene, zond-spezifische Variante von sond_treeviewfm_get_fileparts()
- * (sond_treeviewfm.c). Die generische Basisklasse kennt nur "ganze Datei"
- * (NULL) als Wert, weil sie bewusst nicht weiß, was eine "Section" eines
+ * Die generische Basisklasse weiß bewusst nicht, was eine "Section" eines
  * SOND_TVFM_ITEM_TYPE_LEAF_SECTION-Knotens bedeutet (bei PDF ein
  * Seitenbereich, bei anderen Dateitypen ggf. etwas ganz anderes - z.B.
  * ein Zeitausschnitt bei Audio/Video). Nur zond selbst weiß: in BAUM_FS
  * ist ein LEAF_SECTION-Knoten immer eine Anbindung (angelegt in
  * ziele.c), deren path_or_section ein Seitenbereich ist. Deshalb baut
- * diese Funktion die Hashtable komplett selbst, ausschließlich über die
- * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
- * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
+ * diese Funktion die Hashtable selbst, ausschließlich über die
+ * öffentlichen SondTVFMItem-Zugriffsfunktionen (sond_treeviewfm.h). */
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GHashTable *ht, gboolean reject_unterseitig,
 		gboolean skip_fully_covered, GError **error) {
@@ -1652,8 +1644,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			}
 
 			range = sond_page_range_new(anbindung.von.seite,
-					(anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
-							anbindung.von.seite : anbindung.bis.seite);
+					anbindung_bis_seite(anbindung));
 		}
 		else if (type == SOND_TVFM_ITEM_TYPE_LEAF && !path_or_section &&
 				SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
@@ -1695,8 +1686,7 @@ static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 	ZtvfmGetFilepartsData *gfd = (ZtvfmGetFilepartsData*) data;
 	gint rc = 0;
 
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
-			iter, 0, &stvfm_item, -1);
+	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stv), iter);
 	if (!stvfm_item) //Dummy-Zeile
 		return 0;
 
@@ -1784,8 +1774,7 @@ static SondIndexStatus zond_treeviewfm_get_section_index_status(
 	anbindung_parse_file_section(section, &anbindung);
 
 	von_seite = anbindung.von.seite;
-	bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
-			anbindung.von.seite : anbindung.bis.seite;
+	bis_seite = anbindung_bis_seite(anbindung);
 
 	status = sond_index_ctx_get_file_status(index_ctx, coverage_path, von_seite,
 			bis_seite);
@@ -1878,8 +1867,7 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 	if (!sond_treeview_get_cursor(zond->treeview[BAUM_FS], &iter))
 		return;
 
-	gtk_tree_model_get(gtk_tree_view_get_model(
-			GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter, 0, &stvfm_item, -1);
+	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(zond->treeview[BAUM_FS]), &iter);
 	if (!stvfm_item) //Dummy-Zeile
 		return;
 
@@ -2023,9 +2011,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 			&iter_child, iter))
 		return 0;
 
-	gtk_tree_model_get(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
-			&iter_child, 0, &stvfm_item, -1);
+	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(ztvfm), &iter_child);
 
 	if (!stvfm_item) //dummy
 	{
@@ -2045,9 +2031,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 		SondTVFMItem* stvfm_item_child = NULL;
 		Anbindung anbindung_child = { 0 };
 
-		gtk_tree_model_get(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
-				&iter_child, 0, &stvfm_item_child, -1);
+		stvfm_item_child = sond_tvfm_item_from_view(GTK_TREE_VIEW(ztvfm), &iter_child);
 		if (!stvfm_item_child) //Dummy-Zeile
 			continue;
 		section_child =

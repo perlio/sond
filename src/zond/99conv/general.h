@@ -15,6 +15,10 @@ gboolean anbindung_1_gleich_2(const Anbindung, const Anbindung);
 
 gboolean anbindung_is_pdf_punkt(Anbindung);
 
+/* Letzte Seite der Anbindung; bei einem reinen Punkt (ohne "bis") dessen
+ * eigene Seite. */
+gint anbindung_bis_seite(Anbindung);
+
 /* "unterseitig" (etablierter Begriff, s. 40viewer/seiten.c) - beginnt
  * oder endet die Anbindung an einer Position INNERHALB einer Seite,
  * statt an deren Anfang/Ende? Ein Punkt (anbindung_is_pdf_punkt) ist

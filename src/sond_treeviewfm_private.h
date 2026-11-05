@@ -102,10 +102,9 @@ typedef struct {
 SondTVFMItemPrivate *sond_tvfm_item_get_priv(SondTVFMItem *item);
 
 /* Modul-interne "Freund"-API zwischen sond_treeviewfm.c und
- * sond_tvfm_item.c: diese sechs Funktionen werden sowohl von der Item-Logik
+ * sond_tvfm_item.c: diese fünf Funktionen werden sowohl von der Item-Logik
  * (sond_tvfm_item.c) selbst als auch vom Baum-Code in sond_treeviewfm.c
- * (Rename/Kontextmenü-Löschen/Umbenennen-Handler/Fileparts-Sammlung)
- * aufgerufen. Bewusst NICHT in sond_tvfm_item.h (also nicht Teil der
+ * (Rename/Kontextmenü-Löschen/Umbenennen-Handler) aufgerufen. Bewusst NICHT in sond_tvfm_item.h (also nicht Teil der
  * öffentlichen SondTVFMItem-API für den Rest der Anwendung). Implementiert
  * in sond_tvfm_item.c. */
 gchar const *sond_tvfm_item_get_basename(SondTVFMItem *stvfm_item);
@@ -126,9 +125,6 @@ gint sond_tvfm_item_move(SondTVFMItem *stvfm_item,
  * ein unpräfigierter Name wäre in einem gemeinsam genutzten Header
  * unpassend). */
 gint sond_tvfm_item_delete(SondTVFMItem *stvfm_item, GError **error);
-
-gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
-		GHashTable *ht, GError **error);
 
 G_END_DECLS
 

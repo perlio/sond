@@ -592,8 +592,7 @@ static SondIndexStatus zond_treeview_get_index_status_for_filepart(
 
 		anbindung_parse_file_section(section, &anbindung);
 		von_seite = anbindung.von.seite;
-		bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
-				anbindung.von.seite : anbindung.bis.seite;
+		bis_seite = anbindung_bis_seite(anbindung);
 	}
 
 	return sond_index_ctx_get_file_status(index_ctx, file_part, von_seite,

@@ -65,6 +65,20 @@ gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
 		SondFilePart *, gchar const*);
 
+/* Item der Zeile iter aus Spalte 0 des Baummodells. Neue Referenz (mit
+ * g_object_unref() bzw. g_autoptr() freigeben); NULL bei einer Dummy-Zeile
+ * (Platzhalter für den Aufklapp-Pfeil, trägt kein Item) - der Aufrufer muss
+ * darauf prüfen. */
+SondTVFMItem* sond_tvfm_item_from_model(GtkTreeModel*, GtkTreeIter*);
+
+SondTVFMItem* sond_tvfm_item_from_view(GtkTreeView*, GtkTreeIter*);
+
+/* Filepart-String des Items: Filepart des SondFilePart und, davon mit "//"
+ * getrennt, path_or_section (sfp//Pfad); ohne SondFilePart nur der Pfad, ohne
+ * Pfad nur der Filepart. Neu alloziert (g_free()); NULL, wenn das Item weder
+ * ein SondFilePart noch einen Pfad hat (Wurzel). */
+gchar* sond_tvfm_item_get_filepart(SondTVFMItem*);
+
 /* SondTVFMProgress:
  *
  * Optionaler Fortschritts-/Abbruch-Kontext für sond_tvfm_item_load_children()

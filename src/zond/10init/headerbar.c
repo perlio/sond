@@ -282,9 +282,9 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 		g_usleep(20000);
 	}
 	g_thread_join(thread);
-	/* ht_index hält jetzt (nach dem Ref-Fix in
-	 * sond_tvfm_item_get_fileparts()) eine eigene Ref pro SondFilePart -
-	 * muss also freigegeben werden, sonst Leck. */
+	/* ht_index hält eine eigene Ref pro SondFilePart (s.
+	 * zond_treeviewfm_get_fileparts()) - muss also freigegeben werden, sonst
+	 * Leck. */
 	g_hash_table_destroy(ht_index);
 	g_free(td);
 	info_window_close(info_window);
