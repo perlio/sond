@@ -2824,7 +2824,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 	//Neue Instanz oder bestehende?
 	if (!neue_instanz) {
 		//Testen, ob pv mit file_part schon geöffnet
-		for (gint i = 0; i < zond->arr_pv->len; i++) {
+		for (guint i = 0; i < zond->arr_pv->len; i++) {
 			DisplayedDocument* dd_loop = dd;
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
 
@@ -2861,13 +2861,12 @@ static gint get_anbindung_ges(Projekt *zond, gint node_id, gboolean only_anbindu
 		Anbindung anbindung, Anbindung* anbindung_ges,
 		GError **error) {
 	if (only_anbindung) {
-		if ((anbindung.bis.seite || anbindung.bis.index))
-			*anbindung_ges = anbindung;
-		else if (anbindung.von.seite || anbindung.von.index) { //Pdf_punkt
+		gchar *section_parent = NULL;
+
+		if (anbindung_is_pdf_punkt(anbindung)) {
 			//nächsthöheren Abschnitt ermitteln
 			gint rc = 0;
 			gint parent_id = 0;
-			gchar *section_ges = NULL;
 
 			rc = zond_dbase_get_parent(zond->dbase_zond->zond_dbase_work,
 					node_id, &parent_id, error);
@@ -2876,16 +2875,14 @@ static gint get_anbindung_ges(Projekt *zond, gint node_id, gboolean only_anbindu
 
 			rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
 					parent_id,
-					NULL, NULL, NULL, &section_ges, NULL, NULL, NULL, error);
+					NULL, NULL, NULL, &section_parent, NULL, NULL, NULL, error);
 			if (rc)
 				return -1;
-
-			if (section_ges) //nicht root
-			{
-				anbindung_parse_file_section(section_ges, anbindung_ges);
-				g_free(section_ges);
-			}
 		}
+
+		//section_parent NULL: root, kein übergeordneter Abschnitt
+		anbindung_ges_nur_anbindung(anbindung, section_parent, anbindung_ges);
+		g_free(section_parent);
 	} else {
 		//ermitteln, woran pdf_abschnitt angeknüpft ist
 		//um Umfang des zu öffnenden PDF festzustellen

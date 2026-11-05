@@ -113,37 +113,37 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	return;
 }
 
+gboolean sond_treeviewfm_first_loaded_child(SondTreeviewFM *stvfm,
+		GtkTreeIter *iter_parent, gboolean open, GtkTreeIter *iter_child) {
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	g_autoptr(SondTVFMItem) item = NULL;
+
+	if (!(iter_parent ?
+			gtk_tree_model_iter_children(model, iter_child, iter_parent) :
+			gtk_tree_model_get_iter_first(model, iter_child)))
+		return FALSE;
+
+	item = sond_tvfm_item_from_model(model, iter_child);
+	if (item)
+		return TRUE;
+
+	//nur der Dummy: Kinder sind noch nicht geladen
+	if (!open || !iter_parent)
+		return FALSE;
+
+	sond_treeview_expand_row(SOND_TREEVIEW(stvfm), iter_parent);
+
+	return gtk_tree_model_iter_children(model, iter_child, iter_parent);
+}
+
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_parent,
 		gchar const* filepart, gboolean open,
 		GtkTreeIter *iter_res, GError **error) {
 	GtkTreeIter iter_child = { 0 };
-	gboolean children = FALSE;
-	SondTVFMItem* stvfm_item = NULL;
 
-	if (!iter_parent)
-		children = gtk_tree_model_get_iter_first(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child);
-	else
-		children = gtk_tree_model_iter_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child, iter_parent);
-
-	if (!children)
+	if (!sond_treeviewfm_first_loaded_child(stvfm, iter_parent, open,
+			&iter_child))
 		return 0;
-
-	/* Dummy-Prüfung */
-	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stvfm), &iter_child);
-
-	if (!stvfm_item) {
-		if (!open)
-			return 0;
-
-		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), iter_parent);
-
-		gtk_tree_model_iter_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child,
-				iter_parent);
-	} else
-		g_object_unref(stvfm_item);
 
 	do {
 		g_autofree gchar* filepart_item = NULL;
@@ -3880,6 +3880,21 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 	return;
 }
 
+gboolean sond_treeviewfm_file_part_indexable(SondFilePart *sfp,
+		gchar const *filepart) {
+	gchar const *mime_type = NULL;
+
+	//PDF und E-Mail sind unabhängig von der Endung immer unterstützt
+	if (SOND_IS_FILE_PART_PDF(sfp) || SOND_IS_FILE_PART_GMESSAGE(sfp))
+		return TRUE;
+
+	mime_type = SOND_IS_FILE_PART_LEAF(sfp) ?
+			sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp)) :
+			mime_from_extension(filepart);
+
+	return sond_index_mime_type_supported(mime_type);
+}
+
 /* Ermittelt den filepart-Pfad (Datei/Verzeichnis, "//"-Konvention bei
  * eingebetteten Inhalten) für die Indizierungsstatus-Abfrage - unabhängig
  * vom OS-Pfad "rel", den der SeaDrive-Zweig weiter unten für den
@@ -3994,16 +4009,9 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 			g_free(header_path);
 			status = MAX(header_status, whole_status);
 		}
-		else if (SOND_IS_FILE_PART_PDF(priv->sond_file_part) ||
-				SOND_IS_FILE_PART_GMESSAGE(priv->sond_file_part))
-			status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
 		else {
-			gchar const *mime_type = SOND_IS_FILE_PART_LEAF(priv->sond_file_part) ?
-					sond_file_part_leaf_get_mime_type(
-							SOND_FILE_PART_LEAF(priv->sond_file_part)) :
-					mime_from_extension(coverage_path);
-
-			if (!sond_index_mime_type_supported(mime_type)) {
+			if (!sond_treeviewfm_file_part_indexable(priv->sond_file_part,
+					coverage_path)) {
 				g_free(coverage_path);
 				return SOND_INDEX_STATUS_NONE;
 			}

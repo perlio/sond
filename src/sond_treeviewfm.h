@@ -79,6 +79,13 @@ struct _SondTreeviewFMClass {
  * nachdem sie ein eigenes GMenu angelegt haben. */
 void sond_treeviewfm_add_base_menu(GMenu *gmenu);
 
+/* Erstes Kind von iter_parent (NULL: erste Zeile der obersten Ebene), um die
+ * Kinder zu durchsuchen. Trägt es nur den Dummy (Kinder noch nicht geladen),
+ * wird bei open aufgeklappt, sonst ist nichts zu durchsuchen. FALSE: keine
+ * (geladenen) Kinder. */
+gboolean sond_treeviewfm_first_loaded_child(SondTreeviewFM*, GtkTreeIter*,
+		gboolean open, GtkTreeIter*);
+
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);
 
@@ -131,6 +138,11 @@ void sond_treeviewfm_search_activate(SondTreeviewFM*);
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, GError**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
+
+/* Kann die Datei indiziert werden? PDF und E-Mail immer; sonst nach dem
+ * MIME-Typ: bei einem SondFilePartLeaf der beim Erzeugen ermittelte
+ * (Content-Sniffing), sonst der aus der Endung von filepart. */
+gboolean sond_treeviewfm_file_part_indexable(SondFilePart*, gchar const *filepart);
 
 gboolean sond_treeviewfm_is_seadrive_path(SondTreeviewFM*);
 

@@ -144,6 +144,20 @@ gint anbindung_bis_seite(Anbindung anbindung) {
 			anbindung.von.seite : anbindung.bis.seite;
 }
 
+void anbindung_ges_nur_anbindung(Anbindung anbindung,
+		gchar const *section_parent, Anbindung *ges) {
+	if (!anbindung_is_pdf_punkt(anbindung)) {
+		*ges = anbindung;
+
+		return;
+	}
+
+	if (section_parent)
+		anbindung_parse_file_section(section_parent, ges);
+
+	return;
+}
+
 void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
 	if (anbindung.bis.seite == 0 && anbindung.bis.index == 0)
 		*section = g_strdup_printf("{%d,%d}", anbindung.von.seite,

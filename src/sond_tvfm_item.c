@@ -44,8 +44,6 @@
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 
-#include "misc.h"
-#include "misc_stdlib.h"
 #include "sond_log_and_error.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"

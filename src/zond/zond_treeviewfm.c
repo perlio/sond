@@ -1227,32 +1227,23 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 			anbindung_parse_file_section(section, &anbindung);
 
 		if (ztvfm_priv->zond->state & GDK_CONTROL_MASK) {
-			if (!anbindung_is_pdf_punkt(anbindung))
-				anbindung_ges = anbindung;
-			else { //Eltern-iter holen
-				GtkTreeIter iter_parent = { 0 };
-				GtkTreeModel* model = NULL;
-				SondTVFMItem* stvfm_item_parent = NULL;
-				gchar const* section_parent = NULL;
+			g_autoptr(SondTVFMItem) stvfm_item_parent = NULL;
+			GtkTreeIter iter_parent = { 0 };
+			GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(
+					sond_tvfm_item_get_stvfm(stvfm_item)));
 
-				model = gtk_tree_view_get_model(GTK_TREE_VIEW(
-						sond_tvfm_item_get_stvfm(stvfm_item)));
-				if (!gtk_tree_model_iter_parent(model, &iter_parent, iter)) {
-					LOG_WARN("Elter-Iter konnte nicht ermittelt werden");
-					//dann halt weiter mit ganzem PDF...
-				}
-				else {
-					stvfm_item_parent = sond_tvfm_item_from_model(model, &iter_parent);
-					if (stvfm_item_parent) {
-						section_parent = sond_tvfm_item_get_path_or_section(
-								stvfm_item_parent);
-						if (section_parent)
-							anbindung_parse_file_section(section_parent,
-									&anbindung_ges);
-						g_object_unref(stvfm_item_parent);
-					}
-				}
+			//Eltern-Section nur für einen Punkt nötig (nächsthöherer Abschnitt)
+			if (anbindung_is_pdf_punkt(anbindung)) {
+				if (gtk_tree_model_iter_parent(model, &iter_parent, iter))
+					stvfm_item_parent = sond_tvfm_item_from_model(model,
+							&iter_parent);
+				else
+					LOG_WARN("Elter-Iter konnte nicht ermittelt werden"); //dann ganze PDF
 			}
+
+			anbindung_ges_nur_anbindung(anbindung,
+					stvfm_item_parent ? sond_tvfm_item_get_path_or_section(
+							stvfm_item_parent) : NULL, &anbindung_ges);
 		}
 
 		dd = document_new_displayed_document(sfp_pdf, &anbindung_ges, &anbindung,
@@ -1760,15 +1751,9 @@ static SondIndexStatus zond_treeviewfm_get_section_index_status(
 	if (!coverage_path)
 		return SOND_INDEX_STATUS_NONE;
 
-	if (!SOND_IS_FILE_PART_PDF(sfp) && !SOND_IS_FILE_PART_GMESSAGE(sfp)) {
-		gchar const *mime_type = SOND_IS_FILE_PART_LEAF(sfp) ?
-				sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp)) :
-				mime_from_extension(coverage_path);
-
-		if (!sond_index_mime_type_supported(mime_type)) {
-			g_free(coverage_path);
-			return SOND_INDEX_STATUS_NONE;
-		}
+	if (!sond_treeviewfm_file_part_indexable(sfp, coverage_path)) {
+		g_free(coverage_path);
+		return SOND_INDEX_STATUS_NONE;
 	}
 
 	anbindung_parse_file_section(section, &anbindung);
@@ -2004,27 +1989,10 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 		GtkTreeIter* iter, Anbindung anbindung, gboolean open,
 		GtkTreeIter *iter_res, GError **error) {
 	GtkTreeIter iter_child = { 0 };
-	SondTVFMItem* stvfm_item = NULL;
 
-	if (!gtk_tree_model_iter_children(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
-			&iter_child, iter))
+	if (!sond_treeviewfm_first_loaded_child(SOND_TREEVIEWFM(ztvfm), iter, open,
+			&iter_child))
 		return 0;
-
-	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(ztvfm), &iter_child);
-
-	if (!stvfm_item) //dummy
-	{
-		if (!open)
-			return 0;
-
-		sond_treeview_expand_row(SOND_TREEVIEW(ztvfm), iter);
-
-		gtk_tree_model_iter_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_child, iter);
-	}
-	else
-		g_object_unref(stvfm_item);
 
 	do {
 		gchar const* section_child = NULL;

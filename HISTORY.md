@@ -5994,4 +5994,9 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  (Ziel innerhalb der Quelle liess die Rekursion die neu angelegten Einträge wieder einlesen und
  tausende ineinander verschachtelte Ordner anlegen); Prüfung einmal im öffentlichen Einstieg,
  die Rekursion läuft in copy_r_rek().
+ Aufräumen: sond_treeviewfm_file_part_indexable() (Mime-Prüfung für Index-Badges, vorher in
+ sond_treeviewfm und zond_treeviewfm doppelt), sond_treeviewfm_first_loaded_child() (erstes Kind,
+ bei Dummy aufklappen; file_part_visible und find_section), anbindung_ges_nur_anbindung()
+ (Strg-Umfang beim Öffnen, gemeinsam für get_anbindung_ges und das Öffnen im Dateiverzeichnis);
+ ungenutzte Includes in sond_tvfm_item.c, Vorzeichen-Warnung in zond_treeview.c.
 ```

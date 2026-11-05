@@ -19,6 +19,13 @@ gboolean anbindung_is_pdf_punkt(Anbindung);
  * eigene Seite. */
 gint anbindung_bis_seite(Anbindung);
 
+/* Umfang "nur die Anbindung" (Strg beim Öffnen): die Anbindung selbst; bei
+ * einem reinen Punkt (er hat keinen eigenen Umfang) der nächsthöhere
+ * Abschnitt, also section_parent (Section des Elternknotens, NULL = kein
+ * Abschnitt, dann bleibt *ges leer = ganze Datei). */
+void anbindung_ges_nur_anbindung(Anbindung, gchar const *section_parent,
+		Anbindung *ges);
+
 /* "unterseitig" (etablierter Begriff, s. 40viewer/seiten.c) - beginnt
  * oder endet die Anbindung an einer Position INNERHALB einer Seite,
  * statt an deren Anfang/Ende? Ein Punkt (anbindung_is_pdf_punkt) ist
