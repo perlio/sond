@@ -5956,3 +5956,27 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  error und Leck in load_fs_dir. README: Design-Abschnitt (Auszüge, Container umgesetzt),
  Abschnitt "Öffnen von PDF-Dateien: Umfang und Tasten".
 ```
+
+## Durchsicht sond_treeviewfm (05.11.2026) (#248)
+
+```text
+ sond_treeviewfm.c, zond_treeviewfm.c und sond_tvfm_item.c durchgesehen und die Befunde behoben.
+ Einfügen/Löschen: nach "Unzulässiges Ziel" (Einfügen in den eigenen Unterordner) wird
+ abgebrochen (sond_copy_r hat keinen Schutz gegen ein Ziel im Quellverzeichnis);
+ remove_item_from_tree gab path_new frei, obwohl es in path_or_section stand (Dangling Pointer
+ bei Multipart-Geschwistern); results_row_activated (Use-after-free, fehlendes return);
+ create_dir legt unter PDF/E-Mail keinen Phantomeintrag mehr an (Meldung), Leck von iter_new;
+ Einfügen in E-Mails ist nicht implementiert (sond_file_part_insert), die Geschwister-Nachführung
+ beim Einfügen ist nur abgesichert (#247).
+ Weitere Punkte: foreach_loeschen (Dummy-Zeile, eigene Referenz), Spaltenfunktionen Größe/
+ Änderungsdatum (unref(NULL)), render_text_cell (Hintergrund der Vorzeile), BUSY-Dialog wertet
+ Schließen als Abbrechen, display_name NULL abgesichert, ungültiger Dateiname beim Umbenennen
+ meldet sich (vorher still ignoriert), Tiefenbegrenzung (64) in preflight_scan_dir und der
+ Dateisuche, set_root-Fehlerpfad (path_root, SeaDrive-Watcher). Referenzmuster "get, unref,
+ weiter benutzen" über g_autoptr bereinigt; ungenutzte Includes entfernt. render_eingang und die
+ Spalte "Eingang" bleiben bewusst (soll evtl. wieder aktiviert werden).
+ zond_treeviewfm.c: after() (Nachführung nach gescheitertem Commit), jump_activate, Leck in
+ get_fileparts, changed-Flag beim Umbenennen einer Anbindung, Tiefenbegrenzung im readdir-Scanner,
+ Fehlerwege gestrafft; zond_treeview.c: open_auszug gibt im Fehlerfall die schon geöffneten Teile
+ frei; sond_tvfm_item.c: NULL-Zugriff auf error, Leck in load_fs_dir.
+```
