@@ -33,7 +33,7 @@ ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zond_chat.c, \
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
-	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
+	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
 	$(SRC_DIRS)/sond_tvfm_item.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
@@ -54,7 +54,7 @@ endif
 ifneq (,$(findstring $(MAKECMDGOALS), viewer))
 SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c \
-	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_renderer.c\
+	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_renderer.c\
 	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
@@ -67,13 +67,15 @@ endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
 SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
-	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_misc.c $(SRC_DIRS)/sond_ocr.c \
+	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_file_helper.c \
-	$(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c
+	$(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c \
+	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_string_util.c \
+	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
-	libsoup-3.0 json-glib-1.0 libxml-2.0) -I/usr/local/include/mupdf
+	libsoup-3.0 json-glib-1.0 libxml-2.0 pango) -I/usr/local/include/mupdf
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
-	sqlite3 tesseract libzip libxml-2.0) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm
+	sqlite3 tesseract libzip libxml-2.0 pango) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_client))
@@ -93,6 +95,28 @@ LDFLAGS += $(shell pkg-config --libs glib-2.0 gio-2.0)
 ifneq ($(CONFIG), Debug_Linux)
 LDFLAGS += -lshlwapi
 endif
+endif
+
+ifneq (,$(findstring $(MAKECMDGOALS), test))
+SRCS += $(SRC_DIRS)/tests/test_main.c \
+	$(SRC_DIRS)/tests/test_sond_graph_property.c \
+	$(SRC_DIRS)/tests/test_sond_graph_node.c \
+	$(SRC_DIRS)/tests/test_sond_graph_db_filter.c \
+	$(SRC_DIRS)/tests/test_sond_mime.c \
+	$(SRC_DIRS)/tests/test_sond_text_extract.c \
+	$(SRC_DIRS)/sond_graph/sond_graph_property.c \
+	$(SRC_DIRS)/sond_graph/sond_graph_node.c \
+	$(SRC_DIRS)/sond_graph/sond_graph_edge.c \
+	$(SRC_DIRS)/sond_graph/sond_graph_db.c \
+	$(SRC_DIRS)/sond_mime.c \
+	$(SRC_DIRS)/sond_text_extract.c \
+	$(SRC_DIRS)/sond_log_and_error.c \
+	$(SRC_DIRS)/sond_file_helper.c \
+	$(SRC_DIRS)/sond_gmessage_helper.c
+CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
+	json-glib-1.0 libxml-2.0 pango) -I/usr/local/include/mupdf
+LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb json-glib-1.0 \
+	libzip libxml-2.0 pango) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif
 
 # Object files
@@ -119,6 +143,8 @@ sond_client: $(BIN_DIR)/sond_client.exe
 zond_installer: $(BIN_DIR)/zond_installer.exe
 
 seafile_test: $(BIN_DIR)/seafile_test.exe
+
+test: $(BIN_DIR)/test.exe
 
 # Linking
 $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)

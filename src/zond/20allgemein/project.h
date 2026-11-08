@@ -3,6 +3,7 @@
 
 typedef struct _Projekt Projekt;
 typedef struct _GtkMenuItem GtkMenuItem;
+typedef struct _GtkWidget GtkWidget;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef struct _ZondPdfDocument ZondPdfDocument;
 typedef struct _ZondDBase ZondDBase;
@@ -90,9 +91,15 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error);
  * auch in ZIP-Archive hinabsteigen kann. s. ausführlichen Kommentar an
  * der Definition (project.c).
  *
+ * extra (optional, darf NULL sein): zusätzliches Widget (z.B. Checkboxen),
+ * das unterhalb des Dateibaums im Dialog angezeigt wird. Der Dialog wird
+ * vor der Rückkehr zerstört (und damit auch 'extra') - Zustände daher
+ * über Signalhandler (z.B. "toggled") in Aufruferdaten festhalten.
+ *
  * Rückgabe: neue Referenz auf das ausgewählte SondFilePart (Aufrufer muss
  * g_object_unref()en), oder NULL (*error == NULL: Nutzer hat
  * abgebrochen; *error gesetzt: echter Fehler). */
-SondFilePart* filepart_oeffnen(Projekt *zond, GError **error);
+SondFilePart* filepart_oeffnen(Projekt *zond, GtkWidget *extra,
+		GError **error);
 
 #endif // PROJECT_H_INCLUDED

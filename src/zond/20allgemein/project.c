@@ -1334,6 +1334,10 @@ static gint project_confirm_switch(Projekt *zond) {
  * sond_fileparts.h) bleibt dadurch unverändert derselbe, nur der neue
  * Dialog-Baum bekommt seine eigene, frisch geladene Wurzelebene.
  *
+ * extra (optional, NULL erlaubt): zusätzliches Widget (z.B. Checkboxen)
+ * unterhalb des Dateibaums. Wird zusammen mit dem Dialog zerstört -
+ * Zustände daher per Signalhandler in Aufruferdaten festhalten.
+ *
  * Rückgabe: neue Referenz auf das ausgewählte SondFilePart (Aufrufer muss
  * g_object_unref()en), oder NULL - dann bedeutet *error == NULL: Nutzer
  * hat abgebrochen (Abbrechen-Knopf oder Fenster geschlossen); *error
@@ -1341,7 +1345,8 @@ static gint project_confirm_switch(Projekt *zond) {
  * nicht geladen werden, oder es war kein Verzeichnis, sondern eine Datei
  * markiert).
  */
-SondFilePart* filepart_oeffnen(Projekt *zond, GError **error) {
+SondFilePart* filepart_oeffnen(Projekt *zond, GtkWidget *extra,
+		GError **error) {
 	GtkWidget *dialog = NULL;
 	GtkWidget *scrolled = NULL;
 	ZondTreeviewFM *ztvfm = NULL;
@@ -1355,6 +1360,11 @@ SondFilePart* filepart_oeffnen(Projekt *zond, GError **error) {
 			error);
 	if (rc) {
 		gtk_widget_destroy(GTK_WIDGET(ztvfm));
+		if (extra) { //schwebendes Widget, das nie eingebaut wird
+			g_object_ref_sink(extra);
+			gtk_widget_destroy(extra);
+			g_object_unref(extra);
+		}
 		return NULL;
 	}
 
@@ -1385,6 +1395,9 @@ SondFilePart* filepart_oeffnen(Projekt *zond, GError **error) {
 	gtk_container_add(GTK_CONTAINER(scrolled), GTK_WIDGET(ztvfm));
 	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(
 			GTK_DIALOG(dialog))), scrolled);
+	if (extra)
+		gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(
+				GTK_DIALOG(dialog))), extra, FALSE, FALSE, 6);
 
 	gtk_widget_show_all(dialog);
 	response = my_dialog_run(GTK_DIALOG(dialog));

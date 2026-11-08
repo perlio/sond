@@ -25,6 +25,12 @@
 #include <sys/stat.h>
 #include <string.h>
 
+/* O_BINARY ist eine MinGW-Erweiterung, auf Linux/glibc unbekannt - dort gibt
+ * es ohnehin keine Text/Binär-Unterscheidung beim Öffnen, Fallback also 0. */
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
 /* Blockgröße beim Lesen ganzer Dateien (Abbruchprüfung nach jedem Block) */
 #define SOND_READ_BLOCK_SIZE ((gsize) 4 << 20)
 

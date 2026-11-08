@@ -161,14 +161,17 @@ static void send_success_response(SoupServerMessage *msg,
 }
 
 /**
- * check_authorization:
+ * sond_server_check_authorization:
  *
  * Prüft Authorization-Header und validiert Session-Token.
  * Sendet 401-Fehler bei ungültigem/fehlendem Token.
  *
+ * Exportiert über sond_server.h, damit sond_server_seafile.c und
+ * sond_server_repo_worker.c denselben Auth-Check verwenden können.
+ *
  * Returns: TRUE wenn autorisiert, FALSE sonst (Response wurde bereits gesendet)
  */
-static gboolean check_authorization(SondServer *server,
+gboolean sond_server_check_authorization(SondServer *server,
                                     SoupServerMessage *msg,
                                     const gchar **username) {
     SoupMessageHeaders *headers = soup_server_message_get_request_headers(msg);
@@ -431,7 +434,7 @@ static void handle_node_save(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -497,7 +500,7 @@ static void handle_node_load(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -560,7 +563,7 @@ static void handle_node_delete(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -616,7 +619,7 @@ static void handle_node_save_with_edges(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -676,7 +679,7 @@ static void handle_edge_save(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -715,7 +718,7 @@ static void handle_node_search(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -811,7 +814,7 @@ static void handle_node_lock(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -906,7 +909,7 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 
@@ -1058,7 +1061,7 @@ static void handle_node_unlock(SoupServer *soup_server,
 
     /* Auth-Check */
     const gchar *username = NULL;
-    if (!check_authorization(server, msg, &username)) {
+    if (!sond_server_check_authorization(server, msg, &username)) {
         return;  /* 401 wurde bereits gesendet */
     }
 

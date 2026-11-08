@@ -519,6 +519,12 @@ static void handle_seafile_library_create(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     SoupMessageBody *body = soup_server_message_get_request_body(msg);
     if (!body->data) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Empty request body");
@@ -604,6 +610,12 @@ static void handle_seafile_library_delete(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     /* Library-ID aus Path: /seafile/library/{id} */
     const char *id_str = strrchr(path, '/');
     if (!id_str || strlen(id_str) <= 1) {
@@ -642,6 +654,12 @@ static void handle_seafile_library_id_get(SoupServer *soup_server,
     if (strcmp(soup_server_message_get_method(msg), "GET") != 0) {
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only GET allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     /* Query-Parameter 'name' holen */

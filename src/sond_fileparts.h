@@ -20,7 +20,6 @@
 #define SRC_SOND_FILEPARTS_H_
 
 #include <glib-object.h>
-#include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gmime/gmime.h>

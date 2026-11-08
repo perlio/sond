@@ -91,6 +91,20 @@
  * In fortlaufend paginierten Ordnern steht vor dem Namen jedes Dokuments
  * dessen Blattzahl: "x-y: Name", bei einem Blatt "x: Name".
  *
+ * Checkboxen im Auswahldialog (jeweils im Dialog änderbar):
+ * - "Technische Dokumente ausblenden" (Startwert: an): Dokumente der
+ *   Dokumentklasse 014 (Technische Information, z.B. Strukturdatei,
+ *   Herkunftsnachweis, Transferlog) werden nicht angebunden.
+ * - "Prüfvermerke ausblenden" (Startwert: an): Prüfvermerke werden nicht
+ *   angebunden. Sie liegen in Klasse 015 (Schreiben) und werden daher
+ *   zusätzlich am INHALT erkannt: erste PDF-Seite beginnt mit "Prüfvermerk".
+ * - "Fehlende Blätter anzeigen" (Startwert: an): Strukturpunkte "Bl. x - y
+ *   fehlt" bei Lücken in der Paginierung.
+ * Das Ausblenden wirkt sich NICHT auf die Paginierung aus: Blattbereiche,
+ * Lücken, "x-y:"-Präfixe und Seitensummen werden weiter aus allen Dokumenten
+ * der XML berechnet. Strukturpunkte, in denen nach dem Ausblenden kein
+ * Dokument mehr übrig bleibt, werden nicht angelegt.
+ *
  * Feldnamen aus der offiziellen XJustiz-Spezifikation ("Einheitlicher
  * XJustiz-Strukturdatensatz für die Übermittlung von Schriftgutobjekten")
  * sowie Abgleich mit einem realen Datensatz. Gesucht wird bewußt per

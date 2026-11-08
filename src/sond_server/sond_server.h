@@ -51,6 +51,20 @@ typedef struct _SondServer SondServer;
 #define SOND_TYPE_SERVER (sond_server_get_type())
 G_DECLARE_FINAL_TYPE(SondServer, sond_server, SOND, SERVER, GObject)
 
+/**
+ * sond_server_check_authorization:
+ * @server: SondServer Instanz
+ * @msg: eingehende Request-Message
+ * @username: (out): wird bei Erfolg auf den validierten Usernamen gesetzt
+ *
+ * Prüft den Authorization-Header und validiert das Session-Token.
+ * Sendet bei fehlendem/ungültigem Token selbst eine 401-Antwort.
+ *
+ * Returns: TRUE wenn autorisiert, FALSE sonst (Response wurde bereits gesendet)
+ */
+gboolean sond_server_check_authorization(SondServer *server,
+                                          SoupServerMessage *msg,
+                                          const gchar **username);
 
 G_END_DECLS
 

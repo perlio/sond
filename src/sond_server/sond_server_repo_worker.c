@@ -20,7 +20,6 @@
 #include "sond_server_seafile.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"
-#include "../sond_misc.h"
 #include "../sond_ocr.h"
 #include "../sond_process_file.h"
 #include "../sond_index.h"
@@ -560,6 +559,12 @@ static void handle_ocr_start(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(manager->server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     /* Query-Parameter holen */
     if (!query) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing query parameters");
@@ -699,6 +704,12 @@ static void handle_ocr_status(SoupServer *soup_server,
     if (strcmp(soup_server_message_get_method(msg), "GET") != 0) {
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only GET allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(manager->server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     /* Query-Parameter holen */
@@ -958,12 +969,13 @@ static gboolean seafile_list_files_recursive(SeafileConfig *config,
     g_free(encoded_path);
 
     SoupMessage *msg = soup_message_new("GET", url);
-    g_free(url);
     if (!msg) {
     	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 				   "Failed to create SoupMessage for URL: %s", url);
+        g_free(url);
         return FALSE;
     }
+    g_free(url);
 
     gchar *auth_header = g_strdup_printf("Token %s", config->auth_token);
     soup_message_headers_append(soup_message_get_request_headers(msg),
@@ -1063,7 +1075,7 @@ static guchar* seafile_download_file(SeafileConfig *config,
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
     if (!msg) {
-    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Download '%s' "
+    	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "SoupMessage für Download '%s' "
     			"konnte nicht erstellt werden", file_path);
         return NULL;
     }
@@ -1099,7 +1111,7 @@ static guchar* seafile_download_file(SeafileConfig *config,
     /* 2. Download actual file */
     msg = soup_message_new("GET", download_url);
     if (!msg) {
-    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Downloadlink '%s' "
+    	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "SoupMessage für Downloadlink '%s' "
     			"konnte nicht erstellt werden", download_url);
         g_free(download_url);
         return NULL;
@@ -1143,7 +1155,7 @@ static gboolean seafile_upload_file(SeafileConfig *config,
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
     if (!msg) {
-    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Uploadlink "
+    	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "SoupMessage für Uploadlink "
 				"konnte nicht erstellt werden");
 		return FALSE;
     }
@@ -1214,7 +1226,7 @@ static gboolean seafile_upload_file(SeafileConfig *config,
     msg = soup_message_new("POST", upload_url);
     g_free(upload_url);
     if (!msg) {
-    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Upload "
+    	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "SoupMessage für Upload "
 				"konnte nicht erstellt werden");
         g_free(boundary);
 		return FALSE;

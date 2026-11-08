@@ -156,6 +156,28 @@ SondPropertyFilter* sond_property_filter_new_with_path(const gchar *key,
 void sond_property_filter_free(SondPropertyFilter *filter);
 
 /**
+ * sond_graph_db_has_wildcards:
+ * @str: zu prüfender String
+ *
+ * Prüft, ob @str Wildcards (* oder ?) enthält.
+ *
+ * Returns: %TRUE wenn @str mindestens eine Wildcard enthält
+ */
+gboolean sond_graph_db_has_wildcards(const gchar *str);
+
+/**
+ * sond_graph_db_escape_sql_like_pattern:
+ * @value: Wert, ggf. mit * / ? Wildcards
+ *
+ * Wandelt * -> %, ? -> _ für ein SQL-LIKE-Pattern um und escaped dabei
+ * zuerst die SQL-LIKE-Sonderzeichen % und _, die im Originalwert vorkommen
+ * (damit sie nicht fälschlich als Wildcards interpretiert werden).
+ *
+ * Returns: (transfer full): Neuer String (mit g_free() freizugeben)
+ */
+gchar* sond_graph_db_escape_sql_like_pattern(const gchar *value);
+
+/**
  * SondEdgeFilter:
  *
  * Filter für Edges zwischen Nodes.

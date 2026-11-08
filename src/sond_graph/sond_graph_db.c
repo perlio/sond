@@ -848,20 +848,26 @@ void sond_edge_filter_add_nested_property(SondEdgeFilter *edge_filter,
 }
 
 /**
- * has_wildcards:
+ * sond_graph_db_has_wildcards:
  *
  * Prüft ob ein String Wildcards enthält (* oder ?).
+ *
+ * Nicht mehr static, sondern exportiert (s. sond_graph_db.h) - rein/
+ * deterministisch, keine DB nötig, deshalb per GLib Testing testbar.
  */
-static gboolean has_wildcards(const gchar *str) {
+gboolean sond_graph_db_has_wildcards(const gchar *str) {
     return (strchr(str, '*') != NULL || strchr(str, '?') != NULL);
 }
 
 /**
- * escape_sql_like_pattern:
+ * sond_graph_db_escape_sql_like_pattern:
  *
  * FIXED: Escaped zuerst SQL LIKE Zeichen, dann konvertiert Wildcards.
+ *
+ * Nicht mehr static, sondern exportiert (s. sond_graph_db.h) - rein/
+ * deterministisch, keine DB nötig, deshalb per GLib Testing testbar.
  */
-static gchar* escape_sql_like_pattern(const gchar *value) {
+gchar* sond_graph_db_escape_sql_like_pattern(const gchar *value) {
     GString *result = g_string_new("");
 
     for (const gchar *p = value; *p != '\0'; p++) {
@@ -901,11 +907,11 @@ static void build_property_filters_sql(MYSQL *conn,
         char *escaped_key = g_malloc(strlen(filter->key) * 2 + 1);
         mysql_real_escape_string(conn, escaped_key, filter->key, strlen(filter->key));
 
-        gboolean use_like = has_wildcards(filter->value);
+        gboolean use_like = sond_graph_db_has_wildcards(filter->value);
 
         if (use_like) {
             /* FIXED: Proper escaping für LIKE Pattern */
-            gchar *sql_pattern = escape_sql_like_pattern(filter->value);
+            gchar *sql_pattern = sond_graph_db_escape_sql_like_pattern(filter->value);
             char *escaped_pattern = g_malloc(strlen(sql_pattern) * 2 + 1);
             mysql_real_escape_string(conn, escaped_pattern, sql_pattern, strlen(sql_pattern));
 

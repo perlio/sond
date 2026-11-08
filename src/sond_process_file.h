@@ -30,7 +30,6 @@ typedef struct _GArray GArray;
 typedef char gchar;
 typedef unsigned char guchar;
 typedef void* gpointer;
-typedef long long unsigned gsize;
 typedef int gint;
 typedef int gboolean;
 

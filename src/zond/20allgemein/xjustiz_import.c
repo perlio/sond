@@ -34,6 +34,7 @@
 #include "../../misc.h"
 #include "../../sond_seadrive.h"
 #include "../../sond_treeviewfm.h"
+#include "../../sond_text_extract.h"
 
 #include "../zond_init.h"
 #include "../10init/app_window.h"
@@ -69,7 +70,17 @@ typedef struct {
 	gdouble letzte; //letzteSeitennummer
 	gint seiten; //Seitenzahl laut Seitennummern (nur mit hat_seiten)
 	gboolean ist_luecke; //kein Dokument: Platzhalter "Bl. x fehlt"
+	gchar *klasse; //dokumentklasse/code laut XML (z.B. "014"), ggf. NULL
+	gboolean ausgeblendet; //wird nicht angebunden (zählt aber für Blattzahlen)
 } XJustizDatei;
+
+/* Einstellungen aus den Checkboxen des Auswahldialogs, s.
+ * xjustiz_optionen_widget(). */
+typedef struct {
+	gboolean technische_ausblenden; //Dokumentklasse 014
+	gboolean pruefvermerke_ausblenden; //Klasse 015, Inhalt "Prüfvermerk"
+	gboolean luecken_anzeigen; //Strukturpunkte "Bl. x - y fehlt"
+} XJustizOptionen;
 
 static void xjustiz_datei_free(gpointer data) {
 	XJustizDatei *d = data;
@@ -79,6 +90,7 @@ static void xjustiz_datei_free(gpointer data) {
 
 	g_free(d->dateiname);
 	g_free(d->anzeigename);
+	g_free(d->klasse);
 	g_free(d);
 }
 
@@ -240,6 +252,7 @@ static void xjustiz_collect_dokument(xmlNodePtr dok_node,
 	xmlXPathObjectPtr xpath_anzeige = NULL;
 	xmlXPathObjectPtr xpath_datei = NULL;
 	gchar *anzeigename = NULL;
+	gchar *klasse = NULL;
 	gint n_pdf_in_dok = 0;
 	gdouble erste = 0;
 	gdouble letzte = 0;
@@ -256,6 +269,18 @@ static void xjustiz_collect_dokument(xmlNodePtr dok_node,
 				xpath_anzeige->nodesetval->nodeTab[0]);
 	if (xpath_anzeige)
 		xmlXPathFreeObject(xpath_anzeige);
+
+	{
+		xmlXPathObjectPtr xpath_klasse = xmlXPathEvalExpression(
+				(xmlChar const*) ".//*[local-name()='dokumentklasse']"
+						"/*[local-name()='code']", ctx->xpath);
+
+		if (xpath_klasse && xpath_klasse->nodesetval
+				&& xpath_klasse->nodesetval->nodeNr > 0)
+			klasse = xjustiz_node_text(xpath_klasse->nodesetval->nodeTab[0]);
+		if (xpath_klasse)
+			xmlXPathFreeObject(xpath_klasse);
+	}
 
 	hat_erste = xjustiz_dok_seitennummer(ctx,
 			".//*[local-name()='ersteSeitennummer']", &erste);
@@ -284,6 +309,7 @@ static void xjustiz_collect_dokument(xmlNodePtr dok_node,
 
 			d = g_new0(XJustizDatei, 1);
 			d->dateiname = dateiname; //Ownership übernommen
+			d->klasse = g_strdup(klasse);
 
 			//Seitennummern gelten für das Dokument, nicht für einzelne
 			//Dateien daraus - bei mehreren PDFs nur der ersten zuordnen
@@ -317,6 +343,7 @@ static void xjustiz_collect_dokument(xmlNodePtr dok_node,
 		xmlXPathFreeObject(xpath_datei);
 
 	g_free(anzeigename);
+	g_free(klasse);
 }
 
 static XJustizNode* xjustiz_build_teilakte(xmlNodePtr teilakte,
@@ -820,6 +847,152 @@ static void xjustiz_collect_alle_dateien(XJustizNode *node, GPtrArray *out) {
 }
 
 /* ============================================================================
+ * AUSBLENDEN TECHNISCHER DOKUMENTE / PRÜFVERMERKE
+ * ========================================================================== */
+
+/* Signalhandler der Checkboxen: schreibt den Zustand in die Optionen - der
+ * Dialog (und damit die Checkboxen) wird in filepart_oeffnen() zerstört,
+ * bevor xjustiz_import() weiterläuft. */
+static void xjustiz_cb_option_toggled(GtkToggleButton *button, gpointer data) {
+	*((gboolean*) data) = gtk_toggle_button_get_active(button);
+}
+
+/* Baut die Checkboxen für den Auswahldialog (Startwerte aus 'opt'). */
+static GtkWidget* xjustiz_optionen_widget(XJustizOptionen *opt) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+	struct {
+		gchar const *label;
+		gboolean *wert;
+	} const checks[] = {
+		{ "Technische Dokumente ausblenden (Dokumentklasse 014)",
+				&opt->technische_ausblenden },
+		{ "Prüfvermerke ausblenden", &opt->pruefvermerke_ausblenden },
+		{ "Fehlende Blätter anzeigen", &opt->luecken_anzeigen }
+	};
+
+	for (guint i = 0; i < G_N_ELEMENTS(checks); i++) {
+		GtkWidget *check = gtk_check_button_new_with_label(checks[i].label);
+
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check),
+				*checks[i].wert);
+		g_signal_connect(check, "toggled",
+				G_CALLBACK(xjustiz_cb_option_toggled), checks[i].wert);
+		gtk_box_pack_start(GTK_BOX(box), check, FALSE, FALSE, 0);
+	}
+
+	return box;
+}
+
+/* TRUE, wenn der Text der ersten Seite des PDFs mit "Prüfvermerk" beginnt
+ * (ohne Beachtung von Groß-/Kleinschreibung und führenden Leerzeichen).
+ * Nicht auflösbare/nicht lesbare PDFs sowie Dateien ohne Text auf der ersten
+ * Seite (reine Bilder) gelten nicht als Prüfvermerk. */
+static gboolean xjustiz_ist_pruefvermerk(Projekt *zond, XJustizDatei *d,
+		SondFilePart *sfp_parent_xml, gchar const *dir_prefix) {
+	gchar *sibling_path = NULL;
+	SondFilePart *sfp_pdf = NULL;
+	GBytes *bytes = NULL;
+	GPtrArray *segs = NULL;
+	gconstpointer data = NULL;
+	gsize len = 0;
+	gboolean result = FALSE;
+	GError *local_error = NULL;
+
+	sibling_path = (dir_prefix[0] != '\0') ?
+			g_strconcat(dir_prefix, "/", d->dateiname, NULL) :
+			g_strdup(d->dateiname);
+	sfp_pdf = sond_file_part_create(sfp_parent_xml, sibling_path,
+			&local_error);
+	g_free(sibling_path);
+	if (!sfp_pdf) {
+		g_clear_error(&local_error);
+		return FALSE;
+	}
+
+	bytes = sond_file_part_get_bytes(sfp_pdf, &local_error);
+	g_object_unref(sfp_pdf);
+	if (!bytes) {
+		g_clear_error(&local_error);
+		return FALSE;
+	}
+
+	data = g_bytes_get_data(bytes, &len);
+	segs = sond_text_extract_pdf(zond->ctx, data, len, NULL, NULL, 0, 0, NULL,
+			NULL);
+	g_bytes_unref(bytes);
+
+	if (segs && segs->len > 0) {
+		SondTextSegment *seg = g_ptr_array_index(segs, 0);
+
+		if (seg->text && seg->page_nr == 0
+				&& g_utf8_validate(seg->text, -1, NULL)) {
+			gchar *text = g_strdup(seg->text);
+			gchar *fold = NULL;
+
+			g_strchug(text);
+			fold = g_utf8_casefold(text, -1);
+			result = g_str_has_prefix(fold, "prüfvermerk");
+			g_free(fold);
+			g_free(text);
+		}
+	}
+	if (segs)
+		g_ptr_array_unref(segs);
+
+	return result;
+}
+
+/* Markiert die auszublendenden Dokumente des Baums (rekursiv):
+ * Dokumentklasse 014 (technische Dokumente) und - nur aus Klasse 015, nach
+ * Prüfung des Inhalts, s. xjustiz_ist_pruefvermerk() - Prüfvermerke.
+ * Ausgeblendete Dokumente bleiben im Baum: Paginierung, Lücken und
+ * Seitensummen sind vom Ausblenden unabhängig und bereits berechnet; sie
+ * werden nur beim Anbinden übersprungen. */
+static void xjustiz_markiere_ausgeblendete(Projekt *zond, XJustizNode *node,
+		XJustizOptionen const *opt, SondFilePart *sfp_parent_xml,
+		gchar const *dir_prefix) {
+	guint i;
+
+	for (i = 0; i < node->dateien->len; i++) {
+		XJustizDatei *d = g_ptr_array_index(node->dateien, i);
+
+		if (d->ist_luecke || !d->klasse)
+			continue;
+
+		if (opt->technische_ausblenden && strcmp(d->klasse, "014") == 0)
+			d->ausgeblendet = TRUE;
+		else if (opt->pruefvermerke_ausblenden
+				&& strcmp(d->klasse, "015") == 0
+				&& xjustiz_ist_pruefvermerk(zond, d, sfp_parent_xml,
+						dir_prefix))
+			d->ausgeblendet = TRUE;
+	}
+	for (i = 0; i < node->children->len; i++)
+		xjustiz_markiere_ausgeblendete(zond,
+				g_ptr_array_index(node->children, i), opt, sfp_parent_xml,
+				dir_prefix);
+}
+
+/* TRUE, wenn im Teilbaum mindestens ein anzubindendes Dokument liegt (nicht
+ * ausgeblendet; Lücken-Platzhalter zählen nicht). Strukturpunkte ohne
+ * solchen Inhalt werden nicht angelegt. */
+static gboolean xjustiz_node_hat_inhalt(XJustizNode *node) {
+	guint i;
+
+	for (i = 0; i < node->dateien->len; i++) {
+		XJustizDatei *d = g_ptr_array_index(node->dateien, i);
+
+		if (!d->ist_luecke && !d->ausgeblendet)
+			return TRUE;
+	}
+	for (i = 0; i < node->children->len; i++)
+		if (xjustiz_node_hat_inhalt(g_ptr_array_index(node->children, i)))
+			return TRUE;
+
+	return FALSE;
+}
+
+/* ============================================================================
  * ÖFFENTLICHE FUNKTION
  * ========================================================================== */
 
@@ -948,6 +1121,19 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
 				(*n_vorhanden)++;
 			return; //schon angebunden: Anker nicht vorrücken
 		}
+
+		//Datei kennt die Datenbank schon, ist aber nirgends angebunden (z.B.
+		//nach einem früheren Import, dessen Anbindungen gelöscht wurden):
+		//der Name wird nur beim ersten Anlegen gesetzt - auf die aktuelle
+		//Benennung (inkl. Blattzahl) aktualisieren
+		rc = zond_dbase_update_node_text(zond->dbase_zond->zond_dbase_work,
+				ID_file_part, d->anzeigename, &local_error);
+		if (rc) {
+			g_free(filepart);
+			g_clear_error(&local_error);
+			g_ptr_array_add(nicht_gefunden, g_strdup(d->dateiname));
+			return;
+		}
 	}
 	g_free(filepart);
 
@@ -981,12 +1167,16 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
  * anzuhängen (anchor_id=*out_struktur_id, child=FALSE) - unabhängig davon,
  * wie tief/komplex der unter 'node' neu aufgebaute Teilbaum ist.
  *
+ * 'opt': ausgeblendete Dokumente werden übersprungen, Lücken-Platzhalter
+ * nur mit opt->luecken_anzeigen angelegt; Unter-Strukturpunkte ohne
+ * anzubindenden Inhalt entfallen (xjustiz_node_hat_inhalt()).
+ *
  * Rückgabe: 0 Erfolg (auch bei einzelnen fehlgeschlagenen Dokumenten, s.
  * xjustiz_insert_datei()), -1 bei einem Datenbankfehler beim Anlegen DIESES
  * Strukturpunkts selbst (*error gesetzt - Abbruch der gesamten Operation,
  * wie auch beim obersten Strukturpunkt in xjustiz_import()). */
 static gint xjustiz_insert_node(Projekt *zond, XJustizNode *node,
-		gint anchor_id, gboolean child, SondFilePart *sfp_parent_xml,
+		XJustizOptionen const *opt, gint anchor_id, gboolean child, SondFilePart *sfp_parent_xml,
 		gchar const *dir_prefix, gint *n_angebunden, gint *n_vorhanden,
 		GPtrArray *nicht_gefunden, gint *out_struktur_id, GError **error) {
 	gint struktur_id;
@@ -1007,8 +1197,14 @@ static gint xjustiz_insert_node(Projekt *zond, XJustizNode *node,
 		XJustizDatei *d = g_ptr_array_index(node->dateien, i);
 		gint new_id = 0;
 
+		if (d->ausgeblendet)
+			continue; //technisches Dokument/Prüfvermerk: nicht anbinden
+
 		if (d->ist_luecke) {
-			//fehlende Blätter: Strukturpunkt mit Fehlersymbol
+			//fehlende Blätter: Strukturpunkt mit Fehlersymbol (nur, wenn
+			//gewünscht)
+			if (!opt->luecken_anzeigen)
+				continue;
 			gint luecke_id = zond_dbase_insert_node(
 					zond->dbase_zond->zond_dbase_work, inner_anchor,
 					inner_child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
@@ -1035,7 +1231,10 @@ static gint xjustiz_insert_node(Projekt *zond, XJustizNode *node,
 		XJustizNode *sub = g_ptr_array_index(node->children, i);
 		gint sub_struktur_id = 0;
 
-		if (xjustiz_insert_node(zond, sub, inner_anchor, inner_child,
+		if (!xjustiz_node_hat_inhalt(sub))
+			continue; //nach dem Ausblenden nichts übrig: kein leerer Ordner
+
+		if (xjustiz_insert_node(zond, sub, opt, inner_anchor, inner_child,
 				sfp_parent_xml, dir_prefix, n_angebunden, n_vorhanden,
 				nicht_gefunden, &sub_struktur_id, error))
 			return -1;
@@ -1071,6 +1270,8 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	gchar *struktur_label = NULL;
 	gint struktur_id = 0;
 	gboolean is_xjustiz = FALSE;
+	XJustizOptionen opt = { TRUE, TRUE, TRUE }; //Startwerte der Checkboxen
+	gboolean hat_inhalt = FALSE;
 
 	if (n_angebunden)
 		*n_angebunden = 0;
@@ -1108,7 +1309,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	//entpackte ZIP hineinsehen. Eine Vorauswahl im Dateiverzeichnis (BAUM_FS)
 	//wäre nicht praktikabel, da diese Selektion verloren geht, sobald im
 	//Bestandsverzeichnis die Zielposition markiert wird.
-	sfp_xml = filepart_oeffnen(zond, error);
+	sfp_xml = filepart_oeffnen(zond, xjustiz_optionen_widget(&opt), error);
 	if (!sfp_xml)
 		return (error && *error) ? -1 : 1; //1: Dialog abgebrochen
 
@@ -1216,6 +1417,31 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		}
 	}
 
+	/* Technische Dokumente (Klasse 014) und Prüfvermerke (Klasse 015, nach
+	 * Prüfung des Inhalts) markieren, wenn laut Checkbox ausgeblendet. Die
+	 * Paginierung (Blattbereiche, Lücken, Seitensummen) ist bereits aus
+	 * ALLEN Dokumenten berechnet und davon unabhängig. */
+	if (opt.technische_ausblenden || opt.pruefvermerke_ausblenden) {
+		for (guint i = 0; i < arr_top->len; i++)
+			xjustiz_markiere_ausgeblendete(zond,
+					g_ptr_array_index(arr_top, i), &opt, sfp_parent_xml,
+					dir_prefix);
+	}
+
+	for (guint i = 0; i < arr_top->len && !hat_inhalt; i++)
+		hat_inhalt = xjustiz_node_hat_inhalt(g_ptr_array_index(arr_top, i));
+	if (!hat_inhalt) {
+		g_free(datum);
+		g_free(aktenzeichen);
+		g_free(dir_prefix);
+		g_ptr_array_unref(arr_top);
+		g_object_unref(sfp_xml);
+		g_set_error(error, ZOND_ERROR, 0,
+				"Nach dem Ausblenden technischer Dokumente und Prüfvermerke "
+				"bleibt kein Dokument zum Anbinden übrig.");
+		return -1;
+	}
+
 	/* Benennung des gleich anzulegenden obersten Strukturpunkts (s.u.): aus
 	 * dem Nachrichtenkopf, Erstellungszeitpunkt (kompakt, z.B. "20260805")
 	 * und Aktenzeichen des Absenders (z.B. "51 KLs 11/26"), getrennt durch
@@ -1274,7 +1500,10 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		XJustizNode *akte_node = g_ptr_array_index(arr_top, i);
 		gint sub_struktur_id = 0;
 
-		rc = xjustiz_insert_node(zond, akte_node, anchor_id, child,
+		if (!xjustiz_node_hat_inhalt(akte_node))
+			continue; //nach dem Ausblenden nichts übrig
+
+		rc = xjustiz_insert_node(zond, akte_node, &opt, anchor_id, child,
 				sfp_parent_xml, dir_prefix, n_angebunden, n_vorhanden,
 				nicht_gefunden, &sub_struktur_id, error);
 		if (rc) {
