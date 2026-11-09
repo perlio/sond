@@ -35,7 +35,7 @@
 
 #include "../zond_dbase.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/project.h"

@@ -28,7 +28,134 @@
 #include "../sond_file_helper.h"
 #include "../sond_tmpfiles.h"
 
-#include "99conv/general.h"
+#include "anbindung.h"
+#include "40viewer/viewer.h" //ZOND_ERROR
+
+//Fehlerdomäne, in beiden Builds (zond, viewer) vorhanden
+G_DEFINE_QUARK(zond-error-quark,zond_error)
+
+void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
+	Anbindung anbindung_akt = { 0 };
+
+	if (!anbindung)
+		return;
+
+	anbindung_akt = *anbindung;
+
+	for (guint i = 0; i < zond_pdf_document_get_number_of_pages(zpdfd); i++) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
+
+		/* Seiten, die in der frisch von der Platte geöffneten Kopie
+		 * (doc) NICHT (mehr) vorhanden sind, verschieben die Live-
+		 * Numerierung gegenüber der Platten-Numerierung: entweder weil
+		 * sie live neu eingefügt, aber noch nicht gespeichert sind
+		 * (pdfp->inserted), oder weil sie bei einem früheren Speichern
+		 * bereits aus der Datei ausgeschlossen wurden (pdfp->deleted &&
+		 * pdfp->on_disk_deleted) - live aber (als "Karteileiche") noch
+		 * mitgezählt werden. Noch nicht gespeicherte Löschungen
+		 * (pdfp->deleted && !pdfp->on_disk_deleted) existieren in doc
+		 * dagegen noch (werden gerade erst in diesem Speichervorgang
+		 * entfernt) und zählen daher wie eine normale, unveränderte
+		 * Seite mit. */
+		if (pdfp && (pdfp->inserted ||
+				(pdfp->deleted && pdfp->on_disk_deleted))) {
+			if (i <= anbindung_akt.von.seite) {
+				anbindung->von.seite--;
+				anbindung->bis.seite--;
+			}
+			else if (i <= anbindung_akt.bis.seite)
+				anbindung->bis.seite--;
+		}
+	}
+
+	return;
+}
+
+//aus aktueller Anbindung diejenige errechnen, die sich nach Speichern von zpdfd_part ergibt
+void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
+	GPtrArray* arr_pages = NULL;
+	Anbindung anbindung_zpdfd_part = { 0 };
+
+	zpdfd_part_get_anbindung(zpdfd_part, &anbindung_zpdfd_part);
+	arr_pages = zond_pdf_document_get_arr_pages(zpdfd_part->zond_pdf_document);
+
+	for (gint i = anbindung->bis.seite; i >= 0; i--) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = g_ptr_array_index(arr_pages, i);
+
+		if (!pdfp)
+			continue;
+
+		//innerhalb des zu speichernde zpdfd_parts?
+		if (i >= anbindung_zpdfd_part.von.seite && i <= anbindung_zpdfd_part.bis.seite) {
+			/* Gelöschte Seiten innerhalb des zpdfd_parts verschieben die
+			 * Numerierung nach dem Speichern nicht mehr: das Speichern
+			 * kompaktiert die Live-Numerierung nicht mehr (page_akt
+			 * bleibt für gelöschte Seiten dauerhaft stabil, s.
+			 * PdfDocumentPage->on_disk_deleted) - nichts zu tun. */
+		}
+		else {//außerhalb: eingefügte Seiten
+			if (pdfp->inserted) { //weil die sind ja zuvor hinzugerechnet worden
+				if (i <= anbindung->von.seite) {
+					anbindung->von.seite--;
+					anbindung->bis.seite--;
+				}
+				else if (i <= anbindung->bis.seite)
+					anbindung->bis.seite--;
+			}
+		}
+	}
+
+	return;
+}
+
+void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
+	GPtrArray* arr_pages = NULL;
+	Anbindung anbindung_orig = { 0 };
+
+	if (!anbindung || anbindung_is_empty(anbindung))
+		return;
+
+	arr_pages = zond_pdf_document_get_arr_pages(zpdfd);
+
+	for (guint i = 0; i < arr_pages->len; i++) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = g_ptr_array_index(arr_pages, i);
+
+		if (pdfp && pdfp->inserted) {
+			Anbindung anbindung_zpdfd_part = { 0 };
+			Anbindung anbindung_zpdfd_part_orig = { 0 };
+
+			zpdfd_part_get_anbindung(pdfp->inserted, &anbindung_zpdfd_part);
+			anbindung_zpdfd_part_orig = anbindung_zpdfd_part;
+			anbindung_get_orig(zpdfd, &anbindung_zpdfd_part_orig);
+
+			if (i < anbindung_zpdfd_part.von.seite) {
+				anbindung->von.seite++;
+				anbindung->bis.seite++;
+			}
+			else if (i == anbindung_zpdfd_part.von.seite) {
+				if (!anbindung_1_gleich_2(anbindung_orig, anbindung_zpdfd_part_orig) &&
+						!anbindung_1_eltern_von_2(anbindung_orig, anbindung_zpdfd_part_orig))
+					anbindung->von.seite++;
+				anbindung->bis.seite++;
+			}
+			else if (i < anbindung_zpdfd_part.bis.seite)
+				anbindung->bis.seite++;
+			else if (i == anbindung_zpdfd_part.bis.seite) {
+				if (!anbindung_1_gleich_2(anbindung_orig, anbindung_zpdfd_part_orig) &&
+						!anbindung_1_eltern_von_2(anbindung_orig, anbindung_zpdfd_part_orig))
+					anbindung->bis.seite++;
+			}
+		}
+	}
+
+	return;
+}
 
 
 typedef struct {

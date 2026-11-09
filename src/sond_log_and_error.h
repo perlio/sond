@@ -25,7 +25,7 @@
 #include "sond_mime.h"
 
 #define SOND_ERROR sond_error_quark()
-G_DEFINE_QUARK(sond-error-quark,sond_error)
+GQuark sond_error_quark(void);
 
 enum SondError
 {

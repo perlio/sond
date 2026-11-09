@@ -28,7 +28,7 @@
 #include "../zond_dbase.h"
 #include "../zond_treeviewfm.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"

@@ -18,6 +18,8 @@
 
 #include "viewer.h"
 
+G_DEFINE_QUARK(viewer-error-quark, viewer_error)
+
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 #include <mupdf/pdf.h>
@@ -33,7 +35,7 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"

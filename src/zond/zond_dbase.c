@@ -18,6 +18,10 @@
 
 #include "zond_dbase.h"
 
+void section_free(gpointer data) {
+	g_free(((Section*) data)->section);
+}
+
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <sqlite3.h>
@@ -26,7 +30,7 @@
 #include "zond_convert.h"
 #include "zond_version.h"
 #include "zond_init.h"
-#include "99conv/general.h"
+#include "anbindung.h"
 
 #include "../sond_log_and_error.h"
 

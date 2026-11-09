@@ -29,7 +29,7 @@
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 #include "../20allgemein/ziele.h"
 
 #include "project.h"

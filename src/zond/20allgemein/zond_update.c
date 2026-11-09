@@ -33,7 +33,7 @@
 #include "../zond_init.h"
 #include "../zond_version.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 #include "../zond_dbase.h"
 
 #include "project.h"
@@ -410,6 +410,28 @@ struct memory {
 	gchar *response;
 	size_t size;
 };
+
+typedef struct _CurlUserData {
+	char *response;
+	size_t size;
+} CurlUserData;
+
+static size_t curl_write_cb(void *data, size_t size, size_t nmemb,
+		void *clientp) {
+	size_t realsize = size * nmemb;
+	CurlUserData *mem = (CurlUserData*) clientp;
+
+	char *ptr = realloc(mem->response, mem->size + realsize + 1);
+	if (ptr == NULL)
+		return 0;
+
+	mem->response = ptr;
+	memcpy(&(mem->response[mem->size]), data, realsize);
+	mem->size += realsize;
+	mem->response[mem->size] = 0;
+
+	return realsize;
+}
 
 static gchar*
 zond_update_get_vtag(Projekt *zond, GError **error) {

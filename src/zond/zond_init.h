@@ -5,8 +5,10 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 
+#include "anbindung.h"
+
 #define ZOND_ERROR zond_error_quark()
-G_DEFINE_QUARK(zond-error-quark,zond_error)
+GQuark zond_error_quark(void);
 
 enum ZondError
 {
@@ -61,19 +63,6 @@ typedef double gdouble;
 typedef enum BAEUME {
 	KEIN_BAUM = -1, BAUM_FS = 0, BAUM_INHALT, BAUM_AUSWERTUNG, NUM_BAUM
 } Baum;
-
-//gehört inhaltlich eher zum Viewer, wird aber auch von zond selbst (z.B.
-//zond_dbase.c) als Werttyp gebraucht - deshalb hier in der gemeinsamen
-//Basis statt in viewer.h definiert
-typedef struct _Pdf_Pos {
-	gint seite;
-	gint index;
-} PdfPos;
-
-typedef struct _Anbindung {
-	PdfPos von;
-	PdfPos bis;
-} Anbindung;
 
 typedef struct _Icon {
 	const gchar *icon_name;

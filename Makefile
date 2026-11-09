@@ -16,10 +16,10 @@ SRC_DIRS := src
 
 # Compiler and linker flags
 CFLAGS := -Wall
-LDFLAGS := -Wl,--allow-multiple-definition
+LDFLAGS :=
 
 # Find source files
-ifneq (,$(findstring $(MAKECMDGOALS), zond))
+ifneq (,$(filter zond,$(MAKECMDGOALS)))
 # Embeddings/Chat (semantische Suche, lokales LLM) sind für das anstehende
 # Release bewußt wieder abgeklemmt (nicht ausgereift genug) - dazu:
 # sond_chat.c (Backend) und zond_chat.c (UI-Fenster/Menüeintrag) aus dem
@@ -30,7 +30,8 @@ ifneq (,$(findstring $(MAKECMDGOALS), zond))
 # Funktionalität reif genug ist. Die reine Volltextsuche (FTS5,
 # sond_index_search()/zond_indexsuche.c) ist davon nicht betroffen und
 # bleibt voll funktionsfähig.
-SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zond_chat.c, \
+SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zond_chat.c \
+	$(SRC_DIRS)/zond/zond_installer.c, \
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
@@ -55,7 +56,7 @@ ifneq (,$(findstring $(MAKECMDGOALS), viewer))
 SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c \
 	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_renderer.c\
-	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
+	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/anbindung.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += -DVIEWER $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
@@ -86,7 +87,7 @@ CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb 
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb jansson)
 endif
 
-ifneq (,$(findstring $(MAKECMDGOALS), zond_installer))
+ifneq (,$(filter zond_installer,$(MAKECMDGOALS)))
 SRCS += $(SRC_DIRS)/zond/zond_installer.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/misc_stdlib.c

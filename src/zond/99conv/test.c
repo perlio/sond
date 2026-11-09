@@ -8,7 +8,8 @@
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 
-#include "general.h"
+#include "../anbindung.h"
+#include "../zond_init.h"
 
 /** rc == -1: Fähler
  rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben

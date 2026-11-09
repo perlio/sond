@@ -48,7 +48,7 @@
 #include "40viewer/viewer_ui.h"
 #include "40viewer/document.h"
 
-#include "99conv/general.h"
+#include "anbindung.h"
 #include "zond_indexsuche.h"
 
 typedef struct {
@@ -4466,7 +4466,7 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 			 * (beginnen/enden nicht an Seitengrenzen, oder sind ein reiner
 			 * Punkt) sind dafür nicht zulässig - Indizierung/Löschen
 			 * arbeitet nur seitenweise, s. anbindung_ist_unterseitig()
-			 * (general.c). */
+			 * (anbindung.c). */
 			if (gfd->reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
 				g_object_unref(sfp);
 				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,

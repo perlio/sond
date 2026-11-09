@@ -1,15 +1,20 @@
-#ifndef GENERAL_H_INCLUDED
-#define GENERAL_H_INCLUDED
+#ifndef ANBINDUNG_H_INCLUDED
+#define ANBINDUNG_H_INCLUDED
 
-#include "../40viewer/viewer.h"
+#include <glib.h>
 
-#include <stdio.h>
+//Ende einer Seite, als Index in PdfPos (bis.index)
+#define EOP 99999
 
-typedef struct _ZondPdfDocument ZondPdfDocument;
-typedef struct _ZPDFD_Part ZPDFDPart;
+typedef struct _Pdf_Pos {
+	gint seite;
+	gint index;
+} PdfPos;
 
-typedef int gboolean;
-typedef char gchar;
+typedef struct _Anbindung {
+	PdfPos von;
+	PdfPos bis;
+} Anbindung;
 
 gboolean anbindung_1_gleich_2(const Anbindung, const Anbindung);
 
@@ -49,13 +54,6 @@ void anbindung_build_file_section(Anbindung, gchar**);
 
 gchar* anbindung_to_human_readable(Anbindung*);
 
-void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
-
-void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
-
 gboolean anbindung_is_empty(Anbindung* anbindung);
 
-void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
-
-#endif // GENERAL_H_INCLUDED
-
+#endif // ANBINDUNG_H_INCLUDED

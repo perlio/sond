@@ -18,6 +18,8 @@
 
 #include "sond_log_and_error.h"
 
+G_DEFINE_QUARK(sond-error-quark,sond_error)
+
 #include <string.h>
 #include <sys/stat.h>
 #include <signal.h>

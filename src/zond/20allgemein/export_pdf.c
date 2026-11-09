@@ -23,7 +23,7 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_pdf_helper.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "export_pdf.h"
 #include "export_pdf_seiten.h"

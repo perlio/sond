@@ -25,6 +25,12 @@
 
 #include "viewer.h"
 
+#ifndef VIEWER
+#include <sqlite3.h>
+#include "../dbase_zond.h"
+#include "../zond_dbase.h"
+#endif
+
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 #include <mupdf/pdf.h>
@@ -40,7 +46,7 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"
@@ -794,6 +800,120 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	return 0;
 }
 
+#ifndef VIEWER
+/* Sections müssen für main und work UNABHÄNGIG gelesen und neu berechnet
+ * werden (nicht: einmal berechnen, in beide schreiben) - store und work
+ * können für dieselbe Zeile unterschiedliche Ausgangswerte haben, da work
+ * laufend fortgeschrieben, store aber nur bei project_save() komplett
+ * nachgezogen wird. Läuft innerhalb der Transaktion von dbase_zond_begin(). */
+static gint viewer_save_update_section_schema(sqlite3 *db, gchar const *schema,
+		DisplayedDocument *dd, GError **error) {
+	gint rc = 0;
+	gchar *sql = NULL;
+	sqlite3_stmt *stmt = NULL;
+	SondFilePartPDF *sfp_pdf = NULL;
+	gchar *filepart = NULL;
+	g_autoptr(GArray) arr_sections = NULL;
+
+	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document);
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
+
+	sql = g_strdup_printf("SELECT ID, section FROM %s.knoten WHERE file_part=?1;",
+			schema);
+	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+	g_free(sql);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+		g_free(filepart);
+		return -1;
+	}
+	sqlite3_bind_text(stmt, 1, filepart, -1, SQLITE_TRANSIENT);
+	g_free(filepart);
+
+	arr_sections = g_array_new(FALSE, FALSE, sizeof(Section));
+	g_array_set_clear_func(arr_sections, (GDestroyNotify) section_free);
+
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		Section section = { 0 };
+
+		section.ID = sqlite3_column_int(stmt, 0);
+		section.section = g_strdup((gchar const*) sqlite3_column_text(stmt, 1));
+
+		//wenn section == NULL, dann brauch es nicht gespeichert zu werden,
+		//ist ja die ganze PDF-Datei - keine Anpassung nötig
+		if (section.section)
+			g_array_append_val(arr_sections, section);
+	}
+	sqlite3_finalize(stmt);
+
+	if (rc != SQLITE_DONE) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+		return -1;
+	}
+
+	for (guint i = 0; i < arr_sections->len; i++) {
+		Section section = g_array_index(arr_sections, Section, i);
+		Anbindung anbindung_int = { 0 };
+		gchar *section_new = NULL;
+		gchar *sql_update = NULL;
+		sqlite3_stmt *stmt_update = NULL;
+
+		anbindung_parse_file_section(section.section, &anbindung_int);
+		anbindung_aktualisieren(dd->zpdfd_part->zond_pdf_document, &anbindung_int);
+		// Recalculate changes that will be removed during save
+		anbindung_korrigieren(dd->zpdfd_part, &anbindung_int);
+		anbindung_build_file_section(anbindung_int, &section_new);
+
+		sql_update = g_strdup_printf("UPDATE %s.knoten SET section=?2 WHERE ID=?1;",
+				schema);
+		rc = sqlite3_prepare_v2(db, sql_update, -1, &stmt_update, NULL);
+		g_free(sql_update);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+			g_free(section_new);
+			return -1;
+		}
+
+		sqlite3_bind_int(stmt_update, 1, section.ID);
+		sqlite3_bind_text(stmt_update, 2, section_new, -1, SQLITE_TRANSIENT);
+		g_free(section_new);
+
+		rc = sqlite3_step(stmt_update);
+		sqlite3_finalize(stmt_update);
+		if (rc != SQLITE_DONE) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static gint viewer_save_update_sections(DBaseZond* dbase_zond,
+		DisplayedDocument* dd, GError** error) {
+	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+	gint rc = 0;
+
+	rc = viewer_save_update_section_schema(db, "main", dd, error);
+	if (rc)
+		return -1;
+
+	rc = viewer_save_update_section_schema(db, "work", dd, error);
+	if (rc)
+		return -1;
+
+	return 0;
+}
+#endif //VIEWER
+
 gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	DisplayedDocument *dd = NULL;
 
@@ -863,7 +983,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				index_tx_active ? &index_tx : NULL);
 
 		//Anbindungen in db anpassen
-		rc = dbase_zond_update_sections(pdfv->zond->dbase_zond, dd, error);
+		rc = viewer_save_update_sections(pdfv->zond->dbase_zond, dd, error);
 		if (rc)
 		{
 			g_prefix_error(error, "%s\n", __func__);

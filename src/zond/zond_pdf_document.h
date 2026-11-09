@@ -184,6 +184,12 @@ ZPDFDPart* zpdfd_part_ref(ZPDFDPart*);
 
 ZPDFDPart* zpdfd_part_peek(SondFilePartPDF*, Anbindung*, GError** );
 
+void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
+
+void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
+
+void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
+
 G_END_DECLS
 
 #endif // ZOND_PDF_DOCUMENT_H_INCLUDED

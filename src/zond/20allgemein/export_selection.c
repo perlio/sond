@@ -24,7 +24,7 @@
 #include "../zond_tree_store.h"
 
 #include "../10init/app_window.h"
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "project.h"
 #include "export_selection.h"

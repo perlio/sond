@@ -12,6 +12,8 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 
+#include "../anbindung.h"
+
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkEntry GtkEntry;
 typedef union _GdkEvent GdkEvent;
@@ -33,10 +35,8 @@ typedef void *gpointer;
 #define ZOOM_MIN 10
 #define ZOOM_MAX 400
 
-#define EOP 99999
-
 #define VIEWER_ERROR viewer_error_quark()
-G_DEFINE_QUARK(viewer-error-quark, viewer_error)
+GQuark viewer_error_quark(void);
 
 typedef struct _Page_Quad {
 	gint page[1000];
@@ -73,7 +73,7 @@ typedef struct _Projekt {
 } Projekt;
 
 #define ZOND_ERROR zond_error_quark()
-G_DEFINE_QUARK(zond-error-quark,zond_error)
+GQuark zond_error_quark(void);
 
 enum ZondError
 {
@@ -85,17 +85,6 @@ enum ZondError
 	NUM_ZOND_ERROR
 };
 
-//im eigenständigen "viewer"-Build (-DVIEWER) wird zond_init.h nicht
-//eingebunden - PdfPos/Anbindung deshalb hier lokal für diesen Build
-typedef struct _Pdf_Pos {
-	gint seite;
-	gint index;
-} PdfPos;
-
-typedef struct _Anbindung {
-	PdfPos von;
-	PdfPos bis;
-} Anbindung;
 #else
 #include "../zond_init.h"
 #endif

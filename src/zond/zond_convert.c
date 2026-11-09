@@ -33,7 +33,7 @@
 #include "zond_init.h"
 #include "zond_version.h"
 
-#include "99conv/general.h"
+#include "anbindung.h"
 
 static gint treeviews_get_page_num_from_dest_doc(fz_context *ctx,
 		pdf_document *doc, const gchar *dest, GError **error) {

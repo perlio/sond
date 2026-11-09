@@ -44,11 +44,7 @@ typedef struct _Section {
 	gchar* section;
 } Section;
 
-void section_free(gpointer data) {
-	g_free(((Section*) data)->section);
-
-	return;
-}
+void section_free(gpointer data);
 
 G_BEGIN_DECLS
 

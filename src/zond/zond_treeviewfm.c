@@ -23,7 +23,7 @@
 #include "20allgemein/project.h"
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
-#include "99conv/general.h"
+#include "anbindung.h"
 
 typedef struct {
 	Projekt *zond;
@@ -1625,7 +1625,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 
 			/* Index erstellen/löschen (Auswahl): unterseitige Anbindungen
 			 * sind dafür nicht zulässig - s. anbindung_ist_unterseitig()
-			 * (99conv/general.h). */
+			 * (anbindung.h). */
 			if (reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
 				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 						"Die Auswahl enthält eine unterseitige Anbindung "

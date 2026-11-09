@@ -38,7 +38,7 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
  *
  * reject_unterseitig: TRUE, wenn eine unterseitige Anbindung (beginnt/
  * endet nicht an einer Seitengrenze, oder reiner Punkt - s.
- * anbindung_ist_unterseitig() in 99conv/general.h) in der Auswahl die
+ * anbindung_ist_unterseitig() in anbindung.h) in der Auswahl die
  * ganze Abfrage mit einem GError scheitern lassen soll. Für Index
  * erstellen/löschen (Auswahl) TRUE, für alle anderen Aufrufer
  * (Indexsuche) FALSE. Nur bei selected_only == TRUE relevant - bei

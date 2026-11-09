@@ -25,7 +25,7 @@
 #include "../../sond_pdf_helper.h"
 
 #include "../zond_pdf_document.h"
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "export_dokument.h"
 

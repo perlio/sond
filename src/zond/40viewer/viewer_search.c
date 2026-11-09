@@ -37,7 +37,7 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../99conv/general.h"
+#include "../anbindung.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"

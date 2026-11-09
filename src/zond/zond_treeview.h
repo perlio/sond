@@ -63,7 +63,7 @@ gint zond_treeview_load_baum(ZondTreeview*, GError**);
  *                       Auswahl (beginnt/endet nicht an einer
  *                       Seitengrenze, oder reiner Punkt - s.
  *                       anbindung_ist_unterseitig() in
- *                       99conv/general.h) die ganze Abfrage mit einem
+ *                       anbindung.h) die ganze Abfrage mit einem
  *                       GError scheitern lassen soll, statt sie
  *                       stillschweigend wie eine ganzseitige Anbindung
  *                       zu behandeln. Für Index erstellen/löschen
