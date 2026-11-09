@@ -1956,9 +1956,14 @@ static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     /* Erst speichern */
     on_speichern_clicked(button, priv);
     
-    /* Lock freigeben falls Node in DB */
+    /* Lock freigeben falls Node in DB. Unabhaengig von is_new_from_entry -
+     * das Flag wird beim vorangehenden on_speichern_clicked() bereits auf
+     * FALSE zurueckgesetzt (normaler Speichervorgang) und ist daher an
+     * dieser Stelle kein brauchbares Unterscheidungsmerkmal mehr: "Ok"
+     * heisst in jedem Fall "fertig bearbeitet", egal ob die Akte neu war
+     * oder schon existierte - entsperren wie bei on_abbrechen_clicked(). */
     gint64 node_id = sond_graph_node_get_id(priv->current_node);
-    if (priv->is_new_from_entry && node_id > 0) {
+    if (node_id > 0) {
         GError *error = NULL;
         if (!sond_client_unlock_node(priv->client, node_id, &error)) {
             LOG_ERROR("Unlock fehlgeschlagen: %s\n", error ? error->message : "Unbekannt");
@@ -2022,6 +2027,56 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     /* Letzte RegNr vorschlagen */
     suggest_last_regnr(priv);
+}
+
+/**
+ * on_main_box_destroy:
+ *
+ * "destroy"-Handler fuer main_box. Bisher wurde beim Zerstoeren des Widgets
+ * (z.B. Tab-Wechsel/Fenster schliessen, ohne vorher "Ok" oder "Abbrechen" zu
+ * klicken) nichts aufgeraeumt - der g_object_set_data_full()-Destroy-Callback
+ * fuer "priv" ruft nur g_free() auf priv selbst auf, ohne Lock, current_node,
+ * client oder css_provider freizugeben. Das fuehrt dazu, dass eine noch
+ * gesperrte Akte fuer immer gesperrt bleibt. Unlock-Versuch unbedingt bei
+ * node_id > 0 (wie in on_abbrechen_clicked()/on_ok_clicked(); ein Unlock fuer
+ * eine nicht von uns gehaltene Sperre (AKTE_STATE_READONLY) ist serverseitig
+ * ein harmloser No-Op, s. handle_node_unlock() in sond_server.c).
+ */
+static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
+    SondModuleAktePrivate *priv = (SondModuleAktePrivate *) user_data;
+
+    if (priv->current_node) {
+        gint64 node_id = sond_graph_node_get_id(priv->current_node);
+        if (node_id > 0) {
+            GError *error = NULL;
+            if (!sond_client_unlock_node(priv->client, node_id, &error)) {
+                LOG_ERROR("Unlock beim Zerstoeren fehlgeschlagen: %s\n",
+                          error ? error->message : "Unbekannt");
+                if (error) g_error_free(error);
+            }
+        }
+        g_object_unref(priv->current_node);
+        priv->current_node = NULL;
+    }
+
+    if (priv->css_provider) {
+        /* setup_css_provider() registriert den Provider global am Display
+         * (gtk_style_context_add_provider_for_display) - muss daher beim
+         * Zerstoeren des Moduls explizit wieder entfernt werden, sonst bleibt
+         * er dauerhaft (und bei jedem erneuten Oeffnen des Moduls ein
+         * weiteres Mal) am Display registriert. */
+        gtk_style_context_remove_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(priv->css_provider));
+        g_object_unref(priv->css_provider);
+        priv->css_provider = NULL;
+    }
+
+    g_free(priv->library_name);
+    priv->library_name = NULL;
+
+    g_object_unref(priv->client);
+    priv->client = NULL;
 }
 
 /* =======================================================================
@@ -2351,6 +2406,10 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
 
     /* Private Daten am Widget speichern */
     g_object_set_data_full(G_OBJECT(main_box), "priv", priv, g_free);
+
+    /* Aufraeumen (Unlock, current_node/client unref, css_provider entfernen)
+     * beim Zerstoeren des Widgets - s. on_main_box_destroy(). */
+    g_signal_connect(main_box, "destroy", G_CALLBACK(on_main_box_destroy), priv);
 
     /* Initial State setzen */
     set_akte_state(priv, AKTE_STATE_INITIAL);
