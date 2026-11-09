@@ -2830,18 +2830,21 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 
 			DisplayedDocument* dd_int = pv->dd;
 
-			do {
-				if (dd_int->zpdfd_part != dd_loop->zpdfd_part)
-					break;
+			//Ketten verschiedener Länge dürfen nicht über das Ende laufen
+			while (dd_int && dd_loop
+					&& dd_int->zpdfd_part == dd_loop->zpdfd_part) {
 				dd_int = dd_int->next;
 				dd_loop = dd_loop->next;
-			} while (dd_int);
+			}
 
-			if (dd_int == NULL && dd_loop == NULL) {
+			if (pv->dd && dd_int == NULL && dd_loop == NULL) {
 				gtk_window_present(GTK_WINDOW(pv->vf));
 				if (pos_pdf)
 					pos_von = *pos_pdf;
 				viewer_springen_zu_pos_pdf(pv, pos_von, 0);
+
+				//dd wird nicht an einen Viewer übergeben
+				document_free_displayed_documents(dd);
 
 				return 0;
 			}
