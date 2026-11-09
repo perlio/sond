@@ -1314,7 +1314,8 @@ static gboolean sond_server_init_db_conn(SondServer *server,
     }
 
     gpointer suc = mysql_real_connect(server->db_conn, data_config->db_host,
-    		data_config->db_user, db_password, data_config->db_name, 0, NULL, 0);
+    		data_config->db_user, db_password, data_config->db_name,
+    		(unsigned int) data_config->db_port, NULL, 0);
 
     // Passwort überschreiben
 	memset(db_password, 0, strlen(db_password));

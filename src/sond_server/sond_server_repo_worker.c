@@ -170,14 +170,41 @@ static OcrJobInfo* ocr_job_get_by_repo_id(OcrManager *manager, const gchar *repo
 }
 
 /**
- * ocr_job_add:
+ * ocr_job_try_start:
  *
- * Fügt Job zur Verwaltung hinzu (Thread-sicher)
+ * Prueft unter EINEM gehaltenen jobs_mutex, ob fuer repo_id bereits ein Job
+ * laeuft, und fuegt bei Erfolg new_job_info atomar in active_jobs ein -
+ * kein Race-Fenster mehr zwischen Check und Insert (vorher: getrennte
+ * ocr_job_get_by_repo_id()/ocr_job_add()-Aufrufe mit Luecke dazwischen,
+ * in der zwei gleichzeitige Start-Requests fuer dieselbe Library beide den
+ * "kein Job laeuft"-Check passieren und sich gegenseitig per
+ * g_hash_table_insert()/GDestroyNotify den noch vom jeweils anderen
+ * Worker-Thread benutzten OcrJobInfo unter den Fuessen wegziehen konnten).
+ *
+ * Rueckgabe: FALSE wenn bereits ein Job laeuft (new_job_info wurde NICHT
+ * eingefuegt - der Aufrufer muss ihn selbst freigeben), sonst TRUE.
  */
-static void ocr_job_add(OcrManager *manager, OcrJobInfo *info) {
+static gboolean ocr_job_try_start(OcrManager *manager, const gchar *repo_id,
+                                   OcrJobInfo *new_job_info) {
     g_mutex_lock(&manager->jobs_mutex);
-    g_hash_table_insert(manager->active_jobs, g_strdup(info->repo_id), info);
+
+    OcrJobInfo *existing = g_hash_table_lookup(manager->active_jobs, repo_id);
+    if (existing) {
+        g_mutex_lock(&existing->mutex);
+        gboolean is_running = existing->running;
+        g_mutex_unlock(&existing->mutex);
+
+        if (is_running) {
+            g_mutex_unlock(&manager->jobs_mutex);
+            return FALSE;
+        }
+        /* Nicht (mehr) laufend - wird durch den Insert unten automatisch
+         * ersetzt/freigegeben (GDestroyNotify auf dem alten Wert). */
+    }
+
+    g_hash_table_insert(manager->active_jobs, g_strdup(repo_id), new_job_info);
     g_mutex_unlock(&manager->jobs_mutex);
+    return TRUE;
 }
 
 /**
@@ -596,32 +623,21 @@ static void handle_ocr_start(SoupServer *soup_server,
         return;
     }
 
-    /* Prüfen ob Job bereits läuft */
-    OcrJobInfo *existing_job = ocr_job_get_by_repo_id(manager, repo_id);
-
-    if (existing_job) {
-        g_mutex_lock(&existing_job->mutex);
-        gboolean is_running = existing_job->running;
-        g_mutex_unlock(&existing_job->mutex);
-
-        if (is_running) {
-            gchar *err_msg = g_strdup_printf("OCR job already running for library '%s'",
-                                           library_name);
-            send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
-            g_free(err_msg);
-            g_free(repo_id);
-            return;
-        }
-
-        /* Alter Job ist fertig - überschreiben */
-        g_mutex_lock(&manager->jobs_mutex);
-        g_hash_table_remove(manager->active_jobs, repo_id);
-        g_mutex_unlock(&manager->jobs_mutex);
-    }
-
-    /* Neuen Job erstellen */
+    /* Neuen Job erstellen und atomar (Check-und-Insert in einem Mutex-
+     * kritischen Abschnitt) in die Verwaltung einhaengen - verhindert das
+     * Race, bei dem zwei gleichzeitige Start-Requests fuer dieselbe Library
+     * sich sonst gegenseitig den noch benutzten OcrJobInfo wegziehen konnten. */
     OcrJobInfo *job_info = ocr_job_info_new(repo_id, library_name, force_reprocess);
-    ocr_job_add(manager, job_info);
+
+    if (!ocr_job_try_start(manager, repo_id, job_info)) {
+        gchar *err_msg = g_strdup_printf("OCR job already running for library '%s'",
+                                       library_name);
+        send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
+        g_free(err_msg);
+        g_free(repo_id);
+        ocr_job_info_free(job_info);  /* wurde nicht eingefuegt - selbst freigeben */
+        return;
+    }
 
     /* Worker-Thread starten */
     WorkerThreadData *thread_data = g_new0(WorkerThreadData, 1);
