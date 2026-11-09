@@ -34,6 +34,7 @@ void login_result_free(LoginResult *result) {
     g_free(result->username);
     g_free(result->session_token);
     g_free(result->seafile_token);
+    g_free(result->seafile_url);
     g_free(result);
 }
 
@@ -231,9 +232,12 @@ static void on_login_clicked(GtkButton *button, LoginDialogData *data) {
         if (json_object_has_member(obj, "data")) {
             JsonObject *data_obj = json_object_get_object_member(obj, "data");
             
-            const gchar *session_token = json_object_get_string_member(data_obj, "session_token");
-            const gchar *seafile_token = json_object_get_string_member(data_obj, "seafile_token");
-			const gchar *seafile_url = json_object_get_string_member(data_obj, "seafile_url");
+            const gchar *session_token = json_object_has_member(data_obj, "session_token") ?
+                json_object_get_string_member(data_obj, "session_token") : NULL;
+            const gchar *seafile_token = json_object_has_member(data_obj, "seafile_token") ?
+                json_object_get_string_member(data_obj, "seafile_token") : NULL;
+			const gchar *seafile_url = json_object_has_member(data_obj, "seafile_url") ?
+                json_object_get_string_member(data_obj, "seafile_url") : NULL;
             
             /* LoginResult erstellen */
             data->result = g_new0(LoginResult, 1);

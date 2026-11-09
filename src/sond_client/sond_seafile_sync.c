@@ -197,7 +197,9 @@ gboolean sond_seafile_sync_library(SondClient* client, const gchar *library_id,
     /* RPC-Call: seafile_clone
      * Parameter laut seafile-rpc.h:
      * - repo_id
-     * - repo_version (meistens 0)
+     * - repo_version (>0 für aktuelle Repos; seaf-daemon lehnt 0 explizit
+     *   als "alte, nicht mehr unterstuetzte" Version ab - s. clone-mgr.c:
+     *   "Don't support syncing old version libraries.")
      * - repo_name
      * - worktree (lokaler Pfad)
      * - token
@@ -225,11 +227,11 @@ gboolean sond_seafile_sync_library(SondClient* client, const gchar *library_id,
         &rpc_error,
         11,
         "string", library_id,       // repo_id
-        "int", (void*)1,             // repo_version (0 für normale Repos)
+        "int", (void*)1,             // repo_version (aktuelles Format; 0 wird vom Daemon abgelehnt)
         "string", library_name,        // repo_name (nutzen library_id als Name)
         "string", local_path,        // worktree
         "string", clone_token,  // token
-        "string", NULL,                // passwd (leer wenn nicht verschlüsselt)
+        "string", "",                // passwd (leer wenn nicht verschlüsselt)
         "string", "",                // magic (leer)
         "string", "", 			// email - kann leer bleiben, wird nicht geprüft
         "string", "",                // random_key (leer)

@@ -127,10 +127,14 @@ static JsonNode* akte_to_json(SondOfflineAkte *akte) {
 static SondOfflineAkte* akte_from_json(JsonObject *obj) {
     SondOfflineAkte *akte = g_new0(SondOfflineAkte, 1);
 
-    akte->regnr = g_strdup(json_object_get_string_member(obj, "regnr"));
-    akte->kurzb = g_strdup(json_object_get_string_member(obj, "kurzb"));
-    akte->ggstd = g_strdup(json_object_get_string_member(obj, "ggstd"));
-    akte->seafile_library_id = g_strdup(json_object_get_string_member(obj, "seafile_library_id"));
+    akte->regnr = g_strdup(json_object_has_member(obj, "regnr") ?
+        json_object_get_string_member(obj, "regnr") : NULL);
+    akte->kurzb = g_strdup(json_object_has_member(obj, "kurzb") ?
+        json_object_get_string_member(obj, "kurzb") : NULL);
+    akte->ggstd = g_strdup(json_object_has_member(obj, "ggstd") ?
+        json_object_get_string_member(obj, "ggstd") : NULL);
+    akte->seafile_library_id = g_strdup(json_object_has_member(obj, "seafile_library_id") ?
+        json_object_get_string_member(obj, "seafile_library_id") : NULL);
 
     /* syncing_enabled parsen (Standard: TRUE für Abwärtskompatibilität) */
     if (json_object_has_member(obj, "syncing_enabled")) {
@@ -219,7 +223,8 @@ static gboolean load_config(SondOfflineManager *manager, GError **error) {
     JsonObject *root_obj = json_node_get_object(root);
 
     /* Version prüfen */
-    gint version = json_object_get_int_member(root_obj, "version");
+    gint version = json_object_has_member(root_obj, "version") ?
+        json_object_get_int_member(root_obj, "version") : 0;
     if (version != CONFIG_VERSION) {
         LOG_WARN("Offline-Konfig hat andere Version (%d vs %d), versuche trotzdem zu laden\n",
                  version, CONFIG_VERSION);

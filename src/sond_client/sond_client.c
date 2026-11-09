@@ -1271,10 +1271,12 @@ gboolean sond_client_ocr_start_job(SondClient *client,
     }
 
     /* URL: POST /ocr/start?library_name=XXX&force_reprocess=false */
+    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
     gchar *url = g_strdup_printf("%s/ocr/start?library_name=%s&force_reprocess=%s",
                                  client->server_url,
-                                 library_name,
+                                 escaped_name,
                                  force_reprocess ? "true" : "false");
+    g_free(escaped_name);
 
     SoupMessage *msg = soup_message_new("POST", url);
     g_free(url);
@@ -1356,9 +1358,11 @@ OcrStatus* sond_client_ocr_get_status(SondClient *client,
     }
 
     /* URL: GET /ocr/status?library_name=XXX */
+    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
     gchar *url = g_strdup_printf("%s/ocr/status?library_name=%s",
                                  client->server_url,
-                                 library_name);
+                                 escaped_name);
+    g_free(escaped_name);
 
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
