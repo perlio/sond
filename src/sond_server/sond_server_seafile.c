@@ -127,10 +127,82 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
 }
 
 /**
+ * seafile_share_library_with_group:
+ *
+ * Teilt eine (gerade angelegte) Library mit der konfigurierten Seafile-
+ * Gruppe (Schreibrecht "rw"). Ein Fehlschlag hierbei laesst die bereits
+ * angelegte Library bestehen - es wird nur eine Warnung geloggt, kein
+ * Abbruch von seafile_create_library().
+ *
+ * Seafile API:
+ * PUT https://seafile.example.com/api2/repos/{repo_id}/dir/shared_items/?p=/
+ * Authorization: Token xxx
+ * Body: share_type=group&group_id=xxx&permission=rw
+ */
+static void seafile_share_library_with_group(SondServer *server,
+                                              const gchar *library_id,
+                                              guint group_id) {
+    gchar const* seafile_url = sond_server_get_seafile_url(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
+    if (!seafile_url || !auth_token) {
+        LOG_WARN("Cannot share library '%s' with group %u: "
+                 "Seafile URL/token not available\n", library_id, group_id);
+        return;
+    }
+
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/dir/shared_items/?p=/",
+                                  seafile_url, library_id);
+
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("PUT", url);
+    g_free(url);
+
+    gchar *auth_header = g_strdup_printf("Token %s", auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                               "Authorization", auth_header);
+    g_free(auth_header);
+
+    soup_message_headers_set_content_type(soup_message_get_request_headers(msg),
+                                          "application/x-www-form-urlencoded", NULL);
+
+    gchar *form_data = g_strdup_printf("share_type=group&group_id=%u&permission=rw",
+                                        group_id);
+    soup_message_set_request_body_from_bytes(msg, "application/x-www-form-urlencoded",
+        g_bytes_new_take(form_data, strlen(form_data)));
+
+    GError *local_error = NULL;
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, &local_error);
+
+    if (!response) {
+        LOG_WARN("Failed to share library '%s' with group %u: %s\n",
+                  library_id, group_id,
+                  local_error ? local_error->message : "unknown error");
+        g_clear_error(&local_error);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return;
+    }
+
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+        LOG_WARN("Failed to share library '%s' with group %u (HTTP %u): %.*s\n",
+                  library_id, group_id, status, (int)size, body);
+    } else {
+        LOG_INFO("Library '%s' shared with group %u (rw)\n", library_id, group_id);
+    }
+
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+}
+
+/**
  * seafile_create_library:
- * 
+ *
  * Erstellt eine neue Seafile Library.
- * 
+ *
  * Seafile API:
  * POST https://seafile.example.com/api2/repos/
  * Authorization: Token xxx
@@ -238,7 +310,11 @@ static gchar* seafile_create_library(SondServer *server,
     g_bytes_unref(response);
     g_object_unref(msg);
     g_object_unref(session);
-    
+
+    if (library_id && group_id > 0) {
+        seafile_share_library_with_group(server, library_id, group_id);
+    }
+
     return library_id;
 }
 
