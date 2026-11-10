@@ -370,6 +370,14 @@ LoginResult* sond_login_dialog_show(GtkWindow *parent,
     g_main_loop_run(data.loop);
     g_main_loop_unref(data.loop);
     
+    /* Fokus explizit wegnehmen, BEVOR der Dialog zerstört wird: Nach
+     * Enter im Passwort-Feld (oder Klick auf "Anmelden") hält i.d.R.
+     * noch das password_entry (bzw. der Button) den Fokus. Wird das
+     * Fenster mit einem fokussierten Widget zerstört, synthetisiert
+     * GTK4 dafür kein korrektes focus-out-Event ("GtkText - did not
+     * receive a focus-out event"-Warnung). */
+    gtk_window_set_focus(GTK_WINDOW(dialog), NULL);
+    
     /* Dialog schließen */
     gtk_window_destroy(GTK_WINDOW(dialog));
     

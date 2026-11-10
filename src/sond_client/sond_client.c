@@ -36,6 +36,7 @@ struct _SondClient {
     gchar *session_token;  /* Session-Token vom Server */
     gchar *seafile_token; /* Seafile Auth-Token für user */
     gchar *username;       /* Seafile-Username */
+    gchar *client_id;      /* Instanz-ID (UUID pro Prozess) - Lock-Identitaet */
     gchar *seafile_url;    /* Seafile-Server URL */
     
     /* Zuletzt verwendete RegNr (während Laufzeit) */
@@ -67,10 +68,161 @@ struct _SondClient {
      * stiller Re-Login nach 401) - steuert, ob beim naechsten Login noch die
      * "gib alte Locks frei"-Anfrage geschickt wird (nur beim allerersten
      * Login dieses Prozesslaufs, s. sond_client_set_auth()). */
-    gboolean has_authenticated_before;
 };
 
 G_DEFINE_TYPE(SondClient, sond_client, G_TYPE_OBJECT)
+
+/* ========================================================================
+ * SondClientError - Fehlerdomaene mit Zusatzdaten (fehlende IDs, Lock-Inhaber)
+ * ======================================================================== */
+
+typedef struct {
+    GArray *missing_ids;   /* gint64, nur bei GONE */
+    gchar *locked_by;      /* nur bei LOCKED */
+    gchar *locked_at;      /* nur bei LOCKED */
+} SondClientErrorPrivate;
+
+static void sond_client_error_private_init(SondClientErrorPrivate *priv) {
+    priv->missing_ids = NULL;
+    priv->locked_by = NULL;
+    priv->locked_at = NULL;
+}
+
+static void sond_client_error_private_copy(const SondClientErrorPrivate *src,
+                                           SondClientErrorPrivate *dest) {
+    dest->missing_ids = src->missing_ids ? g_array_ref(src->missing_ids) : NULL;
+    dest->locked_by = g_strdup(src->locked_by);
+    dest->locked_at = g_strdup(src->locked_at);
+}
+
+static void sond_client_error_private_clear(SondClientErrorPrivate *priv) {
+    if (priv->missing_ids) g_array_unref(priv->missing_ids);
+    g_free(priv->locked_by);
+    g_free(priv->locked_at);
+    priv->missing_ids = NULL;
+    priv->locked_by = NULL;
+    priv->locked_at = NULL;
+}
+
+G_DEFINE_EXTENDED_ERROR(SondClientError, sond_client_error)
+
+gboolean sond_client_error_is_conflict(const GError *error) {
+    return error && error->domain == SOND_CLIENT_ERROR &&
+           (error->code == SOND_CLIENT_ERROR_LOCKED ||
+            error->code == SOND_CLIENT_ERROR_STALE ||
+            error->code == SOND_CLIENT_ERROR_GONE);
+}
+
+const GArray* sond_client_error_get_missing_ids(const GError *error) {
+    g_return_val_if_fail(error && error->domain == SOND_CLIENT_ERROR, NULL);
+    return sond_client_error_get_private(error)->missing_ids;
+}
+
+const gchar* sond_client_error_get_locked_by(const GError *error) {
+    g_return_val_if_fail(error && error->domain == SOND_CLIENT_ERROR, NULL);
+    return sond_client_error_get_private(error)->locked_by;
+}
+
+const gchar* sond_client_error_get_locked_at(const GError *error) {
+    g_return_val_if_fail(error && error->domain == SOND_CLIENT_ERROR, NULL);
+    return sond_client_error_get_private(error)->locked_at;
+}
+
+/**
+ * set_write_error:
+ *
+ * Wertet eine Nicht-200-Antwort eines schreibenden Knoten-Endpunkts
+ * (save/delete) aus. Enthaelt sie einen "code" (LOCKED/STALE/GONE), wird ein
+ * SOND_CLIENT_ERROR mit benutzerlesbarer Meldung und Zusatzdaten erzeugt,
+ * sonst ein allgemeiner Fehler mit dem Servertext.
+ *
+ * Returns: der gesetzte #SondClientErrorCode
+ */
+static SondClientErrorCode set_write_error(guint status, GBytes *response, GError **error) {
+    gsize len = 0;
+    const gchar *data = response ? g_bytes_get_data(response, &len) : NULL;
+
+    const gchar *code_str = NULL;
+    const gchar *server_msg = NULL;
+    const gchar *locked_by = NULL;
+    const gchar *locked_at = NULL;
+    JsonArray *missing = NULL;
+
+    JsonParser *parser = json_parser_new();
+    JsonObject *obj = NULL;
+    if (data && json_parser_load_from_data(parser, data, len, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        if (root && JSON_NODE_HOLDS_OBJECT(root)) {
+            obj = json_node_get_object(root);
+        }
+    }
+
+    if (obj) {
+        if (json_object_has_member(obj, "code"))
+            code_str = json_object_get_string_member(obj, "code");
+        if (json_object_has_member(obj, "error"))
+            server_msg = json_object_get_string_member(obj, "error");
+        if (json_object_has_member(obj, "locked_by"))
+            locked_by = json_object_get_string_member(obj, "locked_by");
+        if (json_object_has_member(obj, "locked_at"))
+            locked_at = json_object_get_string_member(obj, "locked_at");
+        if (json_object_has_member(obj, "missing_ids"))
+            missing = json_object_get_array_member(obj, "missing_ids");
+    }
+
+    SondClientErrorCode code = SOND_CLIENT_ERROR_FAILED;
+    if (status == 409 && code_str) {
+        if (g_strcmp0(code_str, "LOCKED") == 0) code = SOND_CLIENT_ERROR_LOCKED;
+        else if (g_strcmp0(code_str, "STALE") == 0) code = SOND_CLIENT_ERROR_STALE;
+        else if (g_strcmp0(code_str, "GONE") == 0) code = SOND_CLIENT_ERROR_GONE;
+    }
+
+    if (code == SOND_CLIENT_ERROR_FAILED) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server returned status %u%s%s", status,
+                   server_msg ? ": " : "", server_msg ? server_msg : "");
+        g_object_unref(parser);
+        return code;
+    }
+
+    gchar *msg = NULL;
+    switch (code) {
+        case SOND_CLIENT_ERROR_LOCKED:
+            msg = g_strdup_printf(
+                "Der Datensatz ist inzwischen von '%s' gesperrt (z.B. weil Ihre "
+                "Sperre gebrochen wurde). Ihre Aenderungen wurden nicht gespeichert.",
+                (locked_by && *locked_by) ? locked_by : "einem anderen Benutzer");
+            break;
+        case SOND_CLIENT_ERROR_STALE:
+            msg = g_strdup("Der Datensatz wurde zwischenzeitlich von jemand anderem "
+                           "geaendert. Ihre Aenderungen wurden nicht gespeichert.");
+            break;
+        default:
+            msg = g_strdup("Der Datensatz (oder ein damit verknuepfter Eintrag) wurde "
+                           "zwischenzeitlich geloescht.");
+            break;
+    }
+
+    if (error) {
+        GError *e = g_error_new_literal(SOND_CLIENT_ERROR, code, msg);
+        SondClientErrorPrivate *priv = sond_client_error_get_private(e);
+        if (code == SOND_CLIENT_ERROR_LOCKED) {
+            priv->locked_by = g_strdup(locked_by);
+            priv->locked_at = g_strdup(locked_at);
+        } else if (code == SOND_CLIENT_ERROR_GONE && missing) {
+            priv->missing_ids = g_array_new(FALSE, FALSE, sizeof(gint64));
+            for (guint i = 0; i < json_array_get_length(missing); i++) {
+                gint64 id = json_array_get_int_element(missing, i);
+                g_array_append_val(priv->missing_ids, id);
+            }
+        }
+        g_propagate_error(error, e);
+    }
+
+    g_free(msg);
+    g_object_unref(parser);
+    return code;
+}
 
 static void sond_client_finalize(GObject *object) {
     SondClient *self = SOND_CLIENT(object);
@@ -87,6 +239,7 @@ static void sond_client_finalize(GObject *object) {
     g_free(self->session_token);
     g_free(self->seafile_token);
     g_free(self->username);
+    g_free(self->client_id);
     g_free(self->seafile_url);
 
     if (self->offline_manager) {
@@ -100,9 +253,24 @@ static void sond_client_finalize(GObject *object) {
     G_OBJECT_CLASS(sond_client_parent_class)->finalize(object);
 }
 
+enum {
+    SIGNAL_NODE_CONFLICT,
+    N_SIGNALS
+};
+static guint client_signals[N_SIGNALS] = { 0 };
+
 static void sond_client_class_init(SondClientClass *klass) {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
     object_class->finalize = sond_client_finalize;
+
+    /* "node-conflict": node_id, code (SondClientErrorCode), locked_by, locked_at */
+    client_signals[SIGNAL_NODE_CONFLICT] =
+        g_signal_new("node-conflict",
+                     G_TYPE_FROM_CLASS(klass),
+                     G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL, NULL,
+                     G_TYPE_NONE, 4,
+                     G_TYPE_INT64, G_TYPE_UINT, G_TYPE_STRING, G_TYPE_STRING);
 }
 
 static void sond_client_init(SondClient *self) {
@@ -111,6 +279,9 @@ static void sond_client_init(SondClient *self) {
     self->session = NULL;
     self->session_token = NULL;
     self->username = NULL;
+    /* Instanz-ID: bleibt ueber Re-Logins/Session-Timeouts stabil, unterscheidet
+     * aber zwei Prozesse (auch desselben Users, auch auf verschiedenen Rechnern) */
+    self->client_id = g_uuid_string_random();
     self->auth_failed_callback = NULL;
     self->auth_failed_user_data = NULL;
     self->login_callback = NULL;
@@ -125,7 +296,6 @@ static void sond_client_init(SondClient *self) {
     /* Lock-Heartbeat */
     self->held_locks = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
     self->heartbeat_source_id = 0;
-    self->has_authenticated_before = FALSE;
 }
 
 static gboolean sond_client_load_config(SondClient *client,
@@ -204,11 +374,25 @@ static gboolean heartbeat_timeout_cb(gpointer user_data) {
     for (GList *l = node_ids; l; l = l->next) {
         gint64 node_id = *(gint64*)l->data;
         GError *error = NULL;
-        if (!sond_client_lock_node(client, node_id, "Bearbeitung (Heartbeat)", &error)) {
+        gchar *locked_by = NULL, *locked_at = NULL;
+        if (!sond_client_lock_node_ex(client, node_id, "Bearbeitung (Heartbeat)",
+                                      &locked_by, &locked_at, &error)) {
             LOG_WARN("Heartbeat-Renewal fuer Node %" G_GINT64_FORMAT " fehlgeschlagen: %s\n",
                      node_id, error ? error->message : "Unbekannt");
             g_clear_error(&error);
+
+            /* locked_by gesetzt = Server hat mit Konflikt (409) geantwortet: der
+             * Lock gehoert uns nicht mehr (gebrochen). Modul benachrichtigen,
+             * damit der Benutzer es sofort und nicht erst beim Speichern merkt. */
+            if (locked_by) {
+                g_hash_table_remove(client->held_locks, &node_id);
+                g_signal_emit(client, client_signals[SIGNAL_NODE_CONFLICT], 0,
+                              node_id, (guint)SOND_CLIENT_ERROR_LOCKED,
+                              locked_by, locked_at);
+            }
         }
+        g_free(locked_by);
+        g_free(locked_at);
     }
 
     g_list_free(node_ids);
@@ -252,8 +436,6 @@ const gchar* sond_client_get_user_token(SondClient *client) {
     return client->seafile_token;
 }
 
-static void release_stale_locks(SondClient *client);  /* s. Definition unten, nach add_auth_header */
-
 void sond_client_set_auth(SondClient *client,
                           const gchar *username,
                           const gchar *session_token,
@@ -270,17 +452,6 @@ void sond_client_set_auth(SondClient *client,
     client->session_token = g_strdup(session_token);
     client->seafile_token = g_strdup(seafile_token);
     client->seafile_url = g_strdup(seafile_url);
-
-    /* Nur beim allerersten erfolgreichen Login dieses Prozesslaufs alte,
-     * eigene Locks freigeben - nicht bei jedem stillen Re-Login nach einem
-     * Session-Timeout (sonst wuerde auch ein Lock in einem noch offenen,
-     * laufenden Fenster verschwinden - s. Besprechung). Deckt stattdessen
-     * Crash/Neustart ab: ein verwaister Lock aus dem letzten Prozesslauf
-     * wird beim naechsten Start automatisch frei. */
-    if (!client->has_authenticated_before) {
-        client->has_authenticated_before = TRUE;
-        release_stale_locks(client);
-    }
 }
 
 void sond_client_set_auth_failed_callback(SondClient *client,
@@ -301,50 +472,59 @@ void sond_client_set_login_callback(SondClient *client,
     client->login_callback_user_data = user_data;
 }
 
+/**
+ * notify_node_conflict:
+ *
+ * Wertet einen von set_write_error() erzeugten Fehler aus und meldet einen
+ * Konflikt, der den Knoten selbst betrifft, per Signal "node-conflict"
+ * (s. sond_client.h). GONE nur, wenn der Knoten selbst fehlt - fehlt nur ein
+ * verknuepfter Knoten, bekommt das ausschliesslich der Aufrufer ueber den Fehler.
+ * Wird der Lock dadurch hinfaellig (LOCKED/GONE), wird er aus held_locks entfernt.
+ */
+static void notify_node_conflict(SondClient *client, gint64 node_id, const GError *werr) {
+    if (!sond_client_error_is_conflict(werr)) {
+        return;
+    }
+
+    if (werr->code == SOND_CLIENT_ERROR_GONE) {
+        const GArray *missing = sond_client_error_get_missing_ids(werr);
+        gboolean self_gone = FALSE;
+        for (guint i = 0; missing && i < missing->len; i++) {
+            if (g_array_index(missing, gint64, i) == node_id) {
+                self_gone = TRUE;
+            }
+        }
+        if (!self_gone) {
+            return;
+        }
+    }
+
+    if (werr->code == SOND_CLIENT_ERROR_LOCKED || werr->code == SOND_CLIENT_ERROR_GONE) {
+        g_hash_table_remove(client->held_locks, &node_id);
+    }
+
+    g_signal_emit(client, client_signals[SIGNAL_NODE_CONFLICT], 0,
+                  node_id, (guint)werr->code,
+                  werr->code == SOND_CLIENT_ERROR_LOCKED ?
+                      sond_client_error_get_locked_by(werr) : NULL,
+                  werr->code == SOND_CLIENT_ERROR_LOCKED ?
+                      sond_client_error_get_locked_at(werr) : NULL);
+}
+
 static void add_auth_header(SondClient *client, SoupMessage *msg) {
+    /* Instanz-ID bei JEDER Anfrage: der Server prueft damit vor schreibenden
+     * Zugriffen generisch, ob ein fremder Lock besteht. */
+    if (client->client_id) {
+        soup_message_headers_append(soup_message_get_request_headers(msg),
+                                    "X-Sond-Client-Id", client->client_id);
+    }
+
     if (client->session_token) {
         gchar *auth_value = g_strdup_printf("Bearer %s", client->session_token);
         soup_message_headers_append(soup_message_get_request_headers(msg),
                                     "Authorization", auth_value);
         g_free(auth_value);
     }
-}
-
-/**
- * release_stale_locks:
- *
- * POST /locks/release-mine - entsperrt alle Nodes, die dieser User laut
- * Server noch haelt. Wird von sond_client_set_auth() genau einmal pro
- * Prozesslauf aufgerufen, s. dort. Fehler hier sind nicht fatal fuer den
- * Login selbst - nur loggen.
- */
-static void release_stale_locks(SondClient *client) {
-    gchar *url = g_strdup_printf("%s/locks/release-mine", client->server_url);
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-
-    add_auth_header(client, msg);
-
-    GError *error = NULL;
-    GBytes *response = soup_session_send_and_read(client->session, msg, NULL, &error);
-
-    if (!response) {
-        LOG_WARN("Freigabe alter Locks beim Login fehlgeschlagen: %s\n",
-                 error ? error->message : "Unbekannt");
-        g_clear_error(&error);
-        g_object_unref(msg);
-        return;
-    }
-
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        LOG_WARN("Freigabe alter Locks beim Login: Status %u\n", status);
-    } else {
-        LOG_INFO("Alte Locks (falls vorhanden) beim Login freigegeben\n");
-    }
-
-    g_bytes_unref(response);
-    g_object_unref(msg);
 }
 
 static gboolean ensure_authenticated(SondClient *client, GError **error) {
@@ -444,6 +624,8 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
     
     json_builder_set_member_name(builder, "user_id");
     json_builder_add_string_value(builder, client->username);
+    json_builder_set_member_name(builder, "client_id");
+    json_builder_add_string_value(builder, client->client_id);
     
     if (lock_reason) {
         json_builder_set_member_name(builder, "lock_reason");
@@ -522,6 +704,7 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
                 if (updated_node) {
                     gint64 node_id = sond_graph_node_get_id(updated_node);
                     sond_graph_node_set_id(node, node_id);
+                    sond_graph_node_set_version(node, sond_graph_node_get_version(updated_node));
                     g_object_unref(updated_node);
                 }
                 
@@ -561,6 +744,8 @@ gboolean sond_client_lock_node_ex(SondClient *client,
 
     json_builder_set_member_name(builder, "user_id");
     json_builder_add_string_value(builder, client->username);
+    json_builder_set_member_name(builder, "client_id");
+    json_builder_add_string_value(builder, client->client_id);
 
     json_builder_set_member_name(builder, "timeout_minutes");
     json_builder_add_int_value(builder, 0);
@@ -667,7 +852,20 @@ gboolean sond_client_unlock_node(SondClient *client,
                                   GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
     g_return_val_if_fail(node_id > 0, FALSE);
-    
+
+    /* Generischer No-Op, wenn wir den Lock laut unserer eigenen
+     * Buchhaltung (held_locks) gar nicht halten - z.B. beim Schliessen
+     * einer nur lesend (READONLY, weil von jemand anderem gelockt)
+     * angezeigten Akte. Das gehoert hier in die generische Client-Schicht
+     * und nicht als Spezialfall in ein einzelnes Modul (sond_module_akte
+     * o.ae.), denn jedes Modul, das Nodes locken kann, braucht dieselbe
+     * Absicherung. Server wuerde sonst zu Recht mit 403 ablehnen
+     * ("Node ist nicht gelockt" / "nur vom Lock-Inhaber") - kein
+     * Server-Roundtrip noetig, wenn wir es lokal schon wissen. */
+    if (!g_hash_table_contains(client->held_locks, &node_id)) {
+        return TRUE;
+    }
+
     if (!ensure_authenticated(client, error)) {
         return FALSE;
     }
@@ -677,6 +875,8 @@ gboolean sond_client_unlock_node(SondClient *client,
     
     json_builder_set_member_name(builder, "user_id");
     json_builder_add_string_value(builder, client->username);
+    json_builder_set_member_name(builder, "client_id");
+    json_builder_add_string_value(builder, client->client_id);
     
     json_builder_end_object(builder);
     
@@ -758,6 +958,8 @@ gboolean sond_client_force_unlock_node(SondClient *client,
 
     json_builder_set_member_name(builder, "user_id");
     json_builder_add_string_value(builder, client->username);
+    json_builder_set_member_name(builder, "client_id");
+    json_builder_add_string_value(builder, client->client_id);
 
     json_builder_set_member_name(builder, "force");
     json_builder_add_boolean_value(builder, TRUE);
@@ -986,8 +1188,14 @@ gboolean sond_client_save_node(SondClient *client,
         }
         
         if (status != 200) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Server returned status %u", status);
+            GError *werr = NULL;
+            set_write_error(status, response, &werr);
+
+            /* Konflikt (gesperrt/geaendert/geloescht) per Signal melden; bei
+             * LOCKED/GONE wird der Lock dabei aus held_locks entfernt. */
+            notify_node_conflict(client, sond_graph_node_get_id(node), werr);
+            g_propagate_error(error, werr);
+
             g_bytes_unref(response);
             g_object_unref(msg);
             break;
@@ -1013,6 +1221,7 @@ gboolean sond_client_save_node(SondClient *client,
                 if (updated_node) {
                     gint64 node_id = sond_graph_node_get_id(updated_node);
                     sond_graph_node_set_id(node, node_id);
+                    sond_graph_node_set_version(node, sond_graph_node_get_version(updated_node));
                     g_object_unref(updated_node);
                 }
                 
@@ -1032,59 +1241,69 @@ gboolean sond_client_save_node(SondClient *client,
 }
 
 gboolean sond_client_delete_node(SondClient *client,
-                                  gint64 node_id,
+                                  gpointer node_ptr,
                                   GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    g_return_val_if_fail(SOND_IS_GRAPH_NODE(node_ptr), FALSE);
+
+    SondGraphNode *node = SOND_GRAPH_NODE(node_ptr);
+    gint64 node_id = sond_graph_node_get_id(node);
+    gint64 version = sond_graph_node_get_version(node);
     g_return_val_if_fail(node_id > 0, FALSE);
-    
+
     if (!ensure_authenticated(client, error)) {
         return FALSE;
     }
-    
+
     gboolean retry = TRUE;
     gboolean success = FALSE;
-    
+
     while (retry) {
         retry = FALSE;
-        
-        gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT,
-                                    client->server_url, node_id);
+
+        gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT "?version=%" G_GINT64_FORMAT,
+                                    client->server_url, node_id, version);
         SoupMessage *msg = soup_message_new("DELETE", url);
         g_free(url);
-        
+
         add_auth_header(client, msg);
-        
+
         GBytes *response = soup_session_send_and_read(client->session, msg, NULL, error);
-        
+
         if (!response) {
             g_object_unref(msg);
             break;
         }
-        
+
         guint status = soup_message_get_status(msg);
-        
+
         if (status == 401) {
             g_bytes_unref(response);
             g_object_unref(msg);
-            
+
             if (handle_auth_error(client, error)) {
                 retry = TRUE;
                 continue;
             }
             break;
         }
-        
+
         success = (status == 200);
-        
-        if (!success) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Server returned status %u", status);
+
+        if (success) {
+            /* Lock-Zeile verschwindet serverseitig per CASCADE mit dem Knoten */
+            g_hash_table_remove(client->held_locks, &node_id);
+        } else {
+            GError *werr = NULL;
+            set_write_error(status, response, &werr);
+            notify_node_conflict(client, node_id, werr);
+            g_propagate_error(error, werr);
         }
-        
+
         g_bytes_unref(response);
         g_object_unref(msg);
     }
-    
+
     return success;
 }
 

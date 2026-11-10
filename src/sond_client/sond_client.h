@@ -29,6 +29,85 @@ typedef struct _SondClient SondClient;
 #define SOND_TYPE_CLIENT (sond_client_get_type())
 G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
 
+/* ========================================================================
+ * Fehler beim Speichern/Loeschen von Nodes (generisch fuer alle Module)
+ * ======================================================================== */
+
+#define SOND_CLIENT_ERROR (sond_client_error_quark())
+
+/**
+ * SondClientErrorCode:
+ * @SOND_CLIENT_ERROR_FAILED: sonstiger Fehler
+ * @SOND_CLIENT_ERROR_LOCKED: Knoten ist von einem anderen Client gesperrt
+ *   (z.B. weil der eigene Lock gebrochen wurde)
+ * @SOND_CLIENT_ERROR_STALE: Knoten wurde zwischenzeitlich geaendert
+ * @SOND_CLIENT_ERROR_GONE: Knoten (oder ein verknuepfter Knoten) wurde
+ *   zwischenzeitlich geloescht
+ *
+ * Die Fehlermeldung (error->message) ist bereits fuer Benutzer formuliert.
+ */
+typedef enum {
+    SOND_CLIENT_ERROR_FAILED,
+    SOND_CLIENT_ERROR_LOCKED,
+    SOND_CLIENT_ERROR_STALE,
+    SOND_CLIENT_ERROR_GONE
+} SondClientErrorCode;
+
+GQuark sond_client_error_quark(void);
+
+/**
+ * SondClient::node-conflict:
+ * @client: der #SondClient
+ * @node_id: betroffener Knoten
+ * @code: #SondClientErrorCode (LOCKED, STALE oder GONE)
+ * @locked_by: (nullable): bei LOCKED der aktuelle Lock-Inhaber
+ * @locked_at: (nullable): bei LOCKED Zeitpunkt seiner letzten Aktivitaet
+ *
+ * Wird synchron ausgeloest, wenn der Server einen Schreibzugriff auf den
+ * Knoten ablehnt (save/delete: LOCKED, STALE, GONE) oder der periodische
+ * Heartbeat feststellt, dass der eigene Lock nicht mehr gehalten wird
+ * (LOCKED). Jedes Modul, das den Knoten anzeigt, verbindet sich damit und
+ * reagiert nur auf seinen eigenen @node_id. GONE wird nur gemeldet, wenn der
+ * Knoten selbst (nicht nur ein verknuepfter Knoten) nicht mehr existiert.
+ *
+ * Signatur des Handlers:
+ *   void handler(SondClient *client, gint64 node_id, guint code,
+ *                const gchar *locked_by, const gchar *locked_at, gpointer user_data);
+ */
+
+/**
+ * sond_client_error_is_conflict:
+ * @error: (nullable): Fehler
+ *
+ * Returns: TRUE bei LOCKED, STALE oder GONE (Modul sollte den Knoten neu laden)
+ */
+gboolean sond_client_error_is_conflict(const GError *error);
+
+/**
+ * sond_client_error_get_missing_ids:
+ * @error: Fehler mit Code SOND_CLIENT_ERROR_GONE
+ *
+ * Returns: (transfer none) (nullable): #GArray mit gint64-IDs der nicht mehr
+ *   vorhandenen Knoten (der Knoten selbst und/oder Ziele seiner Edges)
+ */
+const GArray* sond_client_error_get_missing_ids(const GError *error);
+
+/**
+ * sond_client_error_get_locked_by:
+ * @error: Fehler mit Code SOND_CLIENT_ERROR_LOCKED
+ *
+ * Returns: (transfer none) (nullable): Username des aktuellen Lock-Inhabers
+ */
+const gchar* sond_client_error_get_locked_by(const GError *error);
+
+/**
+ * sond_client_error_get_locked_at:
+ * @error: Fehler mit Code SOND_CLIENT_ERROR_LOCKED
+ *
+ * Returns: (transfer none) (nullable): Zeitpunkt der letzten Lock-Aktivitaet
+ */
+const gchar* sond_client_error_get_locked_at(const GError *error);
+
 /**
  * sond_client_new:
  * @config_file: Pfad zur Konfigurationsdatei
@@ -265,7 +344,9 @@ GPtrArray* sond_client_search_nodes(SondClient *client,
  * @error: (nullable): Fehler-Rückgabe
  *
  * Speichert einen Node auf dem Server.
- * Node-ID wird aktualisiert falls neu angelegt.
+ * Node-ID und Version werden aus der Serverantwort uebernommen.
+ * Fehler (error->domain == SOND_CLIENT_ERROR): LOCKED, STALE, GONE -
+ * s. #SondClientErrorCode.
  * Führt automatisch Login durch falls nicht authentifiziert.
  * Bei 401 wird automatisch Re-Login durchgeführt.
  *
@@ -278,17 +359,18 @@ gboolean sond_client_save_node(SondClient *client,
 /**
  * sond_client_delete_node:
  * @client: SondClient
- * @node_id: Node-ID
+ * @node: (type SondGraphNode): Zu loeschender Node (ID und Version werden mitgeschickt)
  * @error: (nullable): Fehler-Rückgabe
  *
- * Löscht einen Node vom Server.
+ * Löscht einen Node vom Server (nur wenn dessen Version noch aktuell ist).
+ * Fehler (error->domain == SOND_CLIENT_ERROR): LOCKED, STALE, GONE.
  * Führt automatisch Login durch falls nicht authentifiziert.
  * Bei 401 wird automatisch Re-Login durchgeführt.
  *
  * Returns: TRUE bei Erfolg
  */
 gboolean sond_client_delete_node(SondClient *client,
-                                  gint64 node_id,
+                                  gpointer node,
                                   GError **error);
 
 /**

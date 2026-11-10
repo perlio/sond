@@ -73,6 +73,8 @@ typedef struct {
     gchar *locked_by_other;
     gchar *locked_at_other;
     GtkWidget *btn_break_lock;
+    gboolean last_save_ok;   /* Ergebnis des letzten save_node() - fuer on_ok_clicked */
+    gboolean unsaved_conflict; /* Konflikt (gesperrt/geaendert): Eingaben stehen noch in der Maske, wurden aber nicht gespeichert */
 } SondModuleAktePrivate;
 
 /* Struktur für Suchergebnis */
@@ -159,6 +161,20 @@ static void apply_widget_style(GtkWidget *widget, gboolean active) {
 
 static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
     priv->state = new_state;
+
+    /* Fokus zuerst explizit wegnehmen: Wenn ein GtkText/GtkTextView (oder
+     * ein Vorfahr davon, z.B. akte_fields_box) gerade den Fokus hält und
+     * per gtk_widget_set_sensitive(..., FALSE) deaktiviert wird, liefert
+     * GTK4 dafür kein korrektes focus-out-Event -> "GtkText - did not
+     * receive a focus-out event"-Warnung. Fix: Fokus im Fenster zuerst auf
+     * nichts setzen (gtk_window_set_focus(.., NULL)), solange der/die
+     * betroffenen Widgets noch sensitiv sind - das löst das normale
+     * Fokus-Verlassen (inkl. focus-out) aus, bevor wir irgendetwas
+     * deaktivieren. */
+    GtkRoot *root = gtk_widget_get_root(priv->main_widget);
+    if (GTK_IS_WINDOW(root)) {
+        gtk_window_set_focus(GTK_WINDOW(root), NULL);
+    }
 
     switch (new_state) {
         case AKTE_STATE_INITIAL:
@@ -261,6 +277,7 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 }
 
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
+    priv->unsaved_conflict = FALSE;
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
@@ -1160,6 +1177,54 @@ static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
     return sond_client_delete_seafile_library(priv->client, library_id, error);
 }
 
+/**
+ * on_client_node_conflict:
+ *
+ * Reaktion auf das generische Client-Signal "node-conflict" (LOCKED / STALE /
+ * GONE beim Speichern oder Loeschen sowie Lock-Verlust laut Heartbeat) fuer
+ * die gerade angezeigte Akte. Die Eingaben bleiben in der Maske stehen
+ * (zum Kopieren) - neu geladen wird erst auf ausdruecklichen Wunsch ueber
+ * "Bearbeiten" (mit Rueckfrage). Gibt es die Akte nicht mehr, wird die Maske
+ * zurueckgesetzt.
+ */
+static void on_client_node_conflict(SondClient *client, gint64 node_id, guint code,
+                                    const gchar *locked_by, const gchar *locked_at,
+                                    SondModuleAktePrivate *priv) {
+    if (!priv->current_node || sond_graph_node_get_id(priv->current_node) != node_id) {
+        return;
+    }
+
+    if (code == SOND_CLIENT_ERROR_GONE) {
+        /* Akte selbst ist weg: Maske zuruecksetzen */
+        g_object_unref(priv->current_node);
+        priv->current_node = NULL;
+        priv->is_new_from_entry = FALSE;
+        clear_akte_fields(priv);
+        set_akte_state(priv, AKTE_STATE_INITIAL);
+        suggest_last_regnr(priv);
+        return;
+    }
+
+    /* LOCKED / STALE: Lock-Inhaber merken (nur bei LOCKED bekannt) */
+    g_free(priv->locked_by_other);
+    priv->locked_by_other = NULL;
+    g_free(priv->locked_at_other);
+    priv->locked_at_other = NULL;
+    if (code == SOND_CLIENT_ERROR_LOCKED && locked_by && *locked_by) {
+        priv->locked_by_other = g_strdup(locked_by);
+        priv->locked_at_other = (locked_at && *locked_at) ? g_strdup(locked_at) : NULL;
+    }
+
+    set_akte_state(priv, AKTE_STATE_READONLY);
+    priv->unsaved_conflict = TRUE;
+
+    gchar *text = priv->locked_by_other ?
+        g_strdup_printf("Nicht gespeichert - gesperrt von: %s", priv->locked_by_other) :
+        g_strdup("Nicht gespeichert - Akte wurde zwischenzeitlich geaendert");
+    gtk_label_set_text(GTK_LABEL(priv->status_label), text);
+    g_free(text);
+}
+
 static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
     if (!priv->current_node) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
@@ -1169,17 +1234,32 @@ static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
     
     sond_graph_node_set_label(priv->current_node, "Akte");
     
-    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
-    if (!sond_client_save_node(priv->client, priv->current_node, error)) {
-        return FALSE;
-    }
-    
-    return TRUE;
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401).
+     * Konflikte meldet der Client zusaetzlich per Signal "node-conflict"
+     * (s. on_client_node_conflict) - das kann current_node ersetzen, daher
+     * eine eigene Referenz halten. Die Meldung zeigt der Aufrufer
+     * (error->message ist benutzerlesbar). */
+    SondGraphNode *node = g_object_ref(priv->current_node);
+    gboolean ok = sond_client_save_node(priv->client, node, error);
+    g_object_unref(node);
+
+    priv->last_save_ok = ok;
+    return ok;
 }
 
 static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError **error) {
-    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
-    return sond_client_delete_node(priv->client, node_id, error);
+    if (!priv->current_node || sond_graph_node_get_id(priv->current_node) != node_id) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                   "Node %" G_GINT64_FORMAT " ist nicht der aktuelle Node", node_id);
+        return FALSE;
+    }
+
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401); eigene
+     * Referenz halten, falls ein Signal-Handler current_node ersetzt */
+    SondGraphNode *node = g_object_ref(priv->current_node);
+    gboolean ok = sond_client_delete_node(priv->client, node, error);
+    g_object_unref(node);
+    return ok;
 }
 
 /* ========================================================================
@@ -1288,6 +1368,8 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
     show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
 }
 
+static gboolean reload_and_try_lock(SondModuleAktePrivate *priv);
+
 /**
  * on_break_lock_dialog_response:
  *
@@ -1326,32 +1408,96 @@ static void on_break_lock_dialog_response(GObject *source, GAsyncResult *result,
         return;
     }
 
-    GError *lock_error = NULL;
-    if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
-        g_free(priv->locked_by_other);
-        priv->locked_by_other = NULL;
-        g_free(priv->locked_at_other);
-        priv->locked_at_other = NULL;
-
-        update_ui_from_node(priv);
-
-        if (ist_akte_aktiv(priv->current_node)) {
-            set_akte_state(priv, AKTE_STATE_EDITING);
-        } else {
-            set_akte_state(priv, AKTE_STATE_ABGELEGT);
-        }
-    } else {
+    /* Lock neu setzen und DANACH den aktuellen Stand laden: der andere
+     * Bearbeiter kann inzwischen gespeichert haben, unsere Maske zeigt noch
+     * den alten Stand (und das Speichern scheiterte an der Version). */
+    if (reload_and_try_lock(priv)) {
         /* Sollte kaum vorkommen (wir haben ja gerade entsperrt), aber falls
-         * doch (z.B. ein dritter User war schneller): Fehler anzeigen,
-         * Zustand bleibt READONLY. */
+         * doch (z.B. ein dritter User war schneller): Zustand bleibt READONLY. */
         show_error_dialog(priv->main_widget, "Übernahme fehlgeschlagen",
-                          lock_error ? lock_error->message : "Unbekannt");
-        if (lock_error) g_error_free(lock_error);
+                          "Die Akte wurde inzwischen von jemand anderem gesperrt.");
     }
 }
 
-static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+/* Lock versuchen und - erst NACH erfolgreichem Lock - die Akte vom Server neu
+ * laden (sonst koennte zwischen Laden und Sperren ein anderer speichern und wir
+ * wuerden veraltete Daten bearbeiten). Die Lock-Logik liegt im generischen
+ * Client. Rueckgabe TRUE nur, wenn die Akte weiterhin von jemand anderem
+ * gesperrt ist; bei Erfolg oder Fehler (Dialog bereits angezeigt) FALSE. */
+static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
+    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+    if (!regnr_values || regnr_values->len != 2) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte hat keine gültige RegNr");
+        if (regnr_values) g_ptr_array_unref(regnr_values);
+        return FALSE;
+    }
+    guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+    guint lfd_nr = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+    g_ptr_array_unref(regnr_values);
+
+    gint64 node_id = sond_graph_node_get_id(priv->current_node);
+    GError *lock_error = NULL;
+    gchar *locked_by = NULL, *locked_at = NULL;
+
+    if (!sond_client_lock_node_ex(priv->client, node_id, "Bearbeitung",
+                                  &locked_by, &locked_at, &lock_error)) {
+        /* Weiterhin gesperrt: aktuellen Sperrer anzeigen, READONLY bleibt */
+        g_free(priv->locked_by_other);
+        priv->locked_by_other = locked_by;
+        g_free(priv->locked_at_other);
+        priv->locked_at_other = locked_at;
+        if (lock_error) g_error_free(lock_error);
+
+        /* Auch die Leseansicht auf den aktuellen Stand bringen (kein Lock noetig) */
+        GError *load_error = NULL;
+        SondGraphNode *fresh = search_node_by_regnr(priv, lfd_nr, year, &load_error);
+        if (fresh) {
+            g_object_unref(priv->current_node);
+            priv->current_node = fresh;
+        }
+        if (load_error) g_error_free(load_error);
+
+        priv->unsaved_conflict = FALSE;
+        update_ui_from_node(priv);
+        set_akte_state(priv, AKTE_STATE_READONLY);
+        return TRUE;
+    }
+    g_free(locked_by);
+    g_free(locked_at);
+
+    /* Lock gehalten -> jetzt erst aktuellen Stand laden */
+    GError *error = NULL;
+    SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
+    if (!node) {
+        show_error_dialog(priv->main_widget, "Fehler beim Neuladen",
+                          error ? error->message : "Akte nicht gefunden");
+        if (error) g_error_free(error);
+        sond_client_unlock_node(priv->client, node_id, NULL);  /* Lock wieder abgeben */
+        return FALSE;
+    }
+
+    g_object_unref(priv->current_node);
+    priv->current_node = node;
+
+    g_free(priv->locked_by_other);
+    priv->locked_by_other = NULL;
+    g_free(priv->locked_at_other);
+    priv->locked_at_other = NULL;
+
+    priv->unsaved_conflict = FALSE;
+    update_ui_from_node(priv);
+    set_akte_state(priv, ist_akte_aktiv(priv->current_node) ?
+                   AKTE_STATE_EDITING : AKTE_STATE_ABGELEGT);
+    return FALSE;
+}
+
+static void start_edit_attempt(SondModuleAktePrivate *priv) {
     if (!priv->current_node) {
+        return;
+    }
+
+    /* Erst pruefen, ob der Lock inzwischen frei ist; nur wenn nicht, nachfragen. */
+    if (!reload_and_try_lock(priv)) {
         return;
     }
 
@@ -1383,6 +1529,60 @@ static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv
                            priv);
 
     g_object_unref(dialog);
+}
+
+static void on_discard_confirm_response(GObject *source, GAsyncResult *result,
+                                         gpointer user_data) {
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+    SondModuleAktePrivate *priv = user_data;
+
+    GError *error = NULL;
+    int button = gtk_alert_dialog_choose_finish(dialog, result, &error);
+    if (error) {
+        LOG_ERROR("Dialog error: %s\n", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    if (button != 0) {   /* 0 = "Verwerfen und neu laden" */
+        return;
+    }
+
+    priv->unsaved_conflict = FALSE;
+    start_edit_attempt(priv);
+}
+
+/* Button "Bearbeiten" (nur im Lesemodus sichtbar) */
+static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+
+    /* Stehen noch nicht gespeicherte Eingaben in der Maske (nach einem
+     * Konflikt), wuerde das Neuladen sie verwerfen -> vorher fragen. */
+    if (priv->unsaved_conflict) {
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Eingaben verwerfen?");
+        gtk_alert_dialog_set_detail(dialog,
+            "Ihre zuletzt eingegebenen Aenderungen wurden nicht gespeichert. "
+            "Sie gehen verloren, wenn die Akte neu geladen wird.\n\n"
+            "Tipp: Kopieren Sie den Text vorher aus der Maske.");
+
+        const char *buttons[] = {"Verwerfen und neu laden", "Abbrechen", NULL};
+        gtk_alert_dialog_set_buttons(dialog, buttons);
+        gtk_alert_dialog_set_default_button(dialog, 1);
+        gtk_alert_dialog_set_cancel_button(dialog, 1);
+        gtk_alert_dialog_set_modal(dialog, TRUE);
+
+        gtk_alert_dialog_choose(dialog,
+                               GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                               NULL,
+                               on_discard_confirm_response,
+                               priv);
+        g_object_unref(dialog);
+        return;
+    }
+
+    start_edit_attempt(priv);
 }
 
 /* Helper: Toggle zurücksetzen und Button wieder aktivieren */
@@ -2109,23 +2309,16 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     }
 }
 
-static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    if (!priv->current_node) {
-        show_error_dialog(priv->main_widget, "Nichts zu speichern",
-                         "Bitte erst eine Akte laden oder neu erstellen.");
-        return;
-    }
-
-    /* Erst speichern */
-    on_speichern_clicked(button, priv);
-    
+/* Akte freigeben (Lock abgeben) und Maske zuruecksetzen - gemeinsamer
+ * Abschluss von "Ok", ggf. nach der Rueckfrage zum Verwerfen. */
+static void finish_akte(SondModuleAktePrivate *priv) {
     /* Lock freigeben falls Node in DB. Unabhaengig von is_new_from_entry -
      * das Flag wird beim vorangehenden on_speichern_clicked() bereits auf
      * FALSE zurueckgesetzt (normaler Speichervorgang) und ist daher an
      * dieser Stelle kein brauchbares Unterscheidungsmerkmal mehr: "Ok"
      * heisst in jedem Fall "fertig bearbeitet", egal ob die Akte neu war
      * oder schon existierte - entsperren wie bei on_abbrechen_clicked(). */
-    gint64 node_id = sond_graph_node_get_id(priv->current_node);
+    gint64 node_id = priv->current_node ? sond_graph_node_get_id(priv->current_node) : 0;
     if (node_id > 0) {
         GError *error = NULL;
         if (!sond_client_unlock_node(priv->client, node_id, &error)) {
@@ -2147,6 +2340,69 @@ static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     
     /* Letzte RegNr vorschlagen */
     suggest_last_regnr(priv);
+}
+
+static void on_ok_discard_response(GObject *source, GAsyncResult *result,
+                                    gpointer user_data) {
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+    SondModuleAktePrivate *priv = user_data;
+
+    GError *error = NULL;
+    int button = gtk_alert_dialog_choose_finish(dialog, result, &error);
+    if (error) {
+        LOG_ERROR("Dialog error: %s\n", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    if (button == 0) {   /* 0 = "Verwerfen" */
+        finish_akte(priv);
+    }
+}
+
+static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        show_error_dialog(priv->main_widget, "Nichts zu speichern",
+                         "Bitte erst eine Akte laden oder neu erstellen.");
+        return;
+    }
+
+    /* Lesemodus nach einem Konflikt: die Eingaben in der Maske wurden nicht
+     * gespeichert - "Ok" wuerde sie verwerfen, daher vorher fragen. */
+    if (priv->state == AKTE_STATE_READONLY && priv->unsaved_conflict) {
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Eingaben verwerfen?");
+        gtk_alert_dialog_set_detail(dialog,
+            "Ihre zuletzt eingegebenen Aenderungen wurden nicht gespeichert und "
+            "gehen verloren, wenn Sie die Akte jetzt schliessen.\n\n"
+            "Tipp: Kopieren Sie den Text vorher aus der Maske.");
+
+        const char *buttons[] = {"Verwerfen", "Abbrechen", NULL};
+        gtk_alert_dialog_set_buttons(dialog, buttons);
+        gtk_alert_dialog_set_default_button(dialog, 1);
+        gtk_alert_dialog_set_cancel_button(dialog, 1);
+        gtk_alert_dialog_set_modal(dialog, TRUE);
+
+        gtk_alert_dialog_choose(dialog,
+                               GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                               NULL,
+                               on_ok_discard_response,
+                               priv);
+        g_object_unref(dialog);
+        return;
+    }
+
+    /* Erst speichern. Schlaegt das Speichern fehl (Dialog wurde bereits
+     * gezeigt), bleibt die Akte offen - sonst gingen die Eingaben verloren. */
+    if (priv->state != AKTE_STATE_READONLY) {   /* Lesemodus: nichts zu speichern */
+        priv->last_save_ok = FALSE;
+        on_speichern_clicked(button, priv);
+
+        if (priv->current_node && !priv->last_save_ok) {
+            return;
+        }
+    }
+
+    finish_akte(priv);
 }
 
 static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -2211,6 +2467,10 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     if (priv->current_node) {
         gint64 node_id = sond_graph_node_get_id(priv->current_node);
         if (node_id > 0) {
+            /* sond_client_unlock_node() ist jetzt generisch selbst ein
+             * No-Op, wenn wir den Lock laut held_locks gar nicht halten
+             * (z.B. READONLY-Anzeige einer von jemand anderem gelockten
+             * Akte) - keine Akte-spezifische Sonderbehandlung hier noetig. */
             GError *error = NULL;
             if (!sond_client_unlock_node(priv->client, node_id, &error)) {
                 LOG_ERROR("Unlock beim Zerstoeren fehlgeschlagen: %s\n",
@@ -2243,6 +2503,7 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     g_free(priv->locked_at_other);
     priv->locked_at_other = NULL;
 
+    g_signal_handlers_disconnect_by_data(priv->client, priv);
     g_object_unref(priv->client);
     priv->client = NULL;
 }
@@ -2442,6 +2703,9 @@ static void on_ocr_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
 GtkWidget* sond_module_akte_new(SondClient *client) {
     SondModuleAktePrivate *priv = g_new0(SondModuleAktePrivate, 1);
     priv->client = g_object_ref(client);
+
+    /* Generische Konflikt-Meldungen des Clients (gesperrt/geaendert/geloescht) */
+    g_signal_connect(priv->client, "node-conflict", G_CALLBACK(on_client_node_conflict), priv);
     priv->current_node = NULL;
     priv->state = AKTE_STATE_INITIAL;
     priv->is_new_from_entry = FALSE;
@@ -2546,7 +2810,7 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_box_append(GTK_BOX(status_box), priv->btn_reaktivieren);
 
     /* "Lock brechen" - nur sichtbar in AKTE_STATE_READONLY, s. set_akte_state() */
-    priv->btn_break_lock = gtk_button_new_with_label("Lock brechen");
+    priv->btn_break_lock = gtk_button_new_with_label("Bearbeiten");
     g_signal_connect(priv->btn_break_lock, "clicked", G_CALLBACK(on_break_lock_clicked), priv);
     gtk_widget_set_visible(priv->btn_break_lock, FALSE);  /* Initial unsichtbar */
     gtk_box_append(GTK_BOX(status_box), priv->btn_break_lock);

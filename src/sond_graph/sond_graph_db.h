@@ -45,13 +45,19 @@ G_BEGIN_DECLS
  * @SOND_GRAPH_DB_ERROR_CONNECTION: Datenbankverbindungsfehler
  * @SOND_GRAPH_DB_ERROR_QUERY: SQL-Query-Fehler
  * @SOND_GRAPH_DB_ERROR_NOT_FOUND: Gesuchte Daten nicht gefunden
+ * @SOND_GRAPH_DB_ERROR_LOCKED: Knoten ist von einem anderen Client gesperrt
+ * @SOND_GRAPH_DB_ERROR_STALE: Knoten wurde zwischenzeitlich geaendert (Version veraltet)
+ * @SOND_GRAPH_DB_ERROR_GONE: Knoten (oder Ziel einer Kante) existiert nicht mehr
  *
  * Fehler-Codes für Graph-DB-Operationen.
  */
 typedef enum {
     SOND_GRAPH_DB_ERROR_CONNECTION,
     SOND_GRAPH_DB_ERROR_QUERY,
-    SOND_GRAPH_DB_ERROR_NOT_FOUND
+    SOND_GRAPH_DB_ERROR_NOT_FOUND,
+    SOND_GRAPH_DB_ERROR_LOCKED,
+    SOND_GRAPH_DB_ERROR_STALE,
+    SOND_GRAPH_DB_ERROR_GONE
 } SondGraphDbError;
 
 /**
@@ -339,26 +345,39 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
  * sond_graph_db_save_node:
  * @conn: MySQL-Verbindung
  * @node: Zu speichernder Node
+ * @client_id: (nullable): ID des schreibenden Clients (fuer die Lock-Pruefung)
  * @error: (nullable): Fehler-Rückgabe
  *
  * Speichert einen Node in der Datenbank.
- * - Wenn node->id == 0: INSERT (neue ID wird gesetzt)
- * - Wenn node->id > 0: UPDATE
+ * - Wenn node->id == 0: INSERT (neue ID, Version 1 werden gesetzt)
+ * - Wenn node->id > 0: UPDATE, nur wenn die Version des Nodes noch der
+ *   gespeicherten entspricht; die Version wird dabei erhoeht und im Node
+ *   nachgetragen.
+ *
+ * Generische Schutzregeln (gelten fuer jeden Knoten):
+ * - Haelt ein ANDERER Client einen Lock auf den Knoten -> SOND_GRAPH_DB_ERROR_LOCKED
+ * - Version veraltet -> SOND_GRAPH_DB_ERROR_STALE
+ * - Knoten existiert nicht mehr -> SOND_GRAPH_DB_ERROR_GONE
  *
  * WICHTIG: Edges werden NICHT automatisch gespeichert!
  * Verwende sond_graph_db_save_node_with_edges() oder speichere Edges separat.
  *
  * Returns: %TRUE bei Erfolg
  */
-gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **error);
+gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
+                                 const gchar *client_id, GError **error);
 
 /**
  * sond_graph_db_save_node_with_edges:
  * @conn: MySQL-Verbindung
  * @node: Zu speichernder Node
+ * @client_id: (nullable): ID des schreibenden Clients (fuer die Lock-Pruefung)
  * @error: (nullable): Fehler-Rückgabe
  *
  * Speichert einen Node UND alle ausgehenden Edges in einer Transaktion.
+ * Es gelten die Schutzregeln von sond_graph_db_save_node(). Zeigt eine Edge
+ * auf einen nicht mehr existierenden Knoten, wird alles zurueckgerollt und
+ * SOND_GRAPH_DB_ERROR_GONE gemeldet (Details: sond_graph_db_find_missing_nodes()).
  *
  * Ablauf:
  * 1. START TRANSACTION
@@ -372,20 +391,39 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **erro
  *
  * Returns: %TRUE bei Erfolg (alles committed), %FALSE bei Fehler (alles rollback)
  */
-gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node, GError **error);
+gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node,
+                                            const gchar *client_id, GError **error);
+
+/**
+ * sond_graph_db_find_missing_nodes:
+ * @conn: MySQL-Verbindung
+ * @node: Node, dessen ID und Edge-Enden geprueft werden
+ *
+ * Ermittelt, welche der vom Node referenzierten Knoten (der Node selbst, sofern
+ * id > 0, sowie Quelle/Ziel seiner ausgehenden Edges) nicht (mehr) existieren.
+ * Gedacht fuer die Fehlerantwort nach SOND_GRAPH_DB_ERROR_GONE.
+ *
+ * Returns: (transfer full) (nullable): #GArray mit gint64-IDs, %NULL wenn keine fehlen
+ */
+GArray* sond_graph_db_find_missing_nodes(MYSQL *conn, SondGraphNode *node);
 
 /**
  * sond_graph_db_delete_node:
  * @conn: MySQL-Verbindung
  * @node_id: ID des zu löschenden Nodes
+ * @expected_version: Version, die der Client zuletzt gesehen hat
+ * @client_id: (nullable): ID des loeschenden Clients (fuer die Lock-Pruefung)
  * @error: (nullable): Fehler-Rückgabe
  *
  * Löscht einen Node aus der Datenbank.
  * Edges werden automatisch durch CASCADE gelöscht.
+ * Es gelten die Schutzregeln von sond_graph_db_save_node()
+ * (LOCKED / STALE / GONE).
  *
  * Returns: %TRUE bei Erfolg
  */
-gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error);
+gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_version,
+                                   const gchar *client_id, GError **error);
 
 /**
  * sond_graph_db_search_nodes:
@@ -464,20 +502,24 @@ gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error);
  * sond_graph_db_lock_node:
  * @conn: MySQL-Verbindung
  * @node_id: ID des zu lockenden Nodes
- * @user_id: Benutzer-ID (z.B. Username oder Session-ID)
+ * @user_id: Benutzername (nur Anzeige: locked_by)
+ * @client_id: Instanz-ID des Clients (UUID pro Prozess; massgeblich fuer
+ *             Konflikt-/Besitzerpruefung - zwei Instanzen desselben Users
+ *             konkurrieren damit wie zwei verschiedene Bearbeiter)
  * @timeout_minutes: Timeout in Minuten (0 = kein Timeout)
  * @reason: (nullable): Grund für das Lock
  * @error: (nullable): Fehler-Rückgabe
  *
  * Lockt einen Node für exklusiven Zugriff.
- * - Wenn bereits vom selben User gelockt: Lock wird erneuert
- * - Wenn von anderem User gelockt: Fehler
+ * - Wenn bereits von derselben Client-Instanz gelockt: Lock wird erneuert
+ * - Wenn von anderer Instanz gelockt (auch gleicher User): Fehler
  *
  * Returns: %TRUE bei Erfolg
  */
 gboolean sond_graph_db_lock_node(MYSQL *conn,
                                   gint64 node_id,
                                   const gchar *user_id,
+                                  const gchar *client_id,
                                   guint timeout_minutes,
                                   const gchar *reason,
                                   GError **error);
@@ -486,17 +528,17 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
  * sond_graph_db_unlock_node:
  * @conn: MySQL-Verbindung
  * @node_id: ID des zu entsperrenden Nodes
- * @user_id: Benutzer-ID
+ * @client_id: Instanz-ID des Clients, der den Lock haelt
  * @error: (nullable): Fehler-Rückgabe
  *
  * Entsperrt einen Node.
- * Nur der Lock-Inhaber kann entsperren.
+ * Nur die Lock-haltende Client-Instanz kann entsperren.
  *
  * Returns: %TRUE bei Erfolg
  */
 gboolean sond_graph_db_unlock_node(MYSQL *conn,
                                     gint64 node_id,
-                                    const gchar *user_id,
+                                    const gchar *client_id,
                                     GError **error);
 
 /**

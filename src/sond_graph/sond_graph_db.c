@@ -43,10 +43,14 @@ static const char *table_statements[] = {
     "  id BIGINT PRIMARY KEY AUTO_INCREMENT,"
     "  label VARCHAR(50) NOT NULL,"
     "  properties JSON NOT NULL DEFAULT ('[]'),"
+    "  version BIGINT NOT NULL DEFAULT 1,"
     "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
     "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
     "  INDEX idx_nodes_label (label)"
     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+    /* Migration fuer bestehende Datenbanken (MariaDB, idempotent) */
+    "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1",
 
     /* Edges-Tabelle */
     "CREATE TABLE IF NOT EXISTS edges ("
@@ -69,6 +73,7 @@ static const char *table_statements[] = {
     "CREATE TABLE IF NOT EXISTS node_locks ("
     "  node_id BIGINT PRIMARY KEY,"
     "  locked_by VARCHAR(100) NOT NULL,"
+    "  locked_client VARCHAR(64) NOT NULL,"
     "  locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
     "  expires_at TIMESTAMP NULL,"
     "  lock_reason VARCHAR(255) NULL,"
@@ -96,22 +101,23 @@ static const char *procedure_statements[] = {
     "CREATE PROCEDURE lock_node("
     "  IN p_node_id BIGINT,"
     "  IN p_user_id VARCHAR(100),"
+    "  IN p_client_id VARCHAR(64),"
     "  IN p_timeout_minutes INT,"
     "  IN p_reason VARCHAR(255)"
     ")"
     "BEGIN "
-    "  DECLARE v_current_lock_user VARCHAR(100);"
+    "  DECLARE v_current_lock_client VARCHAR(64);"
     "  DECLARE v_expires TIMESTAMP;"
-    "  SELECT locked_by INTO v_current_lock_user FROM node_locks WHERE node_id = p_node_id;"
-    "  IF v_current_lock_user IS NOT NULL AND v_current_lock_user != p_user_id THEN "
+    "  SELECT locked_client INTO v_current_lock_client FROM node_locks WHERE node_id = p_node_id;"
+    "  IF v_current_lock_client IS NOT NULL AND v_current_lock_client != p_client_id THEN "
     "    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Node ist bereits von einem anderen Bearbeiter gelockt';"
     "  END IF;"
     "  IF p_timeout_minutes IS NOT NULL THEN "
     "    SET v_expires = DATE_ADD(NOW(), INTERVAL p_timeout_minutes MINUTE);"
     "  END IF;"
-    "  INSERT INTO node_locks (node_id, locked_by, locked_at, expires_at, lock_reason) "
-    "  VALUES (p_node_id, p_user_id, CURRENT_TIMESTAMP, v_expires, p_reason) "
-    "  ON DUPLICATE KEY UPDATE locked_by = p_user_id, locked_at = CURRENT_TIMESTAMP, "
+    "  INSERT INTO node_locks (node_id, locked_by, locked_client, locked_at, expires_at, lock_reason) "
+    "  VALUES (p_node_id, p_user_id, p_client_id, CURRENT_TIMESTAMP, v_expires, p_reason) "
+    "  ON DUPLICATE KEY UPDATE locked_by = p_user_id, locked_client = p_client_id, locked_at = CURRENT_TIMESTAMP, "
     "    expires_at = v_expires, lock_reason = p_reason;"
     "  SELECT 'success' as status, node_id, locked_by, locked_at, expires_at "
     "  FROM node_locks WHERE node_id = p_node_id;"
@@ -120,14 +126,14 @@ static const char *procedure_statements[] = {
     /* unlock_node */
     "CREATE PROCEDURE unlock_node("
     "  IN p_node_id BIGINT,"
-    "  IN p_user_id VARCHAR(100)"
+    "  IN p_client_id VARCHAR(64)"
     ")"
     "BEGIN "
-    "  DECLARE v_current_lock_user VARCHAR(100);"
-    "  SELECT locked_by INTO v_current_lock_user FROM node_locks WHERE node_id = p_node_id;"
-    "  IF v_current_lock_user IS NULL THEN "
+    "  DECLARE v_current_lock_client VARCHAR(64);"
+    "  SELECT locked_client INTO v_current_lock_client FROM node_locks WHERE node_id = p_node_id;"
+    "  IF v_current_lock_client IS NULL THEN "
     "    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Node ist nicht gelockt';"
-    "  ELSEIF v_current_lock_user != p_user_id THEN "
+    "  ELSEIF v_current_lock_client != p_client_id THEN "
     "    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Node kann nur vom Lock-Inhaber entsperrt werden';"
     "  END IF;"
     "  DELETE FROM node_locks WHERE node_id = p_node_id;"
@@ -139,7 +145,7 @@ static const char *procedure_statements[] = {
     "  IN p_user_id VARCHAR(100)"
     ")"
     "BEGIN "
-    "  DELETE FROM node_locks WHERE locked_by = p_user_id;"
+    "  DELETE FROM node_locks WHERE locked_by = p_user_id COLLATE utf8mb4_unicode_ci;"
     "  SELECT ROW_COUNT() as unlocked_count;"
     "END",
 
@@ -396,12 +402,12 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     SondGraphNode *node = NULL;
     MYSQL_STMT *stmt = NULL;
     MYSQL_BIND bind_params[1];
-    MYSQL_BIND bind_results[5];
+    MYSQL_BIND bind_results[6];
     gchar *properties = NULL;  /* Dynamisch allokiert */
 
     /* Query vorbereiten */
     const char *query =
-        "SELECT id, label, properties, created_at, updated_at "
+        "SELECT id, label, properties, created_at, updated_at, version "
         "FROM nodes WHERE id = ?";
 
     stmt = mysql_stmt_init(conn);
@@ -451,6 +457,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     gchar updated_at[32] = {0};
     unsigned long updated_length;
     my_bool updated_is_null;
+    gint64 version = 0;
 
     memset(bind_results, 0, sizeof(bind_results));
 
@@ -478,6 +485,9 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     bind_results[4].buffer_length = sizeof(updated_at);
     bind_results[4].length = &updated_length;
     bind_results[4].is_null = &updated_is_null;
+
+    bind_results[5].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_results[5].buffer = &version;
 
     if (mysql_stmt_bind_result(stmt, bind_results)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -508,6 +518,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     /* Node erstellen */
     node = sond_graph_node_new();
     sond_graph_node_set_id(node, id);
+    sond_graph_node_set_version(node, version);
     sond_graph_node_set_label(node, label_full);
     if (label_full != label) g_free(label_full);
 
@@ -1134,39 +1145,121 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
     return nodes;
 }
 
+/* Existiert der Knoten? 1 = ja, 0 = nein, -1 = Abfragefehler */
+static int node_exists(MYSQL *conn, gint64 node_id) {
+    gchar *query = g_strdup_printf("SELECT 1 FROM nodes WHERE id = %" G_GINT64_FORMAT, node_id);
+    int rc = mysql_query(conn, query);
+    g_free(query);
+    if (rc) {
+        return -1;
+    }
+
+    MYSQL_RES *res = mysql_store_result(conn);
+    if (!res) {
+        return -1;
+    }
+    int exists = (mysql_fetch_row(res) != NULL) ? 1 : 0;
+    mysql_free_result(res);
+    return exists;
+}
+
+/* Generische Lock-Pruefung vor jedem schreibenden Zugriff: Haelt ein ANDERER
+ * Client einen Lock auf den Knoten, wird abgelehnt. Kein Lock oder eigener
+ * Lock -> OK. */
+static gboolean check_write_lock(MYSQL *conn, gint64 node_id, const gchar *client_id,
+                                 GError **error) {
+    gchar *query = g_strdup_printf(
+        "SELECT locked_client, locked_by FROM node_locks WHERE node_id = %" G_GINT64_FORMAT,
+        node_id);
+    int rc = mysql_query(conn, query);
+    g_free(query);
+    if (rc) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Lock check failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    MYSQL_RES *res = mysql_store_result(conn);
+    if (!res) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Lock check failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    gboolean ok = TRUE;
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (row && (client_id == NULL || g_strcmp0(row[0], client_id) != 0)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_LOCKED,
+                   "Knoten %" G_GINT64_FORMAT " ist von '%s' gesperrt",
+                   node_id, row[1] ? row[1] : "?");
+        ok = FALSE;
+    }
+
+    mysql_free_result(res);
+    return ok;
+}
+
+/* Setzt je nach Existenz GONE oder STALE (Update/Delete hat 0 Zeilen getroffen) */
+static void set_stale_or_gone_error(MYSQL *conn, gint64 node_id, GError **error) {
+    if (node_exists(conn, node_id) == 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_GONE,
+                   "Knoten %" G_GINT64_FORMAT " existiert nicht mehr", node_id);
+    } else {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
+                   "Knoten %" G_GINT64_FORMAT " wurde zwischenzeitlich geaendert", node_id);
+    }
+}
+
 /**
  * sond_graph_db_save_node:
  */
-gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **error) {
+gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
+                                 const gchar *client_id, GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
     g_return_val_if_fail(SOND_IS_GRAPH_NODE(node), FALSE);
 
     MYSQL_STMT *stmt = NULL;
-    gboolean success = FALSE;
 
     gint64 id = sond_graph_node_get_id(node);
+    gint64 expected_version = sond_graph_node_get_version(node);
     const gchar *label = sond_graph_node_get_label(node);
-
-    /* Properties mit NEUER API serialisieren */
-    GPtrArray *props = sond_graph_node_get_properties(node);
-    gchar *properties_json = sond_graph_property_list_to_json(props);
 
     if (label == NULL) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
                    "Node label cannot be NULL");
         g_prefix_error(error, "%s: ", __func__);
-        g_free(properties_json);
         return FALSE;
     }
+
+    if (id > 0) {
+        /* Bestehender Knoten: erst Lock pruefen, dann Version */
+        if (!check_write_lock(conn, id, client_id, error)) {
+            g_prefix_error(error, "%s: ", __func__);
+            return FALSE;
+        }
+        if (expected_version <= 0) {
+            g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
+                       "Knoten %" G_GINT64_FORMAT ": Version fehlt", id);
+            g_prefix_error(error, "%s: ", __func__);
+            return FALSE;
+        }
+    }
+
+    /* Properties mit NEUER API serialisieren */
+    GPtrArray *props = sond_graph_node_get_properties(node);
+    gchar *properties_json = sond_graph_property_list_to_json(props);
 
     const char *query;
 
     if (id == 0) {
-        /* INSERT - neuer Node */
+        /* INSERT - neuer Node (version = DEFAULT 1) */
         query = "INSERT INTO nodes (label, properties) VALUES (?, ?)";
     } else {
-        /* UPDATE - bestehender Node */
-        query = "UPDATE nodes SET label = ?, properties = ? WHERE id = ?";
+        /* UPDATE - nur wenn die Version noch stimmt */
+        query = "UPDATE nodes SET label = ?, properties = ?, version = version + 1 "
+                "WHERE id = ? AND version = ?";
     }
 
     stmt = mysql_stmt_init(conn);
@@ -1187,7 +1280,7 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **erro
         return FALSE;
     }
 
-    MYSQL_BIND bind[3];
+    MYSQL_BIND bind[4];
     memset(bind, 0, sizeof(bind));
 
     unsigned long label_length = strlen(label);
@@ -1205,10 +1298,13 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **erro
     bind[1].buffer_length = props_length;
     bind[1].length = &props_length;
 
-    /* Parameter 3: id (nur bei UPDATE) */
+    /* Parameter 3 + 4: id und erwartete Version (nur bei UPDATE) */
     if (id > 0) {
         bind[2].buffer_type = MYSQL_TYPE_LONGLONG;
         bind[2].buffer = (void*)&id;
+
+        bind[3].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind[3].buffer = (void*)&expected_version;
     }
 
     if (mysql_stmt_bind_param(stmt, bind)) {
@@ -1229,24 +1325,87 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **erro
         return FALSE;
     }
 
-    /* Bei INSERT: Neue ID setzen */
     if (id == 0) {
+        /* INSERT: Neue ID und Startversion setzen */
         gint64 new_id = mysql_stmt_insert_id(stmt);
         sond_graph_node_set_id(node, new_id);
-    }
+        sond_graph_node_set_version(node, 1);
+    } else {
+        /* UPDATE: hat keine Zeile getroffen -> veraltet oder geloescht */
+        my_ulonglong affected = mysql_stmt_affected_rows(stmt);
+        g_free(properties_json);
+        mysql_stmt_close(stmt);
 
-    success = TRUE;
+        if (affected == 0) {
+            set_stale_or_gone_error(conn, id, error);
+            g_prefix_error(error, "%s: ", __func__);
+            return FALSE;
+        }
+
+        sond_graph_node_set_version(node, expected_version + 1);
+        return TRUE;
+    }
 
     g_free(properties_json);
     mysql_stmt_close(stmt);
 
-    return success;
+    return TRUE;
+}
+
+/**
+ * sond_graph_db_find_missing_nodes:
+ */
+GArray* sond_graph_db_find_missing_nodes(MYSQL *conn, SondGraphNode *node) {
+    g_return_val_if_fail(conn != NULL, NULL);
+    g_return_val_if_fail(SOND_IS_GRAPH_NODE(node), NULL);
+
+    GArray *missing = NULL;
+
+    /* Eigene ID und Edge-Enden (jede ID nur einmal pruefen) */
+    GHashTable *checked = g_hash_table_new(g_int64_hash, g_int64_equal);
+    GArray *ids = g_array_new(FALSE, FALSE, sizeof(gint64));
+
+    gint64 self_id = sond_graph_node_get_id(node);
+    if (self_id > 0) {
+        g_array_append_val(ids, self_id);
+    }
+
+    GPtrArray *edges = sond_graph_node_get_outgoing_edges(node);
+    if (edges) {
+        for (guint i = 0; i < edges->len; i++) {
+            SondGraphEdge *edge = g_ptr_array_index(edges, i);
+            gint64 src = sond_graph_edge_get_source_id(edge);
+            gint64 tgt = sond_graph_edge_get_target_id(edge);
+            if (src > 0) g_array_append_val(ids, src);
+            if (tgt > 0) g_array_append_val(ids, tgt);
+        }
+    }
+
+    for (guint i = 0; i < ids->len; i++) {
+        gint64 nid = g_array_index(ids, gint64, i);
+        if (g_hash_table_contains(checked, &nid)) {
+            continue;
+        }
+        g_hash_table_add(checked, &g_array_index(ids, gint64, i));
+
+        if (node_exists(conn, nid) == 0) {
+            if (!missing) {
+                missing = g_array_new(FALSE, FALSE, sizeof(gint64));
+            }
+            g_array_append_val(missing, nid);
+        }
+    }
+
+    g_hash_table_destroy(checked);
+    g_array_unref(ids);
+    return missing;
 }
 
 /**
  * sond_graph_db_save_node_with_edges:
  */
-gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node, GError **error) {
+gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node,
+                                            const gchar *client_id, GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
     g_return_val_if_fail(SOND_IS_GRAPH_NODE(node), FALSE);
 
@@ -1261,7 +1420,7 @@ gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node, GE
     }
 
     /* Node speichern */
-    if (!sond_graph_db_save_node(conn, node, &tmp_error)) {
+    if (!sond_graph_db_save_node(conn, node, client_id, &tmp_error)) {
         g_propagate_error(error, tmp_error);
         mysql_query(conn, "ROLLBACK");
         return FALSE;
@@ -1313,7 +1472,8 @@ gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node, GE
 /**
  * sond_graph_db_delete_node:
  */
-gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) {
+gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_version,
+                                   const gchar *client_id, GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
 
     if (node_id == 0) {
@@ -1323,7 +1483,21 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) 
         return FALSE;
     }
 
-    gchar *query = g_strdup_printf("DELETE FROM nodes WHERE id = %" G_GINT64_FORMAT, node_id);
+    if (!check_write_lock(conn, node_id, client_id, error)) {
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    if (expected_version <= 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
+                   "Knoten %" G_GINT64_FORMAT ": Version fehlt", node_id);
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    gchar *query = g_strdup_printf(
+        "DELETE FROM nodes WHERE id = %" G_GINT64_FORMAT " AND version = %" G_GINT64_FORMAT,
+        node_id, expected_version);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1335,11 +1509,10 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) 
 
     g_free(query);
 
-    /* Prüfen ob wirklich gelöscht wurde */
+    /* Nichts geloescht: entweder geaendert (Version) oder schon weg */
     my_ulonglong affected = mysql_affected_rows(conn);
     if (affected == 0) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Node with ID %" G_GINT64_FORMAT " not found", node_id);
+        set_stale_or_gone_error(conn, node_id, error);
         g_prefix_error(error, "%s: ", __func__);
         return FALSE;
     }
@@ -1455,7 +1628,10 @@ gboolean sond_graph_db_save_edge(MYSQL *conn, SondGraphEdge *edge, GError **erro
     }
 
     if (mysql_stmt_execute(stmt)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+        /* 1452 = Fremdschluessel verletzt: Quelle oder Ziel der Edge existiert nicht mehr */
+        gint code = (mysql_stmt_errno(stmt) == 1452) ?
+            SOND_GRAPH_DB_ERROR_GONE : SOND_GRAPH_DB_ERROR_QUERY;
+        g_set_error(error, SOND_GRAPH_DB_ERROR, code,
                    "mysql_stmt_execute failed: %s", mysql_stmt_error(stmt));
         g_prefix_error(error, "%s: ", __func__);
         g_free(properties_json);
@@ -1524,11 +1700,13 @@ gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error) 
 gboolean sond_graph_db_lock_node(MYSQL *conn,
                                   gint64 node_id,
                                   const gchar *user_id,
+                                  const gchar *client_id,
                                   guint timeout_minutes,
                                   const gchar *reason,
                                   GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
     g_return_val_if_fail(user_id != NULL, FALSE);
+    g_return_val_if_fail(client_id != NULL, FALSE);
 
     MYSQL_STMT *stmt = mysql_stmt_init(conn);
     if (stmt == NULL) {
@@ -1539,7 +1717,7 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
     }
 
     /* Stored Procedure aufrufen */
-    const char *query = "CALL lock_node(?, ?, ?, ?)";
+    const char *query = "CALL lock_node(?, ?, ?, ?, ?)";
 
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1549,10 +1727,11 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
         return FALSE;
     }
 
-    MYSQL_BIND bind[4];
+    MYSQL_BIND bind[5];
     memset(bind, 0, sizeof(bind));
 
     unsigned long user_id_length = strlen(user_id);
+    unsigned long client_id_length = strlen(client_id);
     unsigned long reason_length = reason ? strlen(reason) : 0;
     my_bool reason_is_null = (reason == NULL);
     my_bool timeout_is_null = (timeout_minutes == 0);
@@ -1567,17 +1746,23 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
     bind[1].buffer_length = user_id_length;
     bind[1].length = &user_id_length;
 
-    /* Parameter 3: timeout_minutes (kann NULL sein) */
-    bind[2].buffer_type = MYSQL_TYPE_LONG;
-    bind[2].buffer = (void*)&timeout_minutes;
-    bind[2].is_null = &timeout_is_null;
+    /* Parameter 3: client_id (Instanz-Identitaet, massgeblich fuer Konflikte) */
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)client_id;
+    bind[2].buffer_length = client_id_length;
+    bind[2].length = &client_id_length;
 
-    /* Parameter 4: reason (kann NULL sein) */
-    bind[3].buffer_type = MYSQL_TYPE_STRING;
-    bind[3].buffer = (char*)reason;
-    bind[3].buffer_length = reason_length;
-    bind[3].length = &reason_length;
-    bind[3].is_null = &reason_is_null;
+    /* Parameter 4: timeout_minutes (kann NULL sein) */
+    bind[3].buffer_type = MYSQL_TYPE_LONG;
+    bind[3].buffer = (void*)&timeout_minutes;
+    bind[3].is_null = &timeout_is_null;
+
+    /* Parameter 5: reason (kann NULL sein) */
+    bind[4].buffer_type = MYSQL_TYPE_STRING;
+    bind[4].buffer = (char*)reason;
+    bind[4].buffer_length = reason_length;
+    bind[4].length = &reason_length;
+    bind[4].is_null = &reason_is_null;
 
     if (mysql_stmt_bind_param(stmt, bind)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1605,10 +1790,10 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
  */
 gboolean sond_graph_db_unlock_node(MYSQL *conn,
                                     gint64 node_id,
-                                    const gchar *user_id,
+                                    const gchar *client_id,
                                     GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
-    g_return_val_if_fail(user_id != NULL, FALSE);
+    g_return_val_if_fail(client_id != NULL, FALSE);
 
     MYSQL_STMT *stmt = mysql_stmt_init(conn);
     if (stmt == NULL) {
@@ -1631,15 +1816,15 @@ gboolean sond_graph_db_unlock_node(MYSQL *conn,
     MYSQL_BIND bind[2];
     memset(bind, 0, sizeof(bind));
 
-    unsigned long user_id_length = strlen(user_id);
+    unsigned long client_id_length = strlen(client_id);
 
     bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
     bind[0].buffer = (void*)&node_id;
 
     bind[1].buffer_type = MYSQL_TYPE_STRING;
-    bind[1].buffer = (char*)user_id;
-    bind[1].buffer_length = user_id_length;
-    bind[1].length = &user_id_length;
+    bind[1].buffer = (char*)client_id;
+    bind[1].buffer_length = client_id_length;
+    bind[1].length = &client_id_length;
 
     if (mysql_stmt_bind_param(stmt, bind)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1810,6 +1995,22 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
 
 /**
  * sond_graph_db_unlock_all_by_user:
+ *
+ * HINWEIS (Bugfix): Ursprünglich über das Prepared-Statement-API
+ * (mysql_stmt_*) implementiert, wie lock_node()/unlock_node(). Die
+ * Prozedur gibt aber - anders als bei lock_node()/unlock_node(), wo das
+ * SELECT-Ergebnis komplett ignoriert wird - tatsächlich einen Wert
+ * zurück, den wir brauchen (unlocked_count). Für ein CALL auf eine
+ * Prozedur mit SELECT-Ergebnis liefert mysql_stmt_result_metadata() im
+ * Prepared-Statement-API i.d.R. keine brauchbaren Metadaten, sodass
+ * mysql_stmt_bind_result()/mysql_stmt_fetch() hier fehlschlug (Status
+ * 500 beim Login, da release_stale_locks() -> /locks/release-mine
+ * -> diese Funktion). Fix: Text-Protokoll (mysql_query +
+ * mysql_store_result) wie bei cleanup_expired_locks(), inkl. Abräumen
+ * des von CALL implizit erzeugten zweiten (leeren) Ergebnisses per
+ * mysql_next_result() - sonst bleibt die (dauerhaft offene, geteilte)
+ * Verbindung in einem Zustand, der die NÄCHSTE Anfrage auf dieser
+ * Connection mit "Commands out of sync" scheitern lässt.
  */
 gint sond_graph_db_unlock_all_by_user(MYSQL *conn,
                                        const gchar *user_id,
@@ -1817,71 +2018,47 @@ gint sond_graph_db_unlock_all_by_user(MYSQL *conn,
     g_return_val_if_fail(conn != NULL, -1);
     g_return_val_if_fail(user_id != NULL, -1);
 
-    MYSQL_STMT *stmt = mysql_stmt_init(conn);
-    if (stmt == NULL) {
+    char *escaped_user_id = g_malloc(strlen(user_id) * 2 + 1);
+    mysql_real_escape_string(conn, escaped_user_id, user_id, strlen(user_id));
+
+    gchar *query = g_strdup_printf("CALL unlock_all_by_user('%s')", escaped_user_id);
+    g_free(escaped_user_id);
+
+    if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "mysql_stmt_init failed: %s", mysql_error(conn));
+                   "Failed to unlock locks: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(query);
+        return -1;
+    }
+    g_free(query);
+
+    MYSQL_RES *result = mysql_store_result(conn);
+    if (result == NULL) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Failed to get result: %s", mysql_error(conn));
         g_prefix_error(error, "%s: ", __func__);
         return -1;
     }
 
-    const char *query = "CALL unlock_all_by_user(?)";
-
-    if (mysql_stmt_prepare(stmt, query, strlen(query))) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "mysql_stmt_prepare failed: %s", mysql_stmt_error(stmt));
-        g_prefix_error(error, "%s: ", __func__);
-        mysql_stmt_close(stmt);
-        return -1;
+    gint unlocked_count = 0;
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (row && row[0]) {
+        unlocked_count = atoi(row[0]);
     }
 
-    MYSQL_BIND bind[1];
-    memset(bind, 0, sizeof(bind));
+    mysql_free_result(result);
 
-    unsigned long user_id_length = strlen(user_id);
-
-    bind[0].buffer_type = MYSQL_TYPE_STRING;
-    bind[0].buffer = (char*)user_id;
-    bind[0].buffer_length = user_id_length;
-    bind[0].length = &user_id_length;
-
-    if (mysql_stmt_bind_param(stmt, bind)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "mysql_stmt_bind_param failed: %s", mysql_stmt_error(stmt));
-        g_prefix_error(error, "%s: ", __func__);
-        mysql_stmt_close(stmt);
-        return -1;
+    /* Von CALL implizit erzeugtes(s) weiteres Ergebnis abräumen, damit die
+     * Connection für die nächste Anfrage wieder synchron ist. */
+    while (mysql_next_result(conn) == 0) {
+        MYSQL_RES *extra = mysql_store_result(conn);
+        if (extra) {
+            mysql_free_result(extra);
+        }
     }
 
-    if (mysql_stmt_execute(stmt)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "mysql_stmt_execute failed: %s", mysql_stmt_error(stmt));
-        g_prefix_error(error, "%s: ", __func__);
-        mysql_stmt_close(stmt);
-        return -1;
-    }
-
-    /* Ergebnis holen (unlocked_count) */
-    guint unlocked_count = 0;
-
-    MYSQL_BIND bind_result[1];
-    memset(bind_result, 0, sizeof(bind_result));
-
-    bind_result[0].buffer_type = MYSQL_TYPE_LONG;
-    bind_result[0].buffer = &unlocked_count;
-
-    if (mysql_stmt_bind_result(stmt, bind_result)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "mysql_stmt_bind_result failed: %s", mysql_stmt_error(stmt));
-        g_prefix_error(error, "%s: ", __func__);
-        mysql_stmt_close(stmt);
-        return -1;
-    }
-
-    mysql_stmt_fetch(stmt);
-    mysql_stmt_close(stmt);
-
-    return (gint)unlocked_count;
+    return unlocked_count;
 }
 
 /**

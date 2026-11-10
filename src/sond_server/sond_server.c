@@ -407,6 +407,99 @@ static void handle_auth_validate(SoupServer *soup_server,
     g_object_unref(builder);
 }
 
+/**
+ * get_request_client_id:
+ *
+ * Client-ID der anfragenden Programminstanz (Header X-Sond-Client-Id).
+ * %NULL, wenn der Header fehlt - dann gilt der Client bei jeder
+ * Lock-Pruefung als "fremd".
+ */
+static const gchar* get_request_client_id(SoupServerMessage *msg) {
+    return soup_message_headers_get_one(soup_server_message_get_request_headers(msg),
+                                        "X-Sond-Client-Id");
+}
+
+/**
+ * send_db_write_error:
+ * @node_id: betroffene Knoten-ID (fuer Lock-Info / fehlende IDs)
+ * @node: (nullable): gespeicherter Knoten (fuer fehlende Edge-Enden)
+ *
+ * Fehlerantwort fuer schreibende Knoten-Operationen. Die generischen
+ * Schutzregeln der DB-Schicht (LOCKED / STALE / GONE) werden als
+ * 409 mit { "error", "code", ... } gemeldet, alles andere als 500.
+ */
+static void send_db_write_error(SondServer *server,
+                                SoupServerMessage *msg,
+                                GError *error,
+                                gint64 node_id,
+                                SondGraphNode *node,
+                                const gchar *prefix) {
+    gchar *err_msg = g_strdup_printf("%s: %s", prefix, error ? error->message : "unknown");
+
+    const gchar *code_str = NULL;
+    if (error && error->domain == SOND_GRAPH_DB_ERROR) {
+        switch (error->code) {
+            case SOND_GRAPH_DB_ERROR_LOCKED: code_str = "LOCKED"; break;
+            case SOND_GRAPH_DB_ERROR_STALE:  code_str = "STALE";  break;
+            case SOND_GRAPH_DB_ERROR_GONE:   code_str = "GONE";   break;
+            default: break;
+        }
+    }
+
+    if (!code_str) {
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        return;
+    }
+
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "error");
+    json_builder_add_string_value(builder, err_msg);
+    json_builder_set_member_name(builder, "code");
+    json_builder_add_string_value(builder, code_str);
+
+    if (error->code == SOND_GRAPH_DB_ERROR_LOCKED) {
+        gchar *locked_by = NULL;
+        gchar *locked_at = NULL;
+        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL);
+        json_builder_set_member_name(builder, "locked_by");
+        json_builder_add_string_value(builder, locked_by ? locked_by : "");
+        json_builder_set_member_name(builder, "locked_at");
+        json_builder_add_string_value(builder, locked_at ? locked_at : "");
+        g_free(locked_by);
+        g_free(locked_at);
+    } else if (error->code == SOND_GRAPH_DB_ERROR_GONE) {
+        GArray *missing = node ? sond_graph_db_find_missing_nodes(server->db_conn, node) : NULL;
+        json_builder_set_member_name(builder, "missing_ids");
+        json_builder_begin_array(builder);
+        if (missing) {
+            for (guint i = 0; i < missing->len; i++) {
+                json_builder_add_int_value(builder, g_array_index(missing, gint64, i));
+            }
+            g_array_unref(missing);
+        } else if (node_id > 0) {
+            json_builder_add_int_value(builder, node_id);
+        }
+        json_builder_end_array(builder);
+    }
+
+    json_builder_end_object(builder);
+
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *root = json_builder_get_root(builder);
+    json_generator_set_root(generator, root);
+    gchar *json = json_generator_to_data(generator, NULL);
+
+    send_json_response(msg, SOUP_STATUS_CONFLICT, json);
+
+    g_free(json);
+    json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
+    g_free(err_msg);
+}
+
 /* ========================================================================
  * Request Handlers
  * ======================================================================== */
@@ -460,11 +553,9 @@ static void handle_node_save(SoupServer *soup_server,
     }
 
     /* Node speichern */
-    if (!sond_graph_db_save_node(server->db_conn, node, &error)) {
-        gchar *err_msg = g_strdup_printf("Failed to save node: %s",
-                                        error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
-        g_free(err_msg);
+    if (!sond_graph_db_save_node(server->db_conn, node, get_request_client_id(msg), &error)) {
+        send_db_write_error(server, msg, error, sond_graph_node_get_id(node), node,
+                            "Failed to save node");
         g_clear_error(&error);
         g_object_unref(node);
         return;
@@ -584,12 +675,16 @@ static void handle_node_delete(SoupServer *soup_server,
     }
 
     /* Node löschen */
+    gint64 expected_version = 0;
+    const gchar *version_str = query ? g_hash_table_lookup(query, "version") : NULL;
+    if (version_str) {
+        expected_version = g_ascii_strtoll(version_str, NULL, 10);
+    }
+
     GError *error = NULL;
-    if (!sond_graph_db_delete_node(server->db_conn, node_id, &error)) {
-        gchar *err_msg = g_strdup_printf("Failed to delete node: %s",
-                                        error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
-        g_free(err_msg);
+    if (!sond_graph_db_delete_node(server->db_conn, node_id, expected_version,
+                                   get_request_client_id(msg), &error)) {
+        send_db_write_error(server, msg, error, node_id, NULL, "Failed to delete node");
         g_clear_error(&error);
         return;
     }
@@ -643,11 +738,9 @@ static void handle_node_save_with_edges(SoupServer *soup_server,
     }
 
     /* Node mit Edges speichern */
-    if (!sond_graph_db_save_node_with_edges(server->db_conn, node, &error)) {
-        gchar *err_msg = g_strdup_printf("Failed to save node: %s",
-                                        error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
-        g_free(err_msg);
+    if (!sond_graph_db_save_node_with_edges(server->db_conn, node, get_request_client_id(msg), &error)) {
+        send_db_write_error(server, msg, error, sond_graph_node_get_id(node), node,
+                            "Failed to save node");
         g_clear_error(&error);
         g_object_unref(node);
         return;
@@ -857,20 +950,22 @@ static void handle_node_lock(SoupServer *soup_server,
 
     const gchar *user_id = json_object_has_member(obj, "user_id") ?
         json_object_get_string_member(obj, "user_id") : NULL;
+    const gchar *client_id = json_object_has_member(obj, "client_id") ?
+        json_object_get_string_member(obj, "client_id") : NULL;
     guint timeout_minutes = json_object_has_member(obj, "timeout_minutes") ?
         json_object_get_int_member(obj, "timeout_minutes") : 0;
     const gchar *reason = json_object_has_member(obj, "reason") ?
         json_object_get_string_member(obj, "reason") : NULL;
 
-    if (!user_id) {
+    if (!user_id || !client_id) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
-                           "Missing user_id");
+                           "Missing user_id or client_id");
         g_object_unref(parser);
         return;
     }
 
     /* Lock setzen */
-    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id,
+    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, client_id,
                                  timeout_minutes, reason, &error)) {
         gchar *err_msg = g_strdup_printf("Lock failed: %s",
                                         error ? error->message : "unknown");
@@ -984,8 +1079,11 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
     const gchar *user_id = json_object_has_member(obj, "user_id") ?
         json_object_get_string_member(obj, "user_id") : NULL;
 
-    if (!user_id) {
-        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing 'user_id' field");
+    const gchar *client_id = json_object_has_member(obj, "client_id") ?
+        json_object_get_string_member(obj, "client_id") : NULL;
+
+    if (!user_id || !client_id) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing 'user_id' or 'client_id' field");
         g_free(node_json);
         g_object_unref(parser);
         return;
@@ -1021,7 +1119,7 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
     }
 
     /* Node speichern */
-    if (!sond_graph_db_save_node(server->db_conn, node, &error)) {
+    if (!sond_graph_db_save_node(server->db_conn, node, client_id, &error)) {
         mysql_query(server->db_conn, "ROLLBACK");
         gchar *err_msg = g_strdup_printf("Failed to save node: %s",
                                         error ? error->message : "unknown");
@@ -1036,7 +1134,7 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
     gint64 node_id = sond_graph_node_get_id(node);
 
     /* Lock setzen (0 = kein Timeout) */
-    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, 0, lock_reason, &error)) {
+    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, client_id, 0, lock_reason, &error)) {
         mysql_query(server->db_conn, "ROLLBACK");
         LOG_ERROR("Lock failed for node %" G_GINT64_FORMAT ": %s\n",
                  node_id, error ? error->message : "unknown");
@@ -1167,17 +1265,17 @@ static void handle_node_unlock(SoupServer *soup_server,
         return;
     }
 
-    const gchar *user_id = json_object_has_member(obj, "user_id") ?
-        json_object_get_string_member(obj, "user_id") : NULL;
-    if (!user_id) {
+    const gchar *client_id = json_object_has_member(obj, "client_id") ?
+        json_object_get_string_member(obj, "client_id") : NULL;
+    if (!client_id) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
-                           "Missing user_id");
+                           "Missing client_id");
         g_object_unref(parser);
         return;
     }
 
     /* Unlock */
-    if (!sond_graph_db_unlock_node(server->db_conn, node_id, user_id, &error)) {
+    if (!sond_graph_db_unlock_node(server->db_conn, node_id, client_id, &error)) {
         gchar *err_msg = g_strdup_printf("Unlock failed: %s",
                                         error ? error->message : "unknown");
         send_error_response(msg, SOUP_STATUS_FORBIDDEN, err_msg);
@@ -1190,59 +1288,6 @@ static void handle_node_unlock(SoupServer *soup_server,
     g_object_unref(parser);
 
     send_success_response(msg, NULL);
-}
-
-/**
- * handle_locks_release_mine:
- * POST /locks/release-mine
- *
- * Header: Authorization: Bearer <token>
- * Response: { "success": true, "data": { "released_count": N } }
- *
- * Entsperrt alle Nodes, die der authentifizierte User gerade haelt. Wird vom
- * Client genau einmal pro Prozesslauf aufgerufen, beim allerersten Login
- * (nicht bei jedem stillen Re-Login nach Session-Timeout) - s.
- * sond_client_set_auth(). Deckt Crash/Offline-dann-Neustart ab: alte,
- * verwaiste Locks aus einem vorherigen, nicht sauber beendeten Prozesslauf
- * werden beim naechsten Start automatisch freigegeben.
- */
-static void handle_locks_release_mine(SoupServer *soup_server,
-                                       SoupServerMessage *msg,
-                                       const char *path,
-                                       GHashTable *query,
-                                       gpointer user_data) {
-    SondServer *server = SOND_SERVER(user_data);
-
-    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
-        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
-                           "Only POST allowed");
-        return;
-    }
-
-    const gchar *username = NULL;
-    if (!sond_server_check_authorization(server, msg, &username)) {
-        return;  /* 401 wurde bereits gesendet */
-    }
-
-    GError *error = NULL;
-    gint count = sond_graph_db_unlock_all_by_user(server->db_conn, username, &error);
-
-    if (count < 0) {
-        gchar *err_msg = g_strdup_printf("Release failed: %s",
-                                        error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
-        g_free(err_msg);
-        g_clear_error(&error);
-        return;
-    }
-
-    if (count > 0) {
-        LOG_INFO("Login von '%s': %d alte Lock(s) freigegeben\n", username, count);
-    }
-
-    gchar *data_json = g_strdup_printf("{\"released_count\":%d}", count);
-    send_success_response(msg, data_json);
-    g_free(data_json);
 }
 
 /* ========================================================================
@@ -1579,8 +1624,6 @@ static gboolean sond_server_prepare(SondServer*server,
                            handle_node_lock, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/unlock",
                            handle_node_unlock, server, NULL);
-    soup_server_add_handler(server->soup_server, "/locks/release-mine",
-                           handle_locks_release_mine, server, NULL);
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 
