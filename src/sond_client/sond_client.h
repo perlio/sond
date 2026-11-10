@@ -172,6 +172,30 @@ gboolean sond_client_lock_node(SondClient *client,
                                 GError **error);
 
 /**
+ * sond_client_lock_node_ex:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @lock_reason: (nullable): Grund für Lock
+ * @out_locked_by: (out) (nullable) (transfer full): bei Konflikt (409) der
+ *   aktuelle Lock-Inhaber
+ * @out_locked_at: (out) (nullable) (transfer full): bei Konflikt (409)
+ *   Zeitpunkt der letzten Lock-Erneuerung durch den Inhaber
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Wie sond_client_lock_node(), liefert bei Konflikt aber zusätzlich
+ * Inhaber/Zeitpunkt zurück, für die Anzeige im Client ("Gesperrt von X,
+ * zuletzt aktiv Y") und den "Lock brechen"-Button.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_lock_node_ex(SondClient *client,
+                                   gint64 node_id,
+                                   const gchar *lock_reason,
+                                   gchar **out_locked_by,
+                                   gchar **out_locked_at,
+                                   GError **error);
+
+/**
  * sond_client_unlock_node:
  * @client: SondClient
  * @node_id: Node-ID
@@ -186,6 +210,23 @@ gboolean sond_client_lock_node(SondClient *client,
 gboolean sond_client_unlock_node(SondClient *client,
                                   gint64 node_id,
                                   GError **error);
+
+/**
+ * sond_client_force_unlock_node:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * "Lock brechen": entfernt den Lock unabhängig davon, wer ihn hält. Für den
+ * Fall, dass ein anderer User den Node offensichtlich verwaist gesperrt hat
+ * (Crash/lange Inaktivität) und jemand anderes ihn übernehmen will.
+ * Wird serverseitig geloggt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_force_unlock_node(SondClient *client,
+                                        gint64 node_id,
+                                        GError **error);
 
 /**
  * sond_client_check_lock:

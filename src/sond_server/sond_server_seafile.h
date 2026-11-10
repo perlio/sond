@@ -59,6 +59,25 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
                                            GError **error);
 
 /**
+ * sond_server_seafile_find_group_id_by_name:
+ * @server: SondServer Instanz (benutzt server->auth_token des Service-Accounts)
+ * @group_name: Name der Gruppe, wie in der Config (seafile.group_name) hinterlegt
+ * @error: (nullable): Error Rückgabe - nur bei echtem Kommunikations-/Parse-Fehler
+ *         gesetzt, NICHT wenn die Gruppe einfach nicht existiert.
+ *
+ * Löst einen Gruppennamen über die Seafile-API (GET /api2/groups/ - Gruppen
+ * des Service-Accounts) in die numerische Group-ID auf. Erspart das manuelle
+ * Nachschlagen der ID über Web-UI/DB - die Gruppe wird in der Config künftig
+ * per (sprechendem) Namen statt per ID referenziert.
+ *
+ * Returns: Group-ID (>0) bei Erfolg, 0 wenn keine Gruppe mit diesem Namen
+ *          gefunden wurde (kein Fehler!), -1 bei Kommunikations-/Parse-Fehler.
+ */
+gint sond_server_seafile_find_group_id_by_name(SondServer *server,
+                                                const gchar *group_name,
+                                                GError **error);
+
+/**
  * sond_server_seafile_get_library_id_by_name:
  * @server: SondServer Instanz
  * @library_name: Name der Library

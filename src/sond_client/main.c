@@ -85,8 +85,11 @@ int main(int argc, char *argv[]) {
     
     /* KEIN Login beim Start - Login erfolgt erst bei erster Server-Anfrage */
     
+    /* TEMPORÄR fürs Testen von zwei gleichzeitigen Instanzen (Lock-Konflikt/
+     * "Lock brechen") auf G_APPLICATION_NON_UNIQUE umgestellt - danach bitte
+     * wieder zurück auf G_APPLICATION_DEFAULT_FLAGS (Single-Instance). */
     GtkApplication *app = gtk_application_new("de.rubarth-krieger.sond",
-                                               G_APPLICATION_DEFAULT_FLAGS);
+                                               G_APPLICATION_NON_UNIQUE);
     
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), client);
     

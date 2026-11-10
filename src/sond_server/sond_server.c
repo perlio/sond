@@ -855,7 +855,8 @@ static void handle_node_lock(SoupServer *soup_server,
     JsonNode *root = json_parser_get_root(parser);
     JsonObject *obj = json_node_get_object(root);
 
-    const gchar *user_id = json_object_get_string_member(obj, "user_id");
+    const gchar *user_id = json_object_has_member(obj, "user_id") ?
+        json_object_get_string_member(obj, "user_id") : NULL;
     guint timeout_minutes = json_object_has_member(obj, "timeout_minutes") ?
         json_object_get_int_member(obj, "timeout_minutes") : 0;
     const gchar *reason = json_object_has_member(obj, "reason") ?
@@ -873,9 +874,40 @@ static void handle_node_lock(SoupServer *soup_server,
                                  timeout_minutes, reason, &error)) {
         gchar *err_msg = g_strdup_printf("Lock failed: %s",
                                         error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
-        g_free(err_msg);
         g_clear_error(&error);
+
+        /* Wer haelt den Lock aktuell und seit wann? Fuer die Anzeige im
+         * Client ("Gesperrt von X, zuletzt aktiv Y") und den "Lock
+         * brechen"-Button. Fehler hier ist nicht fatal - dann bleiben die
+         * Felder einfach leer. */
+        gchar *locked_by = NULL;
+        gchar *locked_at = NULL;
+        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL);
+
+        JsonBuilder *conflict_builder = json_builder_new();
+        json_builder_begin_object(conflict_builder);
+        json_builder_set_member_name(conflict_builder, "error");
+        json_builder_add_string_value(conflict_builder, err_msg);
+        json_builder_set_member_name(conflict_builder, "locked_by");
+        json_builder_add_string_value(conflict_builder, locked_by ? locked_by : "");
+        json_builder_set_member_name(conflict_builder, "locked_at");
+        json_builder_add_string_value(conflict_builder, locked_at ? locked_at : "");
+        json_builder_end_object(conflict_builder);
+
+        JsonGenerator *conflict_gen = json_generator_new();
+        JsonNode *conflict_root = json_builder_get_root(conflict_builder);
+        json_generator_set_root(conflict_gen, conflict_root);
+        gchar *conflict_json = json_generator_to_data(conflict_gen, NULL);
+
+        send_json_response(msg, SOUP_STATUS_CONFLICT, conflict_json);
+
+        g_free(conflict_json);
+        json_node_free(conflict_root);
+        g_object_unref(conflict_gen);
+        g_object_unref(conflict_builder);
+        g_free(locked_by);
+        g_free(locked_at);
+        g_free(err_msg);
         g_object_unref(parser);
         return;
     }
@@ -1102,7 +1134,41 @@ static void handle_node_unlock(SoupServer *soup_server,
     JsonNode *root = json_parser_get_root(parser);
     JsonObject *obj = json_node_get_object(root);
 
-    const gchar *user_id = json_object_get_string_member(obj, "user_id");
+    gboolean force = json_object_has_member(obj, "force") ?
+        json_object_get_boolean_member(obj, "force") : FALSE;
+
+    if (force) {
+        /* "Lock brechen" - bewusst ohne Owner-Check (jeder authentifizierte
+         * User darf das, s. sond_server_check_authorization() oben). Wer es
+         * war und wessen Lock gebrochen wurde, wird geloggt. */
+        gchar *previous_holder = NULL;
+        gchar *previous_locked_at = NULL;
+        sond_graph_db_check_lock(server->db_conn, node_id, &previous_holder,
+                                  &previous_locked_at, NULL);
+        g_free(previous_locked_at);
+
+        if (!sond_graph_db_force_unlock_node(server->db_conn, node_id, &error)) {
+            gchar *err_msg = g_strdup_printf("Force unlock failed: %s",
+                                            error ? error->message : "unknown");
+            send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+            g_free(err_msg);
+            g_clear_error(&error);
+            g_free(previous_holder);
+            g_object_unref(parser);
+            return;
+        }
+
+        LOG_INFO("Lock fuer Node %" G_GINT64_FORMAT " (zuvor gehalten von '%s') "
+                 "gebrochen durch '%s'\n", node_id,
+                 previous_holder ? previous_holder : "?", username);
+        g_free(previous_holder);
+        g_object_unref(parser);
+        send_success_response(msg, NULL);
+        return;
+    }
+
+    const gchar *user_id = json_object_has_member(obj, "user_id") ?
+        json_object_get_string_member(obj, "user_id") : NULL;
     if (!user_id) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
                            "Missing user_id");
@@ -1124,6 +1190,59 @@ static void handle_node_unlock(SoupServer *soup_server,
     g_object_unref(parser);
 
     send_success_response(msg, NULL);
+}
+
+/**
+ * handle_locks_release_mine:
+ * POST /locks/release-mine
+ *
+ * Header: Authorization: Bearer <token>
+ * Response: { "success": true, "data": { "released_count": N } }
+ *
+ * Entsperrt alle Nodes, die der authentifizierte User gerade haelt. Wird vom
+ * Client genau einmal pro Prozesslauf aufgerufen, beim allerersten Login
+ * (nicht bei jedem stillen Re-Login nach Session-Timeout) - s.
+ * sond_client_set_auth(). Deckt Crash/Offline-dann-Neustart ab: alte,
+ * verwaiste Locks aus einem vorherigen, nicht sauber beendeten Prozesslauf
+ * werden beim naechsten Start automatisch freigegeben.
+ */
+static void handle_locks_release_mine(SoupServer *soup_server,
+                                       SoupServerMessage *msg,
+                                       const char *path,
+                                       GHashTable *query,
+                                       gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
+
+    const gchar *username = NULL;
+    if (!sond_server_check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
+    GError *error = NULL;
+    gint count = sond_graph_db_unlock_all_by_user(server->db_conn, username, &error);
+
+    if (count < 0) {
+        gchar *err_msg = g_strdup_printf("Release failed: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
+
+    if (count > 0) {
+        LOG_INFO("Login von '%s': %d alte Lock(s) freigegeben\n", username, count);
+    }
+
+    gchar *data_json = g_strdup_printf("{\"released_count\":%d}", count);
+    send_success_response(msg, data_json);
+    g_free(data_json);
 }
 
 /* ========================================================================
@@ -1203,6 +1322,7 @@ struct DataConfig {
 	gchar *db_passfile;
 	gchar* sf_user;
 	gchar *sf_passfile;
+	gchar *sf_group_name;
 };
 
 static void data_config_free(struct DataConfig *data_config) {
@@ -1212,6 +1332,7 @@ static void data_config_free(struct DataConfig *data_config) {
 	g_free(data_config->db_passfile);
 	g_free(data_config->sf_user);
 	g_free(data_config->sf_passfile);
+	g_free(data_config->sf_group_name);
 }
 
 static gboolean sond_server_load_config(SondServer *server,
@@ -1282,7 +1403,12 @@ static gboolean sond_server_load_config(SondServer *server,
     server->seafile_url = g_key_file_get_string(keyfile, "seafile", "url", NULL);
     data_config->sf_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
     data_config->sf_passfile = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
-    server->seafile_group_id = g_key_file_get_integer(keyfile, "seafile", "group_id", NULL);
+    /* Gruppe wird per Name statt per (manuell in der Web-UI/DB nachgeschlagener)
+     * ID referenziert - sond_server_init_seafile() löst den Namen nach dem
+     * Seafile-Login in server->seafile_group_id auf. Key fehlt/leer ->
+     * seafile_group_id bleibt 0 -> Libraries werden nicht automatisch geteilt
+     * (z.B. in der Dev-Umgebung gewollt). */
+    data_config->sf_group_name = g_key_file_get_string(keyfile, "seafile", "group_name", NULL);
 
     g_key_file_free(keyfile);
     return TRUE;
@@ -1314,8 +1440,7 @@ static gboolean sond_server_init_db_conn(SondServer *server,
     }
 
     gpointer suc = mysql_real_connect(server->db_conn, data_config->db_host,
-    		data_config->db_user, db_password, data_config->db_name,
-    		(unsigned int) data_config->db_port, NULL, 0);
+    		data_config->db_user, db_password, data_config->db_name, 0, NULL, 0);
 
     // Passwort überschreiben
 	memset(db_password, 0, strlen(db_password));
@@ -1362,6 +1487,34 @@ static gboolean sond_server_init_seafile(SondServer *server,
 	g_free(sf_password);
 	if (!server->auth_token)
 		return FALSE;
+
+	/* Gruppen-Name (falls konfiguriert) jetzt - mit gueltigem auth_token -
+	 * in die numerische Group-ID auflösen. Nicht konfiguriert (Key fehlt/
+	 * leer) ist kein Fehler - dann wird einfach nicht geteilt (z.B. Dev-
+	 * Umgebung). Ist aber ein Name konfiguriert und die Gruppe existiert
+	 * nicht (oder der Service-Account ist nicht Mitglied) bzw. die Abfrage
+	 * schlägt fehl, bricht der Serverstart ab - eine konfigurierte, aber
+	 * nicht funktionierende Freigabe soll nicht unbemerkt durchrutschen. */
+	if (data_config->sf_group_name && *data_config->sf_group_name) {
+		gint found_id = sond_server_seafile_find_group_id_by_name(
+			server, data_config->sf_group_name, error);
+
+		if (found_id > 0) {
+			server->seafile_group_id = found_id;
+			LOG_INFO("Seafile-Gruppe '%s' -> ID %d (Libraries werden automatisch geteilt)\n",
+				data_config->sf_group_name, found_id);
+		} else if (found_id == 0) {
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+				"Seafile-Gruppe '%s' nicht gefunden - Account '%s' muss Mitglied "
+				"dieser Gruppe sein", data_config->sf_group_name, data_config->sf_user);
+			return FALSE;
+		} else {
+			/* found_id < 0: *error wurde bereits von find_group_id_by_name gesetzt */
+			g_prefix_error(error, "Seafile-Gruppe '%s' konnte nicht aufgelöst werden: ",
+				data_config->sf_group_name);
+			return FALSE;
+		}
+	}
 
 	return TRUE;
 }
@@ -1426,6 +1579,8 @@ static gboolean sond_server_prepare(SondServer*server,
                            handle_node_lock, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/unlock",
                            handle_node_unlock, server, NULL);
+    soup_server_add_handler(server->soup_server, "/locks/release-mine",
+                           handle_locks_release_mine, server, NULL);
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 

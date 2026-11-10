@@ -518,6 +518,8 @@ gboolean sond_graph_db_force_unlock_node(MYSQL *conn,
  * @conn: MySQL-Verbindung
  * @node_id: ID des zu prüfenden Nodes
  * @locked_by: (out) (nullable) (transfer full): Benutzer der den Lock hält
+ * @locked_at: (out) (nullable) (transfer full): Zeitpunkt der letzten
+ *   Lock-Vergabe/-Erneuerung, als MySQL-TIMESTAMP-String
  * @error: (nullable): Fehler-Rückgabe
  *
  * Prüft ob ein Node gelockt ist.
@@ -527,6 +529,7 @@ gboolean sond_graph_db_force_unlock_node(MYSQL *conn,
 gboolean sond_graph_db_check_lock(MYSQL *conn,
                                    gint64 node_id,
                                    gchar **locked_by,
+                                   gchar **locked_at,
                                    GError **error);
 
 /**

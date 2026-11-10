@@ -57,8 +57,9 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
     /* URL: https://seafile.example.com/api2/auth-token/ */
     gchar *url = g_strdup_printf("%s/api2/auth-token/", seafile_url);
     
-    /* Form-Data: username=xxx&password=yyy */
-    gchar *form_data = g_strdup_printf("username=%s&password=%s", user, password);
+    /* Form-Data: username=xxx&password=yyy (korrekt kodiert - Werte koennen
+     * '&'/'='/'%'/Leerzeichen enthalten) */
+    gchar *form_data = soup_form_encode("username", user, "password", password, NULL);
     
     SoupSession *session = soup_session_new();
     SoupMessage *msg = soup_message_new("POST", url);
@@ -122,8 +123,110 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
     g_bytes_unref(response);
     g_object_unref(msg);
     g_object_unref(session);
-    
+
     return token;
+}
+
+/**
+ * sond_server_seafile_find_group_id_by_name:
+ *
+ * Seafile API:
+ * GET https://seafile.example.com/api2/groups/
+ * Authorization: Token xxx
+ * Response: {"groups": [{"id": 1, "name": "xxx", ...}, ...], "replynum": N}
+ */
+gint sond_server_seafile_find_group_id_by_name(SondServer *server,
+                                                const gchar *group_name,
+                                                GError **error) {
+    g_return_val_if_fail(server != NULL, -1);
+    g_return_val_if_fail(group_name != NULL, -1);
+
+    gchar const* seafile_url = sond_server_get_seafile_url(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
+    if (!seafile_url || !auth_token) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile URL/token not available");
+        return -1;
+    }
+
+    gchar *url = g_strdup_printf("%s/api2/groups/", seafile_url);
+
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    gchar *auth_header = g_strdup_printf("Token %s", auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                               "Authorization", auth_header);
+    g_free(auth_header);
+
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return -1;
+    }
+
+    guint status = soup_message_get_status(msg);
+
+    if (status != 200) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to list groups (HTTP %u): %.*s",
+                   status, (int)size, body);
+
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return -1;
+    }
+
+    /* Response parsen: {"groups": [{"id": 1, "name": "xxx"}, ...]} */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+
+    JsonParser *parser = json_parser_new();
+    gint found_id = 0;
+
+    if (json_parser_load_from_data(parser, data, size, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+
+        if (json_object_has_member(obj, "groups")) {
+            JsonArray *groups = json_object_get_array_member(obj, "groups");
+
+            for (guint i = 0; i < json_array_get_length(groups); i++) {
+                JsonObject *group = json_array_get_object_element(groups, i);
+
+                if (json_object_has_member(group, "name")) {
+                    const gchar *name = json_object_get_string_member(group, "name");
+                    /* EXAKTER Match! */
+                    if (name && g_strcmp0(name, group_name) == 0 &&
+                        json_object_has_member(group, "id")) {
+                        found_id = (gint)json_object_get_int_member(group, "id");
+                        break;
+                    }
+                }
+            }
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Seafile response missing 'groups' field");
+            found_id = -1;
+        }
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to parse Seafile response");
+        found_id = -1;
+    }
+
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+
+    return found_id;
 }
 
 /**
@@ -234,12 +337,13 @@ static gchar* seafile_create_library(SondServer *server,
     /* URL: https://seafile.example.com/api2/repos/ */
     gchar *url = g_strdup_printf("%s/api2/repos/", seafile_url);
     
-    /* Form-Data: name=xxx&desc=yyy */
+    /* Form-Data: name=xxx&desc=yyy (korrekt kodiert - z.B. Aktennamen mit
+     * '&' wuerden sonst das Feld zerschneiden) */
     gchar *form_data;
     if (desc && strlen(desc) > 0) {
-        form_data = g_strdup_printf("name=%s&desc=%s", name, desc);
+        form_data = soup_form_encode("name", name, "desc", desc, NULL);
     } else {
-        form_data = g_strdup_printf("name=%s", name);
+        form_data = soup_form_encode("name", name, NULL);
     }
     
     SoupSession *session = soup_session_new();

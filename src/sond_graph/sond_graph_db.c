@@ -1707,6 +1707,7 @@ gboolean sond_graph_db_force_unlock_node(MYSQL *conn,
 gboolean sond_graph_db_check_lock(MYSQL *conn,
                                    gint64 node_id,
                                    gchar **locked_by,
+                                   gchar **locked_at,
                                    GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
 
@@ -1718,7 +1719,7 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
         return FALSE;
     }
 
-    const char *query = "SELECT locked_by FROM node_locks WHERE node_id = ?";
+    const char *query = "SELECT locked_by, locked_at FROM node_locks WHERE node_id = ?";
 
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1753,14 +1754,23 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
     /* Ergebnis holen */
     char user_buffer[256] = {0};  /* Größerer Buffer */
     unsigned long user_length;
+    char time_buffer[32] = {0};   /* reicht fuer "YYYY-MM-DD HH:MM:SS" */
+    unsigned long time_length;
 
-    MYSQL_BIND bind_result[1];
+    MYSQL_BIND bind_result[2];
     memset(bind_result, 0, sizeof(bind_result));
 
     bind_result[0].buffer_type = MYSQL_TYPE_STRING;
     bind_result[0].buffer = user_buffer;
     bind_result[0].buffer_length = sizeof(user_buffer);
     bind_result[0].length = &user_length;
+
+    /* locked_at (TIMESTAMP) als String binden - MariaDB konvertiert das
+     * automatisch bei MYSQL_TYPE_STRING-Bindings. */
+    bind_result[1].buffer_type = MYSQL_TYPE_STRING;
+    bind_result[1].buffer = time_buffer;
+    bind_result[1].buffer_length = sizeof(time_buffer);
+    bind_result[1].length = &time_length;
 
     if (mysql_stmt_bind_result(stmt, bind_result)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1780,10 +1790,16 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
         if (locked_by != NULL) {
             *locked_by = g_strdup(user_buffer);
         }
+        if (locked_at != NULL) {
+            *locked_at = g_strdup(time_buffer);
+        }
     } else {
         /* Kein Lock */
         if (locked_by != NULL) {
             *locked_by = NULL;
+        }
+        if (locked_at != NULL) {
+            *locked_at = NULL;
         }
     }
 

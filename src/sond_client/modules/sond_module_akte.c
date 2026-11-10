@@ -67,6 +67,12 @@ typedef struct {
     GtkWidget *btn_ocr;                 // NEU
     gchar *library_name;                // NEU - wird bei update_ui_from_node gesetzt
     GtkCssProvider *css_provider;
+
+    /* Lock-Konflikt: wer haelt den Lock, wenn wir ihn nicht bekommen haben
+     * (AKTE_STATE_READONLY), und seit wann - fuer Anzeige + "Lock brechen" */
+    gchar *locked_by_other;
+    gchar *locked_at_other;
+    GtkWidget *btn_break_lock;
 } SondModuleAktePrivate;
 
 /* Struktur für Suchergebnis */
@@ -221,6 +227,15 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+
+            if (priv->locked_by_other) {
+                gchar *text = priv->locked_at_other ?
+                    g_strdup_printf("Gesperrt von: %s (zuletzt aktiv: %s)",
+                                    priv->locked_by_other, priv->locked_at_other) :
+                    g_strdup_printf("Gesperrt von: %s", priv->locked_by_other);
+                gtk_label_set_text(GTK_LABEL(priv->status_label), text);
+                g_free(text);
+            }
             break;
 
         case AKTE_STATE_ABGELEGT:
@@ -241,6 +256,8 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
             break;
     }
+
+    gtk_widget_set_visible(priv->btn_break_lock, (new_state == AKTE_STATE_READONLY));
 }
 
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
@@ -525,11 +542,13 @@ static void on_search_result_selected(GtkListBox *listbox,
     /* Lock versuchen zu setzen */
     gint64 node_id = sond_graph_node_get_id(result->node);
     GError *lock_error = NULL;
-    
-    if (sond_client_lock_node(data->priv->client, node_id, "Bearbeitung", &lock_error)) {
+    gchar *locked_by = NULL, *locked_at = NULL;
+
+    if (sond_client_lock_node_ex(data->priv->client, node_id, "Bearbeitung",
+                                 &locked_by, &locked_at, &lock_error)) {
         /* Lock erfolgreich */
         update_ui_from_node(data->priv);
-        
+
         /* Prüfe ob Akte abgelegt ist */
         if (ist_akte_aktiv(data->priv->current_node)) {
             set_akte_state(data->priv, AKTE_STATE_EDITING);
@@ -544,12 +563,23 @@ static void on_search_result_selected(GtkListBox *listbox,
             result->regnr_display);
         show_info_dialog(data->priv->main_widget, "Akte gesperrt", msg);
         g_free(msg);
-        
+
         update_ui_from_node(data->priv);
+
+        g_free(data->priv->locked_by_other);
+        data->priv->locked_by_other = locked_by;
+        locked_by = NULL;
+        g_free(data->priv->locked_at_other);
+        data->priv->locked_at_other = locked_at;
+        locked_at = NULL;
+
         set_akte_state(data->priv, AKTE_STATE_READONLY);
-        
+
         if (lock_error) g_error_free(lock_error);
     }
+
+    g_free(locked_by);
+    g_free(locked_at);
     
     /* Dialog schließen */
     gtk_window_close(GTK_WINDOW(data->dialog));
@@ -1258,6 +1288,103 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
     show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
 }
 
+/**
+ * on_break_lock_dialog_response:
+ *
+ * Callback fuer die "Lock brechen?"-Bestaetigung. Bei "Ja": Lock des anderen
+ * Users force-entsperren, dann sofort selbst sperren und in den EDITING-
+ * Zustand wechseln.
+ */
+static void on_break_lock_dialog_response(GObject *source, GAsyncResult *result,
+                                           gpointer user_data) {
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+    SondModuleAktePrivate *priv = user_data;
+
+    GError *error = NULL;
+    int button = gtk_alert_dialog_choose_finish(dialog, result, &error);
+
+    if (error) {
+        LOG_ERROR("Dialog error: %s\n", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    if (button != 0 || !priv->current_node) {  /* button == 0 -> "Ja" */
+        return;
+    }
+
+    gint64 node_id = sond_graph_node_get_id(priv->current_node);
+    if (node_id <= 0) {
+        return;
+    }
+
+    GError *unlock_error = NULL;
+    if (!sond_client_force_unlock_node(priv->client, node_id, &unlock_error)) {
+        show_error_dialog(priv->main_widget, "Lock brechen fehlgeschlagen",
+                          unlock_error ? unlock_error->message : "Unbekannt");
+        if (unlock_error) g_error_free(unlock_error);
+        return;
+    }
+
+    GError *lock_error = NULL;
+    if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
+        g_free(priv->locked_by_other);
+        priv->locked_by_other = NULL;
+        g_free(priv->locked_at_other);
+        priv->locked_at_other = NULL;
+
+        update_ui_from_node(priv);
+
+        if (ist_akte_aktiv(priv->current_node)) {
+            set_akte_state(priv, AKTE_STATE_EDITING);
+        } else {
+            set_akte_state(priv, AKTE_STATE_ABGELEGT);
+        }
+    } else {
+        /* Sollte kaum vorkommen (wir haben ja gerade entsperrt), aber falls
+         * doch (z.B. ein dritter User war schneller): Fehler anzeigen,
+         * Zustand bleibt READONLY. */
+        show_error_dialog(priv->main_widget, "Übernahme fehlgeschlagen",
+                          lock_error ? lock_error->message : "Unbekannt");
+        if (lock_error) g_error_free(lock_error);
+    }
+}
+
+static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+
+    gchar *detail = priv->locked_by_other ?
+        g_strdup_printf("Diese Akte wird gerade von '%s' bearbeitet%s%s.\n\n"
+                        "Lock trotzdem übernehmen? Der andere Bearbeiter verliert "
+                        "dadurch ohne Vorwarnung seinen Zugriff.",
+                        priv->locked_by_other,
+                        priv->locked_at_other ? " (zuletzt aktiv: " : "",
+                        priv->locked_at_other ? priv->locked_at_other : "") :
+        g_strdup("Diese Akte wird gerade von einem anderen Benutzer bearbeitet.\n\n"
+                "Lock trotzdem übernehmen? Der andere Bearbeiter verliert dadurch "
+                "ohne Vorwarnung seinen Zugriff.");
+
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("Lock brechen?");
+    gtk_alert_dialog_set_detail(dialog, detail);
+    g_free(detail);
+
+    const char *buttons[] = {"Ja", "Nein", NULL};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_default_button(dialog, 1);  /* "Nein" als Standard - bewusste Entscheidung */
+    gtk_alert_dialog_set_cancel_button(dialog, 1);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+
+    gtk_alert_dialog_choose(dialog,
+                           GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                           NULL,
+                           on_break_lock_dialog_response,
+                           priv);
+
+    g_object_unref(dialog);
+}
+
 /* Helper: Toggle zurücksetzen und Button wieder aktivieren */
 static void reset_toggle_and_enable(GtkCheckButton *toggle, gboolean new_state,
                                     SondModuleAktePrivate *priv) {
@@ -1413,6 +1540,8 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
                          error ? error->message : "Unbekannt");
         g_error_free(error);
         reset_toggle_and_enable(toggle, !is_active, priv);
+        g_free(library_name);
+        g_free(library_id);
         return;
     }
 
@@ -1583,11 +1712,13 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
         
         gint64 node_id = sond_graph_node_get_id(node);
         GError *lock_error = NULL;
-        
-        if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
+        gchar *locked_by = NULL, *locked_at = NULL;
+
+        if (sond_client_lock_node_ex(priv->client, node_id, "Bearbeitung",
+                                     &locked_by, &locked_at, &lock_error)) {
             /* Lock erfolgreich */
             update_ui_from_node(priv);
-            
+
             /* Prüfe ob Akte abgelegt ist */
             if (ist_akte_aktiv(priv->current_node)) {
                 set_akte_state(priv, AKTE_STATE_EDITING);  /* Aktiv -> editierbar */
@@ -1602,13 +1733,24 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
                 lfd_nr, year);
             show_info_dialog(priv->main_widget, "Akte gesperrt", msg);
             g_free(msg);
-            
+
             update_ui_from_node(priv);
+
+            g_free(priv->locked_by_other);
+            priv->locked_by_other = locked_by;
+            locked_by = NULL;
+            g_free(priv->locked_at_other);
+            priv->locked_at_other = locked_at;
+            locked_at = NULL;
+
             set_akte_state(priv, AKTE_STATE_READONLY);
-            
+
             if (lock_error) g_error_free(lock_error);
         }
-        
+
+        g_free(locked_by);
+        g_free(locked_at);
+
         return;
     }
     
@@ -1868,26 +2010,47 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             gchar *library_id = create_seafile_library(priv, year, lfd, &error);
 
             if (!library_id) {
-                /* Library-Fehler - nur warnen, Node bleibt */
-                LOG_ERROR("Library-Erstellung fehlgeschlagen: %s\n",
-                         error ? error->message : "Unbekannt");
+                /* Library-Erstellung fehlgeschlagen - Node wieder löschen (Rollback).
+                 * Einheitlich mit dem "Neue Akte"-Button-Pfad weiter oben: bei
+                 * fehlgeschlagener Library-Erstellung bleibt keine Akte ohne
+                 * Library bestehen, unabhängig vom Erstellungsweg. */
+                LOG_ERROR("Library-Erstellung fehlgeschlagen, lösche Node (Rollback)...\n");
 
-                gchar *msg = g_strdup_printf(
-                    "Akte wurde gespeichert, aber Seafile Library konnte nicht erstellt werden:\n%s\n\n"
-                    "Sie können die Akte trotzdem nutzen, aber keine Dateien hochladen.",
-                    error ? error->message : "Unbekannt");
-                show_error_dialog(priv->main_widget, "Warnung", msg);
+                gint64 node_id = sond_graph_node_get_id(priv->current_node);
+                GError *del_error = NULL;
+
+                /* Unlock und Delete */
+                sond_client_unlock_node(priv->client, node_id, NULL);
+
+                if (!delete_node(priv, node_id, &del_error)) {
+                    LOG_ERROR("Rollback fehlgeschlagen: %s\n",
+                             del_error ? del_error->message : "Unbekannt");
+                    if (del_error) g_error_free(del_error);
+                }
+
+                /* Fehler anzeigen */
+                gchar *msg = g_strdup_printf("Fehler beim Erstellen der Seafile Library: %s\n\n"
+                                            "Node wurde zurückgerollt.",
+                                            error ? error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "Library-Erstellung fehlgeschlagen", msg);
+                g_free(msg);
                 if (error) g_error_free(error);
+
+                /* current_node ungültig machen */
+                g_object_unref(priv->current_node);
+                priv->current_node = NULL;
+
+                return;
             }
 
             g_free(library_id);
 
             /* UI aktualisieren */
             priv->is_new_from_entry = FALSE;
-            
+
             /* RegNr merken */
             sond_client_set_last_regnr(priv->client, lfd, year);
-            
+
             update_ui_from_node(priv);
             show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
 
@@ -2074,6 +2237,11 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
 
     g_free(priv->library_name);
     priv->library_name = NULL;
+
+    g_free(priv->locked_by_other);
+    priv->locked_by_other = NULL;
+    g_free(priv->locked_at_other);
+    priv->locked_at_other = NULL;
 
     g_object_unref(priv->client);
     priv->client = NULL;
@@ -2354,13 +2522,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
 	gtk_widget_set_visible(priv->offline_toggle, FALSE);
 	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
 
-	/* Offline-Toggle Button */
-	priv->offline_toggle = gtk_check_button_new_with_label("Offline verfügbar");
-	gtk_widget_set_margin_start(priv->offline_toggle, 20);
-	g_signal_connect(priv->offline_toggle, "toggled", G_CALLBACK(on_offline_toggle_toggled), priv);
-	gtk_widget_set_visible(priv->offline_toggle, FALSE);
-	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
-
 	/* OCR Button */                                         // NEU
 	priv->btn_ocr = gtk_button_new_with_label("OCR");       // NEU
 	gtk_widget_set_margin_start(priv->btn_ocr, 10);         // NEU
@@ -2383,6 +2544,12 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     g_signal_connect(priv->btn_reaktivieren, "clicked", G_CALLBACK(on_reaktivieren_clicked), priv);
     gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);  /* Initial unsichtbar */
     gtk_box_append(GTK_BOX(status_box), priv->btn_reaktivieren);
+
+    /* "Lock brechen" - nur sichtbar in AKTE_STATE_READONLY, s. set_akte_state() */
+    priv->btn_break_lock = gtk_button_new_with_label("Lock brechen");
+    g_signal_connect(priv->btn_break_lock, "clicked", G_CALLBACK(on_break_lock_clicked), priv);
+    gtk_widget_set_visible(priv->btn_break_lock, FALSE);  /* Initial unsichtbar */
+    gtk_box_append(GTK_BOX(status_box), priv->btn_break_lock);
 
     /* Separator */
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
