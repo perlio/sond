@@ -109,7 +109,6 @@ G_DEFINE_EXTENDED_ERROR(SondClientError, sond_client_error)
 gboolean sond_client_error_is_conflict(const GError *error) {
     return error && error->domain == SOND_CLIENT_ERROR &&
            (error->code == SOND_CLIENT_ERROR_LOCK_NOT_HELD ||
-            error->code == SOND_CLIENT_ERROR_STALE ||
             error->code == SOND_CLIENT_ERROR_GONE);
 }
 
@@ -132,7 +131,7 @@ const gchar* sond_client_error_get_locked_at(const GError *error) {
  * set_write_error:
  *
  * Wertet eine Nicht-200-Antwort eines schreibenden Knoten-Endpunkts
- * (save/delete) aus. Enthaelt sie einen "code" (LOCK_NOT_HELD/STALE/GONE), wird ein
+ * (save/delete) aus. Enthaelt sie einen "code" (LOCK_NOT_HELD/GONE), wird ein
  * SOND_CLIENT_ERROR mit benutzerlesbarer Meldung und Zusatzdaten erzeugt,
  * sonst ein allgemeiner Fehler mit dem Servertext.
  *
@@ -173,7 +172,6 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
     SondClientErrorCode code = SOND_CLIENT_ERROR_FAILED;
     if (status == 409 && code_str) {
         if (g_strcmp0(code_str, "LOCK_NOT_HELD") == 0) code = SOND_CLIENT_ERROR_LOCK_NOT_HELD;
-        else if (g_strcmp0(code_str, "STALE") == 0) code = SOND_CLIENT_ERROR_STALE;
         else if (g_strcmp0(code_str, "GONE") == 0) code = SOND_CLIENT_ERROR_GONE;
     }
 
@@ -197,10 +195,6 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
                 msg = g_strdup("Sie halten die Sperre auf den Datensatz nicht (mehr). "
                                "Ihre Aenderungen wurden nicht gespeichert.");
             }
-            break;
-        case SOND_CLIENT_ERROR_STALE:
-            msg = g_strdup("Der Datensatz wurde zwischenzeitlich von jemand anderem "
-                           "geaendert. Ihre Aenderungen wurden nicht gespeichert.");
             break;
         default:
             msg = g_strdup("Der Datensatz (oder ein damit verknuepfter Eintrag) wurde "
@@ -649,7 +643,6 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
                 if (updated_node) {
                     gint64 node_id = sond_graph_node_get_id(updated_node);
                     sond_graph_node_set_id(node, node_id);
-                    sond_graph_node_set_version(node, sond_graph_node_get_version(updated_node));
                     g_object_unref(updated_node);
                 }
                 
@@ -1162,7 +1155,6 @@ gboolean sond_client_save_node(SondClient *client,
                 if (updated_node) {
                     gint64 node_id = sond_graph_node_get_id(updated_node);
                     sond_graph_node_set_id(node, node_id);
-                    sond_graph_node_set_version(node, sond_graph_node_get_version(updated_node));
                     g_object_unref(updated_node);
                 }
                 
@@ -1189,7 +1181,6 @@ gboolean sond_client_delete_node(SondClient *client,
 
     SondGraphNode *node = SOND_GRAPH_NODE(node_ptr);
     gint64 node_id = sond_graph_node_get_id(node);
-    gint64 version = sond_graph_node_get_version(node);
     g_return_val_if_fail(node_id > 0, FALSE);
 
     if (!ensure_authenticated(client, error)) {
@@ -1202,8 +1193,8 @@ gboolean sond_client_delete_node(SondClient *client,
     while (retry) {
         retry = FALSE;
 
-        gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT "?version=%" G_GINT64_FORMAT,
-                                    client->server_url, node_id, version);
+        gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT,
+                                    client->server_url, node_id);
         SoupMessage *msg = soup_message_new("DELETE", url);
         g_free(url);
 

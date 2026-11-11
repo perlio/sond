@@ -1180,7 +1180,7 @@ static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
 /**
  * on_client_node_conflict:
  *
- * Reaktion auf das generische Client-Signal "node-conflict" (LOCK_NOT_HELD / STALE /
+ * Reaktion auf das generische Client-Signal "node-conflict" (LOCK_NOT_HELD /
  * GONE beim Speichern oder Loeschen) fuer
  * die gerade angezeigte Akte. Die Eingaben bleiben in der Maske stehen
  * (zum Kopieren) - neu geladen wird erst auf ausdruecklichen Wunsch ueber
@@ -1205,7 +1205,7 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
         return;
     }
 
-    /* LOCK_NOT_HELD / STALE: Lock-Inhaber merken (falls jemand anderes ihn haelt) */
+    /* LOCK_NOT_HELD: Lock-Inhaber merken (falls jemand anderes ihn haelt) */
     g_free(priv->locked_by_other);
     priv->locked_by_other = NULL;
     g_free(priv->locked_at_other);
@@ -1221,10 +1221,8 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
     gchar *text;
     if (priv->locked_by_other) {
         text = g_strdup_printf("Nicht gespeichert - gesperrt von: %s", priv->locked_by_other);
-    } else if (code == SOND_CLIENT_ERROR_LOCK_NOT_HELD) {
-        text = g_strdup("Nicht gespeichert - Sperre nicht mehr gehalten");
     } else {
-        text = g_strdup("Nicht gespeichert - Akte wurde zwischenzeitlich geaendert");
+        text = g_strdup("Nicht gespeichert - Sperre nicht mehr gehalten");
     }
     gtk_label_set_text(GTK_LABEL(priv->status_label), text);
     g_free(text);
@@ -1415,7 +1413,7 @@ static void on_break_lock_dialog_response(GObject *source, GAsyncResult *result,
 
     /* Lock neu setzen und DANACH den aktuellen Stand laden: der andere
      * Bearbeiter kann inzwischen gespeichert haben, unsere Maske zeigt noch
-     * den alten Stand (und das Speichern scheiterte an der Version). */
+     * den alten Stand (und das Speichern scheiterte am fehlenden Lock). */
     if (reload_and_try_lock(priv)) {
         /* Sollte kaum vorkommen (wir haben ja gerade entsperrt), aber falls
          * doch (z.B. ein dritter User war schneller): Zustand bleibt READONLY. */

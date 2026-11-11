@@ -32,7 +32,6 @@ struct _SondGraphNode {
     GObject parent_instance;
 
     gint64 id;
-    gint64 version;              /* Optimistic-Lock-Version (0 = neu/unbekannt) */
     gchar *label;
     GPtrArray *properties;       /* GPtrArray von SondGraphProperty* */
     GPtrArray *outgoing_edges;   /* GPtrArray von SondGraphEdge* */
@@ -77,7 +76,6 @@ static void sond_graph_node_class_init(SondGraphNodeClass *klass) {
 
 static void sond_graph_node_init(SondGraphNode *self) {
     self->id = 0;
-    self->version = 0;
     self->label = NULL;
     self->properties = g_ptr_array_new_with_free_func(
         (GDestroyNotify)sond_graph_property_free);
@@ -103,16 +101,6 @@ gint64 sond_graph_node_get_id(SondGraphNode *node) {
 void sond_graph_node_set_id(SondGraphNode *node, gint64 id) {
     g_return_if_fail(SOND_IS_GRAPH_NODE(node));
     node->id = id;
-}
-
-gint64 sond_graph_node_get_version(SondGraphNode *node) {
-    g_return_val_if_fail(SOND_IS_GRAPH_NODE(node), 0);
-    return node->version;
-}
-
-void sond_graph_node_set_version(SondGraphNode *node, gint64 version) {
-    g_return_if_fail(SOND_IS_GRAPH_NODE(node));
-    node->version = version;
 }
 
 const gchar* sond_graph_node_get_label(SondGraphNode *node) {
@@ -473,10 +461,6 @@ gchar* sond_graph_node_to_json(SondGraphNode *node) {
     json_builder_set_member_name(builder, "id");
     json_builder_add_int_value(builder, node->id);
 
-    /* Version */
-    json_builder_set_member_name(builder, "version");
-    json_builder_add_int_value(builder, node->version);
-
     /* Label */
     if (node->label) {
         json_builder_set_member_name(builder, "label");
@@ -555,11 +539,6 @@ SondGraphNode* sond_graph_node_from_json(const gchar *json, GError **error) {
     /* ID */
     if (json_object_has_member(obj, "id")) {
         node->id = json_object_get_int_member(obj, "id");
-    }
-
-    /* Version */
-    if (json_object_has_member(obj, "version")) {
-        node->version = json_object_get_int_member(obj, "version");
     }
 
     /* Label */

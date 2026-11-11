@@ -43,14 +43,14 @@ static const char *table_statements[] = {
     "  id BIGINT PRIMARY KEY AUTO_INCREMENT,"
     "  label VARCHAR(50) NOT NULL,"
     "  properties JSON NOT NULL DEFAULT ('[]'),"
-    "  version BIGINT NOT NULL DEFAULT 1,"
     "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
     "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
     "  INDEX idx_nodes_label (label)"
     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-    /* Migration fuer bestehende Datenbanken (MariaDB, idempotent) */
-    "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1",
+    /* Migration fuer bestehende Datenbanken (MariaDB, idempotent):
+     * die frueher eingefuehrte Versionsspalte wird nicht mehr verwendet */
+    "ALTER TABLE nodes DROP COLUMN IF EXISTS version",
 
     /* Edges-Tabelle */
     "CREATE TABLE IF NOT EXISTS edges ("
@@ -369,12 +369,12 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     SondGraphNode *node = NULL;
     MYSQL_STMT *stmt = NULL;
     MYSQL_BIND bind_params[1];
-    MYSQL_BIND bind_results[6];
+    MYSQL_BIND bind_results[5];
     gchar *properties = NULL;  /* Dynamisch allokiert */
 
     /* Query vorbereiten */
     const char *query =
-        "SELECT id, label, properties, created_at, updated_at, version "
+        "SELECT id, label, properties, created_at, updated_at "
         "FROM nodes WHERE id = ?";
 
     stmt = mysql_stmt_init(conn);
@@ -424,7 +424,6 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     gchar updated_at[32] = {0};
     unsigned long updated_length;
     my_bool updated_is_null;
-    gint64 version = 0;
 
     memset(bind_results, 0, sizeof(bind_results));
 
@@ -452,9 +451,6 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     bind_results[4].buffer_length = sizeof(updated_at);
     bind_results[4].length = &updated_length;
     bind_results[4].is_null = &updated_is_null;
-
-    bind_results[5].buffer_type = MYSQL_TYPE_LONGLONG;
-    bind_results[5].buffer = &version;
 
     if (mysql_stmt_bind_result(stmt, bind_results)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -485,7 +481,6 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     /* Node erstellen */
     node = sond_graph_node_new();
     sond_graph_node_set_id(node, id);
-    sond_graph_node_set_version(node, version);
     sond_graph_node_set_label(node, label_full);
     if (label_full != label) g_free(label_full);
 
@@ -1186,17 +1181,6 @@ static gboolean check_write_lock(MYSQL *conn, gint64 node_id, const gchar *clien
     return ok;
 }
 
-/* Setzt je nach Existenz GONE oder STALE (Update/Delete hat 0 Zeilen getroffen) */
-static void set_stale_or_gone_error(MYSQL *conn, gint64 node_id, GError **error) {
-    if (node_exists(conn, node_id) == 0) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_GONE,
-                   "Knoten %" G_GINT64_FORMAT " existiert nicht mehr", node_id);
-    } else {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
-                   "Knoten %" G_GINT64_FORMAT " wurde zwischenzeitlich geaendert", node_id);
-    }
-}
-
 /**
  * sond_graph_db_save_node:
  */
@@ -1208,7 +1192,6 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     MYSQL_STMT *stmt = NULL;
 
     gint64 id = sond_graph_node_get_id(node);
-    gint64 expected_version = sond_graph_node_get_version(node);
     const gchar *label = sond_graph_node_get_label(node);
 
     if (label == NULL) {
@@ -1219,14 +1202,8 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     }
 
     if (id > 0) {
-        /* Bestehender Knoten: erst Lock (muss eigener sein) pruefen, dann Version */
+        /* Bestehender Knoten: Lock muss der eigene sein */
         if (!check_write_lock(conn, id, client_id, error)) {
-            g_prefix_error(error, "%s: ", __func__);
-            return FALSE;
-        }
-        if (expected_version <= 0) {
-            g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
-                       "Knoten %" G_GINT64_FORMAT ": Version fehlt", id);
             g_prefix_error(error, "%s: ", __func__);
             return FALSE;
         }
@@ -1239,12 +1216,11 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     const char *query;
 
     if (id == 0) {
-        /* INSERT - neuer Node (version = DEFAULT 1) */
+        /* INSERT - neuer Node */
         query = "INSERT INTO nodes (label, properties) VALUES (?, ?)";
     } else {
-        /* UPDATE - nur wenn die Version noch stimmt */
-        query = "UPDATE nodes SET label = ?, properties = ?, version = version + 1 "
-                "WHERE id = ? AND version = ?";
+        /* UPDATE - Schreibschutz ist ueber den Lock (check_write_lock) gegeben */
+        query = "UPDATE nodes SET label = ?, properties = ? WHERE id = ?";
     }
 
     stmt = mysql_stmt_init(conn);
@@ -1265,7 +1241,7 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
         return FALSE;
     }
 
-    MYSQL_BIND bind[4];
+    MYSQL_BIND bind[3];
     memset(bind, 0, sizeof(bind));
 
     unsigned long label_length = strlen(label);
@@ -1283,13 +1259,10 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     bind[1].buffer_length = props_length;
     bind[1].length = &props_length;
 
-    /* Parameter 3 + 4: id und erwartete Version (nur bei UPDATE) */
+    /* Parameter 3: id (nur bei UPDATE) */
     if (id > 0) {
         bind[2].buffer_type = MYSQL_TYPE_LONGLONG;
         bind[2].buffer = (void*)&id;
-
-        bind[3].buffer_type = MYSQL_TYPE_LONGLONG;
-        bind[3].buffer = (void*)&expected_version;
     }
 
     if (mysql_stmt_bind_param(stmt, bind)) {
@@ -1311,23 +1284,23 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     }
 
     if (id == 0) {
-        /* INSERT: Neue ID und Startversion setzen */
+        /* INSERT: Neue ID setzen */
         gint64 new_id = mysql_stmt_insert_id(stmt);
         sond_graph_node_set_id(node, new_id);
-        sond_graph_node_set_version(node, 1);
     } else {
-        /* UPDATE: hat keine Zeile getroffen -> veraltet oder geloescht */
+        /* UPDATE: 0 betroffene Zeilen heisst bei MariaDB auch "Werte unveraendert";
+         * nur wenn der Knoten tatsaechlich fehlt, ist das ein Fehler (GONE) */
         my_ulonglong affected = mysql_stmt_affected_rows(stmt);
         g_free(properties_json);
         mysql_stmt_close(stmt);
 
-        if (affected == 0) {
-            set_stale_or_gone_error(conn, id, error);
+        if (affected == 0 && node_exists(conn, id) == 0) {
+            g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_GONE,
+                       "Knoten %" G_GINT64_FORMAT " existiert nicht mehr", id);
             g_prefix_error(error, "%s: ", __func__);
             return FALSE;
         }
 
-        sond_graph_node_set_version(node, expected_version + 1);
         return TRUE;
     }
 
@@ -1457,7 +1430,7 @@ gboolean sond_graph_db_save_node_with_edges(MYSQL *conn, SondGraphNode *node,
 /**
  * sond_graph_db_delete_node:
  */
-gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_version,
+gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id,
                                    const gchar *client_id, GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
 
@@ -1473,16 +1446,8 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_
         return FALSE;
     }
 
-    if (expected_version <= 0) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_STALE,
-                   "Knoten %" G_GINT64_FORMAT ": Version fehlt", node_id);
-        g_prefix_error(error, "%s: ", __func__);
-        return FALSE;
-    }
-
     gchar *query = g_strdup_printf(
-        "DELETE FROM nodes WHERE id = %" G_GINT64_FORMAT " AND version = %" G_GINT64_FORMAT,
-        node_id, expected_version);
+        "DELETE FROM nodes WHERE id = %" G_GINT64_FORMAT, node_id);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1494,10 +1459,11 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_
 
     g_free(query);
 
-    /* Nichts geloescht: entweder geaendert (Version) oder schon weg */
+    /* Nichts geloescht: Knoten war schon weg */
     my_ulonglong affected = mysql_affected_rows(conn);
     if (affected == 0) {
-        set_stale_or_gone_error(conn, node_id, error);
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_GONE,
+                   "Knoten %" G_GINT64_FORMAT " existiert nicht mehr", node_id);
         g_prefix_error(error, "%s: ", __func__);
         return FALSE;
     }

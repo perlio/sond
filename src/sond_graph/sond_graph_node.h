@@ -93,25 +93,6 @@ gint64 sond_graph_node_get_id(SondGraphNode *node);
 void sond_graph_node_set_id(SondGraphNode *node, gint64 id);
 
 /**
- * sond_graph_node_get_version:
- * @node: Eine #SondGraphNode
- *
- * Liefert die Version des Knotens (Optimistic Locking). Der Server erhoeht sie
- * bei jedem Speichern; beim Speichern/Loeschen wird die erwartete Version
- * mitgeschickt. 0 = neuer, noch nicht gespeicherter Knoten.
- *
- * Returns: Version
- */
-gint64 sond_graph_node_get_version(SondGraphNode *node);
-
-/**
- * sond_graph_node_set_version:
- * @node: Eine #SondGraphNode
- * @version: Neue Version
- */
-void sond_graph_node_set_version(SondGraphNode *node, gint64 version);
-
-/**
  * sond_graph_node_get_label:
  * @node: Ein SondGraphNode
  *

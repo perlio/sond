@@ -425,7 +425,7 @@ static const gchar* get_request_client_id(SoupServerMessage *msg) {
  * @node: (nullable): gespeicherter Knoten (fuer fehlende Edge-Enden)
  *
  * Fehlerantwort fuer schreibende Knoten-Operationen. Die generischen
- * Schutzregeln der DB-Schicht (LOCK_NOT_HELD / STALE / GONE) werden als
+ * Schutzregeln der DB-Schicht (LOCK_NOT_HELD / GONE) werden als
  * 409 mit { "error", "code", ... } gemeldet, alles andere als 500.
  */
 static void send_db_write_error(SondServer *server,
@@ -440,7 +440,6 @@ static void send_db_write_error(SondServer *server,
     if (error && error->domain == SOND_GRAPH_DB_ERROR) {
         switch (error->code) {
             case SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD: code_str = "LOCK_NOT_HELD"; break;
-            case SOND_GRAPH_DB_ERROR_STALE:  code_str = "STALE";  break;
             case SOND_GRAPH_DB_ERROR_GONE:   code_str = "GONE";   break;
             default: break;
         }
@@ -675,14 +674,8 @@ static void handle_node_delete(SoupServer *soup_server,
     }
 
     /* Node löschen */
-    gint64 expected_version = 0;
-    const gchar *version_str = query ? g_hash_table_lookup(query, "version") : NULL;
-    if (version_str) {
-        expected_version = g_ascii_strtoll(version_str, NULL, 10);
-    }
-
     GError *error = NULL;
-    if (!sond_graph_db_delete_node(server->db_conn, node_id, expected_version,
+    if (!sond_graph_db_delete_node(server->db_conn, node_id,
                                    get_request_client_id(msg), &error)) {
         send_db_write_error(server, msg, error, node_id, NULL, "Failed to delete node");
         g_clear_error(&error);

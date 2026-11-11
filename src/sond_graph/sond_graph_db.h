@@ -47,7 +47,6 @@ G_BEGIN_DECLS
  * @SOND_GRAPH_DB_ERROR_NOT_FOUND: Gesuchte Daten nicht gefunden
  * @SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD: Der Client haelt den Lock auf den Knoten nicht
  *   (entweder haelt ein anderer Client ihn oder niemand)
- * @SOND_GRAPH_DB_ERROR_STALE: Knoten wurde zwischenzeitlich geaendert (Version veraltet)
  * @SOND_GRAPH_DB_ERROR_GONE: Knoten (oder Ziel einer Kante) existiert nicht mehr
  *
  * Fehler-Codes für Graph-DB-Operationen.
@@ -57,7 +56,6 @@ typedef enum {
     SOND_GRAPH_DB_ERROR_QUERY,
     SOND_GRAPH_DB_ERROR_NOT_FOUND,
     SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD,
-    SOND_GRAPH_DB_ERROR_STALE,
     SOND_GRAPH_DB_ERROR_GONE
 } SondGraphDbError;
 
@@ -350,15 +348,12 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
  * @error: (nullable): Fehler-Rückgabe
  *
  * Speichert einen Node in der Datenbank.
- * - Wenn node->id == 0: INSERT (neue ID, Version 1 werden gesetzt)
- * - Wenn node->id > 0: UPDATE, nur wenn die Version des Nodes noch der
- *   gespeicherten entspricht; die Version wird dabei erhoeht und im Node
- *   nachgetragen.
+ * - Wenn node->id == 0: INSERT (neue ID wird gesetzt)
+ * - Wenn node->id > 0: UPDATE (nur mit eigenem Lock, s.u.)
  *
  * Generische Schutzregeln (gelten fuer jeden Knoten):
  * - Speichern nur, wenn der Client den Lock selbst haelt, sonst
  *   SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD (Server meldet dann, ob und wer ihn haelt)
- * - Version veraltet -> SOND_GRAPH_DB_ERROR_STALE
  * - Knoten existiert nicht mehr -> SOND_GRAPH_DB_ERROR_GONE
  *
  * WICHTIG: Edges werden NICHT automatisch gespeichert!
@@ -413,18 +408,17 @@ GArray* sond_graph_db_find_missing_nodes(MYSQL *conn, SondGraphNode *node);
  * sond_graph_db_delete_node:
  * @conn: MySQL-Verbindung
  * @node_id: ID des zu löschenden Nodes
- * @expected_version: Version, die der Client zuletzt gesehen hat
  * @client_id: (nullable): ID des loeschenden Clients (fuer die Lock-Pruefung)
  * @error: (nullable): Fehler-Rückgabe
  *
  * Löscht einen Node aus der Datenbank.
  * Edges werden automatisch durch CASCADE gelöscht.
  * Es gelten die Schutzregeln von sond_graph_db_save_node()
- * (LOCK_NOT_HELD / STALE / GONE).
+ * (LOCK_NOT_HELD / GONE).
  *
  * Returns: %TRUE bei Erfolg
  */
-gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, gint64 expected_version,
+gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id,
                                    const gchar *client_id, GError **error);
 
 /**

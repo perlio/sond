@@ -41,7 +41,6 @@ G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
  * @SOND_CLIENT_ERROR_LOCK_NOT_HELD: Dieser Client haelt den Lock auf den Knoten
  *   nicht (z.B. weil der eigene Lock gebrochen wurde). Ob und von wem der Knoten
  *   stattdessen gesperrt ist, steht in locked_by (leer = niemand)
- * @SOND_CLIENT_ERROR_STALE: Knoten wurde zwischenzeitlich geaendert
  * @SOND_CLIENT_ERROR_GONE: Knoten (oder ein verknuepfter Knoten) wurde
  *   zwischenzeitlich geloescht
  *
@@ -50,7 +49,6 @@ G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
 typedef enum {
     SOND_CLIENT_ERROR_FAILED,
     SOND_CLIENT_ERROR_LOCK_NOT_HELD,
-    SOND_CLIENT_ERROR_STALE,
     SOND_CLIENT_ERROR_GONE
 } SondClientErrorCode;
 
@@ -60,12 +58,12 @@ GQuark sond_client_error_quark(void);
  * SondClient::node-conflict:
  * @client: der #SondClient
  * @node_id: betroffener Knoten
- * @code: #SondClientErrorCode (LOCK_NOT_HELD, STALE oder GONE)
+ * @code: #SondClientErrorCode (LOCK_NOT_HELD oder GONE)
  * @locked_by: (nullable): bei LOCK_NOT_HELD der aktuelle Lock-Inhaber (NULL/leer: niemand haelt den Lock)
  * @locked_at: (nullable): bei LOCK_NOT_HELD Zeitpunkt, seit dem der Inhaber den Lock haelt
  *
  * Wird synchron ausgeloest, wenn der Server einen Schreibzugriff auf den
- * Knoten ablehnt (save/delete: LOCK_NOT_HELD, STALE, GONE). Jedes Modul, das den Knoten anzeigt, verbindet sich damit und
+ * Knoten ablehnt (save/delete: LOCK_NOT_HELD, GONE). Jedes Modul, das den Knoten anzeigt, verbindet sich damit und
  * reagiert nur auf seinen eigenen @node_id. GONE wird nur gemeldet, wenn der
  * Knoten selbst (nicht nur ein verknuepfter Knoten) nicht mehr existiert.
  *
@@ -78,7 +76,7 @@ GQuark sond_client_error_quark(void);
  * sond_client_error_is_conflict:
  * @error: (nullable): Fehler
  *
- * Returns: TRUE bei LOCK_NOT_HELD, STALE oder GONE (Modul sollte den Knoten neu laden)
+ * Returns: TRUE bei LOCK_NOT_HELD oder GONE (Modul sollte den Knoten neu laden)
  */
 gboolean sond_client_error_is_conflict(const GError *error);
 
@@ -343,8 +341,8 @@ GPtrArray* sond_client_search_nodes(SondClient *client,
  * @error: (nullable): Fehler-Rückgabe
  *
  * Speichert einen Node auf dem Server.
- * Node-ID und Version werden aus der Serverantwort uebernommen.
- * Fehler (error->domain == SOND_CLIENT_ERROR): LOCK_NOT_HELD, STALE, GONE -
+ * Die Node-ID wird aus der Serverantwort uebernommen.
+ * Fehler (error->domain == SOND_CLIENT_ERROR): LOCK_NOT_HELD, GONE -
  * s. #SondClientErrorCode.
  * Führt automatisch Login durch falls nicht authentifiziert.
  * Bei 401 wird automatisch Re-Login durchgeführt.
@@ -358,11 +356,11 @@ gboolean sond_client_save_node(SondClient *client,
 /**
  * sond_client_delete_node:
  * @client: SondClient
- * @node: (type SondGraphNode): Zu loeschender Node (ID und Version werden mitgeschickt)
+ * @node: (type SondGraphNode): Zu loeschender Node (nur die ID wird mitgeschickt)
  * @error: (nullable): Fehler-Rückgabe
  *
- * Löscht einen Node vom Server (nur wenn dessen Version noch aktuell ist).
- * Fehler (error->domain == SOND_CLIENT_ERROR): LOCK_NOT_HELD, STALE, GONE.
+ * Löscht einen Node vom Server (nur mit eigenem Lock).
+ * Fehler (error->domain == SOND_CLIENT_ERROR): LOCK_NOT_HELD, GONE.
  * Führt automatisch Login durch falls nicht authentifiziert.
  * Bei 401 wird automatisch Re-Login durchgeführt.
  *
