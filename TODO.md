@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #249.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #250.
 
 ## Inhalt
 
-Offen: #245, #247
+Offen: #245, #247, #249
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
 Ideen: #167, #169, #205, #232, #233
 
@@ -50,6 +50,19 @@ Status: offen (nicht implementiert)
  Zu tun: Einfügen in sond_file_part_insert() für GMESSAGE (MIME-Baum ändern,
  Mail zurückschreiben, Index-DB und DB-Pfade nachführen), danach die
  vorbereiteten Teile testen.
+```
+
+### #249 Pfade mit führendem Punkt im Dateiverzeichnis ausblenden
+
+Status: offen (geplant)
+
+```text
+ Im Dateiverzeichnis (BAUM_FS) sollen Einträge, deren Name mit "." beginnt, nicht
+ angezeigt werden. Betrifft vor allem .<library_name>.ZND (vom sond_server beim Anlegen
+ der Akte in die Library-Wurzel gelegte Projektdatei) und .sond_index.db.
+ Zu klären: Verhalten beim Öffnen, Anbinden, in der Konsistenzprüfung und beim
+ Indizieren (diese Dateien werden schon heute nicht indiziert, s.
+ sond_file_name_not_indexable()).
 ```
 
 ## Zurückgestellt
