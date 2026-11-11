@@ -258,6 +258,8 @@ typedef struct {
     gint64   size;
     gint64   mtime;   /* Änderungszeit der Quelle, wird auf die Kopie übertragen */
     gboolean is_dir;
+    gboolean top;     /* Eintrag der obersten Ebene, wird in entries gemeldet */
+    guint    source;  /* Index der Quelle, aus der der Eintrag stammt */
 } ImportItem;
 
 static void import_item_free(gpointer data) {
@@ -268,6 +270,13 @@ static void import_item_free(gpointer data) {
     g_free(item);
 }
 
+static void import_entry_free(gpointer data) {
+    SondImportEntry *entry = data;
+
+    g_free(entry->rel);
+    g_free(entry);
+}
+
 void sond_import_result_free(SondImportResult *result) {
     if (!result)
         return;
@@ -276,7 +285,21 @@ void sond_import_result_free(SondImportResult *result) {
         g_ptr_array_unref(result->skipped);
     if (result->failed)
         g_ptr_array_unref(result->failed);
+    if (result->entries)
+        g_ptr_array_unref(result->entries);
     g_free(result);
+}
+
+static void add_entry(SondImportResult *result, const gchar *rel, guint source,
+        gboolean is_dir, gint64 mtime, gint64 size) {
+    SondImportEntry *entry = g_new0(SondImportEntry, 1);
+
+    entry->rel = g_strdup(rel);
+    entry->source = source;
+    entry->is_dir = is_dir;
+    entry->mtime = mtime;
+    entry->size = size;
+    g_ptr_array_add(result->entries, entry);
 }
 
 static void note(GPtrArray *arr, const gchar *rel, const gchar *reason) {
@@ -506,11 +529,37 @@ static gchar* unique_dest(const gchar *dest_dir, const gchar *base,
     }
 }
 
+/* Freier Name für einen Ordner in der Wurzel: nicht schon in target_dir und
+ * nicht schon in diesem Lauf vergeben; bei Gleichheit " (n)". Die Namen
+ * gehören used. */
+static gchar* unique_top_name(const gchar *target_dir, const gchar *name,
+        GHashTable *used) {
+    guint n = 0;
+
+    for (;;) {
+        gchar *trial = (n == 0) ? g_strdup(name) :
+                sond_filename_add_counter(name, n, FALSE);
+        gchar *full = g_build_filename(target_dir, trial, NULL);
+        gboolean taken = sond_exists(full) || g_hash_table_contains(used, trial);
+
+        g_free(full);
+        if (!taken) {
+            g_hash_table_add(used, g_strdup(trial));
+
+            return trial;
+        }
+
+        g_free(trial);
+        n++;
+    }
+}
+
 SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
         SondImportProgressFunc progress_func, gpointer user_data,
         const gint *cancel, GError **error) {
     SondImportResult *result = NULL;
     GPtrArray *items = NULL;
+    GHashTable *used_top = NULL;
     ProgressState ps = { 0 };
 
     g_return_val_if_fail(sources != NULL, NULL);
@@ -528,11 +577,15 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
     result = g_new0(SondImportResult, 1);
     result->skipped = g_ptr_array_new_with_free_func(g_free);
     result->failed = g_ptr_array_new_with_free_func(g_free);
+    result->entries = g_ptr_array_new_with_free_func(import_entry_free);
+
+    used_top = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
     /* 1. Quellen einlesen */
     items = g_ptr_array_new_with_free_func(import_item_free);
     for (guint i = 0; i < sources->len; i++) {
-        const gchar *src = g_ptr_array_index(sources, i);
+        const SondImportSource *source = g_ptr_array_index(sources, i);
+        const gchar *src = source->path;
         GError *err = NULL;
         GStatBuf st;
 
@@ -541,13 +594,40 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
             continue;
         }
 
-        if (S_ISDIR(st.st_mode))
-            scan_dir(src, "", 0, items, result);   /* Inhalt, nicht der Ordner */
-        else {
+        if (S_ISDIR(st.st_mode)) {
+            //Ordner als Ordner: eigener Eintrag der obersten Ebene
+            gchar *base = g_path_get_basename(src);
+            gboolean custom = source->folder_name && *source->folder_name;
+            gchar *clean = NULL;
+            gchar *top = NULL;
+
+            if (!custom && base[0] == '.') {
+                note(result->skipped, base, "Name beginnt mit einem Punkt");
+                g_free(base);
+                continue;
+            }
+
+            clean = sond_sanitize_filename(custom ? source->folder_name : base);
+            top = unique_top_name(target_dir, clean, used_top);
+            add_item(items, src, top, 0, 0, TRUE);
+            ((ImportItem*) g_ptr_array_index(items, items->len - 1))->top = TRUE;
+            ((ImportItem*) g_ptr_array_index(items, items->len - 1))->source = i;
+            scan_dir(src, top, 0, items, result);
+
+            g_free(top);
+            g_free(clean);
+            g_free(base);
+        } else {
             gchar *base = g_path_get_basename(src);
             gchar *dir = g_path_get_dirname(src);
+            guint before = items->len;
 
             scan_entry(dir, base, "", 0, items, result);
+            //lose Datei: Eintrag der obersten Ebene (Name steht erst beim Kopieren fest)
+            if (items->len > before) {
+                ((ImportItem*) g_ptr_array_index(items, before))->top = TRUE;
+                ((ImportItem*) g_ptr_array_index(items, before))->source = i;
+            }
             g_free(base);
             g_free(dir);
         }
@@ -580,12 +660,21 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
         dest = g_build_filename(target_dir, item->rel, NULL);
 
         if (item->is_dir) {
+            gboolean ok = FALSE;
+
             if (sond_exists(dest)) {
                 if (!g_file_test(dest, G_FILE_TEST_IS_DIR))
                     note(result->failed, item->rel,
                             "Ziel existiert bereits als Datei");
+                else
+                    ok = TRUE;
             } else if (!sond_mkdir_with_parents(dest, &err))
                 note_error(result->failed, item->rel, &err);
+            else
+                ok = TRUE;
+
+            if (ok && item->top)
+                add_entry(result, item->rel, item->source, TRUE, 0, 0);
 
             g_free(dest);
             continue;
@@ -619,6 +708,13 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
                 result->copied++;
                 if (counter > 0)
                     result->renamed++;
+                if (item->top) { //lose Datei: endgültiger Name in der Wurzel
+                    gchar *final_name = g_path_get_basename(dest);
+
+                    add_entry(result, final_name, item->source, FALSE,
+                            item->mtime, item->size);
+                    g_free(final_name);
+                }
             } else if (rc > 0) {
                 result->cancelled = TRUE;
             } else
@@ -639,6 +735,7 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
     report(&ps, TRUE);
 
     g_ptr_array_unref(items);
+    g_hash_table_unref(used_top);
 
     return result;
 }

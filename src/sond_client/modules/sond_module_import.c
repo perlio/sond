@@ -20,13 +20,36 @@
 #include "sond_module_akte.h"
 #include "sond_import.h"
 #include "../../sond_log_and_error.h"
+#include "../../sond_eingang_zettel.h"
 #include "../../sond_graph/sond_graph_node.h"
 
 #include <string.h>
 
 typedef struct _ImportJob ImportJob;
+typedef struct _ImportPriv ImportPriv;
 
+/* Eine gewählte Quelle (Zeile der Liste) mit ihren Angaben */
 typedef struct {
+    ImportPriv *priv;
+    gchar *path;
+    gboolean is_dir;
+    GtkWidget *box;          /* Zeileninhalt */
+    GtkWidget *stamp_box;    /* Name, Eingang, Art */
+    GtkWidget *entry_name;   /* nur bei Ordnern */
+    GtkWidget *entry_datum;  /* Eingang, TT.MM.JJJJ */
+    GtkWidget *calendar;
+    GtkWidget *popover;
+    GtkWidget *drop_art;
+    gint cal_year;           /* zuletzt gezeigter Monat im Kalender */
+    gint cal_month;
+} SourceRow;
+
+/* Auswahl für "Art" (Eintrag 0 = keine Angabe) */
+static const gchar *const ART_CHOICES[] = { "(keine Angabe)", "Post", "E-Mail",
+        "beA", "Fax", "CD-ROM / DVD", "USB-Stick / Festplatte",
+        "Persönlich übergeben", "Sonstiges", NULL };
+
+struct _ImportPriv {
     SondClient *client;
 
     GtkWidget *main_box;
@@ -35,27 +58,39 @@ typedef struct {
     GtkWidget *btn_folder;
     GtkWidget *btn_files;
     GtkWidget *btn_clear;
-    GtkWidget *lbl_sources;
+    GtkWidget *list;            /* Quellenzeilen */
     GtkWidget *btn_import;
     GtkWidget *btn_cancel;
+    GtkWidget *lbl_why;         /* warum "Importieren" gesperrt ist */
     GtkWidget *progress;
     GtkWidget *lbl_progress;
     GtkWidget *log_view;
 
-    GPtrArray *sources;      /* gewählte Quellen (Pfade) */
+    GPtrArray *sources;      /* (element-type SourceRow) gewählte Quellen */
     gchar *library_name;     /* geprüfte, aktive Akte; NULL = keine */
     ImportJob *job;          /* laufender Import oder NULL */
-} ImportPriv;
+};
+
+/* Quelle eines Importlaufs mit ihren Angaben (Kopie, gehört dem Job) */
+typedef struct {
+    gchar *path;
+    gchar *folder_name;      /* (nullable) Zielname eines Ordners */
+    gchar *eingang;          /* "JJJJ-MM-TT" */
+    gchar *art;              /* (nullable) */
+} JobSource;
 
 /* Ein Importlauf. Gehört dem Worker-Thread, bis done_idle() ihn freigibt;
  * das Widget wird nur über die schwache Referenz angesprochen. */
 struct _ImportJob {
     GWeakRef box;
-    GPtrArray *sources;
+    GPtrArray *sources;      /* (element-type JobSource) */
     gchar *target;
     gint cancel;
+    gchar *user;
     SondImportResult *result;
     GError *error;
+    gchar *zettel_name;      /* Dateiname des geschriebenen Zettels oder NULL */
+    GError *zettel_error;
 };
 
 typedef struct {
@@ -66,6 +101,23 @@ typedef struct {
     gint64 bytes_total;
     gchar *current;
 } ProgressMsg;
+
+static void source_row_free(gpointer data) {
+    SourceRow *row = data;
+
+    g_free(row->path);
+    g_free(row);
+}
+
+static void job_source_free(gpointer data) {
+    JobSource *js = data;
+
+    g_free(js->path);
+    g_free(js->folder_name);
+    g_free(js->eingang);
+    g_free(js->art);
+    g_free(js);
+}
 
 static void import_priv_free(gpointer data) {
     ImportPriv *priv = data;
@@ -107,6 +159,9 @@ static void set_akte_label(ImportPriv *priv, const gchar *text, gboolean is_erro
 
 static void update_sensitivity(ImportPriv *priv) {
     gboolean running = (priv->job != NULL);
+    const gchar *why = "";
+
+    gtk_widget_set_sensitive(priv->list, !running);
 
     gtk_widget_set_sensitive(priv->entry_regnr, !running);
     gtk_widget_set_sensitive(priv->btn_folder, !running);
@@ -117,34 +172,198 @@ static void update_sensitivity(ImportPriv *priv) {
             !running && priv->library_name && priv->sources->len > 0);
     gtk_widget_set_visible(priv->btn_cancel, running);
     gtk_widget_set_sensitive(priv->btn_cancel, running);
+
+    //Grund nennen, solange "Importieren" gesperrt ist
+    if (!running) {
+        if (!priv->library_name)
+            why = "Registernummer mit Enter prüfen";
+        else if (priv->sources->len == 0)
+            why = "Quelle wählen";
+    }
+    gtk_label_set_text(GTK_LABEL(priv->lbl_why), why);
 }
 
-static void update_sources_label(ImportPriv *priv) {
-    GString *s = g_string_new(NULL);
+/* ---- Kalender ---------------------------------------------------------- */
 
-    if (priv->sources->len == 0)
-        g_string_append(s, "Keine Quellen gewählt.");
-    else {
-        g_string_append_printf(s, "%u Quelle(n):", priv->sources->len);
-        for (guint i = 0; i < priv->sources->len; i++)
-            g_string_append_printf(s, "\n%s",
-                    (const gchar*) g_ptr_array_index(priv->sources, i));
+static void on_calendar_day_selected(GtkCalendar *calendar, gpointer user_data) {
+    SourceRow *row = user_data;
+    GDateTime *dt = gtk_calendar_get_date(calendar);
+    gint year = g_date_time_get_year(dt);
+    gint month = g_date_time_get_month(dt);
+    gchar *text = g_date_time_format(dt, "%d.%m.%Y");
+    gboolean same_month = (year == row->cal_year && month == row->cal_month);
+
+    gtk_editable_set_text(GTK_EDITABLE(row->entry_datum), text);
+
+    row->cal_year = year;
+    row->cal_month = month;
+
+    //Monatswechsel im Kalender schließt das Fenster nicht, ein Klick auf einen Tag schon
+    if (same_month)
+        gtk_popover_popdown(GTK_POPOVER(row->popover));
+
+    g_free(text);
+    g_date_time_unref(dt);
+}
+
+/* Beim Öffnen: Kalender auf das Datum im Feld stellen (sonst heute) */
+static void on_popover_map(GtkWidget *popover, gpointer user_data) {
+    SourceRow *row = user_data;
+    gchar *iso = NULL;
+    GDateTime *dt = NULL;
+
+    if (sond_eingang_datum_parse(
+            gtk_editable_get_text(GTK_EDITABLE(row->entry_datum)), &iso)) {
+        gint y = 0, m = 0, d = 0;
+
+        sscanf(iso, "%d-%d-%d", &y, &m, &d);
+        dt = g_date_time_new_local(y, m, d, 0, 0, 0);
     }
+    if (!dt)
+        dt = g_date_time_new_now_local();
+    g_free(iso);
 
-    gtk_label_set_text(GTK_LABEL(priv->lbl_sources), s->str);
-    g_string_free(s, TRUE);
+    row->cal_year = g_date_time_get_year(dt);
+    row->cal_month = g_date_time_get_month(dt);
+
+    g_signal_handlers_block_by_func(row->calendar, on_calendar_day_selected, row);
+    gtk_calendar_set_date(GTK_CALENDAR(row->calendar), dt);
+    g_signal_handlers_unblock_by_func(row->calendar, on_calendar_day_selected, row);
+
+    g_date_time_unref(dt);
+}
+
+/* ---- Quellenzeilen ----------------------------------------------------- */
+
+static void on_remove_clicked(GtkButton *button, gpointer user_data) {
+    SourceRow *row = user_data;
+    ImportPriv *priv = row->priv;
+
+    gtk_list_box_remove(GTK_LIST_BOX(priv->list),
+            gtk_widget_get_parent(row->box));
+    g_ptr_array_remove(priv->sources, row);   //gibt die Zeile frei
     update_sensitivity(priv);
 }
 
+static GtkWidget* labeled(const gchar *text, GtkWidget *child) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+    gtk_box_append(GTK_BOX(box), gtk_label_new(text));
+    gtk_box_append(GTK_BOX(box), child);
+
+    return box;
+}
+
+/* Neue Zeile; Eingang und Art übernimmt sie von der vorigen Zeile */
 static void add_source(ImportPriv *priv, const gchar *path) {
+    SourceRow *row = NULL;
+    SourceRow *prev = NULL;
+    GtkWidget *icon = NULL;
+    GtkWidget *label = NULL;
+    GtkWidget *btn_cal = NULL;
+    GtkWidget *btn_remove = NULL;
+    gchar *base = NULL;
+
     if (!path)
         return;
 
     for (guint i = 0; i < priv->sources->len; i++)
-        if (g_strcmp0(g_ptr_array_index(priv->sources, i), path) == 0)
+        if (g_strcmp0(((SourceRow*) g_ptr_array_index(priv->sources, i))->path,
+                path) == 0)
             return;
 
-    g_ptr_array_add(priv->sources, g_strdup(path));
+    if (priv->sources->len > 0)
+        prev = g_ptr_array_index(priv->sources, priv->sources->len - 1);
+
+    row = g_new0(SourceRow, 1);
+    row->priv = priv;
+    row->path = g_strdup(path);
+    row->is_dir = g_file_test(path, G_FILE_TEST_IS_DIR);
+
+    row->box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_margin_top(row->box, 4);
+    gtk_widget_set_margin_bottom(row->box, 4);
+    gtk_widget_set_margin_start(row->box, 4);
+    gtk_widget_set_margin_end(row->box, 4);
+
+    icon = gtk_image_new_from_icon_name(row->is_dir ? "folder-symbolic" :
+            "text-x-generic-symbolic");
+    gtk_box_append(GTK_BOX(row->box), icon);
+
+    label = gtk_label_new(path);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_width_chars(GTK_LABEL(label), 30);
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_set_tooltip_text(label, path);
+    gtk_box_append(GTK_BOX(row->box), label);
+
+    row->stamp_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_box_append(GTK_BOX(row->box), row->stamp_box);
+
+    if (row->is_dir) {
+        row->entry_name = gtk_entry_new();
+        gtk_editable_set_width_chars(GTK_EDITABLE(row->entry_name), 18);
+        base = g_path_get_basename(path);
+        gtk_editable_set_text(GTK_EDITABLE(row->entry_name), base);
+        g_free(base);
+        gtk_box_append(GTK_BOX(row->stamp_box), labeled("als Ordner:", row->entry_name));
+    }
+
+    row->entry_datum = gtk_entry_new();
+    gtk_editable_set_width_chars(GTK_EDITABLE(row->entry_datum), 10);
+    if (prev)
+        gtk_editable_set_text(GTK_EDITABLE(row->entry_datum),
+                gtk_editable_get_text(GTK_EDITABLE(prev->entry_datum)));
+    else {
+        gchar *heute = sond_eingang_datum_heute();
+        gchar *anzeige = sond_eingang_datum_anzeige(heute);
+
+        gtk_editable_set_text(GTK_EDITABLE(row->entry_datum), anzeige);
+        g_free(anzeige);
+        g_free(heute);
+    }
+
+    row->calendar = gtk_calendar_new();
+    row->popover = gtk_popover_new();
+    gtk_popover_set_child(GTK_POPOVER(row->popover), row->calendar);
+    g_signal_connect(row->calendar, "day-selected",
+            G_CALLBACK(on_calendar_day_selected), row);
+    g_signal_connect(row->popover, "map", G_CALLBACK(on_popover_map), row);
+
+    btn_cal = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_cal),
+            "x-office-calendar-symbolic");
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn_cal), row->popover);
+    gtk_widget_set_tooltip_text(btn_cal, "Datum im Kalender wählen");
+
+    {
+        GtkWidget *datum_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+
+        gtk_box_append(GTK_BOX(datum_box), row->entry_datum);
+        gtk_box_append(GTK_BOX(datum_box), btn_cal);
+        gtk_box_append(GTK_BOX(row->stamp_box), labeled("Eingang:", datum_box));
+    }
+
+    row->drop_art = gtk_drop_down_new_from_strings(ART_CHOICES);
+    if (prev)
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(row->drop_art),
+                gtk_drop_down_get_selected(GTK_DROP_DOWN(prev->drop_art)));
+    gtk_box_append(GTK_BOX(row->stamp_box), labeled("Art:", row->drop_art));
+
+    btn_remove = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(btn_remove, "flat");
+    gtk_widget_set_tooltip_text(btn_remove, "Diese Quelle entfernen");
+    g_signal_connect(btn_remove, "clicked", G_CALLBACK(on_remove_clicked), row);
+    gtk_box_append(GTK_BOX(row->box), btn_remove);
+
+    gtk_list_box_append(GTK_LIST_BOX(priv->list), row->box);
+    g_ptr_array_add(priv->sources, row);
+}
+
+static void clear_sources(ImportPriv *priv) {
+    gtk_list_box_remove_all(GTK_LIST_BOX(priv->list));
+    g_ptr_array_set_size(priv->sources, 0);
 }
 
 static void set_log(ImportPriv *priv, const gchar *text) {
@@ -273,7 +492,7 @@ static void on_folder_chosen(GObject *source, GAsyncResult *result,
             g_object_unref(file);
         }
 
-        update_sources_label(get_priv(box));
+        update_sensitivity(get_priv(box));
         g_object_unref(folders);
     }
 
@@ -298,7 +517,7 @@ static void on_files_chosen(GObject *source, GAsyncResult *result,
             g_object_unref(file);
         }
 
-        update_sources_label(get_priv(box));
+        update_sensitivity(get_priv(box));
         g_object_unref(files);
     }
 
@@ -330,8 +549,8 @@ static void on_files_clicked(GtkButton *button, gpointer user_data) {
 static void on_clear_clicked(GtkButton *button, gpointer user_data) {
     ImportPriv *priv = user_data;
 
-    g_ptr_array_set_size(priv->sources, 0);
-    update_sources_label(priv);
+    clear_sources(priv);
+    update_sensitivity(priv);
 }
 
 /* ========================================================================
@@ -342,8 +561,11 @@ static void job_free(ImportJob *job) {
     g_weak_ref_clear(&job->box);
     g_ptr_array_unref(job->sources);
     g_free(job->target);
+    g_free(job->user);
     sond_import_result_free(job->result);
     g_clear_error(&job->error);
+    g_free(job->zettel_name);
+    g_clear_error(&job->zettel_error);
     g_free(job);
 }
 
@@ -430,6 +652,18 @@ static gboolean done_idle(gpointer data) {
                 g_string_append(s, "Das Hochladen übernimmt SeaDrive im "
                         "Hintergrund.\n");
 
+            if (r->entries->len > 0) {
+                if (job->zettel_name)
+                    g_string_append_printf(s, "Eingang erfasst für %u "
+                            "Eintrag/Einträge (Zettel %s).\n",
+                            r->entries->len, job->zettel_name);
+                else
+                    g_string_append_printf(s, "ACHTUNG: Die Eingangsangabe "
+                            "konnte nicht gespeichert werden: %s\nDie Dateien "
+                            "sind kopiert.\n", job->zettel_error ?
+                                    job->zettel_error->message : "unbekannt");
+            }
+
             append_list(s, "Übersprungen", r->skipped);
             append_list(s, "Fehlgeschlagen", r->failed);
 
@@ -440,12 +674,12 @@ static gboolean done_idle(gpointer data) {
 
             /* Nur bei vollständigem Erfolg ist die Auswahl erledigt */
             if (!r->cancelled && r->failed->len == 0)
-                g_ptr_array_set_size(priv->sources, 0);
+                clear_sources(priv);
         }
 
         set_log(priv, s->str);
         g_string_free(s, TRUE);
-        update_sources_label(priv);
+        update_sensitivity(priv);
         g_object_unref(box);
     }
 
@@ -454,11 +688,50 @@ static gboolean done_idle(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
+/* Eingangsangabe (Zettel) für die obersten Einträge des Laufs schreiben. Ein
+ * Fehlschlag macht den Import nicht ungültig, er wird nur gemeldet. */
+static void write_zettel(ImportJob *job) {
+    SondEingangZettel *zettel = NULL;
+
+    if (!job->result || job->result->entries->len == 0)
+        return;
+
+    zettel = sond_eingang_zettel_new(job->user, "import");
+    for (guint i = 0; i < job->result->entries->len; i++) {
+        SondImportEntry *entry = g_ptr_array_index(job->result->entries, i);
+        JobSource *js = NULL;
+
+        if (entry->source >= job->sources->len)
+            continue;
+        js = g_ptr_array_index(job->sources, entry->source);
+
+        //Eingang und Art der Quelle, aus der der Eintrag stammt
+        sond_eingang_zettel_add(zettel, entry->rel, entry->is_dir,
+                js->eingang, js->art, NULL, entry->mtime);
+    }
+
+    job->zettel_name = sond_eingang_zettel_write(zettel, job->target,
+            &job->zettel_error);
+    sond_eingang_zettel_free(zettel);
+}
+
 static gpointer import_thread(gpointer data) {
     ImportJob *job = data;
+    GPtrArray *core_sources = g_ptr_array_new_with_free_func(g_free);
 
-    job->result = sond_import_copy(job->sources, job->target, on_progress, job,
+    for (guint i = 0; i < job->sources->len; i++) {
+        JobSource *js = g_ptr_array_index(job->sources, i);
+        SondImportSource *cs = g_new0(SondImportSource, 1);
+
+        cs->path = js->path;
+        cs->folder_name = js->folder_name;
+        g_ptr_array_add(core_sources, cs);
+    }
+
+    job->result = sond_import_copy(core_sources, job->target, on_progress, job,
             &job->cancel, &job->error);
+    g_ptr_array_unref(core_sources);
+    write_zettel(job);
     g_idle_add(done_idle, job);
 
     return NULL;
@@ -471,9 +744,47 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
     gchar *root = NULL;
     gchar *target = NULL;
     ImportJob *job = NULL;
+    GPtrArray *job_sources = NULL;
 
     if (priv->job || !priv->library_name || priv->sources->len == 0)
         return;
+
+    //Angaben je Quelle prüfen und übernehmen, bevor etwas kopiert wird
+    job_sources = g_ptr_array_new_with_free_func(job_source_free);
+    for (guint i = 0; i < priv->sources->len; i++) {
+        SourceRow *row = g_ptr_array_index(priv->sources, i);
+        JobSource *js = g_new0(JobSource, 1);
+
+        js->path = g_strdup(row->path);
+        g_ptr_array_add(job_sources, js);
+
+        if (!sond_eingang_datum_parse(
+                gtk_editable_get_text(GTK_EDITABLE(row->entry_datum)),
+                &js->eingang)) {
+            gchar *detail = g_strdup_printf("Quelle: %s\n\nBitte das Datum "
+                    "als TT.MM.JJJJ eingeben (oder im Kalender wählen).",
+                    row->path);
+
+            show_error(priv->main_box, "Eingangsdatum ungültig", detail);
+            g_free(detail);
+            g_ptr_array_unref(job_sources);
+            return;
+        }
+
+        if (row->entry_name) {
+            const gchar *name = gtk_editable_get_text(GTK_EDITABLE(row->entry_name));
+
+            if (name && *name)
+                js->folder_name = g_strdup(name);
+        }
+
+        {
+            guint art = gtk_drop_down_get_selected(GTK_DROP_DOWN(row->drop_art));
+
+            if (art > 0 && art < g_strv_length((gchar**) ART_CHOICES))
+                js->art = g_strdup(ART_CHOICES[art]);
+        }
+    }
 
     configured = sond_client_get_seadrive_root(priv->client);
     if (configured)
@@ -485,6 +796,7 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
             show_error(priv->main_box, "SeaDrive nicht gefunden",
                     error ? error->message : "unbekannt");
             g_clear_error(&error);
+            g_ptr_array_unref(job_sources);
             return;
         }
     }
@@ -502,16 +814,15 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
                 detail);
         g_free(detail);
         g_clear_error(&error);
+        g_ptr_array_unref(job_sources);
         return;
     }
 
     job = g_new0(ImportJob, 1);
     g_weak_ref_init(&job->box, priv->main_box);
-    job->sources = g_ptr_array_new_with_free_func(g_free);
-    for (guint i = 0; i < priv->sources->len; i++)
-        g_ptr_array_add(job->sources,
-                g_strdup(g_ptr_array_index(priv->sources, i)));
+    job->sources = job_sources;
     job->target = target;
+    job->user = g_strdup(sond_client_get_user_id(priv->client));
 
     priv->job = job;
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(priv->progress), 0.0);
@@ -541,7 +852,7 @@ GtkWidget* sond_module_import_new(SondClient *client) {
     GtkWidget *scrolled = NULL;
 
     priv->client = g_object_ref(client);
-    priv->sources = g_ptr_array_new_with_free_func(g_free);
+    priv->sources = g_ptr_array_new_with_free_func(source_row_free);
 
     priv->main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_start(priv->main_box, 20);
@@ -590,26 +901,28 @@ GtkWidget* sond_module_import_new(SondClient *client) {
     g_signal_connect(priv->btn_clear, "clicked", G_CALLBACK(on_clear_clicked), priv);
     gtk_box_append(GTK_BOX(row), priv->btn_clear);
 
-    priv->lbl_sources = gtk_label_new("");
-    gtk_label_set_xalign(GTK_LABEL(priv->lbl_sources), 0.0);
-    gtk_label_set_yalign(GTK_LABEL(priv->lbl_sources), 0.0);
-    gtk_label_set_selectable(GTK_LABEL(priv->lbl_sources), TRUE);
+    priv->list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(priv->list), GTK_SELECTION_NONE);
+    gtk_list_box_set_placeholder(GTK_LIST_BOX(priv->list),
+            gtk_label_new("Keine Quellen gewählt."));
     scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 90);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), priv->lbl_sources);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 160);
+    gtk_widget_set_vexpand(scrolled, TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), priv->list);
     gtk_box_append(GTK_BOX(priv->main_box), scrolled);
 
-    label = gtk_label_new("Der Inhalt eines gewählten Ordners wird in die "
-            "Wurzel der Akte kopiert, der Aufbau bleibt erhalten. Bei "
-            "gleichem Namen wird ein Zähler angehängt; Namen mit Punkt am "
-            "Anfang werden übersprungen.");
+    label = gtk_label_new("Ordner kommen als Ordner in die Akte, lose "
+            "Dateien direkt in die Wurzel. Jede Quelle bekommt ihren eigenen "
+            "Namen (Ordner), ihr Eingangsdatum und ihre Art; neue Zeilen "
+            "übernehmen die Werte der vorigen. Bei gleichem Namen wird ein "
+            "Zähler angehängt, Namen mit Punkt am Anfang werden übersprungen.");
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_widget_add_css_class(label, "dim-label");
     gtk_box_append(GTK_BOX(priv->main_box), label);
 
     /* Aktion */
-    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_box_append(GTK_BOX(priv->main_box), row);
 
     priv->btn_import = gtk_button_new_with_label("Importieren");
@@ -619,6 +932,10 @@ GtkWidget* sond_module_import_new(SondClient *client) {
     priv->btn_cancel = gtk_button_new_with_label("Abbrechen");
     g_signal_connect(priv->btn_cancel, "clicked", G_CALLBACK(on_cancel_clicked), priv);
     gtk_box_append(GTK_BOX(row), priv->btn_cancel);
+
+    priv->lbl_why = gtk_label_new("");
+    gtk_widget_add_css_class(priv->lbl_why, "dim-label");
+    gtk_box_append(GTK_BOX(row), priv->lbl_why);
 
     priv->progress = gtk_progress_bar_new();
     gtk_box_append(GTK_BOX(priv->main_box), priv->progress);
@@ -640,7 +957,7 @@ GtkWidget* sond_module_import_new(SondClient *client) {
 
     g_signal_connect(priv->main_box, "map", G_CALLBACK(on_map), priv);
 
-    update_sources_label(priv);
+    update_sensitivity(priv);
 
     return priv->main_box;
 }

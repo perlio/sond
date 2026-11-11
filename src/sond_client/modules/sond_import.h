@@ -81,6 +81,32 @@ typedef void (*SondImportProgressFunc)(const SondImportProgress *progress,
                                         gpointer user_data);
 
 /**
+ * SondImportSource:
+ *
+ * Eine Quelle (Datei oder Verzeichnis). Ein Verzeichnis kommt als Ordner (mit
+ * seinem Namen oder folder_name) in die Wurzel, bei Namensgleichheit mit
+ * Zähler, nie in einen vorhandenen Ordner hinein.
+ */
+typedef struct {
+    const gchar *path;
+    const gchar *folder_name;   /* (nullable) */
+} SondImportSource;
+
+/**
+ * SondImportEntry:
+ *
+ * Ein beim Import angelegter Eintrag der obersten Ebene (Ordner oder lose
+ * Datei): rel ist sein endgültiger Name in der Wurzel.
+ */
+typedef struct {
+    gchar   *rel;
+    guint    source;   /* Index der Quelle in der Quellenliste */
+    gboolean is_dir;
+    gint64   mtime;    /* Änderungszeit der Quelle (Dateien), sonst 0 */
+    gint64   size;     /* Größe in Byte (Dateien), sonst 0 */
+} SondImportEntry;
+
+/**
  * SondImportResult:
  *
  * Ergebnis eines Imports. skipped und failed enthalten Zeilen der Form
@@ -91,6 +117,7 @@ typedef struct {
     guint      renamed;     /* davon wegen Namensgleichheit mit Zähler */
     GPtrArray *skipped;     /* übersprungen (Name beginnt mit Punkt, ...) */
     GPtrArray *failed;      /* fehlgeschlagen */
+    GPtrArray *entries;     /* (element-type SondImportEntry) oberste Ebene */
     gboolean   cancelled;
 } SondImportResult;
 
@@ -98,9 +125,8 @@ void sond_import_result_free(SondImportResult *result);
 
 /**
  * sond_import_copy:
- * @sources: (element-type utf8): Verzeichnisse und/oder Dateien. Bei einem
- *           Verzeichnis kommt sein INHALT nach target_dir, der relative Aufbau
- *           bleibt erhalten; Dateien kommen direkt nach target_dir.
+ * @sources: (element-type SondImportSource): Verzeichnisse und/oder Dateien.
+ *           Beide kommen direkt in target_dir (Verzeichnisse als Ordner).
  * @target_dir: vorhandenes Zielverzeichnis (Library-Wurzel)
  * @progress_func: (nullable): Fortschrittsmeldung, höchstens alle ~100 ms
  * @user_data: Zeiger für progress_func
