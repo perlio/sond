@@ -420,10 +420,6 @@ gchar* sond_client_get_seafile_library_id(SondClient *client,
                                            const gchar *library_name,
                                            GError **error);
 
-gchar* sond_client_get_seafile_clone_token(SondClient *client,
-                                            const gchar *repo_id,
-                                            GError **error);
-
 /**
  * sond_client_set_current_akte:
  * @client: SondClient
@@ -463,16 +459,6 @@ gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *
  * Returns: (transfer none) (nullable): Pfad oder NULL, wenn nicht konfiguriert
  */
 const gchar* sond_client_get_seadrive_root(SondClient *client);
-
-/**
- * sond_client_get_offline_manager:
- * @client: SondClient
- *
- * Gibt den Offline Manager zurück.
- *
- * Returns: (transfer none): Offline Manager
- */
-gpointer sond_client_get_offline_manager(SondClient *client);
 
 /**
  * sond_client_set_last_regnr:

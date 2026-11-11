@@ -17,7 +17,6 @@
  */
 
 #include "sond_client.h"
-#include "sond_offline_manager.h"
 #include "../sond_log_and_error.h"
 #include "../sond_graph/sond_graph_db.h"
 #include "../sond_graph/sond_graph_node.h"
@@ -58,9 +57,6 @@ struct _SondClient {
     gboolean (*login_callback)(SondClient *client, gpointer user_data);
     gpointer login_callback_user_data;
     
-    /* Offline Manager */
-    SondOfflineManager *offline_manager;
-
     /* HTTP-Client */
     SoupSession *session;
 
@@ -244,10 +240,6 @@ static void sond_client_finalize(GObject *object) {
     g_free(self->seafile_url);
     g_free(self->seadrive_root);
 
-    if (self->offline_manager) {
-        g_object_unref(self->offline_manager);
-    }
-
     if (self->session) {
         g_object_unref(self->session);
     }
@@ -288,7 +280,6 @@ static void sond_client_init(SondClient *self) {
     self->auth_failed_user_data = NULL;
     self->login_callback = NULL;
     self->login_callback_user_data = NULL;
-    self->offline_manager = NULL;
 
     /* Letzte RegNr initialisieren */
     self->last_regnr_lfd = 0;
@@ -332,27 +323,6 @@ static gboolean sond_client_load_config(SondClient *client,
         client->seadrive_root = NULL;
     }
 
-    /* Offline sync_directory laden (optional) */
-    gchar *sync_directory = g_key_file_get_string(keyfile, "offline", "sync_directory", NULL);
-    if (!sync_directory) {
-        /* Default: ~/.local/share/sond/offline-akten */
-    	//bzw. unter Windows: %APPDATA%\sond\offline-akten
-        const gchar *data_dir = g_get_user_data_dir();
-        sync_directory = g_build_filename(data_dir, "sond_client", "offline-akten", NULL);
-        LOG_INFO("No sync_directory configured, using default: %s\n", sync_directory);
-    }
-    
-    /* Offline Manager erstellen */
-    client->offline_manager = sond_offline_manager_new(sync_directory);
-    g_free(sync_directory);
-    
-    if (!client->offline_manager) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Failed to create offline manager");
-        g_key_file_free(keyfile);
-        return FALSE;
-    }
-    
     g_key_file_free(keyfile);
     return TRUE;
 }
@@ -1553,78 +1523,6 @@ gchar* sond_client_get_seafile_library_id(SondClient *client,
     return library_id;
 }
 
-gchar* sond_client_get_seafile_clone_token(SondClient *client,
-                                            const gchar *repo_id,
-                                            GError **error) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
-    g_return_val_if_fail(repo_id != NULL, NULL);
-
-    /* Sicherstellen dass wir eingeloggt sind */
-    if (!ensure_authenticated(client, error)) {
-        return NULL;
-    }
-
-    /* URL bauen: /api2/repos/{repo_id}/download-info/ */
-    gchar *url = g_strdup_printf("%s/api2/repos/%s/download-info/",
-                                 client->seafile_url, repo_id);
-
-    /* HTTP GET Request */
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("GET", url);
-    g_free(url);
-
-    if (!msg) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Konnte HTTP Request nicht erstellen");
-        g_object_unref(session);
-        return NULL;
-    }
-
-    /* Authorization Header */
-    gchar *auth_header = g_strdup_printf("Token %s", client->seafile_token);
-    soup_message_headers_append(soup_message_get_request_headers(msg),
-                                "Authorization", auth_header);
-    g_free(auth_header);
-
-    /* Request senden */
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    guint status = soup_message_get_status(msg);
-
-    g_object_unref(msg);
-    g_object_unref(session);
-
-    if (!response || status != 200) {
-        if (response) g_bytes_unref(response);
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Seafile returned status %u", status);
-        return NULL;
-    }
-    /* JSON Response parsen */
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-
-    JsonParser *parser = json_parser_new();
-    gchar *clone_token = NULL;
-
-    if (json_parser_load_from_data(parser, data, size, error)) {
-        JsonNode *root = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root);
-
-        if (json_object_has_member(obj, "token")) {
-            const gchar *token = json_object_get_string_member(obj, "token");
-            clone_token = g_strdup(token);
-        } else {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Seafile response enthält kein 'token' Feld");
-        }
-    }
-
-    g_object_unref(parser);
-    g_bytes_unref(response);
-
-    return clone_token;
-}
-
 void sond_client_set_current_akte(SondClient *client, guint lfd_nr, guint year) {
     g_return_if_fail(SOND_IS_CLIENT(client));
     client->current_akte_lfd = lfd_nr;
@@ -1650,11 +1548,6 @@ gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *
 const gchar* sond_client_get_seadrive_root(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     return client->seadrive_root;
-}
-
-gpointer sond_client_get_offline_manager(SondClient *client) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
-    return client->offline_manager;
 }
 
 void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year) {
