@@ -789,6 +789,55 @@ sond_stat(const gchar *path, GStatBuf *buf, GError **error)
 }
 
 gboolean
+sond_set_mtime(FILE *fp, gint64 mtime, GError **error)
+{
+    g_return_val_if_fail(fp != NULL, FALSE);
+
+    if (fflush(fp) != 0) {
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                    "%s", g_strerror(errno));
+        return FALSE;
+    }
+
+#ifdef G_OS_WIN32
+    {
+        /* Epochendifferenz 1601 -> 1970 in 100-ns-Einheiten, s. sond_stat() */
+        const guint64 filetime_unix_epoch_diff = 116444736000000000ULL;
+        HANDLE handle = (HANDLE) _get_osfhandle(_fileno(fp));
+        ULARGE_INTEGER ul;
+        FILETIME ft;
+
+        ul.QuadPart = (guint64) mtime * 10000000ULL + filetime_unix_epoch_diff;
+        ft.dwLowDateTime = ul.LowPart;
+        ft.dwHighDateTime = ul.HighPart;
+
+        if (handle == INVALID_HANDLE_VALUE ||
+                !SetFileTime(handle, NULL, NULL, &ft)) {
+            set_error_from_win32(error, GetLastError());
+            return FALSE;
+        }
+    }
+    return TRUE;
+#else
+    {
+        struct timespec ts[2];
+
+        ts[0].tv_sec = 0;
+        ts[0].tv_nsec = UTIME_OMIT; //Zugriffszeit unverändert
+        ts[1].tv_sec = (time_t) mtime;
+        ts[1].tv_nsec = 0;
+
+        if (futimens(fileno(fp), ts) != 0) {
+            g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                        "%s", g_strerror(errno));
+            return FALSE;
+        }
+    }
+    return TRUE;
+#endif
+}
+
+gboolean
 sond_rename(const gchar *oldpath, const gchar *newpath, GError **error)
 {
     g_return_val_if_fail(oldpath != NULL, FALSE);

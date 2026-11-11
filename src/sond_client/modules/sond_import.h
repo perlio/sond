@@ -109,7 +109,8 @@ void sond_import_result_free(SondImportResult *result);
  * @error: nur bei unbrauchbaren Argumenten gesetzt
  *
  * Kopiert synchron (für einen Worker-Thread gedacht). Namen mit führendem
- * Punkt werden übersprungen, unzulässige Zeichen ersetzt, bei bereits
+ * Punkt werden übersprungen, unzulässige Zeichen ersetzt, die Änderungszeit
+ * der Quelle wird auf die Kopie übertragen, bei bereits
  * vorhandenem Namen ein Zähler " (n)" angehängt. Fehler einzelner Dateien
  * brechen den Lauf nicht ab, sondern landen in failed.
  *

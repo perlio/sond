@@ -256,6 +256,7 @@ typedef struct {
     gchar   *src;
     gchar   *rel;     /* relativ zum Ziel, '/' als Trenner, Namen bereinigt */
     gint64   size;
+    gint64   mtime;   /* Änderungszeit der Quelle, wird auf die Kopie übertragen */
     gboolean is_dir;
 } ImportItem;
 
@@ -293,12 +294,13 @@ static gchar* rel_join(const gchar *prefix, const gchar *name) {
 }
 
 static void add_item(GPtrArray *items, const gchar *src, const gchar *rel,
-        gint64 size, gboolean is_dir) {
+        gint64 size, gint64 mtime, gboolean is_dir) {
     ImportItem *item = g_new0(ImportItem, 1);
 
     item->src = g_strdup(src);
     item->rel = g_strdup(rel);
     item->size = size;
+    item->mtime = mtime;
     item->is_dir = is_dir;
     g_ptr_array_add(items, item);
 }
@@ -371,10 +373,10 @@ static void scan_entry(const gchar *src_dir, const gchar *name,
     rel = rel_join(rel_prefix, clean);
 
     if (S_ISDIR(st.st_mode)) {
-        add_item(items, path, rel, 0, TRUE);
+        add_item(items, path, rel, 0, 0, TRUE);
         scan_dir(path, rel, depth + 1, items, result);
     } else if (S_ISREG(st.st_mode))
-        add_item(items, path, rel, (gint64) st.st_size, FALSE);
+        add_item(items, path, rel, (gint64) st.st_size, (gint64) st.st_mtime, FALSE);
     else
         note(result->skipped, rel_orig, "keine reguläre Datei");
 
@@ -406,8 +408,8 @@ static void report(ProgressState *ps, gboolean force) {
 /* Kopiert eine Datei blockweise (Abbruch zwischen den Blöcken). Bei Fehler
  * oder Abbruch wird die angefangene Zieldatei wieder entfernt.
  * Rückgabe: 0 Erfolg, 1 abgebrochen, -1 Fehler. */
-static gint copy_file(const gchar *src, const gchar *dest, ProgressState *ps,
-        const gint *cancel, GError **error) {
+static gint copy_file(const gchar *src, const gchar *dest, gint64 mtime,
+        ProgressState *ps, const gint *cancel, GError **error) {
     FILE *in = NULL;
     FILE *out = NULL;
     guchar *buf = NULL;
@@ -447,6 +449,17 @@ static gint copy_file(const gchar *src, const gchar *dest, ProgressState *ps,
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "Fehler beim Lesen: %s", g_strerror(errno));
         rc = -1;
+    }
+
+    /* Änderungszeit der Quelle übernehmen, vor dem Schließen (eine einzige
+     * Änderung für SeaDrive); ein Fehlschlag ist nicht kritisch */
+    if (rc == 0) {
+        GError *err_time = NULL;
+
+        if (!sond_set_mtime(out, mtime, &err_time))
+            LOG_WARN("Änderungszeit von '%s' nicht gesetzt: %s\n", dest,
+                    err_time ? err_time->message : "?");
+        g_clear_error(&err_time);
     }
 
     fclose(in);
@@ -601,7 +614,7 @@ SondImportResult* sond_import_copy(GPtrArray *sources, const gchar *target_dir,
         {
             gint64 before = ps.progress.bytes_done;
 
-            rc = copy_file(item->src, dest, &ps, cancel, &err);
+            rc = copy_file(item->src, dest, item->mtime, &ps, cancel, &err);
             if (rc == 0) {
                 result->copied++;
                 if (counter > 0)

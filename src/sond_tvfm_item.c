@@ -613,6 +613,17 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 		g_free(rel_path_child);
 
+		//Änderungszeit und Größe aus dem sond_stat() oben (kein zweiter Zugriff)
+		if (stvfm_item_child) {
+			SondTVFMItemPrivate *child_priv =
+					sond_tvfm_item_get_instance_private(stvfm_item_child);
+
+			child_priv->mtime = (gint64) st.st_mtime;
+			child_priv->size = (gint64) st.st_size;
+			child_priv->is_dir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
+			child_priv->stat_done = TRUE;
+		}
+
 		g_ptr_array_add(loaded_children, stvfm_item_child);
     }
 

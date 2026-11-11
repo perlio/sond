@@ -157,6 +157,14 @@ gint sond_open_fd(const gchar *path, gint flags, gint mode, GError **error);
  */
 gint sond_open_read(const gchar *path, GError **error);
 
+/**
+ * Setzt die Änderungszeit (Sekunden seit 1970) einer geöffneten, zum Schreiben
+ * geöffneten Datei. Puffer werden vorher geschrieben. Aufruf unmittelbar vor
+ * dem Schließen: Windows ändert die ausdrücklich gesetzte Zeit beim Schließen
+ * nicht mehr, so sieht ein Cloud-Dienst nur eine einzige Änderung.
+ */
+gboolean sond_set_mtime(FILE *fp, gint64 mtime, GError **error);
+
 /* Opaque Typ für Verzeichnis-Iteration */
 typedef struct _SondDir SondDir;
 

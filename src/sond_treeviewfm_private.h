@@ -95,6 +95,16 @@ typedef struct {
 	 * GMESSAGE-Message), deren display_name bewusst NICHT der echte
 	 * Dateiname ist - s. sond_tvfm_item_get_anbinden_label() (sond_tvfm_item.c). */
 	gboolean is_content_root_marker;
+	/* Änderungszeit, Größe und Verzeichnis-Kennzeichen des Dateisystem-
+	 * Eintrags (Spalten "Änderungsdatum"/"Größe", Sortierung). Beim Einlesen
+	 * eines Verzeichnisses aus dem dortigen sond_stat() übernommen
+	 * (stat_done); für anderswo erzeugte Items (Einfügen) beim ersten Bedarf
+	 * nachgeholt, s. item_fs_stat() in sond_treeviewfm.c. Für Einträge in
+	 * Containern ohne Bedeutung. */
+	gint64 mtime;
+	gint64 size;
+	gboolean is_dir;
+	gboolean stat_done;
 } SondTVFMItemPrivate;
 
 /* Freund-Accessor für sond_seadrive.c, analog sond_treeviewfm_get_priv().

@@ -3824,30 +3824,83 @@ static void sond_treeviewfm_render_eingang(GtkTreeViewColumn *column,
 	return;
 }
 
+/* Ist der Eintrag ein Eintrag des Dateisystems (Datei oder Verzeichnis unter
+ * root) und nicht Teil eines Containers (ZIP-Eintrag, Mimepart, PDF-Anhang,
+ * Section)? Nur für diese gibt es Änderungsdatum und Größe. */
+static gboolean item_is_fs_entry(SondTVFMItemPrivate *item_priv) {
+	if (!item_priv->sond_file_part) //Verzeichnis (oder Wurzel ohne Pfad)
+		return item_priv->path_or_section != NULL;
+
+	return !item_priv->path_or_section
+			&& !sond_file_part_get_parent(item_priv->sond_file_part);
+}
+
+/* Änderungszeit, Größe und Verzeichnis-Kennzeichen des Eintrags. Meist schon
+ * beim Einlesen des Verzeichnisses gemerkt; sonst (z.B. nach dem Einfügen)
+ * einmal nachgeholt. FALSE: kein Dateisystem-Eintrag oder nicht lesbar. */
+static gboolean item_fs_stat(SondTVFMItemPrivate *item_priv, gint64 *mtime,
+		gint64 *size, gboolean *is_dir) {
+	if (!item_is_fs_entry(item_priv))
+		return FALSE;
+
+	if (!item_priv->stat_done) {
+		gchar const *root = sond_treeviewfm_get_root(item_priv->stvfm);
+		gchar const *rel = item_priv->sond_file_part ?
+				sond_file_part_get_path(item_priv->sond_file_part) :
+				item_priv->path_or_section;
+		gchar *full = NULL;
+		GStatBuf st = { 0 };
+
+		if (!root || !rel)
+			return FALSE;
+
+		full = g_strconcat(root, "/", rel, NULL);
+		if (sond_stat(full, &st, NULL)) {
+			g_free(full);
+
+			return FALSE;
+		}
+		g_free(full);
+
+		item_priv->mtime = (gint64) st.st_mtime;
+		item_priv->size = (gint64) st.st_size;
+		item_priv->is_dir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
+		item_priv->stat_done = TRUE;
+	}
+
+	if (mtime) *mtime = item_priv->mtime;
+	if (size) *size = item_priv->size;
+	if (is_dir) *is_dir = item_priv->is_dir;
+
+	return TRUE;
+}
+
 static void sond_treeviewfm_render_file_modify(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
-	GObject *object = NULL;
+	g_autoptr(SondTVFMItem) item = NULL;
+	gint64 mtime = 0;
+	gchar *text = NULL;
 
-	gtk_tree_model_get(model, iter, 0, &object, -1);
-	if (!object) //Dummy-Zeile
+	item = sond_tvfm_item_from_model(model, iter);
+	if (!item) { //Dummy-Zeile
+		g_object_set(G_OBJECT(renderer), "text", "", NULL);
+
 		return;
+	}
 
-	if (G_IS_FILE_INFO(object)) {
-		GDateTime *datetime = NULL;
-		gchar *text = NULL;
-
-		datetime = g_file_info_get_modification_date_time(G_FILE_INFO(object));
+	if (item_fs_stat(sond_tvfm_item_get_priv(item), &mtime, NULL, NULL)) {
+		GDateTime *datetime = g_date_time_new_from_unix_local(mtime);
 
 		if (datetime) {
 			text = g_date_time_format(datetime, "%d.%m.%Y %T");
 			g_date_time_unref(datetime);
-			g_object_set(G_OBJECT(renderer), "text", text, NULL);
-			g_free(text);
 		}
 	}
 
-	g_object_unref(object);
+	//immer setzen: Renderer werden für andere Zeilen wiederverwendet
+	g_object_set(G_OBJECT(renderer), "text", text ? text : "", NULL);
+	g_free(text);
 
 	return;
 }
@@ -3855,29 +3908,77 @@ static void sond_treeviewfm_render_file_modify(GtkTreeViewColumn *column,
 static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
-	GObject *object = NULL;
+	g_autoptr(SondTVFMItem) item = NULL;
+	gint64 size = 0;
+	gboolean is_dir = FALSE;
+	gchar *text = NULL;
 
-	gtk_tree_model_get(model, iter, 0, &object, -1);
-	if (!object) //Dummy-Zeile
+	item = sond_tvfm_item_from_model(model, iter);
+	if (!item) { //Dummy-Zeile
+		g_object_set(G_OBJECT(renderer), "text", "", NULL);
+
 		return;
-
-	if (G_IS_FILE_INFO(object)) {
-		goffset size = 0;
-		gchar *text = NULL;
-
-//		size = g_file_info_get_size(G_FILE_INFO(object));
-#ifdef _WIN32
-		text = g_strdup_printf("%lld", (long long) size);
-#else
-		text = g_strdup_printf("%ld", (long) size);
-#endif
-		g_object_set(G_OBJECT(renderer), "text", text, NULL);
-		g_free(text);
 	}
 
-	g_object_unref(object);
+	//Verzeichnisse haben keine Größe
+	if (item_fs_stat(sond_tvfm_item_get_priv(item), NULL, &size, &is_dir)
+			&& !is_dir)
+		text = g_format_size((guint64) size);
+
+	g_object_set(G_OBJECT(renderer), "text", text ? text : "", NULL);
+	g_free(text);
 
 	return;
+}
+
+//Spalten-IDs der Sortierung
+#define STVFM_SORT_NAME   0
+#define STVFM_SORT_SIZE   1
+#define STVFM_SORT_MODIFY 2
+
+/* Vergleich zweier Zeilen für die Sortierung nach Spaltenkopf. Nur Einträge
+ * des Dateisystems werden verglichen; Inhalte von Containern (Mimeparts,
+ * ZIP-Einträge, ...) behalten ihre Reihenfolge (Rückgabe 0; die Sortierung
+ * ist stabil), denn dort ist die Reihenfolge Teil der Struktur. */
+static gint sond_treeviewfm_sort_compare(GtkTreeModel *model, GtkTreeIter *a,
+		GtkTreeIter *b, gpointer data) {
+	gint column_id = GPOINTER_TO_INT(data);
+	g_autoptr(SondTVFMItem) item_a = sond_tvfm_item_from_model(model, a);
+	g_autoptr(SondTVFMItem) item_b = sond_tvfm_item_from_model(model, b);
+	SondTVFMItemPrivate *priv_a = NULL;
+	SondTVFMItemPrivate *priv_b = NULL;
+	gint64 mtime_a = 0, mtime_b = 0, size_a = 0, size_b = 0;
+	gboolean dir_a = FALSE, dir_b = FALSE;
+	gint64 diff = 0;
+
+	if (!item_a || !item_b) //Dummy-Zeile
+		return 0;
+
+	priv_a = sond_tvfm_item_get_priv(item_a);
+	priv_b = sond_tvfm_item_get_priv(item_b);
+
+	if (!item_fs_stat(priv_a, &mtime_a, &size_a, &dir_a)
+			|| !item_fs_stat(priv_b, &mtime_b, &size_b, &dir_b))
+		return 0;
+
+	if (column_id == STVFM_SORT_MODIFY)
+		diff = mtime_a - mtime_b;
+	else if (column_id == STVFM_SORT_SIZE) {
+		//Verzeichnisse haben keine Größe: vor den Dateien
+		diff = (dir_a ? -1 : size_a) - (dir_b ? -1 : size_b);
+		if (dir_a && dir_b)
+			diff = 0;
+	}
+
+	if (diff)
+		return (diff < 0) ? -1 : 1;
+
+	//nach Name sortiert oder gleich: nach Anzeigename
+	return g_utf8_collate(
+			sond_tvfm_item_get_display_name(item_a) ?
+					sond_tvfm_item_get_display_name(item_a) : "",
+			sond_tvfm_item_get_display_name(item_b) ?
+					sond_tvfm_item_get_display_name(item_b) : "");
 }
 
 gboolean sond_treeviewfm_file_part_indexable(SondFilePart *sfp,
@@ -4297,10 +4398,37 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 			gtk_tree_view_get_column(GTK_TREE_VIEW(stvfm), 0), "Datei");
 	gtk_tree_view_column_set_title(fs_tree_column_size, "Größe");
 	gtk_tree_view_column_set_title(fs_tree_column_modify, "Änderungsdatum");
+
+	//feste Breiten (Sizing FIXED); Größe rechtsbündig
+	gtk_tree_view_column_set_fixed_width(fs_tree_column_size, 90);
+	gtk_tree_view_column_set_fixed_width(fs_tree_column_modify, 160);
+	g_object_set(G_OBJECT(renderer_size), "xalign", 1.0, NULL);
 	gtk_tree_view_column_set_title(stvfm_priv->column_eingang, "Eingang");
 
 	GtkTreeStore *tree_store = gtk_tree_store_new(1, SOND_TYPE_TVFM_ITEM);
 	gtk_tree_view_set_model(GTK_TREE_VIEW(stvfm), GTK_TREE_MODEL(tree_store));
+
+	//Sortierung per Klick auf den Spaltenkopf; ohne Klick bleibt die
+	//Reihenfolge des Verzeichnisses
+	{
+		GtkTreeViewColumn *column_name = gtk_tree_view_get_column(
+				GTK_TREE_VIEW(stvfm), 0);
+		gint ids[] = { STVFM_SORT_NAME, STVFM_SORT_SIZE, STVFM_SORT_MODIFY };
+
+		gtk_tree_view_column_set_sort_column_id(column_name, STVFM_SORT_NAME);
+		gtk_tree_view_column_set_sort_column_id(fs_tree_column_size,
+				STVFM_SORT_SIZE);
+		gtk_tree_view_column_set_sort_column_id(fs_tree_column_modify,
+				STVFM_SORT_MODIFY);
+
+		for (guint i = 0; i < G_N_ELEMENTS(ids); i++)
+			gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(tree_store),
+					ids[i], sond_treeviewfm_sort_compare,
+					GINT_TO_POINTER(ids[i]), NULL);
+
+		gtk_tree_view_column_set_expand(column_name, TRUE);
+	}
+
 	g_object_unref(tree_store);
 
 	//Zeile expandiert
