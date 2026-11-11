@@ -6000,3 +6000,25 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  (Strg-Umfang beim Öffnen, gemeinsam für get_anbindung_ges und das Öffnen im Dateiverzeichnis);
  ungenutzte Includes in sond_tvfm_item.c, Vorzeichen-Warnung in zond_treeview.c.
 ```
+
+## Eingangsangaben im Dateiverzeichnis (11.11.2026) (#249)
+
+```text
+ Eingang (Datum und Art) je Datei oder Ordner; zond zeigt ihn im Dateiverzeichnis an und
+ sortiert danach (Spaltenkopf). Ablage: je Vorgang ein unveränderlicher Zettel (JSON) in
+ <Library>/.sond/eingang (sond_eingang_zettel.c, GTK-frei); neuerer Zettel (nach Dateiname)
+ gewinnt, Löschungen als "entfernen"-Einträge. Lokaler Nachschlage-Cache in SQLite neben der
+ Projekt-DB (sond_eingang_cache.c), jederzeit aus den Zetteln neu aufbaubar.
+ Regeln: eigener Stempel hat Vorrang, sonst erbt der Eintrag vom nächsten Ordner darüber,
+ sonst Änderungsdatum. Stempel darunter beeinflussen einen Ordner nicht.
+ Import (sond_client): je Quelle Ordnername, Eingangsdatum (Feld und Kalender) und Art; ein
+ Zettel je Import, ein Stempel je importiertem Ordner/je importierter Datei.
+ zond: Kontextmenü "Eingang" (Setzen, Entfernen, Neu einlesen); beim Löschen, Umbenennen,
+ Verschieben und Kopieren werden die Stempel nachgeführt (zond_eingang.c, Vfuncs
+ get_eingang/fs_entry_deleted/_renamed/_moved in sond_treeviewfm); Einträge in Containern
+ sind nicht stempelbar, beim Verschieben/Kopieren dorthin kommt ein Hinweis.
+ Pfade mit führendem Punkt (.sond, .sond_index.db, Projektdatei) werden im Dateiverzeichnis
+ ausgeblendet (#249).
+ Bekannte Grenzen: Änderungen außerhalb von zond lassen verwaiste Stempel zurück;
+ Rechneruhren können die Zettelreihenfolge verschieben; Ersatzdatum nicht grau markiert.
+```
