@@ -391,8 +391,8 @@ void zond_eingang_umbenannt(Projekt *zond, const gchar *alt, const gchar *neu) {
 		return;
 
 	zettel = sond_eingang_zettel_new(g_get_user_name(), "umbenennen");
-	n = sond_eingang_cache_umbenennen_zettel(zond->eingang_cache, zettel, alt,
-			neu);
+	n = sond_eingang_cache_uebertragen_zettel(zond->eingang_cache, zettel, alt,
+			neu, TRUE);
 	if (n == 0) { //nichts gestempelt: nichts nachzuführen
 		sond_eingang_zettel_free(zettel);
 
@@ -413,6 +413,126 @@ void zond_eingang_umbenannt(Projekt *zond, const gchar *alt, const gchar *neu) {
 	sond_eingang_zettel_free(zettel);
 
 	return;
+}
+
+/* Stempel an rel_path und darunter aufheben (Zettel mit der angegebenen Quelle).
+ * Rückgabe: Anzahl der aufgehobenen Stempel; bei einem Fehler 0 und *error. */
+static guint stempel_aufheben(Projekt *zond, const gchar *rel_path,
+		const gchar *quelle, GError **error) {
+	GPtrArray *stempel = NULL;
+	SondEingangZettel *zettel = NULL;
+	gchar *name = NULL;
+	guint n = 0;
+
+	stempel = sond_eingang_cache_stempel_unter(zond->eingang_cache, rel_path);
+	if (stempel->len == 0) {
+		g_ptr_array_unref(stempel);
+
+		return 0;
+	}
+
+	zettel = sond_eingang_zettel_new(g_get_user_name(), quelle);
+	for (guint i = 0; i < stempel->len; i++)
+		sond_eingang_zettel_add_entfernen(zettel, g_ptr_array_index(stempel, i));
+
+	name = sond_eingang_zettel_write(zettel, zond->project_dir, error);
+	if (name && sond_eingang_cache_apply(zond->eingang_cache, zettel, name, error))
+		n = stempel->len;
+
+	g_free(name);
+	sond_eingang_zettel_free(zettel);
+	g_ptr_array_unref(stempel);
+
+	return n;
+}
+
+gboolean zond_eingang_verschoben(Projekt *zond, const gchar *alt,
+		const gchar *neu, gboolean ist_ordner, gboolean kopiert) {
+	SondEingangZettel *zettel = NULL;
+	GError *error = NULL;
+	gchar *name = NULL;
+	gchar *art = NULL;
+	guint n = 0;
+	gboolean ok = TRUE;
+
+	if (!zond->eingang_cache || !alt)
+		return FALSE;
+
+	if (!neu) { //Ziel in einem Container: dort gibt es keine Stempel
+		gboolean hatte_datum = sond_eingang_cache_wirksam(zond->eingang_cache,
+				alt, NULL) > 0; //eigen oder geerbt
+
+		if (kopiert) { //das Original behält seinen Eingang, die Kopie hat keinen
+			if (hatte_datum)
+				display_message(zond->app_window, "Eingang\n\n",
+						"Die Kopie liegt in einem Container; dort gibt es keine "
+						"Eingangsangaben. Das Original behält seinen Eingang.",
+						NULL);
+
+			return FALSE;
+		}
+
+		n = stempel_aufheben(zond, alt, "verschieben", &error);
+		if (error) {
+			display_message(zond->app_window,
+					"Eingangsangaben konnten nicht aufgehoben werden\n\n",
+					error->message, NULL);
+			g_clear_error(&error);
+		} else if (hatte_datum)
+			display_message(zond->app_window, "Eingang\n\n",
+					"Der Eintrag liegt jetzt in einem Container; dort gibt es "
+					"keine Eingangsangaben.",
+					NULL);
+
+		return n > 0;
+	}
+
+	zettel = sond_eingang_zettel_new(g_get_user_name(),
+			kopiert ? "kopie" : "verschieben");
+
+	//Stempel des Eintrags und darunter ziehen mit bzw. werden mitkopiert
+	n = sond_eingang_cache_uebertragen_zettel(zond->eingang_cache, zettel, alt,
+			neu, !kopiert);
+
+	/* Ohne eigenen Stempel erbt der Eintrag. Würde er am Ziel etwas anderes
+	 * erben, den bisher wirksamen Stempel dort festschreiben (bei einem Ordner
+	 * einmal für den Ordner, der Inhalt erbt weiter). */
+	if (!sond_eingang_cache_has_own(zond->eingang_cache, alt)) {
+		gint bisher = sond_eingang_cache_wirksam(zond->eingang_cache, alt, &art);
+
+		if (bisher > 0 && sond_eingang_cache_wirksam(zond->eingang_cache, neu,
+				NULL) != bisher) {
+			gchar *iso = g_strdup_printf("%04d-%02d-%02d", bisher / 10000,
+					(bisher / 100) % 100, bisher % 100);
+
+			sond_eingang_zettel_add(zettel, neu, ist_ordner, iso, art, NULL, 0);
+			g_free(iso);
+			n++;
+		}
+		g_free(art);
+	}
+
+	if (n == 0) { //nichts zu übertragen
+		sond_eingang_zettel_free(zettel);
+
+		return FALSE;
+	}
+
+	name = sond_eingang_zettel_write(zettel, zond->project_dir, &error);
+	if (!name || !sond_eingang_cache_apply(zond->eingang_cache, zettel, name,
+			&error)) {
+		display_message(zond->app_window,
+				"Eingangsangaben konnten nicht auf den neuen Ort übertragen "
+				"werden\n\n", error ? error->message : "unbekannter Fehler",
+				"\n\nBitte mit \"Eingang setzen\" neu erfassen.", NULL);
+		g_clear_error(&error);
+		ok = FALSE;
+	}
+
+	g_free(name);
+	sond_eingang_zettel_free(zettel);
+
+	return ok;
 }
 
 void zond_eingang_geloescht(Projekt *zond, const gchar *rel_path) {

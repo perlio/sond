@@ -1799,6 +1799,21 @@ static void zond_treeviewfm_fs_entry_deleted(SondTreeviewFM *stvfm,
 		zond_eingang_geloescht(ztvfm_priv->zond, rel_path);
 }
 
+/* Ein Eintrag des Dateisystems wurde verschoben oder kopiert: seine
+ * Eingangsangaben gehen mit bzw. werden mitkopiert. */
+static gboolean zond_treeviewfm_fs_entry_moved(SondTreeviewFM *stvfm,
+		gchar const *old_rel, gchar const *new_rel, gboolean is_dir,
+		gboolean copied) {
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (!ztvfm_priv->zond)
+		return FALSE;
+
+	return zond_eingang_verschoben(ztvfm_priv->zond, old_rel, new_rel, is_dir,
+			copied);
+}
+
 /* Ein Eintrag des Dateisystems wurde umbenannt: seine Eingangsangaben (und die
  * darunter) gehen mit auf den neuen Pfad. */
 static void zond_treeviewfm_fs_entry_renamed(SondTreeviewFM *stvfm,
@@ -1845,6 +1860,8 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 			zond_treeviewfm_fs_entry_deleted;
 	SOND_TREEVIEWFM_CLASS(klass)->fs_entry_renamed =
 			zond_treeviewfm_fs_entry_renamed;
+	SOND_TREEVIEWFM_CLASS(klass)->fs_entry_moved =
+			zond_treeviewfm_fs_entry_moved;
 
 	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
 	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();

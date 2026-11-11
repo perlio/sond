@@ -28,8 +28,7 @@
  * Regeln:
  * - Ein eigener Stempel eines Pfads hat Vorrang.
  * - Sonst erbt ein Eintrag den Stempel des nächsten Ordners über ihm.
- * - Ein Ordner ohne eigenen Stempel zeigt das Früheste aus dem, was er erbt,
- *   und den Stempeln unterhalb von ihm.
+ * - Stempel von Einträgen darunter beeinflussen einen Ordner nicht.
  * - Gibt es nichts, ist das Ergebnis 0 (der Aufrufer fällt auf die
  *   Änderungszeit zurück).
  *
@@ -86,7 +85,7 @@ gboolean sond_eingang_cache_apply(SondEingangCache *cache,
 /**
  * sond_eingang_cache_lookup:
  * @rel_path: Pfad relativ zur Library-Wurzel ('/' als Trenner)
- * @is_dir: ist ein Verzeichnis?
+ * @is_dir: ist ein Verzeichnis? (ohne Einfluss auf das Ergebnis)
  *
  * Returns: das wirksame Eingangsdatum als JJJJMMTT, 0 = keine Angabe
  */
@@ -104,20 +103,35 @@ gboolean sond_eingang_cache_has_own(SondEingangCache *cache,
         const gchar *rel_path);
 
 /**
- * sond_eingang_cache_umbenennen_zettel:
+ * sond_eingang_cache_uebertragen_zettel:
  * @zettel: Zettel, dem die Aktionen hinzugefügt werden
- * @old_rel: bisheriger Pfad des umbenannten Eintrags
+ * @old_rel: bisheriger Pfad des umbenannten, verschobenen oder kopierten Eintrags
  * @new_rel: neuer Pfad
+ * @alte_entfernen: TRUE beim Umbenennen und Verschieben (die Stempel ziehen
+ *                  um), FALSE beim Kopieren (das Original behält sie)
  *
- * Für jeden Stempel an old_rel und darunter: "entfernen" für den alten Pfad und
- * "setzen" für den entsprechenden neuen Pfad mit gleichem Datum und gleicher
- * Art. Beim Umbenennen bleibt der Eintrag im selben Ordner, erbt also von
- * derselben Stelle; mehr ist nicht nachzuführen.
+ * Für jeden Stempel an old_rel und darunter: "setzen" für den entsprechenden
+ * neuen Pfad mit gleichem Datum und gleicher Art, bei alte_entfernen davor ein
+ * "entfernen" für den alten.
  *
- * Returns: Anzahl der nachgeführten Stempel (0 = nichts zu tun)
+ * Returns: Anzahl der übertragenen Stempel (0 = nichts zu tun)
  */
-guint sond_eingang_cache_umbenennen_zettel(SondEingangCache *cache,
-        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel);
+guint sond_eingang_cache_uebertragen_zettel(SondEingangCache *cache,
+        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel,
+        gboolean alte_entfernen);
+
+/**
+ * sond_eingang_cache_wirksam:
+ * @rel_path: Pfad relativ zur Library-Wurzel
+ * @art: (out) (optional) (nullable): Art des bestimmenden Stempels (g_free())
+ *
+ * Eigener Stempel des Pfads oder, wenn es keinen gibt, der des nächsten
+ * Ordners darüber. Das ist, was ein Eintrag ohne eigenen Stempel erbt.
+ *
+ * Returns: Datum JJJJMMTT, 0 = keine Angabe
+ */
+gint sond_eingang_cache_wirksam(SondEingangCache *cache, const gchar *rel_path,
+        gchar **art);
 
 /**
  * sond_eingang_cache_stempel_unter:

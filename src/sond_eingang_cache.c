@@ -38,14 +38,12 @@ struct _SondEingangCache {
 typedef struct {
     gint inherited;          /* Stempel des Verzeichnisses oder eines Vorfahren */
     GHashTable *own;         /* Schlüssel eines Kindes -> Datum (eigener Stempel) */
-    GHashTable *below;       /* Name eines Kind-Verzeichnisses -> frühester Stempel darunter */
 } DirCtx;
 
 static void dir_ctx_free(gpointer data) {
     DirCtx *ctx = data;
 
     g_hash_table_unref(ctx->own);
-    g_hash_table_unref(ctx->below);
     g_free(ctx);
 }
 
@@ -389,14 +387,19 @@ gint sond_eingang_cache_reload(SondEingangCache *cache, guint *n_zettel,
  * Abfrage
  * ======================================================================== */
 
-/* Stempel des Verzeichnisses key oder des nächsten Vorfahren (0 = keiner) */
-static gint inherited_for(SondEingangCache *cache, const gchar *key) {
+/* Stempel des Pfads key oder des nächsten Vorfahren (0 = keiner); art (nullable)
+ * bekommt die Art des bestimmenden Stempels */
+static gint inherited_for(SondEingangCache *cache, const gchar *key,
+        gchar **art) {
     sqlite3_stmt *stmt = NULL;
     gchar *current = g_strdup(key);
     gint result = 0;
 
+    if (art)
+        *art = NULL;
+
     if (sqlite3_prepare_v2(cache->db,
-            "SELECT eingang FROM stempel WHERE key = ?1 AND geloescht = 0;",
+            "SELECT eingang, art FROM stempel WHERE key = ?1 AND geloescht = 0;",
             -1, &stmt, NULL) != SQLITE_OK) {
         g_free(current);
 
@@ -408,8 +411,11 @@ static gint inherited_for(SondEingangCache *cache, const gchar *key) {
 
         sqlite3_reset(stmt);
         sqlite3_bind_text(stmt, 1, current, -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(stmt) == SQLITE_ROW)
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
             result = sqlite3_column_int(stmt, 0);
+            if (art && sqlite3_column_text(stmt, 1))
+                *art = g_strdup((const gchar*) sqlite3_column_text(stmt, 1));
+        }
 
         parent = parent_of(current);
         g_free(current);
@@ -427,49 +433,38 @@ static DirCtx* dir_ctx_build(SondEingangCache *cache, const gchar *parent_key) {
     gsize prefix_len = *parent_key ? strlen(parent_key) + 1 : 0;
 
     ctx->own = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    ctx->below = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    ctx->inherited = inherited_for(cache, parent_key);
+    ctx->inherited = inherited_for(cache, parent_key, NULL);
 
-    /* Alle Stempel im Teilbaum auf einmal: direkte Kinder sind eigene
-     * Stempel, tiefere zählen für den jeweiligen Kind-Ordner. Schlüssel
-     * unterhalb von "<Eltern>/" liegen zwischen "<Eltern>/" und "<Eltern>0". */
+    /* Eigene Stempel der direkten Kinder. Schlüssel unterhalb von "<Eltern>/"
+     * liegen zwischen "<Eltern>/" und "<Eltern>0"; tiefere Einträge (weiterer
+     * '/' im Rest) werden schon in SQL ausgeschlossen. */
     if (*parent_key) {
         gchar *lo = g_strconcat(parent_key, "/", NULL);
         gchar *hi = g_strconcat(parent_key, "0", NULL);
 
         if (sqlite3_prepare_v2(cache->db,
                 "SELECT key, eingang FROM stempel WHERE key > ?1 AND key < ?2 "
-                "AND geloescht = 0;", -1, &stmt, NULL) == SQLITE_OK) {
+                "AND instr(substr(key, ?3), '/') = 0 AND geloescht = 0;", -1,
+                &stmt, NULL) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, lo, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 2, hi, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 3, (gint) prefix_len + 1);
         }
         g_free(lo);
         g_free(hi);
     } else if (sqlite3_prepare_v2(cache->db,
-            "SELECT key, eingang FROM stempel WHERE geloescht = 0;", -1, &stmt,
-            NULL) != SQLITE_OK)
+            "SELECT key, eingang FROM stempel WHERE instr(key, '/') = 0 AND "
+            "geloescht = 0;", -1, &stmt, NULL) != SQLITE_OK)
         stmt = NULL;
 
     while (stmt && sqlite3_step(stmt) == SQLITE_ROW) {
         const gchar *key = (const gchar*) sqlite3_column_text(stmt, 0);
         gint datum = sqlite3_column_int(stmt, 1);
-        const gchar *rest = key + prefix_len;
-        const gchar *slash = strchr(rest, '/');
 
         if (!key || datum <= 0)
             continue;
 
-        if (!slash)
-            g_hash_table_insert(ctx->own, g_strdup(key), GINT_TO_POINTER(datum));
-        else {
-            gchar *segment = g_strndup(rest, (gsize) (slash - rest));
-            gpointer old = g_hash_table_lookup(ctx->below, segment);
-
-            if (!old || datum < GPOINTER_TO_INT(old))
-                g_hash_table_insert(ctx->below, segment, GINT_TO_POINTER(datum));
-            else
-                g_free(segment);
-        }
+        g_hash_table_insert(ctx->own, g_strdup(key), GINT_TO_POINTER(datum));
     }
     if (stmt)
         sqlite3_finalize(stmt);
@@ -515,8 +510,23 @@ static const gchar* skip_segments(const gchar *pfad, guint n) {
     return p;
 }
 
-guint sond_eingang_cache_umbenennen_zettel(SondEingangCache *cache,
-        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel) {
+gint sond_eingang_cache_wirksam(SondEingangCache *cache, const gchar *rel_path,
+        gchar **art) {
+    gchar *key = NULL;
+    gint result = 0;
+
+    g_return_val_if_fail(cache != NULL, 0);
+
+    key = make_key(rel_path);
+    result = inherited_for(cache, key, art);
+    g_free(key);
+
+    return result;
+}
+
+guint sond_eingang_cache_uebertragen_zettel(SondEingangCache *cache,
+        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel,
+        gboolean alte_entfernen) {
     sqlite3_stmt *stmt = NULL;
     gchar *key = NULL;
     guint n_segments = 1;
@@ -568,7 +578,8 @@ guint sond_eingang_cache_umbenennen_zettel(SondEingangCache *cache,
 
                 //erst den alten Pfad aufheben, dann den neuen setzen (bei einer
                 //Umbenennung nur der Groß-/Kleinschreibung ist es derselbe Schlüssel)
-                sond_eingang_zettel_add_entfernen(zettel, pfad);
+                if (alte_entfernen)
+                    sond_eingang_zettel_add_entfernen(zettel, pfad);
                 sond_eingang_zettel_add(zettel, neu, ist_ordner, iso, art, NULL, 0);
                 count++;
 
@@ -649,19 +660,8 @@ gint sond_eingang_cache_lookup(SondEingangCache *cache, const gchar *rel_path,
     own = g_hash_table_lookup(ctx->own, key);
     if (own)
         result = GPOINTER_TO_INT(own);                 //eigener Stempel hat Vorrang
-    else {
-        result = ctx->inherited;
-
-        if (is_dir) {
-            const gchar *slash = strrchr(key, '/');
-            gpointer below = g_hash_table_lookup(ctx->below,
-                    slash ? slash + 1 : key);
-
-            //Ordner ohne eigenen Stempel: das Früheste aus Geerbtem und Darunterliegendem
-            if (below && (!result || GPOINTER_TO_INT(below) < result))
-                result = GPOINTER_TO_INT(below);
-        }
-    }
+    else
+        result = ctx->inherited;                       //sonst vom nächsten Ordner darüber
 
     g_free(parent);
     g_free(key);

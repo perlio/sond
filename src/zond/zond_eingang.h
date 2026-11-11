@@ -40,6 +40,16 @@ void zond_eingang_entfernen(Projekt *zond);
  * gültig (zurückbleibende Stempel sind harmlos, bis dort wieder etwas liegt). */
 void zond_eingang_geloescht(Projekt *zond, const gchar *rel_path);
 
+/* Ein Eintrag des Dateisystems wurde verschoben oder kopiert (neu = Pfad am
+ * Ziel, NULL = das Ziel liegt in einem Container). Die Stempel des Eintrags und
+ * der Einträge darunter ziehen mit (Verschieben) bzw. werden mitkopiert
+ * (Kopieren). Hat der Eintrag keinen eigenen Stempel und würde am Ziel etwas
+ * anderes erben, wird der bisher wirksame Stempel am Ziel festgeschrieben.
+ * Wandert ein Eintrag in einen Container, entfallen seine Stempel (mit
+ * Hinweis). Rückgabe: TRUE, wenn sich Eingangsangaben geändert haben. */
+gboolean zond_eingang_verschoben(Projekt *zond, const gchar *alt,
+        const gchar *neu, gboolean ist_ordner, gboolean kopiert);
+
 /* Ein Eintrag des Dateisystems wurde umbenannt: die Stempel des Eintrags und
  * der Einträge darunter ziehen auf den neuen Pfad um (Zettel mit quelle
  * "umbenennen"; Datum und Art bleiben). Ein Fehlschlag wird gemeldet, weil die

@@ -89,6 +89,14 @@ struct _SondTreeviewFMClass {
 	void (*fs_entry_renamed)(SondTreeviewFM*, gchar const *old_rel,
 			gchar const *new_rel, gboolean is_dir);
 
+	/* Optional: ein Eintrag des Dateisystems wurde erfolgreich verschoben oder
+	 * kopiert (old_rel wie bei get_eingang; new_rel = Pfad am Ziel, NULL, wenn
+	 * das Ziel in einem Container liegt). Die Unterklasse kann Zusatzangaben
+	 * (Eingangsstempel) nachführen. Rückgabe: TRUE, wenn sich dadurch Angaben
+	 * geändert haben (dann wird die Anzeige aufgefrischt). NULL = nichts zu tun. */
+	gboolean (*fs_entry_moved)(SondTreeviewFM*, gchar const *old_rel,
+			gchar const *new_rel, gboolean is_dir, gboolean copied);
+
 	/* Signal: SeaDrive-Status geändert (connected, pending_down, pending_up) */
 	guint signal_seadrive_status;
 };

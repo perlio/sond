@@ -920,6 +920,7 @@ typedef struct _S_FM_Paste_Selection {
 	gint index_to;
 	gboolean no_tree; //Ziel eingeklappt: nur auf der Platte einfügen, Baum bleibt unberührt
 	GPtrArray *failed; //Namen (g_free) der Einträge, deren Download gescheitert ist
+	gboolean eingang_changed; //Eingangsstempel wurden nachgeführt: Anzeige auffrischen
 } SFMPasteSelection;
 
 //TRUE, wenn der Eintrag Inhalt eines Containers (ZIP/PDF/E-Mail) ist
@@ -1246,6 +1247,9 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	SondFilePart* sfp_new = NULL;
 	gchar* path_new = NULL;
 	g_autofree gchar* path_old = NULL;
+	g_autofree gchar *fs_old = NULL;
+	gboolean fs_is_dir = FALSE;
+	gboolean fs_known = FALSE;
 
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_priv(s_paste_sel->stvfm_item_parent);
@@ -1289,6 +1293,9 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	//Verschieben kann path_or_section des Quellelements auf den neuen Pfad setzen
 	path_old = g_strdup(stvfm_item_priv->path_or_section);
 
+	//Pfad der Quelle vor dem Vorgang merken (für die Nachführung der Eingangsstempel)
+	fs_known = sond_treeviewfm_item_fs_path(stvfm_item, &fs_old, &fs_is_dir);
+
 	rc = process_stvfm_item_move_or_copy(stvfm_item,
 			s_paste_sel, clipboard->ausschneiden, error);
 	if (rc == -1) {
@@ -1312,6 +1319,24 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		return 1;
 
 	s_paste_sel->index_to++; //> 0 zugleich Marker, daß Knoten eingefügt wurde
+
+	//Eingangsstempel nachführen: Quelle war ein Dateisystem-Eintrag; Ziel ist
+	//ein Dateisystem-Ordner (Pfad = Zielordner + endgültiger Name) oder ein Container
+	if (fs_known && SOND_TREEVIEWFM_GET_CLASS(
+			stvfm_item_parent_priv->stvfm)->fs_entry_moved) {
+		g_autofree gchar *fs_new = NULL;
+
+		if (!stvfm_item_parent_priv->sond_file_part)
+			fs_new = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
+					stvfm_item_parent_priv->path_or_section : "",
+					(stvfm_item_parent_priv->path_or_section) ? "/" : "",
+					s_paste_sel->base_inserted, NULL);
+
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->fs_entry_moved(
+				stvfm_item_parent_priv->stvfm, fs_old, fs_new, fs_is_dir,
+				!clipboard->ausschneiden))
+			s_paste_sel->eingang_changed = TRUE;
+	}
 
 	//Eingeklapptes Ziel: Inhalt wird beim Aufklappen von der Platte geladen
 	if (s_paste_sel->no_tree) {
@@ -2043,10 +2068,15 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 			else if (rc != -1)
 				rc = 0; //Nutzer hat abgebrochen: still nichts tun
 		}
-		else
+		else {
 			rc = sond_treeview_clipboard_foreach(
 					sond_treeviewfm_paste_clipboard_foreach,
 					(gpointer) &s_paste_sel, error);
+
+			//Eingangsstempel nachgeführt: Anzeige (auch abgeleitete Ordnerdaten) auffrischen
+			if (s_paste_sel.eingang_changed)
+				sond_treeviewfm_eingang_refresh(stvfm);
+		}
 		g_free(pf.failure);
 
 		//übersprungene Einträge dem Nutzer nennen
