@@ -45,7 +45,8 @@ G_BEGIN_DECLS
  * @SOND_GRAPH_DB_ERROR_CONNECTION: Datenbankverbindungsfehler
  * @SOND_GRAPH_DB_ERROR_QUERY: SQL-Query-Fehler
  * @SOND_GRAPH_DB_ERROR_NOT_FOUND: Gesuchte Daten nicht gefunden
- * @SOND_GRAPH_DB_ERROR_LOCKED: Knoten ist von einem anderen Client gesperrt
+ * @SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD: Der Client haelt den Lock auf den Knoten nicht
+ *   (entweder haelt ein anderer Client ihn oder niemand)
  * @SOND_GRAPH_DB_ERROR_STALE: Knoten wurde zwischenzeitlich geaendert (Version veraltet)
  * @SOND_GRAPH_DB_ERROR_GONE: Knoten (oder Ziel einer Kante) existiert nicht mehr
  *
@@ -55,7 +56,7 @@ typedef enum {
     SOND_GRAPH_DB_ERROR_CONNECTION,
     SOND_GRAPH_DB_ERROR_QUERY,
     SOND_GRAPH_DB_ERROR_NOT_FOUND,
-    SOND_GRAPH_DB_ERROR_LOCKED,
+    SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD,
     SOND_GRAPH_DB_ERROR_STALE,
     SOND_GRAPH_DB_ERROR_GONE
 } SondGraphDbError;
@@ -355,7 +356,8 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
  *   nachgetragen.
  *
  * Generische Schutzregeln (gelten fuer jeden Knoten):
- * - Haelt ein ANDERER Client einen Lock auf den Knoten -> SOND_GRAPH_DB_ERROR_LOCKED
+ * - Speichern nur, wenn der Client den Lock selbst haelt, sonst
+ *   SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD (Server meldet dann, ob und wer ihn haelt)
  * - Version veraltet -> SOND_GRAPH_DB_ERROR_STALE
  * - Knoten existiert nicht mehr -> SOND_GRAPH_DB_ERROR_GONE
  *
@@ -418,7 +420,7 @@ GArray* sond_graph_db_find_missing_nodes(MYSQL *conn, SondGraphNode *node);
  * Löscht einen Node aus der Datenbank.
  * Edges werden automatisch durch CASCADE gelöscht.
  * Es gelten die Schutzregeln von sond_graph_db_save_node()
- * (LOCKED / STALE / GONE).
+ * (LOCK_NOT_HELD / STALE / GONE).
  *
  * Returns: %TRUE bei Erfolg
  */

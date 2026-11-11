@@ -1130,9 +1130,14 @@ static int node_exists(MYSQL *conn, gint64 node_id) {
     return exists;
 }
 
-/* Generische Lock-Pruefung vor jedem schreibenden Zugriff: Haelt ein ANDERER
- * Client einen Lock auf den Knoten, wird abgelehnt. Kein Lock oder eigener
- * Lock -> OK. */
+/* Generische Lock-Pruefung vor jedem schreibenden Zugriff auf einen
+ * bestehenden Knoten: Geschrieben (gespeichert/geloescht) werden darf nur,
+ * wenn der anfragende Client den Lock selbst haelt.
+ * - eigener Lock                  -> OK
+ * - Lock eines anderen Clients    -> SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD
+ * - gar kein Lock                 -> SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD
+ * - Knoten existiert nicht (mehr) -> SOND_GRAPH_DB_ERROR_GONE
+ * Wer den Lock haelt (falls jemand), ermittelt der Server fuer die Antwort. */
 static gboolean check_write_lock(MYSQL *conn, gint64 node_id, const gchar *client_id,
                                  GError **error) {
     gchar *query = g_strdup_printf(
@@ -1157,10 +1162,23 @@ static gboolean check_write_lock(MYSQL *conn, gint64 node_id, const gchar *clien
 
     gboolean ok = TRUE;
     MYSQL_ROW row = mysql_fetch_row(res);
-    if (row && (client_id == NULL || g_strcmp0(row[0], client_id) != 0)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_LOCKED,
+    if (row && client_id != NULL && g_strcmp0(row[0], client_id) == 0) {
+        /* eigener Lock */
+    } else if (row) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD,
                    "Knoten %" G_GINT64_FORMAT " ist von '%s' gesperrt",
                    node_id, row[1] ? row[1] : "?");
+        ok = FALSE;
+    } else {
+        /* Kein Lock: Knoten weg (GONE) oder schlicht nicht von uns gesperrt */
+        int exists = node_exists(conn, node_id);
+        if (exists == 0) {
+            g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_GONE,
+                       "Knoten %" G_GINT64_FORMAT " existiert nicht mehr", node_id);
+        } else {
+            g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD,
+                       "Knoten %" G_GINT64_FORMAT ": Sperre nicht gehalten", node_id);
+        }
         ok = FALSE;
     }
 
@@ -1201,7 +1219,7 @@ gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node,
     }
 
     if (id > 0) {
-        /* Bestehender Knoten: erst Lock pruefen, dann Version */
+        /* Bestehender Knoten: erst Lock (muss eigener sein) pruefen, dann Version */
         if (!check_write_lock(conn, id, client_id, error)) {
             g_prefix_error(error, "%s: ", __func__);
             return FALSE;

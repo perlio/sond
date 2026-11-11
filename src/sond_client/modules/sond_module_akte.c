@@ -246,7 +246,7 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             if (priv->locked_by_other) {
                 gchar *text = priv->locked_at_other ?
-                    g_strdup_printf("Gesperrt von: %s (zuletzt aktiv: %s)",
+                    g_strdup_printf("Gesperrt von: %s (seit %s)",
                                     priv->locked_by_other, priv->locked_at_other) :
                     g_strdup_printf("Gesperrt von: %s", priv->locked_by_other);
                 gtk_label_set_text(GTK_LABEL(priv->status_label), text);
@@ -1180,8 +1180,8 @@ static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
 /**
  * on_client_node_conflict:
  *
- * Reaktion auf das generische Client-Signal "node-conflict" (LOCKED / STALE /
- * GONE beim Speichern oder Loeschen sowie Lock-Verlust laut Heartbeat) fuer
+ * Reaktion auf das generische Client-Signal "node-conflict" (LOCK_NOT_HELD / STALE /
+ * GONE beim Speichern oder Loeschen) fuer
  * die gerade angezeigte Akte. Die Eingaben bleiben in der Maske stehen
  * (zum Kopieren) - neu geladen wird erst auf ausdruecklichen Wunsch ueber
  * "Bearbeiten" (mit Rueckfrage). Gibt es die Akte nicht mehr, wird die Maske
@@ -1205,12 +1205,12 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
         return;
     }
 
-    /* LOCKED / STALE: Lock-Inhaber merken (nur bei LOCKED bekannt) */
+    /* LOCK_NOT_HELD / STALE: Lock-Inhaber merken (falls jemand anderes ihn haelt) */
     g_free(priv->locked_by_other);
     priv->locked_by_other = NULL;
     g_free(priv->locked_at_other);
     priv->locked_at_other = NULL;
-    if (code == SOND_CLIENT_ERROR_LOCKED && locked_by && *locked_by) {
+    if (code == SOND_CLIENT_ERROR_LOCK_NOT_HELD && locked_by && *locked_by) {
         priv->locked_by_other = g_strdup(locked_by);
         priv->locked_at_other = (locked_at && *locked_at) ? g_strdup(locked_at) : NULL;
     }
@@ -1218,9 +1218,14 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
     set_akte_state(priv, AKTE_STATE_READONLY);
     priv->unsaved_conflict = TRUE;
 
-    gchar *text = priv->locked_by_other ?
-        g_strdup_printf("Nicht gespeichert - gesperrt von: %s", priv->locked_by_other) :
-        g_strdup("Nicht gespeichert - Akte wurde zwischenzeitlich geaendert");
+    gchar *text;
+    if (priv->locked_by_other) {
+        text = g_strdup_printf("Nicht gespeichert - gesperrt von: %s", priv->locked_by_other);
+    } else if (code == SOND_CLIENT_ERROR_LOCK_NOT_HELD) {
+        text = g_strdup("Nicht gespeichert - Sperre nicht mehr gehalten");
+    } else {
+        text = g_strdup("Nicht gespeichert - Akte wurde zwischenzeitlich geaendert");
+    }
     gtk_label_set_text(GTK_LABEL(priv->status_label), text);
     g_free(text);
 }
@@ -1506,7 +1511,7 @@ static void start_edit_attempt(SondModuleAktePrivate *priv) {
                         "Lock trotzdem übernehmen? Der andere Bearbeiter verliert "
                         "dadurch ohne Vorwarnung seinen Zugriff.",
                         priv->locked_by_other,
-                        priv->locked_at_other ? " (zuletzt aktiv: " : "",
+                        priv->locked_at_other ? " (gesperrt seit: " : "",
                         priv->locked_at_other ? priv->locked_at_other : "") :
         g_strdup("Diese Akte wird gerade von einem anderen Benutzer bearbeitet.\n\n"
                 "Lock trotzdem übernehmen? Der andere Bearbeiter verliert dadurch "
@@ -2116,13 +2121,13 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 gint64 node_id = sond_graph_node_get_id(priv->current_node);
                 GError *del_error = NULL;
 
-                /* Unlock und Delete */
-                sond_client_unlock_node(priv->client, node_id, NULL);
-
+                /* Delete (nur mit eigenem Lock moeglich; die Lock-Zeile verschwindet
+                 * serverseitig mit dem Knoten). Nur bei Fehlschlag Lock abgeben. */
                 if (!delete_node(priv, node_id, &del_error)) {
                     LOG_ERROR("Rollback fehlgeschlagen: %s\n",
                              del_error ? del_error->message : "Unbekannt");
                     if (del_error) g_error_free(del_error);
+                    sond_client_unlock_node(priv->client, node_id, NULL);
                 }
 
                 /* Fehler anzeigen */
@@ -2219,13 +2224,13 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 gint64 node_id = sond_graph_node_get_id(priv->current_node);
                 GError *del_error = NULL;
 
-                /* Unlock und Delete */
-                sond_client_unlock_node(priv->client, node_id, NULL);
-
+                /* Delete (nur mit eigenem Lock moeglich; die Lock-Zeile verschwindet
+                 * serverseitig mit dem Knoten). Nur bei Fehlschlag Lock abgeben. */
                 if (!delete_node(priv, node_id, &del_error)) {
                     LOG_ERROR("Rollback fehlgeschlagen: %s\n",
                              del_error ? del_error->message : "Unbekannt");
                     if (del_error) g_error_free(del_error);
+                    sond_client_unlock_node(priv->client, node_id, NULL);
                 }
 
                 /* Fehler anzeigen */
@@ -2411,17 +2416,13 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         gint64 node_id = sond_graph_node_get_id(priv->current_node);
         LOG_INFO("Lösche nicht gespeicherte Entry-Akte (ID %" G_GINT64_FORMAT ")\n", node_id);
         
-        /* Erst Unlock, dann Delete */
+        /* Delete nur mit eigenem Lock moeglich: erst loeschen (Lock-Zeile
+         * verschwindet mit dem Knoten), nur bei Fehlschlag Lock abgeben */
         GError *error = NULL;
-        if (!sond_client_unlock_node(priv->client, node_id, &error)) {
-            LOG_ERROR("Unlock fehlgeschlagen: %s\n", error ? error->message : "Unbekannt");
-            if (error) g_error_free(error);
-        }
-        
-        error = NULL;
         if (!delete_node(priv, node_id, &error)) {
             LOG_ERROR("Fehler beim Löschen der Akte: %s\n", error ? error->message : "Unbekannt");
             if (error) g_error_free(error);
+            sond_client_unlock_node(priv->client, node_id, NULL);
         }
     } else if (priv->current_node && sond_graph_node_get_id(priv->current_node) > 0) {
         /* Bestehende Akte: Nur Unlock */

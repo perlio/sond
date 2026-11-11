@@ -58,11 +58,11 @@ struct _SondClient {
     /* HTTP-Client */
     SoupSession *session;
 
-    /* Lock-Heartbeat: Node-IDs, die wir aktuell selbst gesperrt halten
-     * (Keys: heap-allokierte gint64*, Values: ungenutzt). Wird periodisch
-     * durchlaufen, um die eigenen Locks zu erneuern (s. heartbeat_timeout_cb). */
+    /* Node-IDs, die wir aktuell selbst gesperrt halten (Keys: heap-allokierte
+     * gint64*, Values: ungenutzt). Dient dazu, beim Entsperren nur dann beim
+     * Server nachzufragen, wenn wir den Lock wirklich halten (s.
+     * sond_client_unlock_node). */
     GHashTable *held_locks;
-    guint heartbeat_source_id;
 
     /* TRUE sobald einmal erfolgreich eingeloggt wurde (erster Login ODER
      * stiller Re-Login nach 401) - steuert, ob beim naechsten Login noch die
@@ -78,8 +78,8 @@ G_DEFINE_TYPE(SondClient, sond_client, G_TYPE_OBJECT)
 
 typedef struct {
     GArray *missing_ids;   /* gint64, nur bei GONE */
-    gchar *locked_by;      /* nur bei LOCKED */
-    gchar *locked_at;      /* nur bei LOCKED */
+    gchar *locked_by;      /* nur bei LOCK_NOT_HELD */
+    gchar *locked_at;      /* nur bei LOCK_NOT_HELD */
 } SondClientErrorPrivate;
 
 static void sond_client_error_private_init(SondClientErrorPrivate *priv) {
@@ -108,7 +108,7 @@ G_DEFINE_EXTENDED_ERROR(SondClientError, sond_client_error)
 
 gboolean sond_client_error_is_conflict(const GError *error) {
     return error && error->domain == SOND_CLIENT_ERROR &&
-           (error->code == SOND_CLIENT_ERROR_LOCKED ||
+           (error->code == SOND_CLIENT_ERROR_LOCK_NOT_HELD ||
             error->code == SOND_CLIENT_ERROR_STALE ||
             error->code == SOND_CLIENT_ERROR_GONE);
 }
@@ -132,7 +132,7 @@ const gchar* sond_client_error_get_locked_at(const GError *error) {
  * set_write_error:
  *
  * Wertet eine Nicht-200-Antwort eines schreibenden Knoten-Endpunkts
- * (save/delete) aus. Enthaelt sie einen "code" (LOCKED/STALE/GONE), wird ein
+ * (save/delete) aus. Enthaelt sie einen "code" (LOCK_NOT_HELD/STALE/GONE), wird ein
  * SOND_CLIENT_ERROR mit benutzerlesbarer Meldung und Zusatzdaten erzeugt,
  * sonst ein allgemeiner Fehler mit dem Servertext.
  *
@@ -172,7 +172,7 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
 
     SondClientErrorCode code = SOND_CLIENT_ERROR_FAILED;
     if (status == 409 && code_str) {
-        if (g_strcmp0(code_str, "LOCKED") == 0) code = SOND_CLIENT_ERROR_LOCKED;
+        if (g_strcmp0(code_str, "LOCK_NOT_HELD") == 0) code = SOND_CLIENT_ERROR_LOCK_NOT_HELD;
         else if (g_strcmp0(code_str, "STALE") == 0) code = SOND_CLIENT_ERROR_STALE;
         else if (g_strcmp0(code_str, "GONE") == 0) code = SOND_CLIENT_ERROR_GONE;
     }
@@ -187,11 +187,16 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
 
     gchar *msg = NULL;
     switch (code) {
-        case SOND_CLIENT_ERROR_LOCKED:
-            msg = g_strdup_printf(
-                "Der Datensatz ist inzwischen von '%s' gesperrt (z.B. weil Ihre "
-                "Sperre gebrochen wurde). Ihre Aenderungen wurden nicht gespeichert.",
-                (locked_by && *locked_by) ? locked_by : "einem anderen Benutzer");
+        case SOND_CLIENT_ERROR_LOCK_NOT_HELD:
+            if (locked_by && *locked_by) {
+                msg = g_strdup_printf(
+                    "Der Datensatz ist inzwischen von '%s' gesperrt (z.B. weil Ihre "
+                    "Sperre gebrochen wurde). Ihre Aenderungen wurden nicht gespeichert.",
+                    locked_by);
+            } else {
+                msg = g_strdup("Sie halten die Sperre auf den Datensatz nicht (mehr). "
+                               "Ihre Aenderungen wurden nicht gespeichert.");
+            }
             break;
         case SOND_CLIENT_ERROR_STALE:
             msg = g_strdup("Der Datensatz wurde zwischenzeitlich von jemand anderem "
@@ -206,7 +211,7 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
     if (error) {
         GError *e = g_error_new_literal(SOND_CLIENT_ERROR, code, msg);
         SondClientErrorPrivate *priv = sond_client_error_get_private(e);
-        if (code == SOND_CLIENT_ERROR_LOCKED) {
+        if (code == SOND_CLIENT_ERROR_LOCK_NOT_HELD) {
             priv->locked_by = g_strdup(locked_by);
             priv->locked_at = g_strdup(locked_at);
         } else if (code == SOND_CLIENT_ERROR_GONE && missing) {
@@ -227,10 +232,6 @@ static SondClientErrorCode set_write_error(guint status, GBytes *response, GErro
 static void sond_client_finalize(GObject *object) {
     SondClient *self = SOND_CLIENT(object);
 
-    if (self->heartbeat_source_id != 0) {
-        g_source_remove(self->heartbeat_source_id);
-        self->heartbeat_source_id = 0;
-    }
     if (self->held_locks) {
         g_hash_table_destroy(self->held_locks);
     }
@@ -293,9 +294,8 @@ static void sond_client_init(SondClient *self) {
     self->last_regnr_year = 0;
     self->has_last_regnr = FALSE;
 
-    /* Lock-Heartbeat */
+    /* Eigene Locks */
     self->held_locks = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
-    self->heartbeat_source_id = 0;
 }
 
 static gboolean sond_client_load_config(SondClient *client,
@@ -348,57 +348,6 @@ static gboolean sond_client_load_config(SondClient *client,
     return TRUE;
 }
 
-/**
- * heartbeat_timeout_cb:
- *
- * Erneuert periodisch alle Locks, die dieser Client aktuell haelt (einfach
- * ein erneuter Lock-Request je Node - sond_graph_db_lock_node() ist dafuer
- * bereits idempotent: ON DUPLICATE KEY UPDATE locked_at=... bei gleichem
- * Inhaber). Dient zwei Zwecken: (1) macht locked_at zu einem echten
- * "zuletzt aktiv"-Zeitstempel fuer andere User (s. "Lock brechen"), (2)
- * haelt durch den Server-Request nebenbei auch die Session am Leben,
- * solange die Verbindung steht - ein reiner Session-Timeout fuehrt dadurch
- * i.d.R. nicht mehr zu einem sichtbaren Re-Login-Dialog waehrend das Fenster
- * offen bleibt. Setzt NICHT automatisch frei, egal wie lange ein Renewal
- * fehlschlaegt - das bleibt bewusst Handarbeit (Prozess-Neustart oder
- * "Lock brechen" durch einen anderen User).
- */
-static gboolean heartbeat_timeout_cb(gpointer user_data) {
-    SondClient *client = SOND_CLIENT(user_data);
-
-    /* Kopie der Keys: sond_client_lock_node() schreibt bei Erfolg selbst
-     * wieder in held_locks (g_hash_table_replace) - direkte Iteration ueber
-     * die Original-Tabelle waehrend sie veraendert wird waere undefiniert. */
-    GList *node_ids = g_hash_table_get_keys(client->held_locks);
-
-    for (GList *l = node_ids; l; l = l->next) {
-        gint64 node_id = *(gint64*)l->data;
-        GError *error = NULL;
-        gchar *locked_by = NULL, *locked_at = NULL;
-        if (!sond_client_lock_node_ex(client, node_id, "Bearbeitung (Heartbeat)",
-                                      &locked_by, &locked_at, &error)) {
-            LOG_WARN("Heartbeat-Renewal fuer Node %" G_GINT64_FORMAT " fehlgeschlagen: %s\n",
-                     node_id, error ? error->message : "Unbekannt");
-            g_clear_error(&error);
-
-            /* locked_by gesetzt = Server hat mit Konflikt (409) geantwortet: der
-             * Lock gehoert uns nicht mehr (gebrochen). Modul benachrichtigen,
-             * damit der Benutzer es sofort und nicht erst beim Speichern merkt. */
-            if (locked_by) {
-                g_hash_table_remove(client->held_locks, &node_id);
-                g_signal_emit(client, client_signals[SIGNAL_NODE_CONFLICT], 0,
-                              node_id, (guint)SOND_CLIENT_ERROR_LOCKED,
-                              locked_by, locked_at);
-            }
-        }
-        g_free(locked_by);
-        g_free(locked_at);
-    }
-
-    g_list_free(node_ids);
-    return G_SOURCE_CONTINUE;
-}
-
 SondClient* sond_client_new(const gchar *config_file, GError **error) {
     SondClient *client = g_object_new(SOND_TYPE_CLIENT, NULL);
 
@@ -408,10 +357,6 @@ SondClient* sond_client_new(const gchar *config_file, GError **error) {
     }
 
     client->session = soup_session_new();
-
-    /* Alle 10 Min - deutlich kuerzer als session_inactivity_minutes (Default
-     * 30 Min), haelt die Session also nebenbei aktiv, solange online. */
-    client->heartbeat_source_id = g_timeout_add_seconds(600, heartbeat_timeout_cb, client);
 
     return client;
 }
@@ -479,7 +424,7 @@ void sond_client_set_login_callback(SondClient *client,
  * Konflikt, der den Knoten selbst betrifft, per Signal "node-conflict"
  * (s. sond_client.h). GONE nur, wenn der Knoten selbst fehlt - fehlt nur ein
  * verknuepfter Knoten, bekommt das ausschliesslich der Aufrufer ueber den Fehler.
- * Wird der Lock dadurch hinfaellig (LOCKED/GONE), wird er aus held_locks entfernt.
+ * Wird der Lock dadurch hinfaellig (LOCK_NOT_HELD/GONE), wird er aus held_locks entfernt.
  */
 static void notify_node_conflict(SondClient *client, gint64 node_id, const GError *werr) {
     if (!sond_client_error_is_conflict(werr)) {
@@ -499,15 +444,15 @@ static void notify_node_conflict(SondClient *client, gint64 node_id, const GErro
         }
     }
 
-    if (werr->code == SOND_CLIENT_ERROR_LOCKED || werr->code == SOND_CLIENT_ERROR_GONE) {
+    if (werr->code == SOND_CLIENT_ERROR_LOCK_NOT_HELD || werr->code == SOND_CLIENT_ERROR_GONE) {
         g_hash_table_remove(client->held_locks, &node_id);
     }
 
     g_signal_emit(client, client_signals[SIGNAL_NODE_CONFLICT], 0,
                   node_id, (guint)werr->code,
-                  werr->code == SOND_CLIENT_ERROR_LOCKED ?
+                  werr->code == SOND_CLIENT_ERROR_LOCK_NOT_HELD ?
                       sond_client_error_get_locked_by(werr) : NULL,
-                  werr->code == SOND_CLIENT_ERROR_LOCKED ?
+                  werr->code == SOND_CLIENT_ERROR_LOCK_NOT_HELD ?
                       sond_client_error_get_locked_at(werr) : NULL);
 }
 
@@ -803,7 +748,7 @@ gboolean sond_client_lock_node_ex(SondClient *client,
 
         if (!success) {
             /* Bei Konflikt (409) stehen locked_by/locked_at im Body - fuer
-             * die Anzeige im Client ("Gesperrt von X, zuletzt aktiv Y"). */
+             * die Anzeige im Client ("Gesperrt von X, seit Y"). */
             if (status == 409 && (out_locked_by || out_locked_at)) {
                 gsize resp_len = 0;
                 const gchar *resp_data = g_bytes_get_data(response, &resp_len);
@@ -822,8 +767,7 @@ gboolean sond_client_lock_node_ex(SondClient *client,
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Lock failed with status %u", status);
         } else {
-            /* Eigenen Lock-Bestand merken - fuer das periodische
-             * Heartbeat-Renewal, s. heartbeat_timeout_cb(). */
+            /* Eigenen Lock-Bestand merken (s. held_locks). */
             gint64 *key = g_new(gint64, 1);
             *key = node_id;
             g_hash_table_replace(client->held_locks, key, GINT_TO_POINTER(1));
@@ -1189,7 +1133,7 @@ gboolean sond_client_save_node(SondClient *client,
             set_write_error(status, response, &werr);
 
             /* Konflikt (gesperrt/geaendert/geloescht) per Signal melden; bei
-             * LOCKED/GONE wird der Lock dabei aus held_locks entfernt. */
+             * LOCK_NOT_HELD/GONE wird der Lock dabei aus held_locks entfernt. */
             notify_node_conflict(client, sond_graph_node_get_id(node), werr);
             g_propagate_error(error, werr);
 

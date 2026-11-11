@@ -425,7 +425,7 @@ static const gchar* get_request_client_id(SoupServerMessage *msg) {
  * @node: (nullable): gespeicherter Knoten (fuer fehlende Edge-Enden)
  *
  * Fehlerantwort fuer schreibende Knoten-Operationen. Die generischen
- * Schutzregeln der DB-Schicht (LOCKED / STALE / GONE) werden als
+ * Schutzregeln der DB-Schicht (LOCK_NOT_HELD / STALE / GONE) werden als
  * 409 mit { "error", "code", ... } gemeldet, alles andere als 500.
  */
 static void send_db_write_error(SondServer *server,
@@ -439,7 +439,7 @@ static void send_db_write_error(SondServer *server,
     const gchar *code_str = NULL;
     if (error && error->domain == SOND_GRAPH_DB_ERROR) {
         switch (error->code) {
-            case SOND_GRAPH_DB_ERROR_LOCKED: code_str = "LOCKED"; break;
+            case SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD: code_str = "LOCK_NOT_HELD"; break;
             case SOND_GRAPH_DB_ERROR_STALE:  code_str = "STALE";  break;
             case SOND_GRAPH_DB_ERROR_GONE:   code_str = "GONE";   break;
             default: break;
@@ -459,7 +459,7 @@ static void send_db_write_error(SondServer *server,
     json_builder_set_member_name(builder, "code");
     json_builder_add_string_value(builder, code_str);
 
-    if (error->code == SOND_GRAPH_DB_ERROR_LOCKED) {
+    if (error->code == SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD) {
         gchar *locked_by = NULL;
         gchar *locked_at = NULL;
         sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL);
@@ -970,7 +970,7 @@ static void handle_node_lock(SoupServer *soup_server,
         g_clear_error(&error);
 
         /* Wer haelt den Lock aktuell und seit wann? Fuer die Anzeige im
-         * Client ("Gesperrt von X, zuletzt aktiv Y") und den "Lock
+         * Client ("Gesperrt von X, seit Y") und den "Lock
          * brechen"-Button. Fehler hier ist nicht fatal - dann bleiben die
          * Felder einfach leer. */
         gchar *locked_by = NULL;
