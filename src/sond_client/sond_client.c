@@ -38,12 +38,18 @@ struct _SondClient {
     gchar *username;       /* Seafile-Username */
     gchar *client_id;      /* Instanz-ID (UUID pro Prozess) - Lock-Identitaet */
     gchar *seafile_url;    /* Seafile-Server URL */
-    
+    gchar *seadrive_root;  /* Konfiguration [seadrive] root (optional) */
+
     /* Zuletzt verwendete RegNr (während Laufzeit) */
     guint last_regnr_lfd;
     guint last_regnr_year;
     gboolean has_last_regnr;
-    
+
+    /* Aktuell im Aktenmodul angezeigte Akte (Vorschlag fuer andere Module) */
+    guint current_akte_lfd;
+    guint current_akte_year;
+    gboolean has_current_akte;
+
     /* Auth-Callback */
     void (*auth_failed_callback)(SondClient *client, gpointer user_data);
     gpointer auth_failed_user_data;
@@ -236,6 +242,7 @@ static void sond_client_finalize(GObject *object) {
     g_free(self->username);
     g_free(self->client_id);
     g_free(self->seafile_url);
+    g_free(self->seadrive_root);
 
     if (self->offline_manager) {
         g_object_unref(self->offline_manager);
@@ -316,7 +323,15 @@ static gboolean sond_client_load_config(SondClient *client,
     
     client->server_url = g_strdup_printf("http://%s:%u", host, client->server_port);
     g_free(host);
-    
+
+    /* SeaDrive-Wurzel (optional): Konto-Verzeichnis von SeaDrive. Ohne Angabe
+     * wird sie beim Import automatisch ermittelt. */
+    client->seadrive_root = g_key_file_get_string(keyfile, "seadrive", "root", NULL);
+    if (client->seadrive_root && !*client->seadrive_root) {
+        g_free(client->seadrive_root);
+        client->seadrive_root = NULL;
+    }
+
     /* Offline sync_directory laden (optional) */
     gchar *sync_directory = g_key_file_get_string(keyfile, "offline", "sync_directory", NULL);
     if (!sync_directory) {
@@ -1608,6 +1623,33 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
     g_bytes_unref(response);
 
     return clone_token;
+}
+
+void sond_client_set_current_akte(SondClient *client, guint lfd_nr, guint year) {
+    g_return_if_fail(SOND_IS_CLIENT(client));
+    client->current_akte_lfd = lfd_nr;
+    client->current_akte_year = year;
+    client->has_current_akte = TRUE;
+}
+
+void sond_client_clear_current_akte(SondClient *client) {
+    g_return_if_fail(SOND_IS_CLIENT(client));
+    client->has_current_akte = FALSE;
+}
+
+gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *year) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    if (!client->has_current_akte) {
+        return FALSE;
+    }
+    if (lfd_nr) *lfd_nr = client->current_akte_lfd;
+    if (year) *year = client->current_akte_year;
+    return TRUE;
+}
+
+const gchar* sond_client_get_seadrive_root(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    return client->seadrive_root;
 }
 
 gpointer sond_client_get_offline_manager(SondClient *client) {

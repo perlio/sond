@@ -425,6 +425,46 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
                                             GError **error);
 
 /**
+ * sond_client_set_current_akte:
+ * @client: SondClient
+ * @lfd_nr: Laufende Nummer
+ * @year: Jahr (vollständig, z.B. 2026)
+ *
+ * Merkt die gerade im Aktenmodul angezeigte Akte, damit andere Module sie
+ * vorschlagen können (nur Hinweis, kein Lock, keine Zusage).
+ */
+void sond_client_set_current_akte(SondClient *client, guint lfd_nr, guint year);
+
+/**
+ * sond_client_clear_current_akte:
+ * @client: SondClient
+ *
+ * Es wird keine Akte mehr angezeigt.
+ */
+void sond_client_clear_current_akte(SondClient *client);
+
+/**
+ * sond_client_get_current_akte:
+ * @client: SondClient
+ * @lfd_nr: (out) (optional): Laufende Nummer
+ * @year: (out) (optional): Jahr
+ *
+ * Returns: TRUE, wenn gerade eine Akte angezeigt wird
+ */
+gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *year);
+
+/**
+ * sond_client_get_seadrive_root:
+ * @client: SondClient
+ *
+ * Gibt die in der Konfiguration angegebene SeaDrive-Wurzel (Abschnitt
+ * [seadrive], Schlüssel root) zurück, das Konto-Verzeichnis von SeaDrive.
+ *
+ * Returns: (transfer none) (nullable): Pfad oder NULL, wenn nicht konfiguriert
+ */
+const gchar* sond_client_get_seadrive_root(SondClient *client);
+
+/**
  * sond_client_get_offline_manager:
  * @client: SondClient
  *

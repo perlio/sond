@@ -19,6 +19,7 @@
 #include "sond_client_window.h"
 #include "modules/sond_module_akte.h"
 #include "modules/sond_module_offline.h"
+#include "modules/sond_module_import.h"
 #include "../sond_log_and_error.h"
 
 struct _SondClientWindow {
@@ -34,6 +35,7 @@ struct _SondClientWindow {
     /* Module */
     GtkWidget *module_akte;
     GtkWidget *module_offline;
+    GtkWidget *module_import;
 };
 
 G_DEFINE_TYPE(SondClientWindow, sond_client_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -82,7 +84,13 @@ static void sond_client_window_init(SondClientWindow *self) {
     g_object_set_data(G_OBJECT(btn_offline), "module-name", (gpointer)"offline");
     g_signal_connect(btn_offline, "clicked", G_CALLBACK(on_module_button_clicked), self);
     gtk_box_append(GTK_BOX(module_box), btn_offline);
-    
+
+    /* Button für "Import"-Modul */
+    GtkWidget *btn_import = gtk_button_new_with_label("Import");
+    g_object_set_data(G_OBJECT(btn_import), "module-name", (gpointer)"import");
+    g_signal_connect(btn_import, "clicked", G_CALLBACK(on_module_button_clicked), self);
+    gtk_box_append(GTK_BOX(module_box), btn_import);
+
     /* Separator */
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(main_box), separator);
@@ -125,6 +133,10 @@ SondClientWindow* sond_client_window_new(GtkApplication *app, SondClient *client
     /* Offline-Modul erstellen */
     window->module_offline = sond_module_offline_new(client);
     gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_offline, "offline");
+
+    /* Import-Modul erstellen */
+    window->module_import = sond_module_import_new(client);
+    gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_import, "import");
 
     return window;
 }

@@ -299,6 +299,9 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
     g_free(priv->library_name);
     priv->library_name = NULL;
 
+    /* Andere Module sollen keine Akte mehr vorgeschlagen bekommen */
+    sond_client_clear_current_akte(priv->client);
+
     /* OCR-Button verstecken */
 	gtk_widget_set_visible(priv->btn_ocr, FALSE);
 }
@@ -707,33 +710,68 @@ static void suggest_last_regnr(SondModuleAktePrivate *priv) {
  * Prüft ob eine Akte aktuell aktiv ist.
  * Eine Akte ist aktiv, wenn es mehr "von"-Properties als "bis"-Properties gibt.
  */
-static gboolean ist_akte_aktiv(SondGraphNode *node) {
+static gboolean count_von_bis(SondGraphNode *node, guint *von_count,
+        guint *bis_count) {
+    *von_count = 0;
+    *bis_count = 0;
+
     if (!node) {
         return FALSE;
     }
-    
+
     GPtrArray *properties = sond_graph_node_get_properties(node);
     if (!properties) {
         return FALSE;
     }
-    
+
     /* Zähle "von" und "bis" Properties */
-    guint von_count = 0;
-    guint bis_count = 0;
-    
     for (guint i = 0; i < properties->len; i++) {
         SondGraphProperty *prop = g_ptr_array_index(properties, i);
         const gchar *key = sond_graph_property_get_key(prop);
-        
+
         if (g_strcmp0(key, "von") == 0) {
-            von_count++;
+            (*von_count)++;
         } else if (g_strcmp0(key, "bis") == 0) {
-            bis_count++;
+            (*bis_count)++;
         }
     }
-    
+
+    return TRUE;
+}
+
+static gboolean ist_akte_aktiv(SondGraphNode *node) {
+    guint von_count = 0;
+    guint bis_count = 0;
+
+    if (!count_von_bis(node, &von_count, &bis_count)) {
+        return FALSE;
+    }
+
     /* Wenn mehr "von" als "bis" -> aktiv */
     return von_count > bis_count;
+}
+
+SondAkteStatus sond_module_akte_get_status(SondGraphNode *node) {
+    guint von_count = 0;
+    guint bis_count = 0;
+
+    /* Ohne "von" ist die Akte nie gespeichert worden: der Node reserviert nur
+     * die RegNr, Library und Projektdatei gibt es noch nicht */
+    if (!count_von_bis(node, &von_count, &bis_count) || von_count == 0) {
+        return SOND_AKTE_STATUS_NICHT_ANGELEGT;
+    }
+
+    return (von_count > bis_count) ? SOND_AKTE_STATUS_AKTIV :
+            SOND_AKTE_STATUS_ABGELEGT;
+}
+
+gboolean sond_module_akte_parse_regnr(const gchar *regnr_str, guint *lfd_nr,
+        guint *year) {
+    return parse_regnr(regnr_str, lfd_nr, year);
+}
+
+gchar* sond_module_akte_library_name(guint lfd_nr, guint year) {
+    return format_regnr_storage(lfd_nr, year);
 }
 
 /**
@@ -934,6 +972,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
         gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
         g_free(regnr_display);
         g_ptr_array_unref(regnr_values);
+        sond_client_set_current_akte(priv->client, lfd_nr, year);
     }
     
     /* Kurzbezeichnung */
@@ -1019,7 +1058,7 @@ static gboolean wait_for_sync_changed(const gchar *library_id, gboolean clone,
     return FALSE;  // Timeout
 }
 
-static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
+SondGraphNode* sond_module_akte_find_by_regnr(SondClient *client,
 		guint lfd_nr, guint year, GError **error) {
 	/* Search Criteria erstellen */
 	SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
@@ -1051,7 +1090,7 @@ static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
 	criteria->limit = 100;
 
 	/* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
-	GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
+	GPtrArray *nodes = sond_client_search_nodes(client, criteria, error);
 	sond_graph_node_search_criteria_free(criteria);
 
 	if (!nodes) {
@@ -1087,6 +1126,11 @@ static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
 	}
 
 	return result_node;
+}
+
+static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
+		guint lfd_nr, guint year, GError **error) {
+	return sond_module_akte_find_by_regnr(priv->client, lfd_nr, year, error);
 }
 
 static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint *year, GError **error) {
