@@ -1131,20 +1131,6 @@ static gchar* create_seafile_library(SondModuleAktePrivate *priv,
 }
 
 /**
- * delete_seafile_library:
- * 
- * Löscht eine Seafile Library (Rollback bei Fehler)
- */
-static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
-                                        const gchar *library_id,
-                                        GError **error) {
-    LOG_INFO("Lösche Seafile Library (ID: %s)...\n", library_id);
-    
-    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
-    return sond_client_delete_seafile_library(priv->client, library_id, error);
-}
-
-/**
  * on_client_node_conflict:
  *
  * Reaktion auf das generische Client-Signal "node-conflict" (LOCK_NOT_HELD /

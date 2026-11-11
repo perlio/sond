@@ -1343,67 +1343,6 @@ gchar* sond_client_create_seafile_library(SondClient *client,
     return library_id;
 }
 
-gboolean sond_client_delete_seafile_library(SondClient *client,
-                                            const gchar *library_id,
-                                            GError **error) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
-    g_return_val_if_fail(library_id != NULL, FALSE);
-    
-    if (!ensure_authenticated(client, error)) {
-        return FALSE;
-    }
-    
-    gboolean retry = TRUE;
-    gboolean success = FALSE;
-    
-    while (retry) {
-        retry = FALSE;
-        
-        gchar *url = g_strdup_printf("%s/seafile/library/%s",
-                                    client->server_url, library_id);
-        SoupMessage *msg = soup_message_new("DELETE", url);
-        g_free(url);
-        
-        add_auth_header(client, msg);
-        
-        GBytes *response = soup_session_send_and_read(client->session, msg, NULL, error);
-        
-        if (!response) {
-            g_object_unref(msg);
-            break;
-        }
-        
-        guint status = soup_message_get_status(msg);
-        
-        if (status == 401) {
-            g_bytes_unref(response);
-            g_object_unref(msg);
-            
-            if (handle_auth_error(client, error)) {
-                retry = TRUE;
-                continue;
-            }
-            break;
-        }
-        
-        success = (status == 200 || status == 204);
-        
-        if (!success) {
-            gsize size;
-            const gchar *body = g_bytes_get_data(response, &size);
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Server returned status %u: %.*s", status, (int)size, body);
-        } else {
-            LOG_INFO("Seafile Library deleted (ID: %s)\n", library_id);
-        }
-        
-        g_bytes_unref(response);
-        g_object_unref(msg);
-    }
-    
-    return success;
-}
-
 gchar* sond_client_get_seafile_library_id(SondClient *client,
                                            const gchar *library_name,
                                            GError **error) {

@@ -36,8 +36,8 @@ G_BEGIN_DECLS
  * Registriert alle Seafile-Endpoints beim Server.
  *
  * Endpoints:
- * - POST   /seafile/library  - Erstellt Library
- * - DELETE /seafile/library  - Löscht Library
+ * - POST   /seafile/library  - Erstellt Library samt leerer Projektdatei
+ * - GET    /seafile/library-id?name=XXX - Library-ID zu einem Namen
  */
 void sond_server_seafile_register_handlers(SondServer *server);
 

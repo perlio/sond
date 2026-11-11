@@ -991,52 +991,6 @@ static void handle_seafile_library_create(SoupServer *soup_server,
 }
 
 /**
- * handle_seafile_library_delete:
- * DELETE /seafile/library/{library_id}
- * 
- * Response: {"success": true}
- */
-static void handle_seafile_library_delete(SoupServer *soup_server,
-                                          SoupServerMessage *msg,
-                                          const char *path,
-                                          GHashTable *query,
-                                          gpointer user_data) {
-    SondServer *server = (SondServer*)user_data;
-
-    if (strcmp(soup_server_message_get_method(msg), "DELETE") != 0) {
-        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only DELETE allowed");
-        return;
-    }
-
-    /* Auth-Check */
-    const gchar *username = NULL;
-    if (!sond_server_check_authorization(server, msg, &username)) {
-        return;  /* 401 wurde bereits gesendet */
-    }
-
-    /* Library-ID aus Path: /seafile/library/{id} */
-    const char *id_str = strrchr(path, '/');
-    if (!id_str || strlen(id_str) <= 1) {
-        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing library ID in path");
-        return;
-    }
-    id_str++;
-
-    /* Library löschen */
-    GError *error = NULL;
-    if (!seafile_delete_library(server, id_str, &error)) {
-        gchar *err_msg = g_strdup_printf("Failed to delete library: %s",
-                                        error ? error->message : "unknown");
-        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
-        g_free(err_msg);
-        g_clear_error(&error);
-        return;
-    }
-
-    send_success_response(msg, NULL);
-}
-
-/**
  * handle_seafile_library_id_get:
  * GET /seafile/library-id?name=XXX
  *
@@ -1132,8 +1086,6 @@ void sond_server_seafile_register_handlers(SondServer *server) {
                             handle_seafile_library_id_get, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library",
                            handle_seafile_library_create, server, NULL);
-    soup_server_add_handler(soup_server, "/seafile/library/",
-                           handle_seafile_library_delete, server, NULL);
 
     LOG_INFO("Seafile handlers registered\n");
 }

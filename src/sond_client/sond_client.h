@@ -389,22 +389,6 @@ gchar* sond_client_create_seafile_library(SondClient *client,
                                           GError **error);
 
 /**
- * sond_client_delete_seafile_library:
- * @client: SondClient
- * @library_id: Library-ID
- * @error: (nullable): Fehler-Rückgabe
- *
- * Löscht eine Seafile Library.
- * Führt automatisch Login durch falls nicht authentifiziert.
- * Bei 401 wird automatisch Re-Login durchgeführt.
- *
- * Returns: TRUE bei Erfolg
- */
-gboolean sond_client_delete_seafile_library(SondClient *client,
-                                            const gchar *library_id,
-                                            GError **error);
-
-/**
  * sond_client_get_seafile_library_id:
  * @client: SondClient
  * @library_name: Library-Name (z.B. "2026-1")
