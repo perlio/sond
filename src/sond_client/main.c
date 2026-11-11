@@ -23,22 +23,28 @@
 
 #include <gtk/gtk.h>
 
+/* Ob in diesem Prozess schon einmal eine Anmeldung gelungen ist: nur dann kann
+ * eine Sitzung "abgelaufen" sein, beim ersten Login nach dem Start entfällt
+ * der Hinweis. */
+static gboolean had_login = FALSE;
+
 static gboolean on_login_needed(SondClient *client, gpointer user_data) {
-    const gchar *message = (const gchar *)user_data;
-    
+    const gchar *message = had_login ? (const gchar *)user_data : NULL;
+
     LoginResult *login_result = sond_login_dialog_show(NULL,
                                                         sond_client_get_server_url(client),
                                                         message);
-    
+
     if (!login_result || !login_result->success) {
         LOG_INFO("Login cancelled by user\n");
         login_result_free(login_result);
         return FALSE;
     }
-    
+
     sond_client_set_auth(client, login_result->username, login_result->session_token,
     		login_result->seafile_token, login_result->seafile_url);
-    
+    had_login = TRUE;
+
     login_result_free(login_result);
     return TRUE;
 }
