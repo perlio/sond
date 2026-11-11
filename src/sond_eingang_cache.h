@@ -93,6 +93,45 @@ gboolean sond_eingang_cache_apply(SondEingangCache *cache,
 gint sond_eingang_cache_lookup(SondEingangCache *cache, const gchar *rel_path,
         gboolean is_dir);
 
+/**
+ * sond_eingang_cache_has_own:
+ * @rel_path: Pfad relativ zur Library-Wurzel
+ *
+ * Returns: TRUE, wenn für diesen Pfad selbst ein Stempel gesetzt ist (nicht nur
+ *          geerbt)
+ */
+gboolean sond_eingang_cache_has_own(SondEingangCache *cache,
+        const gchar *rel_path);
+
+/**
+ * sond_eingang_cache_umbenennen_zettel:
+ * @zettel: Zettel, dem die Aktionen hinzugefügt werden
+ * @old_rel: bisheriger Pfad des umbenannten Eintrags
+ * @new_rel: neuer Pfad
+ *
+ * Für jeden Stempel an old_rel und darunter: "entfernen" für den alten Pfad und
+ * "setzen" für den entsprechenden neuen Pfad mit gleichem Datum und gleicher
+ * Art. Beim Umbenennen bleibt der Eintrag im selben Ordner, erbt also von
+ * derselben Stelle; mehr ist nicht nachzuführen.
+ *
+ * Returns: Anzahl der nachgeführten Stempel (0 = nichts zu tun)
+ */
+guint sond_eingang_cache_umbenennen_zettel(SondEingangCache *cache,
+        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel);
+
+/**
+ * sond_eingang_cache_stempel_unter:
+ * @rel_path: Pfad relativ zur Library-Wurzel
+ *
+ * Alle gesetzten Stempel für rel_path selbst und für alles darunter (Pfade wie
+ * im Zettel angegeben). Für das Aufräumen, wenn ein Eintrag gelöscht wird.
+ *
+ * Returns: (transfer container) (element-type utf8): Pfade; mit
+ *          g_ptr_array_unref() freigeben (die Strings gehören dem Array)
+ */
+GPtrArray* sond_eingang_cache_stempel_unter(SondEingangCache *cache,
+        const gchar *rel_path);
+
 G_END_DECLS
 
 #endif /* SOND_EINGANG_CACHE_H */

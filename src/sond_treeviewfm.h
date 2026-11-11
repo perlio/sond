@@ -77,6 +77,18 @@ struct _SondTreeviewFMClass {
 	 * Unterklasse. NULL = keine Eingangsangaben. */
 	gint (*get_eingang)(SondTreeviewFM*, gchar const *rel_path, gboolean is_dir);
 
+	/* Optional: ein Eintrag des Dateisystems (rel_path wie bei get_eingang)
+	 * wurde erfolgreich gelöscht. Die Unterklasse kann dazugehörige
+	 * Zusatzangaben (Eingangsstempel) aufräumen. NULL = nichts zu tun. */
+	void (*fs_entry_deleted)(SondTreeviewFM*, gchar const *rel_path,
+			gboolean is_dir);
+
+	/* Optional: ein Eintrag des Dateisystems wurde erfolgreich umbenannt
+	 * (Pfade wie bei get_eingang). Die Unterklasse kann Zusatzangaben
+	 * (Eingangsstempel) auf den neuen Pfad nachführen. NULL = nichts zu tun. */
+	void (*fs_entry_renamed)(SondTreeviewFM*, gchar const *old_rel,
+			gchar const *new_rel, gboolean is_dir);
+
 	/* Signal: SeaDrive-Status geändert (connected, pending_down, pending_up) */
 	guint signal_seadrive_status;
 };
@@ -150,6 +162,12 @@ const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
  * Einträge im Baum neu holen, neu zeichnen und - falls nach einer Spalte
  * sortiert ist - neu sortieren. */
 void sond_treeviewfm_eingang_refresh(SondTreeviewFM*);
+
+/* Pfad (relativ zur Wurzel, '/' als Trenner) und Verzeichnis-Kennzeichen eines
+ * Eintrags des Dateisystems; FALSE für Einträge in Containern (ZIP, E-Mail,
+ * PDF-Anhänge, Anbindungen). rel_path ist mit g_free() freizugeben. */
+gboolean sond_treeviewfm_item_fs_path(SondTVFMItem*, gchar **rel_path,
+		gboolean *is_dir);
 
 /* Kann die Datei indiziert werden? PDF und E-Mail immer; sonst nach dem
  * MIME-Typ: bei einem SondFilePartLeaf der beim Erzeugen ermittelte

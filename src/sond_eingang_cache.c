@@ -477,6 +477,149 @@ static DirCtx* dir_ctx_build(SondEingangCache *cache, const gchar *parent_key) {
     return ctx;
 }
 
+gboolean sond_eingang_cache_has_own(SondEingangCache *cache,
+        const gchar *rel_path) {
+    sqlite3_stmt *stmt = NULL;
+    gchar *key = NULL;
+    gboolean has = FALSE;
+
+    g_return_val_if_fail(cache != NULL, FALSE);
+
+    key = make_key(rel_path);
+    if (*key && sqlite3_prepare_v2(cache->db,
+            "SELECT 1 FROM stempel WHERE key = ?1 AND geloescht = 0;", -1,
+            &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+        has = (sqlite3_step(stmt) == SQLITE_ROW);
+        sqlite3_finalize(stmt);
+    }
+    g_free(key);
+
+    return has;
+}
+
+/* Pfad ohne die ersten n Segmente ('/' oder '\\' als Trenner) */
+static const gchar* skip_segments(const gchar *pfad, guint n) {
+    const gchar *p = pfad;
+
+    while (*p == '/' || *p == '\\')
+        p++;
+    while (n > 0 && *p) {
+        while (*p && *p != '/' && *p != '\\')
+            p++;
+        while (*p == '/' || *p == '\\')
+            p++;
+        n--;
+    }
+
+    return p;
+}
+
+guint sond_eingang_cache_umbenennen_zettel(SondEingangCache *cache,
+        SondEingangZettel *zettel, const gchar *old_rel, const gchar *new_rel) {
+    sqlite3_stmt *stmt = NULL;
+    gchar *key = NULL;
+    guint n_segments = 1;
+    guint count = 0;
+
+    g_return_val_if_fail(cache != NULL, 0);
+    g_return_val_if_fail(zettel != NULL, 0);
+    g_return_val_if_fail(old_rel != NULL && new_rel != NULL, 0);
+
+    key = make_key(old_rel);
+    if (!*key) {
+        g_free(key);
+
+        return 0;
+    }
+    for (const gchar *c = key; *c; c++)
+        if (*c == '/')
+            n_segments++;
+
+    {
+        gchar *lo = g_strconcat(key, "/", NULL);
+        gchar *hi = g_strconcat(key, "0", NULL);
+
+        if (sqlite3_prepare_v2(cache->db,
+                "SELECT pfad, eingang, art, ist_ordner FROM stempel WHERE "
+                "geloescht = 0 AND (key = ?1 OR (key > ?2 AND key < ?3)) "
+                "ORDER BY key;", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, lo, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, hi, -1, SQLITE_TRANSIENT);
+
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const gchar *pfad = (const gchar*) sqlite3_column_text(stmt, 0);
+                gint datum = sqlite3_column_int(stmt, 1);
+                const gchar *art = (const gchar*) sqlite3_column_text(stmt, 2);
+                gboolean ist_ordner = sqlite3_column_int(stmt, 3) != 0;
+                const gchar *rest = NULL;
+                gchar *neu = NULL;
+                gchar *iso = NULL;
+
+                if (!pfad || datum <= 0)
+                    continue;
+
+                rest = skip_segments(pfad, n_segments);
+                neu = *rest ? g_strconcat(new_rel, "/", rest, NULL) :
+                        g_strdup(new_rel);
+                iso = g_strdup_printf("%04d-%02d-%02d", datum / 10000,
+                        (datum / 100) % 100, datum % 100);
+
+                //erst den alten Pfad aufheben, dann den neuen setzen (bei einer
+                //Umbenennung nur der Groß-/Kleinschreibung ist es derselbe Schlüssel)
+                sond_eingang_zettel_add_entfernen(zettel, pfad);
+                sond_eingang_zettel_add(zettel, neu, ist_ordner, iso, art, NULL, 0);
+                count++;
+
+                g_free(neu);
+                g_free(iso);
+            }
+            sqlite3_finalize(stmt);
+        }
+        g_free(lo);
+        g_free(hi);
+    }
+    g_free(key);
+
+    return count;
+}
+
+GPtrArray* sond_eingang_cache_stempel_unter(SondEingangCache *cache,
+        const gchar *rel_path) {
+    GPtrArray *result = g_ptr_array_new_with_free_func(g_free);
+    sqlite3_stmt *stmt = NULL;
+    gchar *key = NULL;
+
+    g_return_val_if_fail(cache != NULL, result);
+
+    key = make_key(rel_path);
+    if (*key) {
+        gchar *lo = g_strconcat(key, "/", NULL);
+        gchar *hi = g_strconcat(key, "0", NULL);
+
+        //der Pfad selbst oder alles zwischen "<key>/" und "<key>0"
+        if (sqlite3_prepare_v2(cache->db,
+                "SELECT pfad FROM stempel WHERE geloescht = 0 AND "
+                "(key = ?1 OR (key > ?2 AND key < ?3));", -1, &stmt, NULL)
+                == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, lo, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, hi, -1, SQLITE_TRANSIENT);
+
+            while (sqlite3_step(stmt) == SQLITE_ROW)
+                g_ptr_array_add(result,
+                        g_strdup((const gchar*) sqlite3_column_text(stmt, 0)));
+            sqlite3_finalize(stmt);
+        }
+        g_free(lo);
+        g_free(hi);
+    }
+    g_free(key);
+
+    return result;
+}
+
 gint sond_eingang_cache_lookup(SondEingangCache *cache, const gchar *rel_path,
         gboolean is_dir) {
     gchar *key = NULL;

@@ -44,10 +44,8 @@ typedef struct {
     gint cal_month;
 } SourceRow;
 
-/* Auswahl für "Art" (Eintrag 0 = keine Angabe) */
-static const gchar *const ART_CHOICES[] = { "(keine Angabe)", "Post", "E-Mail",
-        "beA", "Fax", "CD-ROM / DVD", "USB-Stick / Festplatte",
-        "Persönlich übergeben", "Sonstiges", NULL };
+/* Auswahl für "Art" (Eintrag 0 = keine Angabe), gemeinsam mit zond */
+#define ART_CHOICES (sond_eingang_arten())
 
 struct _ImportPriv {
     SondClient *client;

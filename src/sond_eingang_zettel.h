@@ -63,14 +63,14 @@ typedef struct {
     gchar     *angelegt;  /* "JJJJ-MM-TTThh:mm:ssZ" (UTC) */
     gchar     *von;       /* Benutzer */
     gchar     *rechner;
-    gchar     *quelle;    /* "import", "manuell", "kopie" */
+    gchar     *quelle;    /* "import", "manuell", "kopie", "loeschen" */
     GPtrArray *eintraege; /* (element-type SondEingangEintrag) */
 } SondEingangZettel;
 
 /**
  * sond_eingang_zettel_new:
  * @von: Benutzer (nullable)
- * @quelle: "import", "manuell" oder "kopie"
+ * @quelle: "import", "manuell", "kopie" oder "loeschen"
  *
  * Neuer, leerer Zettel mit Kennung, Zeitpunkt (jetzt, UTC) und Rechnername.
  *
@@ -144,6 +144,16 @@ gchar* sond_eingang_datum_heute(void);
  * Returns: (transfer full): "TT.MM.JJJJ" (bei ungültiger Eingabe eine Kopie)
  */
 gchar* sond_eingang_datum_anzeige(const gchar *iso);
+
+/**
+ * sond_eingang_arten:
+ *
+ * Auswahl für die Art des Eingangs (Post, E-Mail, ...); Eintrag 0 steht für
+ * "keine Angabe". Von Client und zond gemeinsam genutzt.
+ *
+ * Returns: (transfer none): NULL-terminierte Liste, nicht freigeben
+ */
+const gchar* const* sond_eingang_arten(void);
 
 /**
  * sond_eingang_datum_zu_int:

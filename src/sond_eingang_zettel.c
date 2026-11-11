@@ -160,6 +160,14 @@ gchar* sond_eingang_datum_anzeige(const gchar *iso) {
     return text;
 }
 
+const gchar* const* sond_eingang_arten(void) {
+    static const gchar *const arten[] = { "(keine Angabe)", "Post", "E-Mail",
+            "beA", "Fax", "CD-ROM / DVD", "USB-Stick / Festplatte",
+            "Persönlich übergeben", "Sonstiges", NULL };
+
+    return arten;
+}
+
 gint sond_eingang_datum_zu_int(const gchar *iso) {
     gchar *parsed = NULL;
     gint year = 0, month = 0, day = 0;

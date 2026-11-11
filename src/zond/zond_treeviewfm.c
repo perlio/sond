@@ -12,6 +12,7 @@
 #include "../sond_file_helper.h"
 #include "../sond_mime.h"
 #include "zond_indexsuche.h"
+#include "zond_eingang.h"
 #include "zond_pdf_document.h"
 
 #include "zond_dbase.h"
@@ -1787,6 +1788,28 @@ static gboolean zond_treeviewfm_file_part_busy(SondFilePart *sfp) {
 			zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp)) != NULL;
 }
 
+/* Ein Eintrag des Dateisystems wurde gelöscht: dessen eigene Eingangsangaben
+ * (bei einem Ordner auch die darunter) gelten nicht mehr. */
+static void zond_treeviewfm_fs_entry_deleted(SondTreeviewFM *stvfm,
+		gchar const *rel_path, gboolean is_dir) {
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (ztvfm_priv->zond)
+		zond_eingang_geloescht(ztvfm_priv->zond, rel_path);
+}
+
+/* Ein Eintrag des Dateisystems wurde umbenannt: seine Eingangsangaben (und die
+ * darunter) gehen mit auf den neuen Pfad. */
+static void zond_treeviewfm_fs_entry_renamed(SondTreeviewFM *stvfm,
+		gchar const *old_rel, gchar const *new_rel, gboolean is_dir) {
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (ztvfm_priv->zond)
+		zond_eingang_umbenannt(ztvfm_priv->zond, old_rel, new_rel);
+}
+
 /* Wirksames Eingangsdatum eines Dateisystem-Eintrags aus der lokalen
  * Nachschlagetabelle des Projekts; -1, solange es keine gibt. */
 static gint zond_treeviewfm_get_eingang(SondTreeviewFM *stvfm,
@@ -1818,6 +1841,10 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->get_section_index_status =
 			zond_treeviewfm_get_section_index_status;
 	SOND_TREEVIEWFM_CLASS(klass)->get_eingang = zond_treeviewfm_get_eingang;
+	SOND_TREEVIEWFM_CLASS(klass)->fs_entry_deleted =
+			zond_treeviewfm_fs_entry_deleted;
+	SOND_TREEVIEWFM_CLASS(klass)->fs_entry_renamed =
+			zond_treeviewfm_fs_entry_renamed;
 
 	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
 	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
@@ -1846,7 +1873,12 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	g_object_unref(sec_idx);
 
 	GMenu *sec_eingang = g_menu_new();
-	g_menu_append(sec_eingang, "Eingänge neu einlesen", "stv.eingang-neu");
+	GMenu *sub_eingang = g_menu_new();
+	g_menu_append(sub_eingang, "Setzen ...", "stv.eingang-setzen");
+	g_menu_append(sub_eingang, "Entfernen", "stv.eingang-entfernen");
+	g_menu_append(sub_eingang, "Neu einlesen", "stv.eingang-neu");
+	g_menu_append_submenu(sec_eingang, "Eingang", G_MENU_MODEL(sub_eingang));
+	g_object_unref(sub_eingang);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_eingang));
 	g_object_unref(sec_eingang);
 
@@ -1933,6 +1965,16 @@ static void zond_treeviewfm_action_index_loeschen_auswahl(GSimpleAction *a,
 	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
+static void zond_treeviewfm_action_eingang_setzen(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	zond_eingang_setzen((Projekt*) d);
+}
+
+static void zond_treeviewfm_action_eingang_entfernen(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	zond_eingang_entfernen((Projekt*) d);
+}
+
 /* Zettel nachlesen, die seit dem Öffnen des Projekts dazugekommen sind
  * (z.B. ein Import auf einem anderen Rechner), und die Anzeige auffrischen */
 static void zond_treeviewfm_action_eingang_neu(GSimpleAction *a, GVariant *p,
@@ -1997,6 +2039,18 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 			G_CALLBACK(zond_treeviewfm_action_index_loeschen_auswahl), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_loesch_sel));
 	g_object_unref(act_idx_loesch_sel);
+
+	GSimpleAction *act_eingang_setzen = g_simple_action_new("eingang-setzen", NULL);
+	g_signal_connect(act_eingang_setzen, "activate",
+			G_CALLBACK(zond_treeviewfm_action_eingang_setzen), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_eingang_setzen));
+	g_object_unref(act_eingang_setzen);
+
+	GSimpleAction *act_eingang_entf = g_simple_action_new("eingang-entfernen", NULL);
+	g_signal_connect(act_eingang_entf, "activate",
+			G_CALLBACK(zond_treeviewfm_action_eingang_entfernen), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_eingang_entf));
+	g_object_unref(act_eingang_entf);
 
 	GSimpleAction *act_eingang_neu = g_simple_action_new("eingang-neu", NULL);
 	g_signal_connect(act_eingang_neu, "activate",

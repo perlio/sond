@@ -475,6 +475,10 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	gint res = 0;
 	gpointer ctx = NULL;
 	g_autofree gchar* path_old = NULL;
+	g_autofree gchar *fs_old = NULL;
+	g_autofree gchar *fs_new = NULL;
+	gboolean fs_is_dir = FALSE;
+	gboolean fs_known = FALSE;
 
 	if (!is_valid_filename(text_new)) {
 		g_set_error(error, g_quark_from_static_string("sond"), 0,
@@ -508,6 +512,9 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	 * path_or_section auf den neuen (vollen) Pfad */
 	path_old = g_strdup(stvfm_item_priv->path_or_section);
 
+	//Pfad vor dem Umbenennen merken (für die Nachführung von Zusatzangaben)
+	fs_known = sond_treeviewfm_item_fs_path(stvfm_item, &fs_old, &fs_is_dir);
+
 	rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, text_new, error);
 	g_object_unref(stvfm_item_parent);
 	g_signal_emit(stvfm_item_priv->stvfm,
@@ -515,6 +522,13 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 			(rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
 		return -1;
+
+	//Zusatzangaben (Eingangsstempel) auf den neuen Pfad nachführen
+	if (fs_known && sond_treeviewfm_item_fs_path(stvfm_item, &fs_new, NULL)
+			&& g_strcmp0(fs_old, fs_new)
+			&& SOND_TREEVIEWFM_GET_CLASS(stvfm)->fs_entry_renamed)
+		SOND_TREEVIEWFM_GET_CLASS(stvfm)->fs_entry_renamed(stvfm, fs_old,
+				fs_new, fs_is_dir);
 
 	/* Pfade bereits geöffneter Dateien darin nachführen - vorher wurde
 	 * der schon neue Pfad als alter und nur der Name als neuer übergeben,
@@ -2173,6 +2187,9 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	gint res = 0;
 	gint rc = 0;
 	gpointer ctx = NULL;
+	gchar *fs_rel = NULL;
+	gboolean fs_is_dir = FALSE;
+	gboolean fs_known = FALSE;
 	SondTreeviewFM* stvfm = SOND_TREEVIEWFM(stv);
 
 	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stvfm), iter);
@@ -2186,11 +2203,22 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	else if (res == 1)
 		return 0;
 
+	//Pfad vor dem Löschen merken (danach lässt sich der Eintrag nicht mehr abfragen)
+	fs_known = sond_treeviewfm_item_fs_path(stvfm_item, &fs_rel, &fs_is_dir);
+
 	rc = sond_tvfm_item_delete(stvfm_item, error);
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_after,
 			0, (rc == 0) ? TRUE : FALSE, ctx);
-	if (rc)
+	if (rc) {
+		g_free(fs_rel);
+
 		return -1;
+	}
+
+	if (fs_known && SOND_TREEVIEWFM_GET_CLASS(stvfm)->fs_entry_deleted)
+		SOND_TREEVIEWFM_GET_CLASS(stvfm)->fs_entry_deleted(stvfm, fs_rel,
+				fs_is_dir);
+	g_free(fs_rel);
 
 	{
 		GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
@@ -3837,6 +3865,29 @@ static gboolean item_fs_stat(SondTVFMItemPrivate *item_priv, gint64 *mtime,
 	if (mtime) *mtime = item_priv->mtime;
 	if (size) *size = item_priv->size;
 	if (is_dir) *is_dir = item_priv->is_dir;
+
+	return TRUE;
+}
+
+gboolean sond_treeviewfm_item_fs_path(SondTVFMItem *item, gchar **rel_path,
+		gboolean *is_dir) {
+	SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
+	gboolean dir = FALSE;
+	gchar const *rel = NULL;
+
+	if (!item_fs_stat(item_priv, NULL, NULL, &dir))
+		return FALSE;
+
+	rel = item_priv->sond_file_part ?
+			sond_file_part_get_path(item_priv->sond_file_part) :
+			item_priv->path_or_section;
+	if (!rel)
+		return FALSE;
+
+	if (rel_path)
+		*rel_path = g_strdup(rel);
+	if (is_dir)
+		*is_dir = dir;
 
 	return TRUE;
 }
