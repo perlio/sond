@@ -21,7 +21,11 @@
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
+#include <glib/gstdio.h>
+#include <sqlite3.h>
 #include <string.h>
+
+#include "../sond_zond_schema.h"
 
 /* Forward declarations */
 typedef struct _SondServer SondServer;
@@ -495,6 +499,192 @@ static gboolean seafile_delete_library(SondServer *server,
     return success;
 }
 
+/**
+ * seafile_upload_bytes:
+ *
+ * Lädt eine Datei in das Wurzelverzeichnis einer Library hoch (vorhandene
+ * gleichnamige Datei wird ersetzt). Anders als der Worker prüft diese Funktion
+ * die HTTP-Status beider Schritte.
+ *
+ * Seafile API:
+ * GET  https://seafile.example.com/api2/repos/{repo_id}/upload-link/?p=/
+ * POST {upload-link} (multipart: file, parent_dir, replace)
+ */
+static gboolean seafile_upload_bytes(SondServer *server,
+                                      const gchar *library_id,
+                                      const gchar *filename,
+                                      const guchar *data, gsize size,
+                                      GError **error) {
+    gchar const* seafile_url = sond_server_get_seafile_url(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
+    if (!seafile_url || !auth_token) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile URL/token not available");
+        return FALSE;
+    }
+
+    SoupSession *session = soup_session_new();
+
+    /* 1. Upload-Link holen */
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/upload-link/?p=/",
+                                  seafile_url, library_id);
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    gchar *auth_header = g_strdup_printf("Token %s", auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                               "Authorization", auth_header);
+    g_free(auth_header);
+
+    GBytes *link_bytes = soup_session_send_and_read(session, msg, NULL, error);
+    if (!link_bytes) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+
+    guint status = soup_message_get_status(msg);
+    gsize link_size = 0;
+    gconstpointer link_data = g_bytes_get_data(link_bytes, &link_size);
+
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to get upload link (HTTP %u): %.*s",
+                   status, (int)link_size, (const gchar*)link_data);
+        g_bytes_unref(link_bytes);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+
+    gchar *upload_url = g_strndup(link_data, link_size);
+    g_strstrip(upload_url);
+    if (upload_url[0] == '"') {
+        gsize len = strlen(upload_url);
+        gchar *tmp = g_strndup(upload_url + 1, len >= 2 ? len - 2 : 0);
+        g_free(upload_url);
+        upload_url = tmp;
+    }
+    g_bytes_unref(link_bytes);
+    g_object_unref(msg);
+
+    /* 2. Multipart-Body aufbauen */
+    gchar *boundary = g_strdup_printf("----SondBoundary%016" G_GINT64_MODIFIER "x",
+                                      g_get_monotonic_time());
+    GString *body = g_string_new(NULL);
+
+    g_string_append_printf(body, "--%s\r\n", boundary);
+    g_string_append_printf(body,
+        "Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+        "Content-Type: application/octet-stream\r\n\r\n", filename);
+    g_string_append_len(body, (const gchar*)data, size);
+    g_string_append(body, "\r\n");
+
+    g_string_append_printf(body, "--%s\r\n", boundary);
+    g_string_append(body,
+        "Content-Disposition: form-data; name=\"parent_dir\"\r\n\r\n/\r\n");
+
+    g_string_append_printf(body, "--%s\r\n", boundary);
+    g_string_append(body,
+        "Content-Disposition: form-data; name=\"replace\"\r\n\r\n1\r\n");
+
+    g_string_append_printf(body, "--%s--\r\n", boundary);
+
+    msg = soup_message_new("POST", upload_url);
+    g_free(upload_url);
+
+    gchar *content_type = g_strdup_printf("multipart/form-data; boundary=%s",
+                                          boundary);
+    g_free(boundary);
+
+    gsize body_len = body->len;
+    GBytes *body_bytes = g_bytes_new_take(g_string_free(body, FALSE), body_len);
+    soup_message_set_request_body_from_bytes(msg, content_type, body_bytes);
+    g_bytes_unref(body_bytes);
+    g_free(content_type);
+
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+
+    status = soup_message_get_status(msg);
+    gboolean success = (status == 200 || status == 201);
+
+    if (!success) {
+        gsize resp_size = 0;
+        const gchar *resp = g_bytes_get_data(response, &resp_size);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to upload '%s' (HTTP %u): %.*s",
+                   filename, status, (int)resp_size, resp ? resp : "");
+    }
+
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+
+    return success;
+}
+
+/**
+ * seafile_create_project_file:
+ *
+ * Erzeugt eine leere zond-Projektdatei ".<library_name>.ZND" (Schema aus
+ * sond_zond_schema_create()) und legt sie ins Wurzelverzeichnis der Library.
+ * Der führende Punkt blendet sie im zond-Dateibaum aus.
+ */
+static gboolean seafile_create_project_file(SondServer *server,
+                                             const gchar *library_id,
+                                             const gchar *library_name,
+                                             GError **error) {
+    gchar *tmp_path = NULL;
+    gchar *contents = NULL;
+    gsize length = 0;
+    sqlite3 *db = NULL;
+    gboolean ok = FALSE;
+
+    gint fd = g_file_open_tmp("sond_projekt_XXXXXX.znd", &tmp_path, error);
+    if (fd < 0)
+        return FALSE;
+    g_close(fd, NULL);
+
+    gint rc = sqlite3_open_v2(tmp_path, &db, SQLITE_OPEN_READWRITE, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Projektdatei konnte nicht angelegt werden: %s",
+                   sqlite3_errstr(rc));
+        sqlite3_close(db);
+        goto out;
+    }
+
+    rc = sond_zond_schema_create(db, error);
+    sqlite3_close(db);
+    if (rc)
+        goto out;
+
+    if (!g_file_get_contents(tmp_path, &contents, &length, error))
+        goto out;
+
+    /* Pfadtrenner im Namen würden sonst den Dateinamen zerlegen */
+    gchar *safe_name = g_strdup(library_name);
+    g_strdelimit(safe_name, "/\\", '_');
+    gchar *filename = g_strdup_printf(".%s.ZND", safe_name);
+    g_free(safe_name);
+
+    ok = seafile_upload_bytes(server, library_id, filename,
+                              (const guchar*)contents, length, error);
+    g_free(filename);
+
+out:
+    g_free(contents);
+    g_remove(tmp_path);
+    g_free(tmp_path);
+
+    return ok;
+}
+
 /* ========================================================================
  * Request Handlers
  * ======================================================================== */
@@ -750,6 +940,33 @@ static void handle_seafile_library_create(SoupServer *soup_server,
         return;
     }
 
+    /* Leere Projektdatei anlegen. Scheitert das, wird die Library wieder
+     * gelöscht, damit keine Akte mit unvollständigem Speicherplatz bleibt. */
+    if (!seafile_create_project_file(server, library_id, name, &error)) {
+        GError *del_error = NULL;
+
+        LOG_ERROR("Projektdatei fuer Library '%s' fehlgeschlagen, loesche "
+                  "Library (Rollback): %s\n", name,
+                  error ? error->message : "unknown");
+
+        if (!seafile_delete_library(server, library_id, &del_error)) {
+            LOG_ERROR("Rollback fehlgeschlagen, Library '%s' (%s) bleibt "
+                      "bestehen: %s\n", name, library_id,
+                      del_error ? del_error->message : "unknown");
+            g_clear_error(&del_error);
+        }
+
+        gchar *err_msg = g_strdup_printf("Failed to create project file: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_free(library_id);
+        g_object_unref(parser);
+
+        return;
+    }
+
     /* Response */
     JsonBuilder *response_builder = json_builder_new();
     json_builder_begin_object(response_builder);
@@ -759,6 +976,7 @@ static void handle_seafile_library_create(SoupServer *soup_server,
     json_builder_add_string_value(response_builder, name);
     json_builder_end_object(response_builder);
 
+    g_free(library_id);
     g_object_unref(parser);
 
     JsonGenerator *gen = json_generator_new();
