@@ -18,8 +18,6 @@
 
 #include "sond_module_akte.h"
 #include "../sond_client.h"
-#include "../sond_offline_manager.h"
-#include "../sond_seafile_sync.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_property.h"
@@ -59,9 +57,6 @@ typedef struct {
     GtkWidget *status_label;       /* Zeigt "Aktiv" oder "Abgelegt" */
     GtkWidget *btn_ablegen;        /* "Akte ablegen" */
     GtkWidget *btn_reaktivieren;   /* "Akte reaktivieren" */
-    
-    /* Offline-Verfügbarkeit */
-    GtkWidget *offline_toggle;     /* Toggle Button für Offline */
 
     /* OCR */                           // NEU
     GtkWidget *btn_ocr;                 // NEU
@@ -89,7 +84,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
 static void update_ui_from_node(SondModuleAktePrivate *priv);
 static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
-static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
 static void apply_widget_style(GtkWidget *widget, gboolean active);
 static gboolean ist_akte_aktiv(SondGraphNode *node);
@@ -187,7 +181,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
             apply_widget_style(priv->textview_gegenstand, FALSE);
-            apply_widget_style(priv->offline_toggle, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, FALSE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
@@ -204,7 +197,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
             apply_widget_style(priv->textview_gegenstand, TRUE);
-            apply_widget_style(priv->offline_toggle, TRUE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
@@ -221,7 +213,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
             apply_widget_style(priv->textview_gegenstand, TRUE);
-            apply_widget_style(priv->offline_toggle, TRUE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
@@ -238,7 +229,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
             apply_widget_style(priv->textview_gegenstand, FALSE);
-            apply_widget_style(priv->offline_toggle, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
@@ -264,7 +254,6 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 
             apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
             apply_widget_style(priv->textview_gegenstand, FALSE);
-            apply_widget_style(priv->offline_toggle, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
@@ -286,14 +275,6 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
 	gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
 	gtk_widget_set_visible(priv->btn_ablegen, FALSE);
 	gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
-
-    /* Offline-Toggle zurücksetzen */
-	if (priv->offline_toggle) {
-		g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-		gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), FALSE);
-		g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-		gtk_widget_set_visible(priv->offline_toggle, FALSE);
-	}
 
     /* Library-Name löschen */
     g_free(priv->library_name);
@@ -943,12 +924,6 @@ static void update_status_display(SondModuleAktePrivate *priv) {
     }
 }
 
-static void update_ocr_button_sensitivity(SondModuleAktePrivate *priv) {
-    /* OCR-Button ist nur sensitiv wenn NICHT offline */
-    gboolean is_offline = gtk_check_button_get_active(GTK_CHECK_BUTTON(priv->offline_toggle));
-    gtk_widget_set_sensitive(priv->btn_ocr, !is_offline);
-}
-
 static void update_ui_from_node(SondModuleAktePrivate *priv) {
 	guint year = 0;
 	guint lfd_nr = 0;
@@ -992,72 +967,20 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     /* Status-Anzeige aktualisieren */
     update_status_display(priv);
 
-    /* Offline-Toggle Status aktualisieren */
-	if (priv->offline_toggle) {
-		gint64 node_id = sond_graph_node_get_id(priv->current_node);
-
-		if (node_id > 0) {
-			SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
-			gchar *regnr = format_regnr_storage(lfd_nr, year);
-
-			SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
-
-			g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-			if (akte && akte->syncing_enabled) {
-				/* Akte in Liste UND Sync aktiv → Toggle AN */
-				gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), TRUE);
-			}
-			else {
-				/* Nicht in Liste ODER pausiert → Toggle AUS */
-				gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), FALSE);
-			}
-			g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-
-			gtk_widget_set_visible(priv->offline_toggle, TRUE);
-
-			/* Library-Name speichern für OCR */
-			g_free(priv->library_name);
-			priv->library_name = regnr;  /* ownership übernehmen*/
-		}
-		else {
-			g_free(priv->library_name);
-			priv->library_name = NULL;
-		}
-	}
+    /* Library-Name (heißt wie die RegNr) für OCR merken */
+    g_free(priv->library_name);
+    priv->library_name = NULL;
+    if (sond_graph_node_get_id(priv->current_node) > 0) {
+        priv->library_name = format_regnr_storage(lfd_nr, year);
+    }
 
     /* OCR-Button sichtbar machen wenn Library vorhanden */
 	gtk_widget_set_visible(priv->btn_ocr, priv->library_name != NULL);
-	update_ocr_button_sensitivity(priv);
 }
 
 /* ========================================================================
  * Server Communication
  * ======================================================================== */
-static gboolean wait_for_sync_changed(const gchar *library_id, gboolean clone,
-		int timeout_ms, GError **error) {
-    int waited = 0;
-    while (waited < timeout_ms) {
-
-        gchar *status = sond_seafile_get_sync_status(library_id, error);
-        if (error && *error) {
-			return FALSE;  // Fehler beim Abrufen des Status
-		}
-        if ((clone && status != NULL) || (!clone && status == NULL)) {
-            g_free(status);
-            return TRUE;  // Befehl ist angekommen!
-        }
-        g_usleep(100000);  // 100ms
-        waited += 100;
-    }
-
-    if (error && *error == NULL) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
-					"Timeout beim Warten auf Sync-Status-Änderung für Library %s", library_id);
-	}
-
-    return FALSE;  // Timeout
-}
-
 SondGraphNode* sond_module_akte_find_by_regnr(SondClient *client,
 		guint lfd_nr, guint year, GError **error) {
 	/* Search Criteria erstellen */
@@ -1630,199 +1553,6 @@ static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv
     }
 
     start_edit_attempt(priv);
-}
-
-/* Helper: Toggle zurücksetzen und Button wieder aktivieren */
-static void reset_toggle_and_enable(GtkCheckButton *toggle, gboolean new_state,
-                                    SondModuleAktePrivate *priv) {
-    g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-    gtk_check_button_set_active(toggle, new_state);
-    g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-    gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
-}
-
-/* Helper: Sync aktivieren (neue Akte oder pausierte fortsetzen) */
-static gboolean activate_sync(SondModuleAktePrivate *priv,
-                               SondOfflineManager *manager,
-                               const gchar *library_name,
-                               const gchar *library_id,
-                               GtkCheckButton *toggle,
-							   GError** error) {
-    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, library_name);
-
-    /* Akte in Manager registrieren falls nötig */
-    if (!akte) {
-        gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
-        gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
-
-        SondOfflineAkte *neue_akte = sond_offline_akte_new(
-            library_name, kurzb ? kurzb : "", ggstd ? ggstd : "", library_id);
-
-        g_free(kurzb);
-        g_free(ggstd);
-
-        if (!sond_offline_manager_add_akte(manager, neue_akte, error))
-            return FALSE;
-    } else {
-        if (!sond_offline_manager_set_sync_enabled(manager, library_name, TRUE, error))
-            return FALSE;
-    }
-
-    /* Seafile Sync starten */
-    const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
-    gchar *local_path = g_build_filename(sync_dir, library_name, NULL);
-
-    gboolean success = sond_seafile_sync_library(priv->client, library_id,
-                                                  library_name, local_path, error);
-    g_free(local_path);
-
-    if (!success)
-        return FALSE;
-
-    return TRUE;
-}
-
-/* Helper: Sync deaktivieren (pausieren) */
-static gboolean deactivate_sync(SondModuleAktePrivate *priv,
-                                 SondOfflineManager *manager,
-                                 const gchar *library_name,
-                                 const gchar *library_id,
-								 GError** error) {
-    if (!sond_offline_manager_set_sync_enabled(manager, library_name, FALSE, error))
-        return FALSE;
-
-    if (!sond_seafile_unsync_library(library_id, error))
-        return FALSE;
-
-    return TRUE;
-}
-
-/* Event Handler für Offline-Toggle */
-static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv) {
-    if (!priv->current_node) {
-        return;
-    }
-
-    gtk_widget_set_sensitive(GTK_WIDGET(toggle), FALSE);
-
-    /* RegNr extrahieren */
-    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
-    if (!regnr_values || regnr_values->len != 2) {
-        show_error_dialog(priv->main_widget, "Fehler", "Akte hat keine gültige RegNr");
-        if (regnr_values) g_ptr_array_unref(regnr_values);
-        gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
-        return;
-    }
-
-    guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-    guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-    gchar *library_name = format_regnr_storage(lfd, year);
-    g_ptr_array_unref(regnr_values);
-
-    SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
-    if (!manager) {
-        show_error_dialog(priv->main_widget, "Fehler", "Offline Manager nicht verfügbar");
-        g_free(library_name);
-        gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
-        return;
-    }
-
-    gboolean is_active = gtk_check_button_get_active(toggle);
-    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, library_name);
-    gboolean syncing_enabled = akte ? akte->syncing_enabled : FALSE;
-
-    /* Konsistenzprüfung */
-    if ((is_active && syncing_enabled) || (!is_active && !syncing_enabled)) {
-        gchar *msg = g_strdup_printf("Akte '%s' bereits als %s markiert.",
-                                    library_name, is_active ? "synchronisiert" : "nicht synchronisiert");
-        show_error_dialog(priv->main_widget, "Toggle-Zustand inkonsistent", msg);
-        g_free(msg);
-        g_free(library_name);
-        reset_toggle_and_enable(toggle, !is_active, priv);
-        return;
-    }
-
-    /* Library ID ermitteln */
-    GError *error = NULL;
-    gchar *library_id = NULL;
-
-    if (is_active) {
-        library_id = sond_client_get_seafile_library_id(priv->client, library_name, &error);
-    } else {
-        library_id = g_strdup(akte->seafile_library_id);
-    }
-
-    if (!library_id) {
-        show_error_dialog(priv->main_widget, "Library-ID nicht gefunden",
-        		error ? error->message : "Unbekannt");
-        g_error_free(error);
-        g_free(library_name);
-        reset_toggle_and_enable(toggle, FALSE, priv);
-        return;
-    }
-
-    /* Sync aktivieren oder deaktivieren */
-    gboolean success = FALSE;
-    if (is_active) {
-        success = activate_sync(priv, manager, library_name, library_id, toggle, &error);
-    } else {
-        success = deactivate_sync(priv, manager, library_name, library_id, &error);
-    }
-
-    if (!success) {
-		gchar *msg = g_strdup_printf("Fehler beim %s der Synchronisation",
-									is_active ? "Aktivieren" : "Deaktivieren");
-		show_error_dialog(priv->main_widget, msg, error ? error->message : "Unbekannt");
-		g_free(msg);
-		g_error_free(error);
-		reset_toggle_and_enable(toggle, !is_active, priv);
-		g_free(library_name);
-		g_free(library_id);
-		return;
-	}
-
-    /* Warten bis Sync läuft */
-    if (!wait_for_sync_changed(library_id, TRUE, 5000, &error)) {
-        show_error_dialog(priv->main_widget, "Synchronisation wurde nicht gestartet",
-                         error ? error->message : "Unbekannt");
-        g_error_free(error);
-        reset_toggle_and_enable(toggle, !is_active, priv);
-        g_free(library_name);
-        g_free(library_id);
-        return;
-    }
-
-    g_free(library_name);
-    g_free(library_id);
-
-	gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
-
-    /* OCR-Button aktualisieren */
-    update_ocr_button_sensitivity(priv);
-
-    /* Wenn aktiviert wird: Prüfe ob OCR läuft */
-    if (gtk_check_button_get_active(toggle) && priv->library_name) {
-        GError *error = NULL;
-        OcrStatus *status = sond_client_ocr_get_status(priv->client, priv->library_name, &error);
-
-        if (status && status->running) {
-            /* OCR läuft - Offline nicht erlauben */
-            gtk_check_button_set_active(toggle, FALSE);
-
-            GtkAlertDialog *dialog = gtk_alert_dialog_new(
-                "Offline-Verfügbarkeit nicht möglich!\n\n"
-                "Für diese Akte läuft gerade ein OCR-Job.\n"
-                "Bitte warten Sie bis der Job abgeschlossen ist.");
-
-            gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
-            g_object_unref(dialog);
-        }
-
-        if (status) {
-            sond_client_ocr_status_free(status);
-        }
-        g_clear_error(&error);
-    }
 }
 
 /* Callback-Daten für neuen Akte Dialog */
@@ -2822,13 +2552,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_widget_set_halign(priv->status_label, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(status_box), priv->status_label);
     
-    /* Offline-Toggle Button */
-	priv->offline_toggle = gtk_check_button_new_with_label("Offline verfügbar");
-	gtk_widget_set_margin_start(priv->offline_toggle, 20);
-	g_signal_connect(priv->offline_toggle, "toggled", G_CALLBACK(on_offline_toggle_toggled), priv);
-	gtk_widget_set_visible(priv->offline_toggle, FALSE);
-	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
-
 	/* OCR Button */                                         // NEU
 	priv->btn_ocr = gtk_button_new_with_label("OCR");       // NEU
 	gtk_widget_set_margin_start(priv->btn_ocr, 10);         // NEU
