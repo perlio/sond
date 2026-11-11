@@ -145,6 +145,31 @@ gchar* sond_eingang_datum_heute(void);
  */
 gchar* sond_eingang_datum_anzeige(const gchar *iso);
 
+/**
+ * sond_eingang_datum_zu_int:
+ * @iso: "JJJJ-MM-TT"
+ *
+ * Returns: Datum als Zahl JJJJMMTT (z.B. 20261105), 0 bei ungültiger Eingabe
+ */
+gint sond_eingang_datum_zu_int(const gchar *iso);
+
+/**
+ * sond_eingang_int_zu_unix:
+ * @datum: JJJJMMTT
+ *
+ * Für Sortierung und Vergleich mit Änderungszeiten: Sekunden seit 1970 für
+ * Mitternacht (UTC) des Tages. 0 bei ungültigem Datum.
+ */
+gint64 sond_eingang_int_zu_unix(gint datum);
+
+/**
+ * sond_eingang_int_zu_anzeige:
+ * @datum: JJJJMMTT
+ *
+ * Returns: (transfer full): "TT.MM.JJJJ"
+ */
+gchar* sond_eingang_int_zu_anzeige(gint datum);
+
 G_END_DECLS
 
 #endif /* SOND_EINGANG_ZETTEL_H */

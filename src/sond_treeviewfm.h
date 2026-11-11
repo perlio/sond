@@ -70,6 +70,13 @@ struct _SondTreeviewFMClass {
 	 * (SOND_INDEX_STATUS_NONE). */
 	SondIndexStatus (*get_section_index_status)(SondTVFMItem*, SondIndexCtx*);
 
+	/* Optional: wirksames Eingangsdatum (JJJJMMTT) des Dateisystem-Eintrags
+	 * rel_path (relativ zur Wurzel, '/' als Trenner); 0 = keine Angabe,
+	 * -1 = (noch) nicht verfügbar (dann wird später erneut gefragt). Die
+	 * Basisklasse kennt weder Zettel noch Cache - das macht die
+	 * Unterklasse. NULL = keine Eingangsangaben. */
+	gint (*get_eingang)(SondTreeviewFM*, gchar const *rel_path, gboolean is_dir);
+
 	/* Signal: SeaDrive-Status geändert (connected, pending_down, pending_up) */
 	guint signal_seadrive_status;
 };
@@ -138,6 +145,11 @@ void sond_treeviewfm_search_activate(SondTreeviewFM*);
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, GError**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
+
+/* Nach geänderten Eingangsangaben (neue Zettel eingelesen): die Angaben aller
+ * Einträge im Baum neu holen, neu zeichnen und - falls nach einer Spalte
+ * sortiert ist - neu sortieren. */
+void sond_treeviewfm_eingang_refresh(SondTreeviewFM*);
 
 /* Kann die Datei indiziert werden? PDF und E-Mail immer; sonst nach dem
  * MIME-Typ: bei einem SondFilePartLeaf der beim Erzeugen ermittelte

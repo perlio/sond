@@ -38,6 +38,7 @@
 #include "sond_pdf_helper.h"
 #include "sond_seadrive.h"
 #include "sond_icon_util.h"
+#include "sond_eingang_zettel.h"
 #include "sond_treeviewfm_private.h"
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
@@ -3789,41 +3790,6 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 	return;
 }
 
-static void sond_treeviewfm_render_eingang(GtkTreeViewColumn *column,
-		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
-		gpointer data) {
-	/*
-	 gint rc = 0;
-	 gint eingang_id = 0;
-	 gchar* rel_path = NULL;
-	 gchar* errmsg = NULL;
-
-	 SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
-	 SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
-
-	 rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
-	 if ( !rel_path ) return;
-
-	 //    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
-	 g_free( rel_path );
-	 if ( rc == -1 )
-	 {
-	 display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-	 "Warnung -\n\nBei Aufruf eingang_for_rel_path:\n",
-	 errmsg, NULL );
-	 g_free( errmsg );
-	 }
-	 else if ( rc == 1 )
-	 {
-	 if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
-	 "Datum", NULL );
-	 else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
-	 }
-	 else g_object_set( G_OBJECT(renderer), "text", "", NULL );
-	 */
-	return;
-}
-
 /* Ist der Eintrag ein Eintrag des Dateisystems (Datei oder Verzeichnis unter
  * root) und nicht Teil eines Containers (ZIP-Eintrag, Mimepart, PDF-Anhang,
  * Section)? Nur für diese gibt es Änderungsdatum und Größe. */
@@ -3873,6 +3839,68 @@ static gboolean item_fs_stat(SondTVFMItemPrivate *item_priv, gint64 *mtime,
 	if (is_dir) *is_dir = item_priv->is_dir;
 
 	return TRUE;
+}
+
+/* Wirksames Eingangsdatum (JJJJMMTT, 0 = keine Angabe) des Eintrags. Beim
+ * ersten Bedarf über das Vfunc get_eingang der Unterklasse geholt und im Item
+ * gemerkt. Ist die Auskunft (noch) nicht verfügbar, wird später erneut
+ * gefragt. */
+static gint item_eingang(SondTVFMItemPrivate *item_priv) {
+	SondTreeviewFMClass *klass = NULL;
+	gint64 mtime = 0;
+	gboolean is_dir = FALSE;
+	gchar const *rel = NULL;
+	gint result = 0;
+
+	if (item_priv->eingang_done)
+		return item_priv->eingang;
+
+	if (!item_fs_stat(item_priv, &mtime, NULL, &is_dir))
+		return 0;
+
+	klass = SOND_TREEVIEWFM_GET_CLASS(item_priv->stvfm);
+	if (!klass->get_eingang)
+		return 0;
+
+	rel = item_priv->sond_file_part ?
+			sond_file_part_get_path(item_priv->sond_file_part) :
+			item_priv->path_or_section;
+	if (!rel)
+		return 0;
+
+	result = klass->get_eingang(item_priv->stvfm, rel, is_dir);
+	if (result < 0) //noch nicht verfügbar
+		return 0;
+
+	item_priv->eingang = result;
+	item_priv->eingang_key = (result > 0) ? sond_eingang_int_zu_unix(result) : 0;
+	item_priv->eingang_done = TRUE;
+
+	return result;
+}
+
+static void sond_treeviewfm_render_eingang(GtkTreeViewColumn *column,
+		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
+		gpointer data) {
+	g_autoptr(SondTVFMItem) item = NULL;
+	gchar *text = NULL;
+
+	item = sond_tvfm_item_from_model(model, iter);
+	if (item) {
+		SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
+
+		if (item_is_fs_entry(item_priv)) {
+			gint eingang = item_eingang(item_priv);
+
+			text = (eingang > 0) ? sond_eingang_int_zu_anzeige(eingang) :
+					g_strdup("\xe2\x80\x93"); //Gedankenstrich: keine Angabe
+		}
+	}
+
+	g_object_set(G_OBJECT(renderer), "text", text ? text : "", NULL);
+	g_free(text);
+
+	return;
 }
 
 static void sond_treeviewfm_render_file_modify(GtkTreeViewColumn *column,
@@ -3935,6 +3963,7 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 #define STVFM_SORT_NAME   0
 #define STVFM_SORT_SIZE   1
 #define STVFM_SORT_MODIFY 2
+#define STVFM_SORT_EINGANG 3
 
 /* Vergleich zweier Zeilen für die Sortierung nach Spaltenkopf. Nur Einträge
  * des Dateisystems werden verglichen; Inhalte von Containern (Mimeparts,
@@ -3963,6 +3992,13 @@ static gint sond_treeviewfm_sort_compare(GtkTreeModel *model, GtkTreeIter *a,
 
 	if (column_id == STVFM_SORT_MODIFY)
 		diff = mtime_a - mtime_b;
+	else if (column_id == STVFM_SORT_EINGANG) {
+		//Eingangsdatum, ohne Angabe die Änderungszeit
+		item_eingang(priv_a);
+		item_eingang(priv_b);
+		diff = (priv_a->eingang_key > 0 ? priv_a->eingang_key : mtime_a)
+				- (priv_b->eingang_key > 0 ? priv_b->eingang_key : mtime_b);
+	}
 	else if (column_id == STVFM_SORT_SIZE) {
 		//Verzeichnisse haben keine Größe: vor den Dateien
 		diff = (dir_a ? -1 : size_a) - (dir_b ? -1 : size_b);
@@ -4402,6 +4438,7 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 	//feste Breiten (Sizing FIXED); Größe rechtsbündig
 	gtk_tree_view_column_set_fixed_width(fs_tree_column_size, 90);
 	gtk_tree_view_column_set_fixed_width(fs_tree_column_modify, 160);
+	gtk_tree_view_column_set_fixed_width(stvfm_priv->column_eingang, 100);
 	g_object_set(G_OBJECT(renderer_size), "xalign", 1.0, NULL);
 	gtk_tree_view_column_set_title(stvfm_priv->column_eingang, "Eingang");
 
@@ -4413,13 +4450,16 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 	{
 		GtkTreeViewColumn *column_name = gtk_tree_view_get_column(
 				GTK_TREE_VIEW(stvfm), 0);
-		gint ids[] = { STVFM_SORT_NAME, STVFM_SORT_SIZE, STVFM_SORT_MODIFY };
+		gint ids[] = { STVFM_SORT_NAME, STVFM_SORT_SIZE, STVFM_SORT_MODIFY,
+				STVFM_SORT_EINGANG };
 
 		gtk_tree_view_column_set_sort_column_id(column_name, STVFM_SORT_NAME);
 		gtk_tree_view_column_set_sort_column_id(fs_tree_column_size,
 				STVFM_SORT_SIZE);
 		gtk_tree_view_column_set_sort_column_id(fs_tree_column_modify,
 				STVFM_SORT_MODIFY);
+		gtk_tree_view_column_set_sort_column_id(stvfm_priv->column_eingang,
+				STVFM_SORT_EINGANG);
 
 		for (guint i = 0; i < G_N_ELEMENTS(ids); i++)
 			gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(tree_store),
@@ -4535,6 +4575,43 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	sond_treeviewfm_root_monitor_start(stvfm);
 
 	return 0;
+}
+
+static gboolean eingang_reset_foreach(GtkTreeModel *model, GtkTreePath *path,
+		GtkTreeIter *iter, gpointer data) {
+	g_autoptr(SondTVFMItem) item = sond_tvfm_item_from_model(model, iter);
+
+	if (item) {
+		SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
+
+		item_priv->eingang_done = FALSE;
+		item_priv->eingang = 0;
+		item_priv->eingang_key = 0;
+	}
+
+	return FALSE;
+}
+
+void sond_treeviewfm_eingang_refresh(SondTreeviewFM *stvfm) {
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	gint column_id = 0;
+	GtkSortType order = GTK_SORT_ASCENDING;
+
+	gtk_tree_model_foreach(model, eingang_reset_foreach, NULL);
+
+	//Ist nach einer Spalte sortiert: mit den neuen Angaben neu sortieren
+	if (gtk_tree_sortable_get_sort_column_id(GTK_TREE_SORTABLE(model),
+			&column_id, &order)
+			&& column_id != GTK_TREE_SORTABLE_UNSORTED_SORT_COLUMN_ID) {
+		gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(model),
+				GTK_TREE_SORTABLE_UNSORTED_SORT_COLUMN_ID, GTK_SORT_ASCENDING);
+		gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(model),
+				column_id, order);
+	}
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+
+	return;
 }
 
 const gchar*

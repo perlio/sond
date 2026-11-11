@@ -1787,6 +1787,20 @@ static gboolean zond_treeviewfm_file_part_busy(SondFilePart *sfp) {
 			zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp)) != NULL;
 }
 
+/* Wirksames Eingangsdatum eines Dateisystem-Eintrags aus der lokalen
+ * Nachschlagetabelle des Projekts; -1, solange es keine gibt. */
+static gint zond_treeviewfm_get_eingang(SondTreeviewFM *stvfm,
+		gchar const *rel_path, gboolean is_dir) {
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (!ztvfm_priv->zond || !ztvfm_priv->zond->eingang_cache)
+		return -1;
+
+	return sond_eingang_cache_lookup(ztvfm_priv->zond->eingang_cache, rel_path,
+			is_dir);
+}
+
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = zond_treeviewfm_finalize;
 
@@ -1803,6 +1817,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
 	SOND_TREEVIEWFM_CLASS(klass)->get_section_index_status =
 			zond_treeviewfm_get_section_index_status;
+	SOND_TREEVIEWFM_CLASS(klass)->get_eingang = zond_treeviewfm_get_eingang;
 
 	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
 	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
@@ -1829,6 +1844,11 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
 	g_object_unref(sec_idx);
+
+	GMenu *sec_eingang = g_menu_new();
+	g_menu_append(sec_eingang, "Eingänge neu einlesen", "stv.eingang-neu");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_eingang));
+	g_object_unref(sec_eingang);
 
 	return;
 }
@@ -1913,6 +1933,40 @@ static void zond_treeviewfm_action_index_loeschen_auswahl(GSimpleAction *a,
 	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_aktuell(zond));
 }
 
+/* Zettel nachlesen, die seit dem Öffnen des Projekts dazugekommen sind
+ * (z.B. ein Import auf einem anderen Rechner), und die Anzeige auffrischen */
+static void zond_treeviewfm_action_eingang_neu(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	GError *error = NULL;
+	guint n_zettel = 0;
+	gchar *text = NULL;
+
+	if (!zond->eingang_cache) {
+		display_message(zond->app_window, "Eingänge neu einlesen\n\n",
+				"Für dieses Projekt sind keine Eingangsangaben verfügbar.", NULL);
+
+		return;
+	}
+
+	if (sond_eingang_cache_reload(zond->eingang_cache, &n_zettel, &error)) {
+		display_message(zond->app_window,
+				"Eingänge neu einlesen fehlgeschlagen\n\n", error->message,
+				NULL);
+		g_error_free(error);
+
+		return;
+	}
+
+	sond_treeviewfm_eingang_refresh(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+
+	text = g_strdup_printf("%u neue(r) Zettel eingelesen.", n_zettel);
+	display_message(zond->app_window, "Eingänge neu einlesen\n\n", text, NULL);
+	g_free(text);
+
+	return;
+}
+
 static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 		Projekt *zond) {
 	/* Nur GActions registrieren — GMenu-Sections wurden bereits in
@@ -1943,6 +1997,12 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 			G_CALLBACK(zond_treeviewfm_action_index_loeschen_auswahl), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_loesch_sel));
 	g_object_unref(act_idx_loesch_sel);
+
+	GSimpleAction *act_eingang_neu = g_simple_action_new("eingang-neu", NULL);
+	g_signal_connect(act_eingang_neu, "activate",
+			G_CALLBACK(zond_treeviewfm_action_eingang_neu), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_eingang_neu));
+	g_object_unref(act_eingang_neu);
 }
 
 /* Getter fuer sond_treeviewfm_set_index_ctx_func(): liefert den aktuellen

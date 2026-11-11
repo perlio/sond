@@ -523,6 +523,11 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		gchar* rel_path_child = NULL;
 		GStatBuf st = { 0 };
 
+		//Pfade mit führendem Punkt gehören dem System (.sond, .sond_index.db,
+		//Projektdatei) und bleiben im Dateibaum unsichtbar
+		if (filename[0] == '.')
+			continue;
+
 		dir_has_children = TRUE;
 
 		if (!arr_children) //Es gibt Eintrag - reicht

@@ -425,6 +425,8 @@ gint project_close(Projekt *zond, GError **error) {
 	g_free(project_path_full);
 
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
+	sond_eingang_cache_free(zond->eingang_cache);
+	zond->eingang_cache = NULL;
 	project_clear_dbase_zond(&(zond->dbase_zond));
 
 	// Disable autosave if active
@@ -532,6 +534,10 @@ static void project_open_cleanup(Projekt* zond) {
 	// Clear filesystem root (safe to call even if not set)
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
 
+	// Eingangsangaben (erst nach dem Leeren des Dateibaums, der sie abfragt)
+	sond_eingang_cache_free(zond->eingang_cache);
+	zond->eingang_cache = NULL;
+
 	// Close databases if they were opened
 	if (zond->dbase_zond) {
 		project_clear_dbase_zond(&zond->dbase_zond);
@@ -621,6 +627,47 @@ gint project_sicherungskopie(Projekt *zond, gchar **path_bak, GError **error) {
 	return 0;
 }
 
+/* Eingangsangaben des Projekts einlesen: die Zettel in .sond/eingang der
+ * Library kommen in eine lokale Nachschlagetabelle (neben der lokalen
+ * Arbeitsdatenbank, nie auf dem Cloud-Laufwerk). Ein Fehlschlag ist nicht
+ * kritisch - der Dateibaum zeigt dann keine Eingangsangaben. */
+static void project_eingang_cache_open(Projekt *zond, const gchar *project_path) {
+	GError *error = NULL;
+	gchar *path_tmp = NULL;
+	gchar *path_cache = NULL;
+
+	path_tmp = project_get_local_tmp_path(project_path, &error);
+	if (!path_tmp) {
+		LOG_WARN("%s: lokaler Pfad für die Eingangsangaben: %s", __func__,
+				error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	path_cache = g_strconcat(path_tmp, ".eingang.db", NULL);
+	g_free(path_tmp);
+
+	zond->eingang_cache = sond_eingang_cache_open(path_cache,
+			zond->project_dir, &error);
+	g_free(path_cache);
+	if (!zond->eingang_cache) {
+		LOG_WARN("%s: Eingangsangaben nicht verfügbar: %s", __func__,
+				error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	if (sond_eingang_cache_reload(zond->eingang_cache, NULL, &error)) {
+		LOG_WARN("%s: Zettel nicht vollständig eingelesen: %s", __func__,
+				error ? error->message : "?");
+		g_clear_error(&error);
+	}
+
+	return;
+}
+
 /**
  * Open a project (create new or open existing)
  * @param zond The project structure
@@ -674,6 +721,9 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		project_open_cleanup(zond);
 		return -1;
 	}
+
+	// Eingangsangaben vor dem Dateibaum bereitstellen (er fragt sie beim Anzeigen ab)
+	project_eingang_cache_open(zond, abs_path);
 
 	// Load tree structures if opening existing project
 	if (!create) {

@@ -105,6 +105,13 @@ typedef struct {
 	gint64 size;
 	gboolean is_dir;
 	gboolean stat_done;
+	/* Wirksames Eingangsdatum (JJJJMMTT, 0 = keine Angabe) und der daraus
+	 * abgeleitete Sortierschlüssel (Sekunden); beim ersten Bedarf über das
+	 * Vfunc get_eingang der Unterklasse geholt (eingang_done), s.
+	 * item_eingang() in sond_treeviewfm.c. */
+	gint eingang;
+	gint64 eingang_key;
+	gboolean eingang_done;
 } SondTVFMItemPrivate;
 
 /* Freund-Accessor für sond_seadrive.c, analog sond_treeviewfm_get_priv().

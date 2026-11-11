@@ -160,6 +160,41 @@ gchar* sond_eingang_datum_anzeige(const gchar *iso) {
     return text;
 }
 
+gint sond_eingang_datum_zu_int(const gchar *iso) {
+    gchar *parsed = NULL;
+    gint year = 0, month = 0, day = 0;
+
+    if (!sond_eingang_datum_parse(iso, &parsed))
+        return 0;
+
+    sscanf(parsed, "%d-%d-%d", &year, &month, &day);
+    g_free(parsed);
+
+    return year * 10000 + month * 100 + day;
+}
+
+gint64 sond_eingang_int_zu_unix(gint datum) {
+    GDate date;
+    gint year = datum / 10000;
+    gint month = (datum / 100) % 100;
+    gint day = datum % 100;
+
+    if (datum <= 0 || !g_date_valid_dmy((GDateDay) day, (GDateMonth) month,
+            (GDateYear) year))
+        return 0;
+
+    g_date_clear(&date, 1);
+    g_date_set_dmy(&date, (GDateDay) day, (GDateMonth) month, (GDateYear) year);
+
+    //Julianischer Tag von 1970-01-01 ist 719163
+    return ((gint64) g_date_get_julian(&date) - 719163) * 86400;
+}
+
+gchar* sond_eingang_int_zu_anzeige(gint datum) {
+    return g_strdup_printf("%02d.%02d.%04d", datum % 100, (datum / 100) % 100,
+            datum / 10000);
+}
+
 /* ========================================================================
  * Schreiben
  * ======================================================================== */

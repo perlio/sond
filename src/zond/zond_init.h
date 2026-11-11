@@ -6,6 +6,7 @@
 #include <gio/gio.h>
 
 #include "anbindung.h"
+#include "../sond_eingang_cache.h"
 
 #define ZOND_ERROR zond_error_quark()
 GQuark zond_error_quark(void);
@@ -134,6 +135,12 @@ typedef struct _Projekt {
 	GtkApplication *app;
 
 	SondProcessFileCtx *wctx;
+
+	/* Eingangsangaben (Stempel) des Projekts: lokale Tabelle, aus den Zetteln
+	 * in .sond/eingang der Library aufgebaut (s. sond_eingang_cache.h).
+	 * NULL, wenn kein Projekt offen ist oder sich der Cache nicht anlegen ließ
+	 * (dann zeigt der Dateibaum keine Eingangsangaben). */
+	SondEingangCache *eingang_cache;
 
 	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
 	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
