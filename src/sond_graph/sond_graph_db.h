@@ -506,7 +506,6 @@ gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error);
  * @client_id: Instanz-ID des Clients (UUID pro Prozess; massgeblich fuer
  *             Konflikt-/Besitzerpruefung - zwei Instanzen desselben Users
  *             konkurrieren damit wie zwei verschiedene Bearbeiter)
- * @timeout_minutes: Timeout in Minuten (0 = kein Timeout)
  * @reason: (nullable): Grund für das Lock
  * @error: (nullable): Fehler-Rückgabe
  *
@@ -520,7 +519,6 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
                                   gint64 node_id,
                                   const gchar *user_id,
                                   const gchar *client_id,
-                                  guint timeout_minutes,
                                   const gchar *reason,
                                   GError **error);
 
@@ -573,33 +571,6 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
                                    gchar **locked_by,
                                    gchar **locked_at,
                                    GError **error);
-
-/**
- * sond_graph_db_unlock_all_by_user:
- * @conn: MySQL-Verbindung
- * @user_id: Benutzer-ID
- * @error: (nullable): Fehler-Rückgabe
- *
- * Entsperrt alle Nodes eines Benutzers.
- * Nützlich beim Logout oder Session-Cleanup.
- *
- * Returns: Anzahl entsperrter Nodes, -1 bei Fehler
- */
-gint sond_graph_db_unlock_all_by_user(MYSQL *conn,
-                                       const gchar *user_id,
-                                       GError **error);
-
-/**
- * sond_graph_db_cleanup_expired_locks:
- * @conn: MySQL-Verbindung
- * @error: (nullable): Fehler-Rückgabe
- *
- * Entfernt alle abgelaufenen Locks.
- * Sollte regelmäßig aufgerufen werden (z.B. via Cron).
- *
- * Returns: Anzahl entfernter Locks, -1 bei Fehler
- */
-gint sond_graph_db_cleanup_expired_locks(MYSQL *conn, GError **error);
 
 /**
  * sond_graph_node_search_criteria_to_json:

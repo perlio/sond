@@ -747,9 +747,6 @@ gboolean sond_client_lock_node_ex(SondClient *client,
     json_builder_set_member_name(builder, "client_id");
     json_builder_add_string_value(builder, client->client_id);
 
-    json_builder_set_member_name(builder, "timeout_minutes");
-    json_builder_add_int_value(builder, 0);
-
     if (lock_reason) {
         json_builder_set_member_name(builder, "reason");
         json_builder_add_string_value(builder, lock_reason);

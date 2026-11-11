@@ -75,11 +75,9 @@ static const char *table_statements[] = {
     "  locked_by VARCHAR(100) NOT NULL,"
     "  locked_client VARCHAR(64) NOT NULL,"
     "  locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-    "  expires_at TIMESTAMP NULL,"
     "  lock_reason VARCHAR(255) NULL,"
     "  FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,"
-    "  INDEX idx_locks_user (locked_by),"
-    "  INDEX idx_locks_expires (expires_at)"
+    "  INDEX idx_locks_user (locked_by)"
     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
     NULL  /* Terminator */
@@ -102,24 +100,19 @@ static const char *procedure_statements[] = {
     "  IN p_node_id BIGINT,"
     "  IN p_user_id VARCHAR(100),"
     "  IN p_client_id VARCHAR(64),"
-    "  IN p_timeout_minutes INT,"
     "  IN p_reason VARCHAR(255)"
     ")"
     "BEGIN "
     "  DECLARE v_current_lock_client VARCHAR(64);"
-    "  DECLARE v_expires TIMESTAMP;"
     "  SELECT locked_client INTO v_current_lock_client FROM node_locks WHERE node_id = p_node_id;"
     "  IF v_current_lock_client IS NOT NULL AND v_current_lock_client != p_client_id THEN "
     "    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Node ist bereits von einem anderen Bearbeiter gelockt';"
     "  END IF;"
-    "  IF p_timeout_minutes IS NOT NULL THEN "
-    "    SET v_expires = DATE_ADD(NOW(), INTERVAL p_timeout_minutes MINUTE);"
-    "  END IF;"
-    "  INSERT INTO node_locks (node_id, locked_by, locked_client, locked_at, expires_at, lock_reason) "
-    "  VALUES (p_node_id, p_user_id, p_client_id, CURRENT_TIMESTAMP, v_expires, p_reason) "
+    "  INSERT INTO node_locks (node_id, locked_by, locked_client, locked_at, lock_reason) "
+    "  VALUES (p_node_id, p_user_id, p_client_id, CURRENT_TIMESTAMP, p_reason) "
     "  ON DUPLICATE KEY UPDATE locked_by = p_user_id, locked_client = p_client_id, locked_at = CURRENT_TIMESTAMP, "
-    "    expires_at = v_expires, lock_reason = p_reason;"
-    "  SELECT 'success' as status, node_id, locked_by, locked_at, expires_at "
+    "    lock_reason = p_reason;"
+    "  SELECT 'success' as status, node_id, locked_by, locked_at "
     "  FROM node_locks WHERE node_id = p_node_id;"
     "END",
 
@@ -138,32 +131,6 @@ static const char *procedure_statements[] = {
     "  END IF;"
     "  DELETE FROM node_locks WHERE node_id = p_node_id;"
     "  SELECT 'success' as status;"
-    "END",
-
-    /* unlock_all_by_user */
-    "CREATE PROCEDURE unlock_all_by_user("
-    "  IN p_user_id VARCHAR(100)"
-    ")"
-    "BEGIN "
-    "  DELETE FROM node_locks WHERE locked_by = p_user_id COLLATE utf8mb4_unicode_ci;"
-    "  SELECT ROW_COUNT() as unlocked_count;"
-    "END",
-
-    /* cleanup_expired_locks */
-    "CREATE PROCEDURE cleanup_expired_locks() "
-    "BEGIN "
-    "  DELETE FROM node_locks WHERE expires_at IS NOT NULL AND expires_at < NOW();"
-    "  SELECT ROW_COUNT() as cleaned_locks;"
-    "END",
-
-    /* check_lock_status */
-    "CREATE PROCEDURE check_lock_status("
-    "  IN p_node_id BIGINT"
-    ")"
-    "BEGIN "
-    "  SELECT node_id, locked_by, locked_at, expires_at, lock_reason, "
-    "    CASE WHEN expires_at IS NOT NULL AND expires_at < NOW() THEN 'expired' ELSE 'active' END as lock_status "
-    "  FROM node_locks WHERE node_id = p_node_id;"
     "END",
 
     NULL  /* Terminator */
@@ -1701,7 +1668,6 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
                                   gint64 node_id,
                                   const gchar *user_id,
                                   const gchar *client_id,
-                                  guint timeout_minutes,
                                   const gchar *reason,
                                   GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
@@ -1717,7 +1683,7 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
     }
 
     /* Stored Procedure aufrufen */
-    const char *query = "CALL lock_node(?, ?, ?, ?, ?)";
+    const char *query = "CALL lock_node(?, ?, ?, ?)";
 
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1727,14 +1693,13 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
         return FALSE;
     }
 
-    MYSQL_BIND bind[5];
+    MYSQL_BIND bind[4];
     memset(bind, 0, sizeof(bind));
 
     unsigned long user_id_length = strlen(user_id);
     unsigned long client_id_length = strlen(client_id);
     unsigned long reason_length = reason ? strlen(reason) : 0;
     my_bool reason_is_null = (reason == NULL);
-    my_bool timeout_is_null = (timeout_minutes == 0);
 
     /* Parameter 1: node_id */
     bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
@@ -1752,17 +1717,12 @@ gboolean sond_graph_db_lock_node(MYSQL *conn,
     bind[2].buffer_length = client_id_length;
     bind[2].length = &client_id_length;
 
-    /* Parameter 4: timeout_minutes (kann NULL sein) */
-    bind[3].buffer_type = MYSQL_TYPE_LONG;
-    bind[3].buffer = (void*)&timeout_minutes;
-    bind[3].is_null = &timeout_is_null;
-
-    /* Parameter 5: reason (kann NULL sein) */
-    bind[4].buffer_type = MYSQL_TYPE_STRING;
-    bind[4].buffer = (char*)reason;
-    bind[4].buffer_length = reason_length;
-    bind[4].length = &reason_length;
-    bind[4].is_null = &reason_is_null;
+    /* Parameter 4: reason (kann NULL sein) */
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (char*)reason;
+    bind[3].buffer_length = reason_length;
+    bind[3].length = &reason_length;
+    bind[3].is_null = &reason_is_null;
 
     if (mysql_stmt_bind_param(stmt, bind)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1991,106 +1951,6 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
     mysql_stmt_close(stmt);
 
     return is_locked;
-}
-
-/**
- * sond_graph_db_unlock_all_by_user:
- *
- * HINWEIS (Bugfix): Ursprünglich über das Prepared-Statement-API
- * (mysql_stmt_*) implementiert, wie lock_node()/unlock_node(). Die
- * Prozedur gibt aber - anders als bei lock_node()/unlock_node(), wo das
- * SELECT-Ergebnis komplett ignoriert wird - tatsächlich einen Wert
- * zurück, den wir brauchen (unlocked_count). Für ein CALL auf eine
- * Prozedur mit SELECT-Ergebnis liefert mysql_stmt_result_metadata() im
- * Prepared-Statement-API i.d.R. keine brauchbaren Metadaten, sodass
- * mysql_stmt_bind_result()/mysql_stmt_fetch() hier fehlschlug (Status
- * 500 beim Login, da release_stale_locks() -> /locks/release-mine
- * -> diese Funktion). Fix: Text-Protokoll (mysql_query +
- * mysql_store_result) wie bei cleanup_expired_locks(), inkl. Abräumen
- * des von CALL implizit erzeugten zweiten (leeren) Ergebnisses per
- * mysql_next_result() - sonst bleibt die (dauerhaft offene, geteilte)
- * Verbindung in einem Zustand, der die NÄCHSTE Anfrage auf dieser
- * Connection mit "Commands out of sync" scheitern lässt.
- */
-gint sond_graph_db_unlock_all_by_user(MYSQL *conn,
-                                       const gchar *user_id,
-                                       GError **error) {
-    g_return_val_if_fail(conn != NULL, -1);
-    g_return_val_if_fail(user_id != NULL, -1);
-
-    char *escaped_user_id = g_malloc(strlen(user_id) * 2 + 1);
-    mysql_real_escape_string(conn, escaped_user_id, user_id, strlen(user_id));
-
-    gchar *query = g_strdup_printf("CALL unlock_all_by_user('%s')", escaped_user_id);
-    g_free(escaped_user_id);
-
-    if (mysql_query(conn, query)) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Failed to unlock locks: %s", mysql_error(conn));
-        g_prefix_error(error, "%s: ", __func__);
-        g_free(query);
-        return -1;
-    }
-    g_free(query);
-
-    MYSQL_RES *result = mysql_store_result(conn);
-    if (result == NULL) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Failed to get result: %s", mysql_error(conn));
-        g_prefix_error(error, "%s: ", __func__);
-        return -1;
-    }
-
-    gint unlocked_count = 0;
-    MYSQL_ROW row = mysql_fetch_row(result);
-    if (row && row[0]) {
-        unlocked_count = atoi(row[0]);
-    }
-
-    mysql_free_result(result);
-
-    /* Von CALL implizit erzeugtes(s) weiteres Ergebnis abräumen, damit die
-     * Connection für die nächste Anfrage wieder synchron ist. */
-    while (mysql_next_result(conn) == 0) {
-        MYSQL_RES *extra = mysql_store_result(conn);
-        if (extra) {
-            mysql_free_result(extra);
-        }
-    }
-
-    return unlocked_count;
-}
-
-/**
- * sond_graph_db_cleanup_expired_locks:
- */
-gint sond_graph_db_cleanup_expired_locks(MYSQL *conn, GError **error) {
-    g_return_val_if_fail(conn != NULL, -1);
-
-    if (mysql_query(conn, "CALL cleanup_expired_locks()")) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Failed to cleanup locks: %s", mysql_error(conn));
-        g_prefix_error(error, "%s: ", __func__);
-        return -1;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-    if (result == NULL) {
-        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Failed to get result: %s", mysql_error(conn));
-        g_prefix_error(error, "%s: ", __func__);
-        return -1;
-    }
-
-    gint cleaned_count = 0;
-    MYSQL_ROW row = mysql_fetch_row(result);
-    if (row && row[0]) {
-        cleaned_count = atoi(row[0]);
-    }
-
-    mysql_free_result(result);
-
-    return cleaned_count;
 }
 
 /**

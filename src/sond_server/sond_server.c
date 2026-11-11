@@ -889,7 +889,7 @@ static void handle_node_search(SoupServer *soup_server,
  * handle_node_lock:
  * POST /node/lock/{id}
  *
- * Body: { "user_id": "...", "timeout_minutes": 30, "reason": "..." }
+ * Body: { "user_id": "...", "client_id": "...", "reason": "..." }
  * Response: { "success": true }
  */
 static void handle_node_lock(SoupServer *soup_server,
@@ -952,8 +952,6 @@ static void handle_node_lock(SoupServer *soup_server,
         json_object_get_string_member(obj, "user_id") : NULL;
     const gchar *client_id = json_object_has_member(obj, "client_id") ?
         json_object_get_string_member(obj, "client_id") : NULL;
-    guint timeout_minutes = json_object_has_member(obj, "timeout_minutes") ?
-        json_object_get_int_member(obj, "timeout_minutes") : 0;
     const gchar *reason = json_object_has_member(obj, "reason") ?
         json_object_get_string_member(obj, "reason") : NULL;
 
@@ -966,7 +964,7 @@ static void handle_node_lock(SoupServer *soup_server,
 
     /* Lock setzen */
     if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, client_id,
-                                 timeout_minutes, reason, &error)) {
+                                 reason, &error)) {
         gchar *err_msg = g_strdup_printf("Lock failed: %s",
                                         error ? error->message : "unknown");
         g_clear_error(&error);
@@ -1134,7 +1132,7 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
     gint64 node_id = sond_graph_node_get_id(node);
 
     /* Lock setzen (0 = kein Timeout) */
-    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, client_id, 0, lock_reason, &error)) {
+    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, client_id, lock_reason, &error)) {
         mysql_query(server->db_conn, "ROLLBACK");
         LOG_ERROR("Lock failed for node %" G_GINT64_FORMAT ": %s\n",
                  node_id, error ? error->message : "unknown");
