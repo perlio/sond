@@ -40,6 +40,7 @@ typedef struct {
     gchar *archiv_name;
     gchar *user;
     gchar *message;
+    gboolean restore;     /* TRUE: Wiederherstellen, sonst Archivieren */
     JobState state;
     gint64 start_time;    /* Unix-Sekunden */
     gint64 end_time;      /* 0 = läuft noch */
@@ -124,6 +125,8 @@ static void add_job(JsonBuilder *b, const ArchivJob *job) {
     json_builder_add_string_value(b, job->library_name);
     json_builder_set_member_name(b, "state");
     json_builder_add_string_value(b, state_name(job->state));
+    json_builder_set_member_name(b, "art");
+    json_builder_add_string_value(b, job->restore ? "wiederherstellen" : "archivieren");
     json_builder_set_member_name(b, "archiv_name");
     json_builder_add_string_value(b, job->archiv_name);
     json_builder_set_member_name(b, "user");
@@ -145,13 +148,17 @@ typedef struct {
     ArchivContext *ctx;
     gchar *library_name;
     gchar *archiv_name;
+    gboolean restore;
 } ThreadData;
 
 static gpointer archiv_thread(gpointer data) {
     ThreadData *td = data;
     GError *error = NULL;
-    gboolean ok = sond_server_archiv_library(td->ctx->server, td->library_name,
-            td->archiv_name, TRUE, &error);
+    gboolean ok = td->restore ?
+            sond_server_archiv_restore(td->ctx->server, td->library_name,
+                    td->archiv_name, &error) :
+            sond_server_archiv_library(td->ctx->server, td->library_name,
+                    td->archiv_name, TRUE, &error);
     ArchivJob *job = NULL;
 
     g_mutex_lock(&td->ctx->mutex);
@@ -165,9 +172,11 @@ static gpointer archiv_thread(gpointer data) {
     g_mutex_unlock(&td->ctx->mutex);
 
     if (ok)
-        LOG_INFO("Archivierung von '%s' beendet\n", td->library_name);
+        LOG_INFO("%s von '%s' beendet\n",
+                td->restore ? "Wiederherstellung" : "Archivierung", td->library_name);
     else
-        LOG_ERROR("Archivierung von '%s' fehlgeschlagen: %s\n", td->library_name,
+        LOG_ERROR("%s von '%s' fehlgeschlagen: %s\n",
+                td->restore ? "Wiederherstellung" : "Archivierung", td->library_name,
                 error ? error->message : "unbekannter Fehler");
 
     g_clear_error(&error);
@@ -182,9 +191,7 @@ static gpointer archiv_thread(gpointer data) {
  * Handler
  * ---------------------------------------------------------------------- */
 
-static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
-                                const char *path, GHashTable *query, gpointer user_data) {
-    ArchivContext *ctx = user_data;
+static void start_job(SoupServerMessage *msg, ArchivContext *ctx, gboolean restore) {
     const gchar *username = NULL;
     SoupMessageBody *body = NULL;
     JsonParser *parser = NULL;
@@ -197,8 +204,6 @@ static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
     gpointer value = NULL;
     gint64 now = g_get_real_time() / G_USEC_PER_SEC;
     JsonBuilder *b = NULL;
-
-    (void) soup_server; (void) path; (void) query;
 
     if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
         send_error(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only POST allowed");
@@ -246,7 +251,7 @@ static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
         }
     }
     if (busy) {
-        gchar *text = g_strdup_printf("Es läuft bereits eine Archivierung (Library '%s')", busy);
+        gchar *text = g_strdup_printf("Es läuft bereits ein Archivierungs- oder Wiederherstellungsjob (Library '%s')", busy);
 
         g_mutex_unlock(&ctx->mutex);
         send_error(msg, SOUP_STATUS_CONFLICT, text);
@@ -273,6 +278,7 @@ static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
         job->library_name = g_strdup(library_name);
         job->archiv_name = g_strdup(archiv_name);
         job->user = g_strdup(username);
+        job->restore = restore;
         job->state = JOB_RUNNING;
         job->start_time = now;
         g_hash_table_replace(ctx->jobs, g_strdup(library_name), job);
@@ -280,12 +286,14 @@ static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
         td->ctx = ctx;
         td->library_name = g_strdup(library_name);
         td->archiv_name = g_strdup(archiv_name);
+        td->restore = restore;
         thread = g_thread_new("archiv-worker", archiv_thread, td);
         g_thread_unref(thread);
     }
     g_mutex_unlock(&ctx->mutex);
 
-    LOG_INFO("Archivierung von '%s' als '%s' gestartet (%s)\n", library_name,
+    LOG_INFO("%s von '%s' mit Archiv '%s' gestartet (%s)\n",
+            restore ? "Wiederherstellung" : "Archivierung", library_name,
             archiv_name, username);
 
     b = json_builder_new();
@@ -296,6 +304,18 @@ static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
     send_json(msg, SOUP_STATUS_OK, b);
     g_object_unref(b);
     g_object_unref(parser);
+}
+
+static void handle_archiv_start(SoupServer *soup_server, SoupServerMessage *msg,
+                                const char *path, GHashTable *query, gpointer user_data) {
+    (void) soup_server; (void) path; (void) query;
+    start_job(msg, user_data, FALSE);
+}
+
+static void handle_archiv_restore(SoupServer *soup_server, SoupServerMessage *msg,
+                                  const char *path, GHashTable *query, gpointer user_data) {
+    (void) soup_server; (void) path; (void) query;
+    start_job(msg, user_data, TRUE);
 }
 
 static void handle_archiv_status(SoupServer *soup_server, SoupServerMessage *msg,
@@ -358,6 +378,7 @@ void sond_server_archiv_job_register_handlers(SondServer *server) {
             (GDestroyNotify) job_free);
 
     soup_server_add_handler(soup_server, "/archiv/start", handle_archiv_start, ctx, NULL);
+    soup_server_add_handler(soup_server, "/archiv/restore", handle_archiv_restore, ctx, NULL);
     soup_server_add_handler(soup_server, "/archiv/status", handle_archiv_status, ctx, NULL);
 
     LOG_INFO("Archiv handlers registered\n");

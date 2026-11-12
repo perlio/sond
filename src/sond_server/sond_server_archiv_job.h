@@ -38,8 +38,13 @@ G_BEGIN_DECLS
  * - POST /archiv/start   Body {"library_name": "...", "archiv_name": "..."}
  *                        Startet die Archivierung im Hintergrund (Thread).
  *                        409, wenn bereits eine läuft (es läuft höchstens eine).
+ * - POST /archiv/restore Body {"library_name": "...", "archiv_name": "..."}
+ *                        Stellt die Library aus dem Archiv wieder her (die
+ *                        Library darf nicht existieren). Derselbe Jobmechanismus;
+ *                        es läuft insgesamt höchstens ein Job.
  * - GET  /archiv/status?library_name=X
- *                        {"state": "none"|"running"|"ok"|"error", "message",
+ *                        {"state": "none"|"running"|"ok"|"error", "art":
+ *                         "archivieren"|"wiederherstellen", "message",
  *                         "archiv_name", "user", "start_time", "end_time"}
  * - GET  /archiv/status  ohne Parameter: {"jobs": [...]} aller bekannten Jobs
  *

@@ -466,3 +466,289 @@ out:
 
     return ok;
 }
+
+/* ------------------------------------------------------------------------
+ * Wiederherstellen
+ * ---------------------------------------------------------------------- */
+
+/* Verzeichnisse von "/" bis @path in der Library anlegen (jedes nur einmal) */
+static gboolean ensure_dir_chain(SondServer *server, const gchar *library_id,
+                                 const gchar *path, GHashTable *angelegt, GError **error) {
+    gchar **teile = g_strsplit(path, "/", -1);
+    GString *p = g_string_new(NULL);
+    gboolean ok = TRUE;
+
+    for (guint i = 0; teile[i] && ok; i++) {
+        if (!teile[i][0])
+            continue;
+        g_string_append_printf(p, "/%s", teile[i]);
+        if (g_hash_table_contains(angelegt, p->str))
+            continue;
+        ok = sond_server_seafile_ensure_dir(server, library_id, p->str, error);
+        if (ok)
+            g_hash_table_add(angelegt, g_strdup(p->str));
+    }
+    g_string_free(p, TRUE);
+    g_strfreev(teile);
+
+    return ok;
+}
+
+/* Eintrag @idx des ZIP in die Datei @dest schreiben */
+static gboolean extract_entry(zip_t *z, zip_uint64_t idx, gint64 soll, const gchar *dest,
+                              GError **error) {
+    zip_file_t *f = zip_fopen_index(z, idx, 0);
+    FILE *out = NULL;
+    guchar *buf = NULL;
+    zip_int64_t r = 0;
+    gint64 gesamt = 0;
+    gboolean ok = FALSE;
+
+    if (!f) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "ZIP-Eintrag nicht lesbar: %s", zip_strerror(z));
+        return FALSE;
+    }
+    out = g_fopen(dest, "wb");
+    if (!out) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "Datei '%s' nicht schreibbar", dest);
+        zip_fclose(f);
+        return FALSE;
+    }
+
+    buf = g_malloc(65536);
+    while ((r = zip_fread(f, buf, 65536)) > 0) {
+        if (fwrite(buf, 1, (size_t) r, out) != (size_t) r) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Schreibfehler (Platte voll?)");
+            goto out;
+        }
+        gesamt += r;
+    }
+    if (r < 0 || gesamt != soll) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "ZIP-Eintrag fehlerhaft (Prüfsumme/Länge)");
+        goto out;
+    }
+    ok = TRUE;
+
+out:
+    g_free(buf);
+    fclose(out);
+    zip_fclose(f);
+
+    return ok;
+}
+
+/* Wiederhergestellte Library gegen das ZIP prüfen: gleiche Dateien und Größen */
+static gboolean verify_restored(zip_t *z, GPtrArray *liste, GError **error) {
+    GHashTable *erwartet = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    zip_int64_t n = zip_get_num_entries(z, 0);
+    gboolean ok = FALSE;
+
+    for (zip_int64_t i = 0; i < n; i++) {
+        const gchar *name = zip_get_name(z, (zip_uint64_t) i, ZIP_FL_ENC_UTF_8);
+        zip_stat_t st;
+        gint64 *size = NULL;
+
+        if (!name || name[strlen(name) - 1] == '/')
+            continue;
+        zip_stat_init(&st);
+        if (zip_stat_index(z, (zip_uint64_t) i, 0, &st) < 0)
+            goto out;
+        size = g_new(gint64, 1);
+        *size = (gint64) st.size;
+        g_hash_table_insert(erwartet, g_strdup(name), size);
+    }
+
+    for (guint i = 0; i < liste->len; i++) {
+        Eintrag *e = g_ptr_array_index(liste, i);
+        gchar *name = NULL;
+        gint64 *soll = NULL;
+
+        if (e->is_dir)
+            continue;
+        name = zip_name(e);
+        soll = g_hash_table_lookup(erwartet, name);
+        if (!soll || *soll != e->size) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Wiederhergestellte Datei '%s' stimmt nicht mit dem Archiv überein", e->path);
+            g_free(name);
+            goto out;
+        }
+        g_hash_table_remove(erwartet, name);
+        g_free(name);
+    }
+
+    ok = g_hash_table_size(erwartet) == 0;
+    if (!ok)
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%u Dateien aus dem Archiv fehlen in der wiederhergestellten Library",
+                g_hash_table_size(erwartet));
+
+out:
+    g_hash_table_unref(erwartet);
+
+    return ok;
+}
+
+gboolean sond_server_archiv_restore(SondServer *server, const gchar *library_name,
+                                    const gchar *archiv_name, GError **error) {
+    g_return_val_if_fail(server && library_name && archiv_name, FALSE);
+
+    gchar *datei = NULL;
+    gchar *arch_id = NULL;
+    gchar *lib_id = NULL;
+    gchar *tmpdir = NULL;
+    gchar *zip_path = NULL;
+    gchar *remote_pfad = NULL;
+    GError *local = NULL;
+    zip_t *z = NULL;
+    GHashTable *angelegt = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    GPtrArray *liste = g_ptr_array_new_with_free_func((GDestroyNotify) eintrag_free);
+    gboolean angelegt_hier = FALSE;
+    gboolean ok = FALSE;
+    int zerr = 0;
+
+    if (!library_name[0] || strpbrk(library_name, "/\\") || !archiv_name[0] ||
+            strpbrk(archiv_name, "/\\")) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                "Ungültiger Library- oder Archivname");
+        goto out;
+    }
+    datei = g_strdup_printf("%s.zip", archiv_name);
+
+    //das Ziel darf noch nicht existieren
+    lib_id = sond_server_seafile_get_library_id_by_name(server, library_name, &local);
+    if (lib_id) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+                "Library '%s' existiert bereits", library_name);
+        g_free(lib_id);
+        lib_id = NULL;
+        goto out;
+    }
+    if (!g_error_matches(local, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+        g_propagate_error(error, local);
+        local = NULL;
+        goto out;
+    }
+    g_clear_error(&local);
+
+    arch_id = sond_server_seafile_get_library_id_by_name(server,
+            SOND_SERVER_ARCHIV_LIBRARY, error);
+    if (!arch_id)
+        goto out;
+    {
+        gint64 groesse = root_file_size(server, arch_id, datei, error);
+
+        if (groesse == -2)
+            goto out;
+        if (groesse < 0) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                    "Archiv '%s' nicht gefunden", datei);
+            goto out;
+        }
+    }
+
+    tmpdir = g_dir_make_tmp("sond_restore_XXXXXX", error);
+    if (!tmpdir)
+        goto out;
+    zip_path = g_build_filename(tmpdir, "archiv.zip", NULL);
+    remote_pfad = g_strdup_printf("/%s", datei);
+    if (!sond_server_seafile_download_file(server, arch_id, remote_pfad, zip_path, error))
+        goto out;
+
+    z = zip_open(zip_path, ZIP_RDONLY | ZIP_CHECKCONS, &zerr);
+    if (!z) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "Archiv '%s' lässt sich nicht öffnen (Code %d)", datei, zerr);
+        goto out;
+    }
+
+    lib_id = sond_server_seafile_create_library(server, library_name, NULL, error);
+    if (!lib_id)
+        goto out;
+    angelegt_hier = TRUE;
+    LOG_INFO("Stelle '%s' aus '%s' wieder her\n", library_name, datei);
+
+    for (zip_int64_t i = 0; i < zip_get_num_entries(z, 0); i++) {
+        const gchar *name = zip_get_name(z, (zip_uint64_t) i, ZIP_FL_ENC_UTF_8);
+        gchar *pfad = NULL;
+        gboolean ist_dir = FALSE;
+
+        if (!name || !name[0] || name[0] == '/' || strstr(name, "../") ||
+                g_str_has_prefix(name, "..")) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Unzulässiger Pfad im Archiv: %s", name ? name : "?");
+            goto out;
+        }
+        ist_dir = name[strlen(name) - 1] == '/';
+        pfad = g_strdup_printf("/%s", name);
+        if (ist_dir)
+            pfad[strlen(pfad) - 1] = '\0';
+
+        if (ist_dir) {
+            gboolean r = ensure_dir_chain(server, lib_id, pfad, angelegt, error);
+
+            g_free(pfad);
+            if (!r)
+                goto out;
+        } else {
+            gchar *eltern = g_path_get_dirname(pfad);
+            gchar *basis = g_path_get_basename(pfad);
+            gchar *tmp = g_build_filename(tmpdir, "datei", NULL);
+            zip_stat_t st;
+            gboolean r = FALSE;
+
+            zip_stat_init(&st);
+            r = zip_stat_index(z, (zip_uint64_t) i, 0, &st) == 0 &&
+                    ensure_dir_chain(server, lib_id, eltern, angelegt, error) &&
+                    extract_entry(z, (zip_uint64_t) i, (gint64) st.size, tmp, error) &&
+                    sond_server_seafile_upload_file(server, lib_id, eltern, basis, tmp, error);
+            g_remove(tmp);
+            g_free(tmp);
+            g_free(eltern);
+            g_free(basis);
+            g_free(pfad);
+            if (!r) {
+                if (error && !*error)
+                    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "'%s' konnte nicht wiederhergestellt werden", name);
+                goto out;
+            }
+        }
+    }
+
+    if (!list_recursive(server, lib_id, "/", liste, error) ||
+            !verify_restored(z, liste, error))
+        goto out;
+
+    LOG_INFO("Library '%s' wiederhergestellt\n", library_name);
+    ok = TRUE;
+
+out:
+    if (z)
+        zip_discard(z);
+    //halb wiederhergestellte Library entfernen, damit ein neuer Versuch möglich ist
+    if (!ok && angelegt_hier && lib_id) {
+        GError *del = NULL;
+
+        if (!sond_server_seafile_delete_library(server, lib_id, &del))
+            LOG_WARN("Unvollständige Library '%s' konnte nicht entfernt werden: %s\n",
+                    library_name, del ? del->message : "?");
+        g_clear_error(&del);
+    }
+    if (tmpdir)
+        remove_tmp_dir(tmpdir);
+    g_clear_error(&local);
+    g_hash_table_unref(angelegt);
+    g_ptr_array_unref(liste);
+    g_free(datei);
+    g_free(arch_id);
+    g_free(lib_id);
+    g_free(tmpdir);
+    g_free(zip_path);
+    g_free(remote_pfad);
+
+    return ok;
+}

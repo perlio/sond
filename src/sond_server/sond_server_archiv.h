@@ -61,6 +61,24 @@ gboolean sond_server_archiv_library(SondServer *server, const gchar *library_nam
                                     const gchar *archiv_name, gboolean delete_after,
                                     GError **error);
 
+/**
+ * sond_server_archiv_restore:
+ * @server: SondServer Instanz
+ * @library_name: Name der wiederherzustellenden Library (darf nicht existieren)
+ * @archiv_name: Name des Archivs in "abgelegteAkten" ohne Endung
+ * @error: (nullable): Error Rückgabe
+ *
+ * Legt die Library neu an und füllt sie aus dem ZIP (Verzeichnisse, Dateien,
+ * auch versteckte); die Änderungszeiten der Dateien gehen dabei verloren.
+ * Danach wird die Library gegen das ZIP geprüft. Bei einem Fehler wird die
+ * halb wiederhergestellte Library wieder gelöscht. Das Archiv bleibt
+ * unverändert in "abgelegteAkten". Blockiert bis zum Ende.
+ *
+ * Returns: TRUE bei Erfolg.
+ */
+gboolean sond_server_archiv_restore(SondServer *server, const gchar *library_name,
+                                    const gchar *archiv_name, GError **error);
+
 G_END_DECLS
 
 #endif /* SOND_SERVER_ARCHIV_H */
