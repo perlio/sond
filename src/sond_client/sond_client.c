@@ -20,6 +20,7 @@
 #include "../sond_log_and_error.h"
 #include "../sond_graph/sond_graph_db.h"
 #include "../sond_graph/sond_graph_node.h"
+#include "modules/sond_import.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -38,6 +39,7 @@ struct _SondClient {
     gchar *client_id;      /* Instanz-ID (UUID pro Prozess) - Lock-Identitaet */
     gchar *seafile_url;    /* Seafile-Server URL */
     gchar *seadrive_root;  /* Konfiguration [seadrive] root (optional) */
+    gchar *zond_exe;       /* Konfiguration [zond] exe (optional) */
 
     /* Zuletzt verwendete RegNr (während Laufzeit) */
     guint last_regnr_lfd;
@@ -239,6 +241,7 @@ static void sond_client_finalize(GObject *object) {
     g_free(self->client_id);
     g_free(self->seafile_url);
     g_free(self->seadrive_root);
+    g_free(self->zond_exe);
 
     if (self->session) {
         g_object_unref(self->session);
@@ -321,6 +324,14 @@ static gboolean sond_client_load_config(SondClient *client,
     if (client->seadrive_root && !*client->seadrive_root) {
         g_free(client->seadrive_root);
         client->seadrive_root = NULL;
+    }
+
+    /* zond-Programm (optional): ohne Angabe wird zond.exe neben dem Client und
+     * im Suchpfad gesucht */
+    client->zond_exe = g_key_file_get_string(keyfile, "zond", "exe", NULL);
+    if (client->zond_exe && !*client->zond_exe) {
+        g_free(client->zond_exe);
+        client->zond_exe = NULL;
     }
 
     g_key_file_free(keyfile);
@@ -1579,6 +1590,26 @@ gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *
 const gchar* sond_client_get_seadrive_root(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     return client->seadrive_root;
+}
+
+gchar* sond_client_find_seadrive_root(SondClient *client, GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+
+    if (client->seadrive_root)
+        return g_strdup(client->seadrive_root);
+
+    return sond_import_detect_seadrive_root(client->seafile_url, error);
+}
+
+const gchar* sond_client_get_zond_exe(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    return client->zond_exe;
+}
+
+gboolean sond_client_login(SondClient *client, GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+
+    return ensure_authenticated(client, error);
 }
 
 void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year) {

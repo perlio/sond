@@ -18,7 +18,6 @@
 
 #include "sond_client_window.h"
 #include "modules/sond_module_akte.h"
-#include "modules/sond_import_dialog.h"
 #include "../sond_log_and_error.h"
 
 struct _SondClientWindow {
@@ -43,27 +42,6 @@ static void on_module_button_clicked(GtkButton *button, SondClientWindow *window
     if (module_name) {
         gtk_stack_set_visible_child_name(GTK_STACK(window->main_stack), module_name);
     }
-}
-
-/* Übergangslösung bis zur Startseite: Import für die zuletzt im Akte-Modul
- * angezeigte Akte */
-static void on_import_button_clicked(GtkButton *button, SondClientWindow *window) {
-    guint lfd_nr = 0;
-    guint year = 0;
-
-    if (!sond_client_get_current_akte(window->client, &lfd_nr, &year)) {
-        GtkAlertDialog *dialog = gtk_alert_dialog_new("Keine Akte gewählt");
-
-        gtk_alert_dialog_set_detail(dialog, "Bitte zuerst im Akte-Modul eine "
-                "Akte öffnen.");
-        gtk_alert_dialog_show(dialog, GTK_WINDOW(window));
-        g_object_unref(dialog);
-
-        return;
-    }
-
-    sond_import_dialog_show(window->client, GTK_WINDOW(window), lfd_nr, year,
-            NULL);
 }
 
 static void sond_client_window_init(SondClientWindow *self) {
@@ -96,11 +74,6 @@ static void sond_client_window_init(SondClientWindow *self) {
     g_object_set_data(G_OBJECT(btn_akte), "module-name", (gpointer)"akte");
     g_signal_connect(btn_akte, "clicked", G_CALLBACK(on_module_button_clicked), self);
     gtk_box_append(GTK_BOX(module_box), btn_akte);
-    
-    /* Button für "Import"-Modul */
-    GtkWidget *btn_import = gtk_button_new_with_label("Import ...");
-    g_signal_connect(btn_import, "clicked", G_CALLBACK(on_import_button_clicked), self);
-    gtk_box_append(GTK_BOX(module_box), btn_import);
 
     /* Separator */
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);

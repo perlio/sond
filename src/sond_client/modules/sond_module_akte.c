@@ -22,6 +22,10 @@
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_property.h"
 #include "../../sond_graph/sond_graph_db.h"
+#include "sond_akten.h"
+#include "sond_import.h"
+#include "sond_import_dialog.h"
+#include "sond_zond_start.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -31,7 +35,10 @@ typedef enum {
     AKTE_STATE_CREATING,      /* Neue Akte wird erstellt (Entry insensitiv) */
     AKTE_STATE_EDITING,       /* Bestehende/Entry-Akte wird bearbeitet */
     AKTE_STATE_READONLY,      /* Akte ist gelockt von anderem User */
-    AKTE_STATE_ABGELEGT       /* Akte ist abgelegt (read-only mit Reaktivierungs-Option) */
+    AKTE_STATE_ABGELEGT,      /* Akte ist abgelegt (read-only mit Reaktivierungs-Option) */
+    AKTE_STATE_AUSGEWAEHLT    /* Akte ausgewählt, nicht gesperrt: Ansicht (online mit Daten
+                                 vom Server, sonst nur Nummer und Bezeichnung); Import und
+                                 zond gehen, Änderungen erst nach "Bearbeiten" (online) */
 } AkteState;
 
 typedef struct {
@@ -47,6 +54,8 @@ typedef struct {
     GtkWidget *textview_gegenstand;
     
     GtkWidget *btn_neue_akte;
+    GtkWidget *btn_import;         /* Import-Dialog für die gewählte Akte */
+    GtkWidget *btn_zond;           /* zond mit der Projektdatei starten */
     GtkWidget *btn_ok;
     GtkWidget *btn_speichern;
     GtkWidget *btn_abbrechen;
@@ -74,9 +83,12 @@ typedef struct {
 
 /* Struktur für Suchergebnis */
 typedef struct {
-    SondGraphNode *node;
+    SondGraphNode *node;    /* (nullable) nur, wenn der Server die Akte kennt */
+    guint lfd_nr;
+    guint year;
     gchar *regnr_display;   /* Format: "23/26" */
-    gchar *kurzbezeichnung;
+    gchar *kurzbezeichnung; /* (nullable) */
+    gboolean lokal;         /* Library im SeaDrive vorhanden */
 } AkteSearchResult;
 
 /* Forward declarations */
@@ -90,6 +102,11 @@ static gboolean ist_akte_aktiv(SondGraphNode *node);
 static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term);
 static void akte_search_result_free(AkteSearchResult *result);
 static GPtrArray* search_akten_by_kurzbezeichnung(SondModuleAktePrivate *priv, const gchar *search_term, GError **error);
+static void update_action_widgets(SondModuleAktePrivate *priv);
+static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
+                                           guint lfd_nr, guint year, GError **error);
+static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
+                        const gchar *bezeichnung, SondGraphNode *node);
 
 extern const gchar* sond_client_get_server_url(SondClient *client);
 extern SoupSession* sond_client_get_session(SondClient *client);
@@ -260,9 +277,48 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
             gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
             break;
+
+        case AKTE_STATE_AUSGEWAEHLT:
+            /* Nur Ansicht ohne Sperre; ein neues Suchen ist jederzeit möglich.
+             * Ablegen/Reaktivieren erst nach "Bearbeiten" (dann gesperrt). */
+            gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
+            apply_widget_style(priv->regnr_entry, TRUE);
+
+            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
+            apply_widget_style(priv->textview_gegenstand, FALSE);
+
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+            gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+            break;
     }
 
-    gtk_widget_set_visible(priv->btn_break_lock, (new_state == AKTE_STATE_READONLY));
+    update_action_widgets(priv);
+}
+
+/* Freischaltung der Knöpfe. Es gibt keinen Online-Zustand: Serverfunktionen
+ * (Neue Akte, Bearbeiten, Speichern, Ablegen ...) sind bedienbar, wo sie
+ * inhaltlich Sinn haben, und scheitern beim Klick mit einer Meldung, wenn der
+ * Server nicht zu erreichen ist. Import und zond brauchen nur die gewählte
+ * Akte und das SeaDrive-Laufwerk. */
+static void update_action_widgets(SondModuleAktePrivate *priv) {
+    gboolean gewaehlt = sond_client_get_current_akte(priv->client, NULL, NULL);
+    AkteState st = priv->state;
+
+    gtk_widget_set_sensitive(priv->btn_neue_akte,
+            st == AKTE_STATE_INITIAL || st == AKTE_STATE_AUSGEWAEHLT);
+
+    gtk_widget_set_sensitive(priv->btn_import,
+            gewaehlt && st != AKTE_STATE_CREATING);
+    gtk_widget_set_sensitive(priv->btn_zond,
+            gewaehlt && st != AKTE_STATE_CREATING);
+
+    gtk_widget_set_visible(priv->btn_break_lock,
+            st == AKTE_STATE_READONLY || st == AKTE_STATE_AUSGEWAEHLT);
 }
 
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
@@ -490,6 +546,8 @@ static GPtrArray* search_akten_by_kurzbezeichnung(SondModuleAktePrivate *priv,
                 /* Suchergebnis erstellen */
                 AkteSearchResult *result = g_new0(AkteSearchResult, 1);
                 result->node = g_object_ref(node);
+                result->lfd_nr = lfd_nr;
+                result->year = year;
                 result->regnr_display = format_regnr(lfd_nr, year);
                 result->kurzbezeichnung = kurzb;  /* Ownership übernehmen */
                 kurzb = NULL;  /* Nicht freigeben */
@@ -516,74 +574,228 @@ typedef struct {
 } SearchDialogData;
 
 /**
+ * select_akte:
+ *
+ * Wählt eine Akte aus (ohne Sperre) und zeigt sie an. Mit Anmeldung werden die
+ * Daten vom Server geholt (@node oder per RegNr), ohne Anmeldung zeigt die
+ * Maske nur Nummer und Bezeichnung. Gearbeitet wird erst nach "Bearbeiten".
+ */
+static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
+                        const gchar *bezeichnung, SondGraphNode *node) {
+    SondGraphNode *geladen = NULL;
+    const gchar *herkunft = NULL;
+
+    //Der Server wird nur befragt, wenn schon eine Sitzung besteht (kein Login
+    //von selbst); scheitert er, bleibt die lokale Ansicht
+    if (!node && sond_client_is_logged_in(priv->client)) {
+        GError *error = NULL;
+
+        geladen = search_node_by_regnr(priv, lfd_nr, year, &error);
+        if (!geladen && error && error->code != G_IO_ERROR_NOT_FOUND)
+            herkunft = "nur lokal bekannt (Server nicht erreichbar)";
+        else if (!geladen)
+            herkunft = "auf dem Server nicht gefunden";
+        g_clear_error(&error);
+        node = geladen;
+    } else if (!node)
+        herkunft = "nur lokal bekannt (Server nicht befragt)";
+
+    if (priv->current_node) {
+        g_object_unref(priv->current_node);
+        priv->current_node = NULL;
+    }
+    priv->is_new_from_entry = FALSE;
+    priv->unsaved_conflict = FALSE;
+    sond_client_set_last_regnr(priv->client, lfd_nr, year);
+
+    if (node) {
+        gchar *status = NULL;
+
+        priv->current_node = g_object_ref(node);
+        update_ui_from_node(priv);
+
+        status = g_strdup_printf("%s (Daten vom Server)",
+                gtk_label_get_text(GTK_LABEL(priv->status_label)));
+        gtk_label_set_text(GTK_LABEL(priv->status_label), status);
+        g_free(status);
+    } else {
+        gchar *regnr_display = format_regnr(lfd_nr, year);
+        gchar *status = g_strdup_printf("Status: %s", herkunft);
+
+        clear_akte_fields(priv);
+        gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
+        gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung),
+                              bezeichnung ? bezeichnung : "");
+        gtk_label_set_text(GTK_LABEL(priv->status_label), status);
+        sond_client_set_current_akte(priv->client, lfd_nr, year);
+        g_free(status);
+        g_free(regnr_display);
+    }
+
+    if (geladen)
+        g_object_unref(geladen);
+
+    set_akte_state(priv, AKTE_STATE_AUSGEWAEHLT);
+}
+
+/**
  * on_search_result_selected:
- * 
+ *
  * Callback wenn Benutzer ein Suchergebnis auswählt (Doppelklick oder Enter).
  */
-static void on_search_result_selected(GtkListBox *listbox, 
+static void on_search_result_selected(GtkListBox *listbox,
                                       GtkListBoxRow *row,
                                       SearchDialogData *data) {
     if (!row) return;
-    
+
     gint index = gtk_list_box_row_get_index(row);
     if (index < 0 || index >= (gint)data->results->len) {
         return;
     }
-    
+
     AkteSearchResult *result = g_ptr_array_index(data->results, index);
-    
-    /* Akte laden */
-    if (data->priv->current_node) {
-        g_object_unref(data->priv->current_node);
-    }
-    
-    data->priv->current_node = g_object_ref(result->node);
-    data->priv->is_new_from_entry = FALSE;
-    
-    /* Lock versuchen zu setzen */
-    gint64 node_id = sond_graph_node_get_id(result->node);
-    GError *lock_error = NULL;
-    gchar *locked_by = NULL, *locked_at = NULL;
 
-    if (sond_client_lock_node_ex(data->priv->client, node_id, "Bearbeitung",
-                                 &locked_by, &locked_at, &lock_error)) {
-        /* Lock erfolgreich */
-        update_ui_from_node(data->priv);
+    select_akte(data->priv, result->lfd_nr, result->year,
+                result->kurzbezeichnung, result->node);
 
-        /* Prüfe ob Akte abgelegt ist */
-        if (ist_akte_aktiv(data->priv->current_node)) {
-            set_akte_state(data->priv, AKTE_STATE_EDITING);
-        } else {
-            set_akte_state(data->priv, AKTE_STATE_ABGELEGT);
-        }
-    } else {
-        /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
-        gchar *msg = g_strdup_printf(
-            "Akte %s wird gerade von einem anderen Benutzer bearbeitet.\n\n"
-            "Sie können die Akte nur im Lesemodus öffnen.",
-            result->regnr_display);
-        show_info_dialog(data->priv->main_widget, "Akte gesperrt", msg);
-        g_free(msg);
-
-        update_ui_from_node(data->priv);
-
-        g_free(data->priv->locked_by_other);
-        data->priv->locked_by_other = locked_by;
-        locked_by = NULL;
-        g_free(data->priv->locked_at_other);
-        data->priv->locked_at_other = locked_at;
-        locked_at = NULL;
-
-        set_akte_state(data->priv, AKTE_STATE_READONLY);
-
-        if (lock_error) g_error_free(lock_error);
-    }
-
-    g_free(locked_by);
-    g_free(locked_at);
-    
     /* Dialog schließen */
     gtk_window_close(GTK_WINDOW(data->dialog));
+}
+
+/* Ergebnis für RegNr suchen oder neu anlegen; bei Treffer gleicher RegNr
+ * werden Server- und SeaDrive-Angaben zusammengeführt. */
+static AkteSearchResult* find_or_add_result(GPtrArray *results, guint lfd_nr,
+                                             guint year) {
+    AkteSearchResult *r = NULL;
+
+    for (guint i = 0; i < results->len; i++) {
+        r = g_ptr_array_index(results, i);
+        if (r->lfd_nr == lfd_nr && r->year == year)
+            return r;
+    }
+
+    r = g_new0(AkteSearchResult, 1);
+    r->lfd_nr = lfd_nr;
+    r->year = year;
+    r->regnr_display = format_regnr(lfd_nr, year);
+    g_ptr_array_add(results, r);
+
+    return r;
+}
+
+static gint search_result_compare(gconstpointer a, gconstpointer b) {
+    const AkteSearchResult *ra = *(AkteSearchResult* const*) a;
+    const AkteSearchResult *rb = *(AkteSearchResult* const*) b;
+
+    if (ra->year != rb->year)
+        return ra->year < rb->year ? 1 : -1;
+    if (ra->lfd_nr != rb->lfd_nr)
+        return ra->lfd_nr < rb->lfd_nr ? 1 : -1;
+
+    return 0;
+}
+
+/**
+ * collect_results:
+ *
+ * Eine Suche für online und offline: die Libraries im SeaDrive (mit der
+ * Bezeichnung aus .sond/akte oder der Merkliste) und, wenn angemeldet, der
+ * Server. Gleiche Akten erscheinen einmal. Ein Serverfehler wird in
+ * @server_error gemeldet, die lokalen Treffer bleiben erhalten.
+ *
+ * Returns: (transfer full): Array von AkteSearchResult, neueste zuerst
+ */
+static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text,
+                                  gchar **server_error) {
+    GPtrArray *results = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)akte_search_result_free);
+    gchar *root = sond_client_find_seadrive_root(priv->client, NULL);
+    gchar *merkliste = sond_akten_merkliste_pfad();
+    guint lfd_nr = 0;
+    guint year = 0;
+
+    /* SeaDrive */
+    if (root) {
+        GPtrArray *alle = sond_akten_scan(root, merkliste, NULL);
+
+        if (alle) {
+            GPtrArray *treffer = sond_akten_suchen(alle, text);
+
+            for (guint i = 0; i < treffer->len; i++) {
+                SondAkteEintrag *e = g_ptr_array_index(treffer, i);
+                AkteSearchResult *r = find_or_add_result(results, e->lfd_nr,
+                                                         e->year);
+
+                r->lokal = TRUE;
+                if (!r->kurzbezeichnung && e->bezeichnung)
+                    r->kurzbezeichnung = g_strdup(e->bezeichnung);
+            }
+            g_ptr_array_unref(treffer);
+            g_ptr_array_unref(alle);
+        }
+        g_free(root);
+    }
+
+    /* Server, nur mit Anmeldung (sonst würde der Login-Dialog aufspringen) */
+    if (sond_client_is_logged_in(priv->client)) {
+        GError *error = NULL;
+
+        if (is_valid_regnr_format(text) && parse_regnr(text, &lfd_nr, &year)) {
+            SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
+
+            if (node) {
+                AkteSearchResult *r = find_or_add_result(results, lfd_nr, year);
+                gchar *kurzb = sond_graph_node_get_property_string(node, "kurzb");
+
+                if (r->node)
+                    g_object_unref(r->node);
+                r->node = node;
+                if (kurzb) {
+                    g_free(r->kurzbezeichnung);
+                    r->kurzbezeichnung = kurzb;
+                }
+            } else if (error && error->code != G_IO_ERROR_NOT_FOUND)
+                *server_error = g_strdup(error->message);
+        } else {
+            GPtrArray *srv = search_akten_by_kurzbezeichnung(priv, text, &error);
+
+            if (srv) {
+                for (guint i = 0; i < srv->len; i++) {
+                    AkteSearchResult *s = g_ptr_array_index(srv, i);
+                    AkteSearchResult *r = find_or_add_result(results, s->lfd_nr,
+                                                             s->year);
+
+                    if (r->node)
+                        g_object_unref(r->node);
+                    r->node = s->node ? g_object_ref(s->node) : NULL;
+                    if (s->kurzbezeichnung) {
+                        g_free(r->kurzbezeichnung);
+                        r->kurzbezeichnung = g_strdup(s->kurzbezeichnung);
+                    }
+                }
+                g_ptr_array_unref(srv);
+            } else if (error)
+                *server_error = g_strdup(error->message);
+        }
+        g_clear_error(&error);
+
+        //Bezeichnungen vom Server auch für die Offline-Suche merken
+        for (guint i = 0; i < results->len; i++) {
+            AkteSearchResult *r = g_ptr_array_index(results, i);
+
+            if (r->node && r->kurzbezeichnung) {
+                gchar *lib = format_regnr_storage(r->lfd_nr, r->year);
+
+                sond_akten_merken(merkliste, lib, r->kurzbezeichnung);
+                g_free(lib);
+            }
+        }
+    }
+
+    g_free(merkliste);
+    g_ptr_array_sort(results, search_result_compare);
+
+    return results;
 }
 
 /**
@@ -634,9 +846,7 @@ static void show_akte_search_results(SondModuleAktePrivate *priv,
     for (guint i = 0; i < results->len; i++) {
         AkteSearchResult *result = g_ptr_array_index(results, i);
         
-        gchar *label_text = g_strdup_printf("%s - %s", 
-                                           result->regnr_display, 
-                                           result->kurzbezeichnung);
+        gchar *label_text = g_strdup_printf("%s - %s%s", result->regnr_display, result->kurzbezeichnung ? result->kurzbezeichnung : "", (result->node || !sond_client_is_logged_in(priv->client)) ? "" : "   (nur im SeaDrive)");
         GtkWidget *label = gtk_label_new(label_text);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);  /* Links ausrichten */
         gtk_widget_set_margin_start(label, 10);
@@ -1511,8 +1721,42 @@ static void on_discard_confirm_response(GObject *source, GAsyncResult *result,
 }
 
 /* Button "Bearbeiten" (nur im Lesemodus sichtbar) */
+/* Eine nur lokal gewählte Akte vom Server laden (mit Login, falls nötig), um sie
+ * bearbeiten zu können. Scheitert das, bleibt die lokale Ansicht unverändert. */
+static gboolean load_node_from_server(SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+    GError *error = NULL;
+    SondGraphNode *node = NULL;
+
+    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
+        return FALSE;
+
+    if (!sond_client_login(priv->client, &error)) {
+        show_error_dialog(priv->main_widget, "Server nicht erreichbar",
+                "Die Akte kann nicht bearbeitet werden, weil keine Verbindung "
+                "zum Server besteht. Es wurde nichts geändert.");
+        g_clear_error(&error);
+        return FALSE;
+    }
+
+    node = search_node_by_regnr(priv, lfd_nr, year, &error);
+    if (!node) {
+        show_error_dialog(priv->main_widget, "Akte nicht geladen",
+                error ? error->message : "Die Akte wurde auf dem Server nicht gefunden.");
+        g_clear_error(&error);
+        return FALSE;
+    }
+
+    priv->current_node = node;
+    update_ui_from_node(priv);
+    set_akte_state(priv, AKTE_STATE_AUSGEWAEHLT);   //Ablegen usw. bleiben bis zur Sperre verborgen
+
+    return TRUE;
+}
+
 static void on_break_lock_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    if (!priv->current_node) {
+    if (!priv->current_node && !load_node_from_server(priv)) {
         return;
     }
 
@@ -1614,141 +1858,84 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
     g_free(data);
 }
 
-static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
-    guint lfd_nr, year;
-
-    const gchar *regnr_text = gtk_editable_get_text(GTK_EDITABLE(entry));
-    
-    if (!regnr_text || strlen(regnr_text) == 0)
-    	return;
-
-    /* Prüfen ob gültiges RegNr-Format */
-    if (!is_valid_regnr_format(regnr_text)) {
-        /* Kein gültiges RegNr-Format -> Suche nach Kurzbezeichnung */
-        GError *error = NULL;
-        GPtrArray *results = search_akten_by_kurzbezeichnung(priv, regnr_text, &error);
-        
-        if (error) {
-            gchar *msg = g_strdup_printf("Fehler bei der Suche: %s", error->message);
-            show_error_dialog(priv->main_widget, "Suchfehler", msg);
-            g_free(msg);
-            g_error_free(error);
-            return;
-        }
-        
-        if (results) {
-            show_akte_search_results(priv, results, regnr_text);
-            g_ptr_array_unref(results);
-        }
-        
-        return;
-    }
-    
-    /* Gültiges Format -> Parsen */
-    if (!parse_regnr(regnr_text, &lfd_nr, &year)) {
-        show_error_dialog(priv->main_widget, "Fehler beim Parsen",
-                         "RegNr konnte nicht interpretiert werden.");
-        return;
-    }
-    
-    /* RegNr merken */
-    sond_client_set_last_regnr(priv->client, lfd_nr, year);
-    
-    GError *error = NULL;
-    SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
-
-    /* Fehler außer Akte existiert nicht */
-    if (error && error->code != G_IO_ERROR_NOT_FOUND) {
-        show_error_dialog(priv->main_widget, "Fehler", error->message);
-        g_error_free(error);
-        return;
-    }
-    else if (error) {//kein richtiger Fehler; Akte einfach noch nicht angelegt
-    	g_error_free(error);
-    }
-    
-    if (node) {
-        /* Akte existiert - versuche Lock zu setzen */
-        if (priv->current_node) {
-            g_object_unref(priv->current_node);
-        }
-        priv->current_node = node;
-        priv->is_new_from_entry = FALSE;
-        
-        gint64 node_id = sond_graph_node_get_id(node);
-        GError *lock_error = NULL;
-        gchar *locked_by = NULL, *locked_at = NULL;
-
-        if (sond_client_lock_node_ex(priv->client, node_id, "Bearbeitung",
-                                     &locked_by, &locked_at, &lock_error)) {
-            /* Lock erfolgreich */
-            update_ui_from_node(priv);
-
-            /* Prüfe ob Akte abgelegt ist */
-            if (ist_akte_aktiv(priv->current_node)) {
-                set_akte_state(priv, AKTE_STATE_EDITING);  /* Aktiv -> editierbar */
-            } else {
-                set_akte_state(priv, AKTE_STATE_ABGELEGT);  /* Abgelegt -> read-only mit Reaktivierung */
-            }
-        } else {
-            /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
-            gchar *msg = g_strdup_printf(
-                "Akte %u/%u wird gerade von einem anderen Benutzer bearbeitet.\n\n"
-                "Sie können die Akte nur im Lesemodus öffnen.",
-                lfd_nr, year);
-            show_info_dialog(priv->main_widget, "Akte gesperrt", msg);
-            g_free(msg);
-
-            update_ui_from_node(priv);
-
-            g_free(priv->locked_by_other);
-            priv->locked_by_other = locked_by;
-            locked_by = NULL;
-            g_free(priv->locked_at_other);
-            priv->locked_at_other = locked_at;
-            locked_at = NULL;
-
-            set_akte_state(priv, AKTE_STATE_READONLY);
-
-            if (lock_error) g_error_free(lock_error);
-        }
-
-        g_free(locked_by);
-        g_free(locked_at);
-
-        return;
-    }
-    
-    /* Bestätigung für neue Akte */
+/* Nachfrage, ob eine noch nicht vorhandene Akte angelegt werden soll (online) */
+static void ask_new_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year) {
     gchar *regnr_display = format_regnr(lfd_nr, year);
     gchar *message = g_strdup_printf(
         "Akte %s existiert nicht.\n\nNeue Akte mit dieser Registernummer anlegen?",
         regnr_display);
     g_free(regnr_display);
-    
+
     GtkAlertDialog *dialog = gtk_alert_dialog_new("Akte nicht gefunden");
     gtk_alert_dialog_set_detail(dialog, message);
     g_free(message);
-    
+
     const char *buttons[] = {"Ja", "Nein", NULL};
     gtk_alert_dialog_set_buttons(dialog, buttons);
     gtk_alert_dialog_set_default_button(dialog, 0);  /* "Ja" als Standard */
     gtk_alert_dialog_set_cancel_button(dialog, 1);   /* "Nein" als Abbruch */
     gtk_alert_dialog_set_modal(dialog, TRUE);
-    
+
     /* Callback-Daten vorbereiten */
     NewAkteDialogData *data = g_new0(NewAkteDialogData, 1);
     data->priv = priv;
     data->lfd_nr = lfd_nr;
     data->year = year;
-    
+
     gtk_alert_dialog_choose(dialog,
                            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
                            NULL,  /* cancellable */
                            on_new_akte_dialog_response,
                            data);
-    
+
     g_object_unref(dialog);
+}
+
+/* Enter im Suchfeld: RegNr oder Suchtext. Gesucht wird im SeaDrive und, wenn
+ * angemeldet, auf dem Server. Ein einziger Treffer wird gleich gewählt, bei
+ * mehreren erscheint die Trefferliste. Die Akte wird dabei nicht gesperrt. */
+static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+    gchar *server_error = NULL;
+    gchar *such = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(entry))));
+    GPtrArray *results = NULL;
+    gboolean online = sond_client_is_logged_in(priv->client);
+
+    if (!*such) {
+        g_free(such);
+        return;
+    }
+
+    results = collect_results(priv, such, &server_error);
+
+    if (results->len == 1) {
+        AkteSearchResult *r = g_ptr_array_index(results, 0);
+
+        select_akte(priv, r->lfd_nr, r->year, r->kurzbezeichnung, r->node);
+    } else if (results->len > 1) {
+        show_akte_search_results(priv, results, such);
+    } else if (server_error) {
+        gchar *msg = g_strdup_printf("Fehler bei der Suche: %s", server_error);
+
+        show_error_dialog(priv->main_widget, "Suchfehler", msg);
+        g_free(msg);
+    } else if (online && is_valid_regnr_format(such) &&
+               parse_regnr(such, &lfd_nr, &year)) {
+        sond_client_set_last_regnr(priv->client, lfd_nr, year);
+        ask_new_akte(priv, lfd_nr, year);
+    } else {
+        gchar *msg = g_strdup_printf("Keine Akten gefunden mit Suchbegriff: \"%s\"%s",
+                such, online ? "" :
+                "\n\nDer Server wurde nicht befragt (keine Sitzung): gesucht wurde nur im SeaDrive-Laufwerk.");
+
+        show_info_dialog(priv->main_widget, "Keine Ergebnisse", msg);
+        g_free(msg);
+    }
+
+    g_free(server_error);
+    g_ptr_array_unref(results);
+    g_free(such);
 }
 
 static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -2154,6 +2341,12 @@ static void on_ok_discard_response(GObject *source, GAsyncResult *result,
 }
 
 static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    /* Nur ausgewählt (nichts gesperrt, nichts zu speichern): Auswahl beenden */
+    if (priv->state == AKTE_STATE_AUSGEWAEHLT) {
+        finish_akte(priv);
+        return;
+    }
+
     if (!priv->current_node) {
         show_error_dialog(priv->main_widget, "Nichts zu speichern",
                          "Bitte erst eine Akte laden oder neu erstellen.");
@@ -2485,6 +2678,76 @@ static void on_ocr_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     }
 }
 
+/* =======================================================================
+ * Anmelden, Import, zond
+ * ======================================================================= */
+
+/* Import-Dialog für die gewählte Akte (geht auch offline) */
+static void on_import_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+
+    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
+        return;
+
+    sond_import_dialog_show(priv->client,
+            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), lfd_nr, year,
+            gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)));
+}
+
+/* zond mit der Projektdatei der gewählten Akte starten (geht auch offline,
+ * sofern SeaDrive die Datei im Cache hat) */
+static void on_zond_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+    gchar *root = NULL;
+    gchar *lib_name = NULL;
+    gchar *lib_dir = NULL;
+    gchar *exe = NULL;
+    gchar *project = NULL;
+    GError *error = NULL;
+
+    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
+        return;
+
+    lib_name = sond_module_akte_library_name(lfd_nr, year);
+
+    root = sond_client_find_seadrive_root(priv->client, &error);
+    if (!root) {
+        show_error_dialog(priv->main_widget, "SeaDrive nicht gefunden",
+                error ? error->message : "unbekannt");
+        goto out;
+    }
+
+    lib_dir = sond_import_find_library_dir(root, lib_name, &error);
+    if (!lib_dir) {
+        show_error_dialog(priv->main_widget,
+                "Akte im SeaDrive-Laufwerk nicht erreichbar",
+                error ? error->message : "unbekannt");
+        goto out;
+    }
+
+    exe = sond_zond_find_exe(sond_client_get_zond_exe(priv->client), &error);
+    if (!exe) {
+        show_error_dialog(priv->main_widget, "zond nicht gefunden",
+                error ? error->message : "unbekannt");
+        goto out;
+    }
+
+    project = sond_zond_project_file(lib_dir, lib_name);
+    if (!sond_zond_start(exe, project, &error))
+        show_error_dialog(priv->main_widget, "zond konnte nicht gestartet werden",
+                error ? error->message : "unbekannt");
+
+out:
+    g_clear_error(&error);
+    g_free(project);
+    g_free(exe);
+    g_free(lib_dir);
+    g_free(root);
+    g_free(lib_name);
+}
+
 /* ========================================================================
  * Public API
  * ======================================================================== */
@@ -2527,6 +2790,22 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     priv->btn_neue_akte = gtk_button_new_with_label("Neue Akte");
     g_signal_connect(priv->btn_neue_akte, "clicked", G_CALLBACK(on_neue_akte_clicked), priv);
     gtk_box_append(GTK_BOX(top_box), priv->btn_neue_akte);
+
+    priv->btn_import = gtk_button_new_with_label("Import ...");
+    gtk_widget_set_tooltip_text(priv->btn_import,
+            "Dokumente in die gewählte Akte importieren");
+    g_signal_connect(priv->btn_import, "clicked", G_CALLBACK(on_import_clicked), priv);
+    gtk_box_append(GTK_BOX(top_box), priv->btn_import);
+
+    priv->btn_zond = gtk_button_new_with_label("zond starten");
+    gtk_widget_set_tooltip_text(priv->btn_zond,
+            "Die Projektdatei der gewählten Akte in zond öffnen");
+    g_signal_connect(priv->btn_zond, "clicked", G_CALLBACK(on_zond_clicked), priv);
+    gtk_box_append(GTK_BOX(top_box), priv->btn_zond);
+
+    GtkWidget *top_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(top_spacer, TRUE);
+    gtk_box_append(GTK_BOX(top_box), top_spacer);
 
     /* Separator */
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);

@@ -695,7 +695,6 @@ static gpointer import_thread(gpointer data) {
 static void on_import_clicked(GtkButton *button, gpointer user_data) {
     ImportPriv *priv = user_data;
     GError *error = NULL;
-    const gchar *configured = NULL;
     gchar *root = NULL;
     gchar *target = NULL;
     ImportJob *job = NULL;
@@ -742,19 +741,13 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
         }
     }
 
-    configured = sond_client_get_seadrive_root(priv->client);
-    if (configured)
-        root = g_strdup(configured);
-    else {
-        root = sond_import_detect_seadrive_root(
-                sond_client_get_seafile_url(priv->client), &error);
-        if (!root) {
-            show_error(priv->main_box, "SeaDrive nicht gefunden",
-                    error ? error->message : "unbekannt");
-            g_clear_error(&error);
-            g_ptr_array_unref(job_sources);
-            return;
-        }
+    root = sond_client_find_seadrive_root(priv->client, &error);
+    if (!root) {
+        show_error(priv->main_box, "SeaDrive nicht gefunden",
+                error ? error->message : "unbekannt");
+        g_clear_error(&error);
+        g_ptr_array_unref(job_sources);
+        return;
     }
 
     target = sond_import_find_library_dir(root, priv->library_name, &error);

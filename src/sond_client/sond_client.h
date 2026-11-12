@@ -475,6 +475,38 @@ gboolean sond_client_get_current_akte(SondClient *client, guint *lfd_nr, guint *
 const gchar* sond_client_get_seadrive_root(SondClient *client);
 
 /**
+ * sond_client_find_seadrive_root:
+ * @client: SondClient
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * SeaDrive-Wurzel: die konfigurierte, sonst die automatisch erkannte (mit der
+ * Seafile-URL als Hinweis, soweit angemeldet). Braucht keinen Server.
+ *
+ * Returns: (transfer full) (nullable): Pfad oder NULL
+ */
+gchar* sond_client_find_seadrive_root(SondClient *client, GError **error);
+
+/**
+ * sond_client_get_zond_exe:
+ * @client: SondClient
+ *
+ * Returns: (transfer none) (nullable): Pfad zu zond aus [zond] exe oder NULL
+ */
+const gchar* sond_client_get_zond_exe(SondClient *client);
+
+/**
+ * sond_client_login:
+ * @client: SondClient
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Meldet am Server an (über den Login-Dialog), falls noch keine Anmeldung
+ * besteht.
+ *
+ * Returns: TRUE, wenn der Client angemeldet ist
+ */
+gboolean sond_client_login(SondClient *client, GError **error);
+
+/**
  * sond_client_set_last_regnr:
  * @client: SondClient
  * @lfd_nr: Laufende Nummer
