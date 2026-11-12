@@ -48,13 +48,15 @@ G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
  *   stattdessen gesperrt ist, steht in locked_by (leer = niemand)
  * @SOND_CLIENT_ERROR_GONE: Knoten (oder ein verknuepfter Knoten) wurde
  *   zwischenzeitlich geloescht
+ * @SOND_CLIENT_ERROR_BUSY: Auf dem Server läuft schon ein Archivierungsjob
  *
  * Die Fehlermeldung (error->message) ist bereits fuer Benutzer formuliert.
  */
 typedef enum {
     SOND_CLIENT_ERROR_FAILED,
     SOND_CLIENT_ERROR_LOCK_NOT_HELD,
-    SOND_CLIENT_ERROR_GONE
+    SOND_CLIENT_ERROR_GONE,
+    SOND_CLIENT_ERROR_BUSY
 } SondClientErrorCode;
 
 GQuark sond_client_error_quark(void);
@@ -614,6 +616,92 @@ OcrStatus* sond_client_ocr_get_status(SondClient *client,
  * Gibt OcrStatus frei.
  */
 void sond_client_ocr_status_free(OcrStatus *status);
+
+
+/* =======================================================================
+ * Archivierung und Wiederherstellung (Jobs auf dem Server)
+ * ======================================================================= */
+
+/**
+ * SondArchivState:
+ * @SOND_ARCHIV_NONE: für diese Library ist (seit dem Serverstart) kein Job bekannt
+ * @SOND_ARCHIV_RUNNING: der Job läuft
+ * @SOND_ARCHIV_OK: der Job ist erfolgreich beendet
+ * @SOND_ARCHIV_ERROR: der Job ist fehlgeschlagen (Text in message)
+ */
+typedef enum {
+    SOND_ARCHIV_NONE,
+    SOND_ARCHIV_RUNNING,
+    SOND_ARCHIV_OK,
+    SOND_ARCHIV_ERROR
+} SondArchivState;
+
+/**
+ * SondArchivJob:
+ * @library_name: Name der Library
+ * @state: Stand des Jobs
+ * @restore: TRUE bei Wiederherstellen, FALSE bei Archivieren
+ * @archiv_name: Name des Archivs (ohne ".zip")
+ * @user: Nutzer, der den Job angestoßen hat
+ * @message: (nullable): Fehlermeldung bei SOND_ARCHIV_ERROR
+ * @start_time: Unix-Sekunden, 0 = unbekannt
+ * @end_time: Unix-Sekunden, 0 = läuft noch
+ */
+typedef struct {
+    gchar *library_name;
+    SondArchivState state;
+    gboolean restore;
+    gchar *archiv_name;
+    gchar *user;
+    gchar *message;
+    gint64 start_time;
+    gint64 end_time;
+} SondArchivJob;
+
+void sond_archiv_job_free(SondArchivJob *job);
+
+/**
+ * sond_client_archiv_start:
+ * @client: SondClient
+ * @library_name: Name der Library (z. B. "2026-23")
+ * @archiv_name: Name des Archivs ohne Endung
+ * @restore: TRUE = aus dem Archiv wiederherstellen, FALSE = archivieren
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Startet den Job auf dem Server (läuft im Hintergrund; Fortschritt über
+ * sond_client_archiv_status()). Führt bei Bedarf Login durch.
+ * Läuft auf dem Server schon ein Job, scheitert der Aufruf mit
+ * SOND_CLIENT_ERROR_BUSY (die Meldung nennt die Library).
+ *
+ * Returns: TRUE, wenn der Job gestartet wurde
+ */
+gboolean sond_client_archiv_start(SondClient *client, const gchar *library_name,
+                                  const gchar *archiv_name, gboolean restore,
+                                  GError **error);
+
+/**
+ * sond_client_archiv_status:
+ * @client: SondClient
+ * @library_name: Name der Library
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Returns: (transfer full) (nullable): Stand des Jobs zu dieser Library (bei
+ *   fehlendem Job mit state SOND_ARCHIV_NONE); NULL bei Fehler.
+ *   Mit sond_archiv_job_free() freigeben.
+ */
+SondArchivJob* sond_client_archiv_status(SondClient *client, const gchar *library_name,
+                                         GError **error);
+
+/**
+ * sond_client_archiv_jobs:
+ * @client: SondClient
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Returns: (transfer full) (nullable) (element-type SondArchivJob): alle dem
+ *   Server bekannten Jobs; NULL bei Fehler. Mit g_ptr_array_unref() freigeben
+ *   (die Einträge werden dabei mit freigegeben).
+ */
+GPtrArray* sond_client_archiv_jobs(SondClient *client, GError **error);
 
 G_END_DECLS
 

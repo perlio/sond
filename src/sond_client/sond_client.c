@@ -1887,3 +1887,253 @@ void sond_client_ocr_status_free(OcrStatus *status) {
 
     g_free(status);
 }
+
+/* =======================================================================
+ * Archivierung und Wiederherstellung (Jobs auf dem Server)
+ * ======================================================================= */
+
+void sond_archiv_job_free(SondArchivJob *job) {
+    if (!job)
+        return;
+    g_free(job->library_name);
+    g_free(job->archiv_name);
+    g_free(job->user);
+    g_free(job->message);
+    g_free(job);
+}
+
+/* Anfrage an den Server; bei 401 wird einmal neu angemeldet und wiederholt.
+ * Rückgabe TRUE, wenn eine Antwort eintraf (HTTP-Status in @status_out, der
+ * Körper, falls JSON, in @parser_out - sonst NULL); FALSE bei Verbindungs- oder
+ * Anmeldefehlern. */
+static gboolean archiv_request(SondClient *client, const gchar *method,
+                               const gchar *path_query, const gchar *json_body,
+                               guint *status_out, JsonParser **parser_out,
+                               GError **error) {
+    *parser_out = NULL;
+
+    for (gint versuch = 0; versuch < 2; versuch++) {
+        gchar *url = NULL;
+        SoupMessage *msg = NULL;
+        GBytes *response = NULL;
+        guint status = 0;
+
+        if (!ensure_authenticated(client, error))
+            return FALSE;
+
+        url = g_strdup_printf("%s%s", client->server_url, path_query);
+        msg = soup_message_new(method, url);
+        g_free(url);
+        add_auth_header(client, msg);
+        if (json_body) {
+            GBytes *body = g_bytes_new(json_body, strlen(json_body));
+
+            soup_message_set_request_body_from_bytes(msg, "application/json", body);
+            g_bytes_unref(body);
+        }
+
+        response = soup_session_send_and_read(client->session, msg, NULL, error);
+        if (!response) {
+            g_object_unref(msg);
+
+            return FALSE;
+        }
+        status = soup_message_get_status(msg);
+
+        if (status == 401 && versuch == 0) {
+            g_bytes_unref(response);
+            g_object_unref(msg);
+            if (!handle_auth_error(client, error))
+                return FALSE;
+
+            continue;
+        }
+
+        {
+            gsize size = 0;
+            const gchar *data = g_bytes_get_data(response, &size);
+            JsonParser *parser = json_parser_new();
+
+            if (!data || !json_parser_load_from_data(parser, data, (gssize) size, NULL) ||
+                    !JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser)))
+                g_clear_object(&parser);
+            *parser_out = parser;
+        }
+        *status_out = status;
+        g_bytes_unref(response);
+        g_object_unref(msg);
+
+        return TRUE;
+    }
+
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED, "Anmeldung fehlgeschlagen");
+
+    return FALSE;
+}
+
+/* Fehlertext der Serverantwort ("error"), sonst NULL */
+static const gchar* archiv_server_error(JsonParser *parser) {
+    JsonObject *obj = NULL;
+
+    if (!parser)
+        return NULL;
+    obj = json_node_get_object(json_parser_get_root(parser));
+
+    return json_object_has_member(obj, "error") ?
+            json_object_get_string_member(obj, "error") : NULL;
+}
+
+static gint64 archiv_parse_time(JsonObject *obj, const gchar *member) {
+    GDateTime *dt = NULL;
+    gint64 unix_secs = 0;
+
+    if (!json_object_has_member(obj, member))
+        return 0;
+    dt = g_date_time_new_from_iso8601(json_object_get_string_member(obj, member), NULL);
+    if (dt) {
+        unix_secs = g_date_time_to_unix(dt);
+        g_date_time_unref(dt);
+    }
+
+    return unix_secs;
+}
+
+static const gchar* archiv_string(JsonObject *obj, const gchar *member) {
+    return json_object_has_member(obj, member) ?
+            json_object_get_string_member(obj, member) : NULL;
+}
+
+static SondArchivJob* archiv_job_from_json(JsonObject *obj) {
+    SondArchivJob *job = g_new0(SondArchivJob, 1);
+    const gchar *state = archiv_string(obj, "state");
+
+    job->library_name = g_strdup(archiv_string(obj, "library_name"));
+    job->archiv_name = g_strdup(archiv_string(obj, "archiv_name"));
+    job->user = g_strdup(archiv_string(obj, "user"));
+    job->message = g_strdup(archiv_string(obj, "message"));
+    job->restore = !g_strcmp0(archiv_string(obj, "art"), "wiederherstellen");
+    job->start_time = archiv_parse_time(obj, "start_time");
+    job->end_time = archiv_parse_time(obj, "end_time");
+
+    if (!g_strcmp0(state, "running"))
+        job->state = SOND_ARCHIV_RUNNING;
+    else if (!g_strcmp0(state, "ok"))
+        job->state = SOND_ARCHIV_OK;
+    else if (!g_strcmp0(state, "error"))
+        job->state = SOND_ARCHIV_ERROR;
+    else
+        job->state = SOND_ARCHIV_NONE;
+
+    return job;
+}
+
+gboolean sond_client_archiv_start(SondClient *client, const gchar *library_name,
+                                  const gchar *archiv_name, gboolean restore,
+                                  GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    g_return_val_if_fail(library_name != NULL && archiv_name != NULL, FALSE);
+
+    JsonBuilder *builder = json_builder_new();
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *root = NULL;
+    gchar *body = NULL;
+    JsonParser *parser = NULL;
+    guint status = 0;
+    gboolean ok = FALSE;
+
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "library_name");
+    json_builder_add_string_value(builder, library_name);
+    json_builder_set_member_name(builder, "archiv_name");
+    json_builder_add_string_value(builder, archiv_name);
+    json_builder_end_object(builder);
+    root = json_builder_get_root(builder);
+    json_generator_set_root(generator, root);
+    body = json_generator_to_data(generator, NULL);
+    json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
+
+    if (archiv_request(client, "POST", restore ? "/archiv/restore" : "/archiv/start",
+            body, &status, &parser, error)) {
+        const gchar *text = archiv_server_error(parser);
+
+        if (status == 200) {
+            ok = TRUE;
+        } else if (status == 409) {
+            g_set_error(error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_BUSY, "%s",
+                    text ? text : "Auf dem Server läuft bereits ein Archivierungsjob");
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s fehlgeschlagen (HTTP %u): %s",
+                    restore ? "Wiederherstellung" : "Archivierung", status,
+                    text ? text : "");
+        }
+    }
+
+    g_clear_object(&parser);
+    g_free(body);
+
+    return ok;
+}
+
+SondArchivJob* sond_client_archiv_status(SondClient *client, const gchar *library_name,
+                                         GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    g_return_val_if_fail(library_name != NULL, NULL);
+
+    gchar *esc = g_uri_escape_string(library_name, NULL, FALSE);
+    gchar *query = g_strdup_printf("/archiv/status?library_name=%s", esc);
+    JsonParser *parser = NULL;
+    guint status = 0;
+    SondArchivJob *job = NULL;
+
+    g_free(esc);
+    if (archiv_request(client, "GET", query, NULL, &status, &parser, error)) {
+        if (status == 200 && parser) {
+            job = archiv_job_from_json(json_node_get_object(json_parser_get_root(parser)));
+            if (!job->library_name)
+                job->library_name = g_strdup(library_name);
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Status der Archivierung nicht lesbar (HTTP %u)", status);
+        }
+    }
+
+    g_clear_object(&parser);
+    g_free(query);
+
+    return job;
+}
+
+GPtrArray* sond_client_archiv_jobs(SondClient *client, GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+
+    JsonParser *parser = NULL;
+    guint status = 0;
+    GPtrArray *jobs = NULL;
+
+    if (archiv_request(client, "GET", "/archiv/status", NULL, &status, &parser, error)) {
+        JsonObject *obj = parser ? json_node_get_object(json_parser_get_root(parser)) : NULL;
+
+        if (status == 200 && obj && json_object_has_member(obj, "jobs") &&
+                JSON_NODE_HOLDS_ARRAY(json_object_get_member(obj, "jobs"))) {
+            JsonArray *arr = json_object_get_array_member(obj, "jobs");
+
+            jobs = g_ptr_array_new_with_free_func((GDestroyNotify) sond_archiv_job_free);
+            for (guint i = 0; i < json_array_get_length(arr); i++) {
+                JsonObject *o = json_array_get_object_element(arr, i);
+
+                if (o)
+                    g_ptr_array_add(jobs, archiv_job_from_json(o));
+            }
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Jobliste der Archivierung nicht lesbar (HTTP %u)", status);
+        }
+    }
+
+    g_clear_object(&parser);
+
+    return jobs;
+}
