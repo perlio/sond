@@ -23,6 +23,7 @@
 #include "../../sond_graph/sond_graph_property.h"
 #include "../../sond_graph/sond_graph_db.h"
 #include "sond_akten.h"
+#include "sond_archiv_kandidaten.h"
 #include "sond_import.h"
 #include "sond_import_dialog.h"
 #include "sond_zond_start.h"
@@ -1182,7 +1183,8 @@ static void update_status_display(SondModuleAktePrivate *priv) {
     } else {
         gchar *ablnr = get_letzte_ablage(priv->current_node);
         if (ablnr) {
-            gchar *text = g_strdup_printf("Status: Abgelegt (%s)", ablnr);
+            gchar *text = g_strdup_printf("Status: Abgelegt (%s)%s", ablnr,
+                    sond_archiv_ist_archiviert(priv->current_node, NULL) ? ", archiviert" : "");
             gtk_label_set_text(GTK_LABEL(priv->status_label), text);
             g_free(text);
             g_free(ablnr);
@@ -1562,30 +1564,36 @@ static void on_ablegen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde abgelegt.");
 }
 
-static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    if (!priv->current_node) {
-        return;
-    }
-    
-    if (ist_akte_aktiv(priv->current_node)) {
-        show_error_dialog(priv->main_widget, "Fehler", "Akte ist bereits aktiv.");
-        return;
-    }
-    
+/* Library-Name ("Jahr-LfdNr") eines Akten-Nodes; NULL ohne gültige RegNr */
+static gchar* node_library_name(SondGraphNode *node) {
+    GPtrArray *regnr = node ? sond_graph_node_get_property(node, "regnr") : NULL;
+    gchar *lib = NULL;
+
+    if (regnr && regnr->len == 2)
+        lib = g_strdup_printf("%s-%s", (const gchar*) g_ptr_array_index(regnr, 0),
+                (const gchar*) g_ptr_array_index(regnr, 1));
+    if (regnr)
+        g_ptr_array_unref(regnr);
+
+    return lib;
+}
+
+/* Setzt "von" und speichert: die eigentliche Reaktivierung (Library ist vorhanden) */
+static void reaktivieren_ausfuehren(SondModuleAktePrivate *priv, gboolean wiederhergestellt) {
     /* Aktuelles Datum als ISO-String */
     GDateTime *now = g_date_time_new_now_local();
     gchar *datum = g_date_time_format(now, "%Y-%m-%d");
     g_date_time_unref(now);
-    
+
     /* "von"-Property hinzufügen */
     GPtrArray *properties = sond_graph_node_get_properties(priv->current_node);
-    
+
     const gchar *von_value[] = {datum};
     SondGraphProperty *von_prop = sond_graph_property_new("von", von_value, 1);
     g_ptr_array_add(properties, von_prop);
-    
+
     g_free(datum);
-    
+
     /* Speichern */
     GError *error = NULL;
     if (!save_node(priv, &error)) {
@@ -1596,10 +1604,285 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
         if (error) g_error_free(error);
         return;
     }
-    
+
     update_status_display(priv);
     set_akte_state(priv, AKTE_STATE_EDITING);  /* Nach Reaktivierung wieder editierbar */
-    show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
+    show_info_dialog(priv->main_widget, "Erfolgreich", wiederhergestellt ?
+            "Der Dokumentenordner wurde wiederhergestellt und die Akte reaktiviert." :
+            "Akte wurde reaktiviert.");
+}
+
+/* ------------------------------------------------------------------------
+ * Wiederherstellen des archivierten Dokumentenordners beim Reaktivieren
+ * ---------------------------------------------------------------------- */
+
+typedef struct {
+    SondModuleAktePrivate *priv;
+    gchar *library;
+    gchar *archiv;
+    GtkWidget *fenster;
+    GtkWidget *label;
+    guint source;
+    gint64 start;        /* Monotonic-Zeit in us */
+    guint status_fehler; /* aufeinanderfolgende Fehler der Statusabfrage */
+    guint neustarts;     /* Wiederholungen des Starts, falls der Server den Job nicht kennt */
+} RestoreCtx;
+
+static void restore_ctx_free(RestoreCtx *ctx) {
+    if (ctx->source)
+        g_source_remove(ctx->source);
+    if (ctx->fenster)
+        gtk_window_destroy(GTK_WINDOW(ctx->fenster));
+    g_free(ctx->library);
+    g_free(ctx->archiv);
+    g_free(ctx);
+}
+
+static gboolean restore_poll(gpointer data) {
+    RestoreCtx *ctx = data;
+    SondModuleAktePrivate *priv = ctx->priv;
+    GError *error = NULL;
+    SondArchivJob *job = sond_client_archiv_status(priv->client, ctx->library, &error);
+
+    ctx->source = 0;
+    if (!job) {
+        if (++ctx->status_fehler >= 10) {
+            show_error_dialog(priv->main_widget, "Wiederherstellung unklar",
+                    "Der Stand der Wiederherstellung ist nicht abrufbar. Sie läuft "
+                    "eventuell auf dem Server weiter. Bitte später die Akte erneut öffnen "
+                    "und prüfen.");
+            g_clear_error(&error);
+            restore_ctx_free(ctx);
+
+            return G_SOURCE_REMOVE;
+        }
+        g_clear_error(&error);
+        ctx->source = g_timeout_add(3000, restore_poll, ctx);
+
+        return G_SOURCE_REMOVE;
+    }
+    ctx->status_fehler = 0;
+
+    if (job->state == SOND_ARCHIV_RUNNING) {
+        gchar *text = g_strdup_printf("Dokumentenordner wird wiederhergestellt ... (%d s)",
+                (gint) ((g_get_monotonic_time() - ctx->start) / G_USEC_PER_SEC));
+
+        gtk_label_set_text(GTK_LABEL(ctx->label), text);
+        g_free(text);
+        ctx->source = g_timeout_add(2000, restore_poll, ctx);
+    } else if (job->state == SOND_ARCHIV_OK) {
+        sond_archiv_job_free(job);
+        gtk_window_destroy(GTK_WINDOW(ctx->fenster));
+        ctx->fenster = NULL;
+        reaktivieren_ausfuehren(priv, TRUE);
+        restore_ctx_free(ctx);
+
+        return G_SOURCE_REMOVE;
+    } else if (job->state == SOND_ARCHIV_ERROR) {
+        gchar *text = g_strdup_printf("Die Wiederherstellung ist fehlgeschlagen:\n\n%s\n\n"
+                "Die Akte bleibt abgelegt.", job->message ? job->message : "unbekannter Fehler");
+
+        gtk_window_destroy(GTK_WINDOW(ctx->fenster));
+        ctx->fenster = NULL;
+        show_error_dialog(priv->main_widget, "Wiederherstellung fehlgeschlagen", text);
+        g_free(text);
+        sond_archiv_job_free(job);
+        restore_ctx_free(ctx);
+
+        return G_SOURCE_REMOVE;
+    } else if (++ctx->neustarts < 3) {
+        //Server kennt den Job nicht mehr (Neustart): erneut starten ist unschädlich
+        if (!sond_client_archiv_start(priv->client, ctx->library, ctx->archiv, TRUE, NULL))
+            LOG_WARN("Neustart der Wiederherstellung von '%s' gescheitert\n", ctx->library);
+        ctx->source = g_timeout_add(2000, restore_poll, ctx);
+    } else {
+        gtk_window_destroy(GTK_WINDOW(ctx->fenster));
+        ctx->fenster = NULL;
+        show_error_dialog(priv->main_widget, "Wiederherstellung fehlgeschlagen",
+                "Der Server kennt den Auftrag nicht mehr. Die Akte bleibt abgelegt.");
+        sond_archiv_job_free(job);
+        restore_ctx_free(ctx);
+
+        return G_SOURCE_REMOVE;
+    }
+    sond_archiv_job_free(job);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void restore_starten(SondModuleAktePrivate *priv, const gchar *library, const gchar *archiv) {
+    GError *error = NULL;
+    RestoreCtx *ctx = NULL;
+    GtkWidget *box = NULL;
+    GtkWidget *spinner = NULL;
+
+    if (!sond_client_archiv_start(priv->client, library, archiv, TRUE, &error)) {
+        gchar *text = g_strdup_printf("Die Wiederherstellung konnte nicht gestartet werden:\n\n%s\n\n"
+                "Die Akte bleibt abgelegt.", error ? error->message : "unbekannter Fehler");
+
+        show_error_dialog(priv->main_widget, "Wiederherstellung nicht gestartet", text);
+        g_free(text);
+        g_clear_error(&error);
+
+        return;
+    }
+
+    ctx = g_new0(RestoreCtx, 1);
+    ctx->priv = priv;
+    ctx->library = g_strdup(library);
+    ctx->archiv = g_strdup(archiv);
+    ctx->start = g_get_monotonic_time();
+
+    ctx->fenster = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(ctx->fenster), "Wiederherstellung");
+    gtk_window_set_modal(GTK_WINDOW(ctx->fenster), TRUE);
+    gtk_window_set_deletable(GTK_WINDOW(ctx->fenster), FALSE);
+    gtk_window_set_transient_for(GTK_WINDOW(ctx->fenster),
+            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start(box, 24);
+    gtk_widget_set_margin_end(box, 24);
+    gtk_widget_set_margin_top(box, 24);
+    gtk_widget_set_margin_bottom(box, 24);
+    spinner = gtk_spinner_new();
+    gtk_spinner_set_spinning(GTK_SPINNER(spinner), TRUE);
+    gtk_box_append(GTK_BOX(box), spinner);
+    ctx->label = gtk_label_new("Dokumentenordner wird wiederhergestellt ...");
+    gtk_box_append(GTK_BOX(box), ctx->label);
+    gtk_window_set_child(GTK_WINDOW(ctx->fenster), box);
+    gtk_window_present(GTK_WINDOW(ctx->fenster));
+
+    ctx->source = g_timeout_add(2000, restore_poll, ctx);
+}
+
+typedef struct {
+    SondModuleAktePrivate *priv;
+    gchar *library;
+    gchar *archiv;
+} RestoreFrage;
+
+static void on_restore_frage_response(GObject *source, GAsyncResult *result, gpointer user_data) {
+    RestoreFrage *f = user_data;
+    GError *error = NULL;
+    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+
+    if (error)
+        g_error_free(error);
+    else if (button == 0 && f->priv->current_node)
+        restore_starten(f->priv, f->library, f->archiv);
+
+    g_free(f->library);
+    g_free(f->archiv);
+    g_free(f);
+}
+
+static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+
+    if (ist_akte_aktiv(priv->current_node)) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte ist bereits aktiv.");
+        return;
+    }
+
+    gchar *lib = node_library_name(priv->current_node);
+    if (!lib) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte hat keine gültige RegNr");
+        return;
+    }
+
+    /* Läuft für die Library gerade ein Archivierungs- oder Wiederherstellungsjob, darf
+     * nicht reaktiviert werden (der Job würde den Dokumentenordner gleich löschen bzw.
+     * neu anlegen). Ist der Stand nicht abrufbar, wird vorsichtshalber ebenfalls abgelehnt. */
+    GError *error = NULL;
+    SondArchivJob *job = sond_client_archiv_status(priv->client, lib, &error);
+    if (!job) {
+        gchar *msg = g_strdup_printf("Der Stand der Archivierung ist nicht abrufbar:\n\n%s",
+                error ? error->message : "unbekannt");
+
+        show_error_dialog(priv->main_widget, "Reaktivieren nicht möglich", msg);
+        g_free(msg);
+        g_clear_error(&error);
+        g_free(lib);
+        return;
+    }
+    if (job->state == SOND_ARCHIV_RUNNING) {
+        show_error_dialog(priv->main_widget, "Reaktivieren nicht möglich",
+                job->restore ? "Der Dokumentenordner dieser Akte wird gerade wiederhergestellt." :
+                "Der Dokumentenordner dieser Akte wird gerade archiviert. Bitte später erneut "
+                "versuchen.");
+        sond_archiv_job_free(job);
+        g_free(lib);
+        return;
+    }
+    sond_archiv_job_free(job);
+
+    /* Archiviert ist die Akte mit Markierung; ohne Markierung auch dann, wenn die Library
+     * fehlt (Lauf nach dem Archivieren abgebrochen, bevor die Markierung gespeichert war) */
+    gchar *archiv = NULL;
+    if (!sond_archiv_ist_archiviert(priv->current_node, &archiv)) {
+        gchar *lib_id = sond_client_get_seafile_library_id(priv->client, lib, &error);
+
+        if (lib_id) {
+            g_free(lib_id);
+        } else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+            const gchar *grund = NULL;
+            SondArchivKandidat *k = sond_archiv_kandidat_pruefen(priv->current_node, 0, NULL, &grund);
+
+            if (k) {
+                archiv = g_strdup(k->archiv_name);
+                sond_archiv_kandidat_free(k);
+            }
+            if (!archiv) {
+                show_error_dialog(priv->main_widget, "Reaktivieren nicht möglich",
+                        "Die Library dieser Akte fehlt, und der Archivname lässt sich nicht "
+                        "bestimmen. Bitte den Administrator fragen.");
+                g_clear_error(&error);
+                g_free(lib);
+                return;
+            }
+        } else {
+            gchar *msg = g_strdup_printf("Ob der Dokumentenordner vorhanden ist, lässt sich nicht "
+                    "prüfen:\n\n%s", error ? error->message : "unbekannt");
+
+            show_error_dialog(priv->main_widget, "Reaktivieren nicht möglich", msg);
+            g_free(msg);
+            g_clear_error(&error);
+            g_free(lib);
+            return;
+        }
+        g_clear_error(&error);
+    }
+
+    if (!archiv) {
+        g_free(lib);
+        reaktivieren_ausfuehren(priv, FALSE);
+        return;
+    }
+
+    /* Archiviert: vorher Warnung und Rückfrage */
+    {
+        RestoreFrage *f = g_new0(RestoreFrage, 1);
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Dokumentenordner wiederherstellen?");
+        const gchar *buttons[] = { "Wiederherstellen und reaktivieren", "Abbrechen", NULL };
+        gchar *detail = g_strdup_printf("Der Dokumentenordner dieser Akte ist archiviert (%s). "
+                "Er muss zuerst wiederhergestellt werden; das kann bei großen Akten länger "
+                "dauern.\n\nTrotzdem reaktivieren?", archiv);
+
+        f->priv = priv;
+        f->library = lib;
+        f->archiv = archiv;
+        gtk_alert_dialog_set_detail(dialog, detail);
+        g_free(detail);
+        gtk_alert_dialog_set_buttons(dialog, buttons);
+        gtk_alert_dialog_set_default_button(dialog, 1);
+        gtk_alert_dialog_set_cancel_button(dialog, 1);
+        gtk_alert_dialog_set_modal(dialog, TRUE);
+        gtk_alert_dialog_choose(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                NULL, on_restore_frage_response, f);
+        g_object_unref(dialog);
+    }
 }
 
 static gboolean reload_and_try_lock(SondModuleAktePrivate *priv);

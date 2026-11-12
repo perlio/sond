@@ -1522,6 +1522,14 @@ gchar* sond_client_get_seafile_library_id(SondClient *client,
         }
     }
 
+    if (status == 404) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                   "Library '%s' nicht gefunden", library_name);
+        g_object_unref(stream);
+        g_object_unref(msg);
+        return NULL;
+    }
+
     if (status != 200) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Server-Fehler: HTTP %u", status);
