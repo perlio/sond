@@ -19,9 +19,10 @@
 /*
  * Akten-Liste des Clients, ohne Server: Die Akten ergeben sich aus den
  * Libraries im SeaDrive-Laufwerk (Verzeichnisnamen der Form "Jahr-Nr"); die
- * Bezeichnung steht als Dateiname in <Library>/.sond/akte (s. sond_akte_name.h).
- * Ist sie offline nicht lesbar, greift eine lokale Merkliste (Library-Name ->
- * Bezeichnung), die bei jedem erfolgreichen Lesen nachgeführt wird.
+ * Bezeichnung und der Gegenstand stehen als Dateinamen (B~..., G~...) in
+ * <Library>/.sond/akte (s. sond_akte_name.h), ein Verzeichnis für beide. Sind sie
+ * offline nicht lesbar, greift eine lokale Merkliste (Library-Name -> Bezeichnung und
+ * Gegenstand), die bei jedem erfolgreichen Lesen nachgeführt wird.
  *
  * Frei von GTK; nur glib und json-glib.
  */
@@ -37,6 +38,7 @@ typedef struct {
     guint    year;                /* 2026 */
     gchar   *library_dir;         /* Verzeichnis der Library im SeaDrive */
     gchar   *bezeichnung;         /* nullable: Aktenbezeichnung */
+    gchar   *gegenstand;          /* nullable: Gegenstand (unterscheidet gleiche Bezeichnungen) */
     gboolean bezeichnung_gemerkt; /* aus der Merkliste, nicht aus der Library */
 } SondAkteEintrag;
 
@@ -63,6 +65,16 @@ gchar* sond_akten_merkliste_pfad(void);
 gchar* sond_akten_lese_bezeichnung(const gchar *library_dir);
 
 /**
+ * sond_akten_lese_gegenstand:
+ * @library_dir: Verzeichnis einer Library
+ *
+ * Wie sond_akten_lese_bezeichnung(), für den G~-Eintrag in .sond/akte.
+ *
+ * Returns: (transfer full) (nullable): Gegenstand oder NULL
+ */
+gchar* sond_akten_lese_gegenstand(const gchar *library_dir);
+
+/**
  * sond_akten_scan:
  * @seadrive_root: Wurzel des SeaDrive-Laufwerks
  * @merkliste: (nullable): Pfad der Merkliste; NULL = keine
@@ -84,7 +96,8 @@ GPtrArray* sond_akten_scan(const gchar *seadrive_root, const gchar *merkliste,
  * @text: Suchtext
  *
  * Erkennt RegNr ("23/26", "23/2026", "2026-23", nur "23" = jedes Jahr) und
- * sonst Wörter: jedes Wort muss in Bezeichnung oder Library-Name vorkommen
+ * sonst Wörter: jedes Wort muss in Bezeichnung, Gegenstand oder Library-Name
+ * vorkommen
  * (ohne Beachtung der Groß-/Kleinschreibung). Leerer Text liefert alle.
  *
  * Returns: (transfer container) (element-type SondAkteEintrag): Treffer in der
@@ -96,9 +109,12 @@ GPtrArray* sond_akten_suchen(GPtrArray *alle, const gchar *text);
  * sond_akten_merken:
  * @merkliste: Pfad der Merkliste
  *
- * Trägt eine Bezeichnung in die Merkliste ein (z. B. nach einer Serverabfrage).
+ * @bezeichnung: (nullable): NULL oder leer = unverändert
+ * @gegenstand: (nullable): NULL = unverändert, "" = löschen
+ *
+ * Trägt Angaben in die Merkliste ein (z. B. nach einer Serverabfrage).
  */
 void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
-        const gchar *bezeichnung);
+        const gchar *bezeichnung, const gchar *gegenstand);
 
 #endif /* SOND_AKTEN_H */

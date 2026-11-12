@@ -789,19 +789,26 @@ out:
 }
 
 /**
- * seafile_set_bezeichnung:
+ * seafile_set_name_file:
+ * @art: SOND_AKTE_NAME_BEZEICHNUNG oder SOND_AKTE_NAME_GEGENSTAND
+ * @wert: Bezeichnung bzw. Gegenstand
+ * @entfernen_wenn_leer: bei leerem Wert die vorhandene Datei dieser Art
+ *   löschen (sonst bleibt alles unverändert)
  *
- * Legt die Aktenbezeichnung als leere Datei .sond/akte/<kodierte Bezeichnung>
- * in der Library ab (s. sond_akte_name.h). Eine andere dort vorhandene Datei
- * wird gelöscht, die Bezeichnung ersetzt also die bisherige; ist sie schon
- * so eingetragen, geschieht nichts. Eine leere Bezeichnung lässt alles
- * unverändert.
+ * Legt den Wert als leere Datei .sond/akte/<Art>~<kodierter Wert> in der
+ * Library ab (s. sond_akte_name.h). Eine andere Datei derselben Art (auch
+ * eine ältere ohne Vorsilbe, die als Bezeichnung gilt) wird gelöscht, der Wert
+ * ersetzt also den bisherigen; ist er schon so eingetragen, geschieht nichts.
+ * Dateien der anderen Art bleiben unberührt.
  */
-static gboolean seafile_set_bezeichnung(SondServer *server,
-                                        const gchar *library_id,
-                                        const gchar *bezeichnung,
-                                        GError **error) {
-    gchar *name = sond_akte_name_escape(bezeichnung);
+static gboolean seafile_set_name_file(SondServer *server,
+                                      const gchar *library_id,
+                                      gchar art,
+                                      const gchar *wert,
+                                      gboolean entfernen_wenn_leer,
+                                      GError **error) {
+    const gchar *dir = "/" SOND_AKTE_NAME_DIR;
+    gchar *name = sond_akte_name_make(art, wert);
     gchar *dir_esc = NULL;
     gchar *query = NULL;
     gchar *body = NULL;
@@ -810,19 +817,19 @@ static gboolean seafile_set_bezeichnung(SondServer *server,
     gboolean ok = FALSE;
     GPtrArray *others = g_ptr_array_new_with_free_func(g_free);
 
-    if (!name) {
+    if (!name && !entfernen_wenn_leer) {
         g_ptr_array_unref(others);
 
         return TRUE;
     }
 
-    if (!seafile_ensure_dir(server, library_id, "/.sond", error) ||
-            !seafile_ensure_dir(server, library_id, "/" SOND_AKTE_NAME_DIR,
-                    error))
+    //zum Anlegen müssen die Verzeichnisse da sein; zum bloßen Entfernen nicht
+    if (name && (!seafile_ensure_dir(server, library_id, "/.sond", error) ||
+            !seafile_ensure_dir(server, library_id, dir, error)))
         goto out;
 
     //vorhandene Einträge
-    dir_esc = g_uri_escape_string("/" SOND_AKTE_NAME_DIR, "/", FALSE);
+    dir_esc = g_uri_escape_string(dir, "/", FALSE);
     query = g_strdup_printf("/api2/repos/%s/dir/?p=%s", library_id, dir_esc);
     if (!seafile_api_call(server, "GET", query, NULL, &status, &body, error))
         goto out;
@@ -846,7 +853,11 @@ static gboolean seafile_set_bezeichnung(SondServer *server,
                     if (!entry_name)
                         continue;
 
-                    if (g_strcmp0(entry_name, name) == 0)
+                    //nur Einträge derselben Art betreffen den neuen Wert
+                    if (sond_akte_name_parse(entry_name, NULL, NULL) != art)
+                        continue;
+
+                    if (name && g_strcmp0(entry_name, name) == 0)
                         present = TRUE;
                     else
                         g_ptr_array_add(others, g_strdup(entry_name));
@@ -856,13 +867,13 @@ static gboolean seafile_set_bezeichnung(SondServer *server,
         g_object_unref(parser);
     }
 
-    if (!present && !seafile_upload_bytes(server, library_id,
-            "/" SOND_AKTE_NAME_DIR, name, (const guchar*) "", 0, error))
+    if (name && !present && !seafile_upload_bytes(server, library_id, dir, name,
+            (const guchar*) "", 0, error))
         goto out;
 
-    //erst nach erfolgreichem Anlegen die bisherige Bezeichnung entfernen
+    //erst nach erfolgreichem Anlegen den bisherigen Wert entfernen
     for (guint i = 0; i < others->len; i++) {
-        gchar *path = g_strconcat("/" SOND_AKTE_NAME_DIR "/",
+        gchar *path = g_strconcat(dir, "/",
                 (gchar*) g_ptr_array_index(others, i), NULL);
         gchar *path_esc = g_uri_escape_string(path, "/", FALSE);
         gchar *del_query = g_strdup_printf("/api2/repos/%s/file/?p=%s",
@@ -872,7 +883,7 @@ static gboolean seafile_set_bezeichnung(SondServer *server,
 
         if (!seafile_api_call(server, "DELETE", del_query, NULL, &status,
                 &del_body, &del_error) || (status != 200 && status != 204))
-            LOG_ERROR("Alte Aktenbezeichnung '%s' konnte nicht entfernt werden: "
+            LOG_ERROR("Alter Eintrag '%s' konnte nicht entfernt werden: "
                       "%s\n", path, del_error ? del_error->message :
                       (del_body ? del_body : "unknown"));
         g_clear_error(&del_error);
@@ -892,6 +903,24 @@ out:
     g_free(name);
 
     return ok;
+}
+
+/* Bezeichnung und Gegenstand (je nullable = unverändert; Gegenstand leer =
+ * Eintrag entfernen, Bezeichnung leer = unverändert) */
+static gboolean seafile_set_akte_names(SondServer *server,
+                                       const gchar *library_id,
+                                       const gchar *bezeichnung,
+                                       const gchar *gegenstand,
+                                       GError **error) {
+    if (bezeichnung && !seafile_set_name_file(server, library_id,
+            SOND_AKTE_NAME_BEZEICHNUNG, bezeichnung, FALSE, error))
+        return FALSE;
+
+    if (gegenstand && !seafile_set_name_file(server, library_id,
+            SOND_AKTE_NAME_GEGENSTAND, gegenstand, TRUE, error))
+        return FALSE;
+
+    return TRUE;
 }
 
 /* ========================================================================
@@ -1083,8 +1112,10 @@ static void send_success_response(SoupServerMessage *msg,
  * handle_seafile_library_create:
  * POST /seafile/library
  * 
- * Body: {"name": "2026-23", "desc": "optional", "bezeichnung": "optional"}
- * (bezeichnung: Aktenbezeichnung, wird als .sond/akte/<Name> abgelegt)
+ * Body: {"name": "2026-23", "desc": "optional", "bezeichnung": "optional",
+ *        "gegenstand": "optional"}
+ * (bezeichnung/gegenstand: werden als .sond/akte/B~<Name> bzw.
+ *  .sond/akte/G~<Name> abgelegt)
  * Response: {"success": true, "data": {"library_id": "xxx", "name": "2026-23"}}
  */
 static void handle_seafile_library_create(SoupServer *soup_server,
@@ -1208,14 +1239,17 @@ static void handle_seafile_library_create(SoupServer *soup_server,
     /* Aktenbezeichnung als Dateiname ablegen. Reine Zusatzangabe für die
      * Suche ohne Server: ein Fehlschlag lässt die Akte bestehen (der Client
      * kann die Bezeichnung über /seafile/library-bezeichnung nachtragen). */
-    if (json_object_has_member(obj, "bezeichnung")) {
-        const gchar *bezeichnung = json_object_get_string_member(obj,
-                "bezeichnung");
+    {
+        const gchar *bezeichnung = json_object_has_member(obj, "bezeichnung") ?
+                json_object_get_string_member(obj, "bezeichnung") : NULL;
+        const gchar *gegenstand = json_object_has_member(obj, "gegenstand") ?
+                json_object_get_string_member(obj, "gegenstand") : NULL;
 
-        if (bezeichnung && !seafile_set_bezeichnung(server, library_id,
-                bezeichnung, &error)) {
-            LOG_ERROR("Aktenbezeichnung fuer Library '%s' nicht abgelegt: %s\n",
-                      name, error ? error->message : "unknown");
+        if ((bezeichnung || gegenstand) && !seafile_set_akte_names(server,
+                library_id, bezeichnung, gegenstand, &error)) {
+            LOG_ERROR("Aktenbezeichnung/Gegenstand fuer Library '%s' nicht "
+                      "abgelegt: %s\n", name,
+                      error ? error->message : "unknown");
             g_clear_error(&error);
         }
     }
@@ -1247,8 +1281,10 @@ static void handle_seafile_library_create(SoupServer *soup_server,
  * handle_seafile_library_bezeichnung:
  * POST /seafile/library-bezeichnung
  *
- * Body: {"name": "2026-23", "bezeichnung": "Meier ./. Müller"}
- * Setzt bzw. ersetzt die Aktenbezeichnung (.sond/akte) der Library.
+ * Body: {"name": "2026-23", "bezeichnung": "Meier ./. Müller",
+ *        "gegenstand": "Kündigungsschutz"}   (mindestens eines von beiden)
+ * Setzt bzw. ersetzt die Aktenbezeichnung (.sond/akte) und/oder den Gegenstand
+ * (jeweils in .sond/akte; Gegenstand leer = entfernen) der Library.
  * Response: {"success": true, "data": {"name": "2026-23"}}
  */
 static void handle_seafile_library_bezeichnung(SoupServer *soup_server,
@@ -1264,6 +1300,7 @@ static void handle_seafile_library_bezeichnung(SoupServer *soup_server,
     JsonObject *obj = NULL;
     const gchar *name = NULL;
     const gchar *bezeichnung = NULL;
+    const gchar *gegenstand = NULL;
     gchar *library_id = NULL;
 
     if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
@@ -1295,9 +1332,12 @@ static void handle_seafile_library_bezeichnung(SoupServer *soup_server,
     bezeichnung = json_object_has_member(obj, "bezeichnung") ?
             json_object_get_string_member(obj, "bezeichnung") : NULL;
 
-    if (!name || !*name || !bezeichnung) {
+    gegenstand = json_object_has_member(obj, "gegenstand") ?
+            json_object_get_string_member(obj, "gegenstand") : NULL;
+
+    if (!name || !*name || (!bezeichnung && !gegenstand)) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
-                "Missing 'name' or 'bezeichnung' field");
+                "Missing 'name' or 'bezeichnung'/'gegenstand' field");
         g_object_unref(parser);
         return;
     }
@@ -1314,7 +1354,8 @@ static void handle_seafile_library_bezeichnung(SoupServer *soup_server,
         return;
     }
 
-    if (!seafile_set_bezeichnung(server, library_id, bezeichnung, &error)) {
+    if (!seafile_set_akte_names(server, library_id, bezeichnung, gegenstand,
+            &error)) {
         gchar *err_msg = g_strdup_printf("Failed to set Aktenbezeichnung: %s",
                 error ? error->message : "unknown");
 

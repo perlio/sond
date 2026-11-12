@@ -37,8 +37,10 @@ G_BEGIN_DECLS
  *
  * Endpoints:
  * - POST   /seafile/library  - Erstellt Library samt leerer Projektdatei und
- *                              (optional) Aktenbezeichnung in .sond/akte
- * - POST   /seafile/library-bezeichnung - Setzt/ersetzt die Aktenbezeichnung
+ *                              (optional) Aktenbezeichnung (B~...) und
+ *                              Gegenstand (G~...) in .sond/akte
+ * - POST   /seafile/library-bezeichnung - Setzt/ersetzt Bezeichnung und/oder
+ *                              Gegenstand
  * - GET    /seafile/library-id?name=XXX - Library-ID zu einem Namen
  */
 void sond_server_seafile_register_handlers(SondServer *server);

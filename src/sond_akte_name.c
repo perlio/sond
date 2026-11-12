@@ -23,18 +23,18 @@
 static gboolean needs_escape(guchar c) {
     return c < 0x20 || c == 0x7f || c == '%' || c == '/' || c == '\\' ||
             c == ':' || c == '*' || c == '?' || c == '"' || c == '<' ||
-            c == '>' || c == '|';
+            c == '>' || c == '|' || c == '~';
 }
 
-gchar* sond_akte_name_escape(const gchar *bezeichnung) {
+gchar* sond_akte_name_escape(const gchar *wert) {
     gchar *trimmed = NULL;
     GString *out = NULL;
     const gchar *p = NULL;
 
-    if (!bezeichnung)
+    if (!wert)
         return NULL;
 
-    trimmed = g_strstrip(g_strdup(bezeichnung));
+    trimmed = g_strstrip(g_strdup(wert));
     if (!*trimmed || !g_utf8_validate(trimmed, -1, NULL)) {
         g_free(trimmed);
 
@@ -105,4 +105,40 @@ gchar* sond_akte_name_unescape(const gchar *dateiname) {
     }
 
     return g_string_free(out, FALSE);
+}
+
+gchar* sond_akte_name_make(gchar art, const gchar *wert) {
+    gchar *kodiert = sond_akte_name_escape(wert);
+    gchar *name = NULL;
+
+    if (!kodiert)
+        return NULL;
+
+    name = g_strdup_printf("%c~%s", art, kodiert);
+    g_free(kodiert);
+
+    return name;
+}
+
+gchar sond_akte_name_parse(const gchar *dateiname, gchar **wert,
+        gboolean *neues_format) {
+    gchar art = SOND_AKTE_NAME_BEZEICHNUNG;
+    const gchar *rest = dateiname;
+    gboolean neu = FALSE;
+
+    g_return_val_if_fail(dateiname != NULL, art);
+
+    if ((dateiname[0] == SOND_AKTE_NAME_BEZEICHNUNG ||
+            dateiname[0] == SOND_AKTE_NAME_GEGENSTAND) && dateiname[1] == '~') {
+        art = dateiname[0];
+        rest = dateiname + 2;
+        neu = TRUE;
+    }
+
+    if (wert)
+        *wert = sond_akte_name_unescape(rest);
+    if (neues_format)
+        *neues_format = neu;
+
+    return art;
 }

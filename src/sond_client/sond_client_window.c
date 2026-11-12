@@ -28,7 +28,6 @@ struct _SondClientWindow {
     /* UI-Elemente */
     GtkWidget *main_stack;
     GtkWidget *module_selector;
-    GtkWidget *status_bar;
     
     /* Module */
     GtkWidget *module_akte;
@@ -89,15 +88,6 @@ static void sond_client_window_init(SondClientWindow *self) {
     /* Platzhalter für leere Ansicht */
     GtkWidget *welcome = gtk_label_new("Bitte wählen Sie ein Modul aus.");
     gtk_stack_add_named(GTK_STACK(self->main_stack), welcome, "welcome");
-    
-    /* Status-Leiste */
-    self->status_bar = gtk_label_new("Nicht verbunden");
-    gtk_widget_set_margin_start(self->status_bar, 10);
-    gtk_widget_set_margin_end(self->status_bar, 10);
-    gtk_widget_set_margin_top(self->status_bar, 5);
-    gtk_widget_set_margin_bottom(self->status_bar, 5);
-    gtk_widget_add_css_class(self->status_bar, "dim-label");
-    gtk_box_append(GTK_BOX(main_box), self->status_bar);
 }
 
 static void sond_client_window_class_init(SondClientWindowClass *klass) {

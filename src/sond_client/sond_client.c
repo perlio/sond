@@ -1255,6 +1255,7 @@ gchar* sond_client_create_seafile_library(SondClient *client,
                                           const gchar *name,
                                           const gchar *description,
                                           const gchar *bezeichnung,
+                                          const gchar *gegenstand,
                                           GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     g_return_val_if_fail(name != NULL, NULL);
@@ -1279,8 +1280,13 @@ gchar* sond_client_create_seafile_library(SondClient *client,
         json_builder_add_string_value(builder, bezeichnung);
     }
 
+    if (gegenstand && *gegenstand) {
+        json_builder_set_member_name(builder, "gegenstand");
+        json_builder_add_string_value(builder, gegenstand);
+    }
+
     json_builder_end_object(builder);
-    
+
     JsonGenerator *gen = json_generator_new();
     json_generator_set_root(gen, json_builder_get_root(builder));
     gchar *request_json = json_generator_to_data(gen, NULL);
@@ -1368,6 +1374,7 @@ gchar* sond_client_create_seafile_library(SondClient *client,
 gboolean sond_client_set_library_bezeichnung(SondClient *client,
                                              const gchar *library_name,
                                              const gchar *bezeichnung,
+                                             const gchar *gegenstand,
                                              GError **error) {
     JsonBuilder *builder = NULL;
     JsonGenerator *gen = NULL;
@@ -1376,7 +1383,8 @@ gboolean sond_client_set_library_bezeichnung(SondClient *client,
     gboolean retry = TRUE;
 
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
-    g_return_val_if_fail(library_name != NULL && bezeichnung != NULL, FALSE);
+    g_return_val_if_fail(library_name != NULL, FALSE);
+    g_return_val_if_fail(bezeichnung != NULL || gegenstand != NULL, FALSE);
 
     if (!ensure_authenticated(client, error))
         return FALSE;
@@ -1385,8 +1393,14 @@ gboolean sond_client_set_library_bezeichnung(SondClient *client,
     json_builder_begin_object(builder);
     json_builder_set_member_name(builder, "name");
     json_builder_add_string_value(builder, library_name);
-    json_builder_set_member_name(builder, "bezeichnung");
-    json_builder_add_string_value(builder, bezeichnung);
+    if (bezeichnung) {
+        json_builder_set_member_name(builder, "bezeichnung");
+        json_builder_add_string_value(builder, bezeichnung);
+    }
+    if (gegenstand) {
+        json_builder_set_member_name(builder, "gegenstand");
+        json_builder_add_string_value(builder, gegenstand);
+    }
     json_builder_end_object(builder);
 
     gen = json_generator_new();

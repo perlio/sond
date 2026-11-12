@@ -17,15 +17,21 @@
  */
 
 /*
- * Aktenbezeichnung als Dateiname: Der Server legt in jeder Akten-Library
- * .sond/akte/<kodierte Bezeichnung> an (leere Datei). Clients lesen den Namen
- * aus dem Verzeichnislisting, ohne eine Datei laden zu müssen (SeaDrive hält
- * nur bereits geöffnete Dateien im Cache, Verzeichniseinträge sind bekannt).
+ * Aktenbezeichnung und Gegenstand als Dateinamen: Der Server legt in jeder
+ * Akten-Library im Verzeichnis .sond/akte leere Dateien an:
  *
- * Kodierung: Zeichen, die in Windows-Dateinamen nicht erlaubt sind, '%' selbst,
- * Steuerzeichen sowie ein Punkt oder Leerzeichen am Ende werden als %XX
- * (UTF-8-Bytes, Großbuchstaben) geschrieben. Zu lange Bezeichnungen werden an
- * einer Zeichengrenze gekürzt.
+ *   B~<kodierte Bezeichnung>   z. B. "B~Müller, Heinz"
+ *   G~<kodierter Gegenstand>   z. B. "G~Verkehrsunfall A9"
+ *
+ * Clients lesen die Namen aus dem Verzeichnislisting, ohne eine Datei laden zu
+ * müssen (SeaDrive legt die Verzeichniseinträge als Platzhalter an, Inhalte
+ * werden erst bei Zugriff geladen). Ein Verzeichnis genügt für beide Angaben.
+ * Ein Eintrag ohne Vorsilbe gilt als Bezeichnung (ältere Fassung).
+ *
+ * Kodierung der Werte: Zeichen, die in Windows-Dateinamen nicht erlaubt sind,
+ * '%' und '~' selbst, Steuerzeichen sowie ein Punkt oder Leerzeichen am Ende
+ * werden als %XX (UTF-8-Bytes, Großbuchstaben) geschrieben. Zu lange Werte
+ * werden an einer Zeichengrenze gekürzt.
  *
  * Frei von GTK; nur glib.
  */
@@ -35,28 +41,54 @@
 
 #include <glib.h>
 
-/* Unterverzeichnis der Library (Pfade relativ zur Library-Wurzel) */
+/* Verzeichnis der Library (Pfad relativ zur Library-Wurzel) */
 #define SOND_AKTE_NAME_DIR ".sond/akte"
 
-/* Höchstlänge des kodierten Dateinamens in Bytes (Dateisysteme erlauben 255) */
+/* Art des Eintrags */
+#define SOND_AKTE_NAME_BEZEICHNUNG 'B'
+#define SOND_AKTE_NAME_GEGENSTAND  'G'
+
+/* Höchstlänge des kodierten Werts in Bytes (Dateisysteme erlauben 255) */
 #define SOND_AKTE_NAME_MAX 200
 
 /**
  * sond_akte_name_escape:
- * @bezeichnung: Aktenbezeichnung, z. B. "Meier ./. Müller"
+ * @wert: Bezeichnung oder Gegenstand, z. B. "Meier ./. Müller"
  *
- * Returns: (transfer full) (nullable): kodierter Dateiname (g_free()),
- *          NULL bei leerer Bezeichnung
+ * Returns: (transfer full) (nullable): kodierter Wert (g_free()),
+ *          NULL bei leerem Wert
  */
-gchar* sond_akte_name_escape(const gchar *bezeichnung);
+gchar* sond_akte_name_escape(const gchar *wert);
 
 /**
  * sond_akte_name_unescape:
- * @dateiname: Name aus sond_akte_name_escape()
+ * @dateiname: kodierter Wert aus sond_akte_name_escape()
  *
- * Returns: (transfer full): Bezeichnung (g_free()); ungültige %-Folgen bleiben
+ * Returns: (transfer full): Wert (g_free()); ungültige %-Folgen bleiben
  *          unverändert
  */
 gchar* sond_akte_name_unescape(const gchar *dateiname);
+
+/**
+ * sond_akte_name_make:
+ * @art: SOND_AKTE_NAME_BEZEICHNUNG oder SOND_AKTE_NAME_GEGENSTAND
+ * @wert: Bezeichnung bzw. Gegenstand
+ *
+ * Returns: (transfer full) (nullable): Dateiname "B~..." bzw. "G~...",
+ *          NULL bei leerem Wert
+ */
+gchar* sond_akte_name_make(gchar art, const gchar *wert);
+
+/**
+ * sond_akte_name_parse:
+ * @dateiname: Name eines Eintrags in .sond/akte
+ * @wert: (out) (optional) (transfer full): dekodierter Wert
+ * @neues_format: (out) (optional): TRUE bei Eintrag mit Vorsilbe
+ *
+ * Returns: SOND_AKTE_NAME_BEZEICHNUNG oder SOND_AKTE_NAME_GEGENSTAND; ein
+ *          Eintrag ohne Vorsilbe gilt als Bezeichnung
+ */
+gchar sond_akte_name_parse(const gchar *dateiname, gchar **wert,
+        gboolean *neues_format);
 
 #endif /* SOND_AKTE_NAME_H */

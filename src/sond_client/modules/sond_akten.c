@@ -32,21 +32,48 @@ void sond_akte_eintrag_free(SondAkteEintrag *eintrag) {
     g_free(eintrag->library_name);
     g_free(eintrag->library_dir);
     g_free(eintrag->bezeichnung);
+    g_free(eintrag->gegenstand);
     g_free(eintrag);
 }
 
 /* ========================================================================
- * Merkliste: JSON-Objekt { "<Library>": "<Bezeichnung>", ... }
+ * Merkliste: JSON-Objekt { "<Library>": { "bezeichnung": "...",
+ * "gegenstand": "..." }, ... }; ein bloßer String als Wert (ältere Fassung)
+ * gilt als Bezeichnung.
  * ======================================================================== */
+
+typedef struct {
+    gchar *bezeichnung;     /* nullable */
+    gchar *gegenstand;      /* nullable */
+} Merk;
+
+static void merk_free(gpointer data) {
+    Merk *m = data;
+
+    g_free(m->bezeichnung);
+    g_free(m->gegenstand);
+    g_free(m);
+}
 
 gchar* sond_akten_merkliste_pfad(void) {
     return g_build_filename(g_get_user_config_dir(), "sond", "akten.json", NULL);
 }
 
-/* Library-Name -> Bezeichnung (beide g_free()); leer, wenn es die Datei nicht gibt */
+static gchar* member_string(JsonObject *obj, const gchar *name) {
+    JsonNode *value = json_object_has_member(obj, name) ?
+            json_object_get_member(obj, name) : NULL;
+
+    if (value && JSON_NODE_HOLDS_VALUE(value) &&
+            json_node_get_value_type(value) == G_TYPE_STRING)
+        return g_strdup(json_node_get_string(value));
+
+    return NULL;
+}
+
+/* Library-Name -> Merk; leer, wenn es die Datei nicht gibt */
 static GHashTable* merkliste_laden(const gchar *pfad) {
     GHashTable *map = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
-            g_free);
+            merk_free);
     JsonParser *parser = NULL;
 
     if (!pfad)
@@ -62,11 +89,18 @@ static GHashTable* merkliste_laden(const gchar *pfad) {
 
             for (GList *l = members; l; l = l->next) {
                 JsonNode *value = json_object_get_member(obj, l->data);
+                Merk *m = g_new0(Merk, 1);
 
                 if (value && JSON_NODE_HOLDS_VALUE(value) &&
                         json_node_get_value_type(value) == G_TYPE_STRING)
-                    g_hash_table_replace(map, g_strdup(l->data),
-                            g_strdup(json_node_get_string(value)));
+                    m->bezeichnung = g_strdup(json_node_get_string(value));
+                else if (value && JSON_NODE_HOLDS_OBJECT(value)) {
+                    JsonObject *o = json_node_get_object(value);
+
+                    m->bezeichnung = member_string(o, "bezeichnung");
+                    m->gegenstand = member_string(o, "gegenstand");
+                }
+                g_hash_table_replace(map, g_strdup(l->data), m);
             }
             g_list_free(members);
         }
@@ -90,8 +124,19 @@ static gboolean merkliste_speichern(const gchar *pfad, GHashTable *map) {
     json_builder_begin_object(builder);
     g_hash_table_iter_init(&iter, map);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
+        Merk *m = value;
+
         json_builder_set_member_name(builder, key);
-        json_builder_add_string_value(builder, value);
+        json_builder_begin_object(builder);
+        if (m->bezeichnung) {
+            json_builder_set_member_name(builder, "bezeichnung");
+            json_builder_add_string_value(builder, m->bezeichnung);
+        }
+        if (m->gegenstand) {
+            json_builder_set_member_name(builder, "gegenstand");
+            json_builder_add_string_value(builder, m->gegenstand);
+        }
+        json_builder_end_object(builder);
     }
     json_builder_end_object(builder);
 
@@ -116,20 +161,42 @@ static gboolean merkliste_speichern(const gchar *pfad, GHashTable *map) {
     return ok;
 }
 
-void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
-        const gchar *bezeichnung) {
-    GHashTable *map = NULL;
-    const gchar *alt = NULL;
+/* Wert setzen (leer = löschen); TRUE, wenn sich etwas geändert hat */
+static gboolean merk_setzen(gchar **feld, const gchar *wert) {
+    const gchar *neu = (wert && *wert) ? wert : NULL;
 
-    if (!merkliste || !library_name || !bezeichnung || !*bezeichnung)
+    if (g_strcmp0(*feld, neu) == 0)
+        return FALSE;
+
+    g_free(*feld);
+    *feld = g_strdup(neu);
+
+    return TRUE;
+}
+
+void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
+        const gchar *bezeichnung, const gchar *gegenstand) {
+    GHashTable *map = NULL;
+    Merk *m = NULL;
+    gboolean geaendert = FALSE;
+
+    if (!merkliste || !library_name || (!bezeichnung && !gegenstand))
         return;
 
     map = merkliste_laden(merkliste);
-    alt = g_hash_table_lookup(map, library_name);
-    if (g_strcmp0(alt, bezeichnung) != 0) {
-        g_hash_table_replace(map, g_strdup(library_name), g_strdup(bezeichnung));
-        merkliste_speichern(merkliste, map);
+    m = g_hash_table_lookup(map, library_name);
+    if (!m) {
+        m = g_new0(Merk, 1);
+        g_hash_table_replace(map, g_strdup(library_name), m);
     }
+
+    if (bezeichnung && *bezeichnung)
+        geaendert |= merk_setzen(&m->bezeichnung, bezeichnung);
+    if (gegenstand)
+        geaendert |= merk_setzen(&m->gegenstand, gegenstand);
+
+    if (geaendert)
+        merkliste_speichern(merkliste, map);
     g_hash_table_unref(map);
 }
 
@@ -137,39 +204,79 @@ void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
  * Lesen aus dem SeaDrive
  * ======================================================================== */
 
-gchar* sond_akten_lese_bezeichnung(const gchar *library_dir) {
-    gchar *dir_path = NULL;
-    SondDir *dir = NULL;
+/* Liest .sond/akte einer Library in einem Zug (ein Verzeichnis für beide
+ * Angaben). Bei mehreren Einträgen einer Art gilt der in der Sortierung erste.
+ * *vorhanden: das Verzeichnis ließ sich öffnen. *autoritativ: es enthält
+ * mindestens einen Eintrag mit Vorsilbe, stammt also von der aktuellen
+ * Serverfassung - dann heißt ein fehlender Gegenstand wirklich "keiner". */
+static void lese_akte_dir(const gchar *library_dir, gchar **bezeichnung,
+        gchar **gegenstand, gboolean *vorhanden, gboolean *autoritativ) {
+    gchar *dir_path = g_build_filename(library_dir, SOND_AKTE_NAME_DIR, NULL);
+    SondDir *dir = sond_dir_open(dir_path, NULL);
     const gchar *name = NULL;
-    gchar *first = NULL;
+    gchar *first_b = NULL;
+    gchar *first_g = NULL;
 
-    g_return_val_if_fail(library_dir != NULL, NULL);
-
-    dir_path = g_build_filename(library_dir, ".sond", "akte", NULL);
-    dir = sond_dir_open(dir_path, NULL);
     g_free(dir_path);
+    if (bezeichnung)
+        *bezeichnung = NULL;
+    if (gegenstand)
+        *gegenstand = NULL;
+    if (vorhanden)
+        *vorhanden = (dir != NULL);
+    if (autoritativ)
+        *autoritativ = FALSE;
     if (!dir)
-        return NULL;
+        return;
 
     while ((name = sond_dir_read_name(dir))) {
+        gboolean neu = FALSE;
+        gchar art = 0;
+        gchar **ziel = NULL;
+
         if (!strcmp(name, ".") || !strcmp(name, ".."))
             continue;
-        if (!first || g_strcmp0(name, first) < 0) {
-            g_free(first);
-            first = g_strdup(name);
+
+        art = sond_akte_name_parse(name, NULL, &neu);
+        if (neu && autoritativ)
+            *autoritativ = TRUE;
+
+        ziel = (art == SOND_AKTE_NAME_GEGENSTAND) ? &first_g : &first_b;
+        if (!*ziel || g_strcmp0(name, *ziel) < 0) {
+            g_free(*ziel);
+            *ziel = g_strdup(name);
         }
     }
     sond_dir_close(dir);
 
-    if (first) {
-        gchar *bezeichnung = sond_akte_name_unescape(first);
-
-        g_free(first);
-
-        return bezeichnung;
+    if (first_b) {
+        if (bezeichnung)
+            sond_akte_name_parse(first_b, bezeichnung, NULL);
+        g_free(first_b);
     }
+    if (first_g) {
+        if (gegenstand)
+            sond_akte_name_parse(first_g, gegenstand, NULL);
+        g_free(first_g);
+    }
+}
 
-    return NULL;
+gchar* sond_akten_lese_bezeichnung(const gchar *library_dir) {
+    gchar *bezeichnung = NULL;
+
+    g_return_val_if_fail(library_dir != NULL, NULL);
+    lese_akte_dir(library_dir, &bezeichnung, NULL, NULL, NULL);
+
+    return bezeichnung;
+}
+
+gchar* sond_akten_lese_gegenstand(const gchar *library_dir) {
+    gchar *gegenstand = NULL;
+
+    g_return_val_if_fail(library_dir != NULL, NULL);
+    lese_akte_dir(library_dir, NULL, &gegenstand, NULL, NULL);
+
+    return gegenstand;
 }
 
 /* "2026-23" -> Jahr 2026, Nummer 23 */
@@ -248,6 +355,8 @@ GPtrArray* sond_akten_scan(const gchar *seadrive_root, const gchar *merkliste,
             guint year = 0;
             guint lfd = 0;
             gchar *lib_dir = NULL;
+            Merk *m = NULL;
+            gboolean autoritativ = FALSE;
 
             if (!parse_library_name(lib, &year, &lfd) ||
                     g_hash_table_contains(gesehen, lib))
@@ -264,23 +373,33 @@ GPtrArray* sond_akten_scan(const gchar *seadrive_root, const gchar *merkliste,
             eintrag->year = year;
             eintrag->lfd_nr = lfd;
             eintrag->library_dir = lib_dir;
-            eintrag->bezeichnung = sond_akten_lese_bezeichnung(lib_dir);
+            lese_akte_dir(lib_dir, &eintrag->bezeichnung, &eintrag->gegenstand,
+                    NULL, &autoritativ);
 
-            if (eintrag->bezeichnung) {
-                if (g_strcmp0(g_hash_table_lookup(gemerkt, lib),
-                        eintrag->bezeichnung) != 0) {
-                    g_hash_table_replace(gemerkt, g_strdup(lib),
-                            g_strdup(eintrag->bezeichnung));
-                    geaendert = TRUE;
-                }
-            } else {
-                const gchar *alt = g_hash_table_lookup(gemerkt, lib);
-
-                if (alt) {
-                    eintrag->bezeichnung = g_strdup(alt);
-                    eintrag->bezeichnung_gemerkt = TRUE;
-                }
+            m = g_hash_table_lookup(gemerkt, lib);
+            if (!m) {
+                m = g_new0(Merk, 1);
+                g_hash_table_replace(gemerkt, g_strdup(lib), m);
             }
+
+            //Bezeichnung: gelesen -> merken; sonst die gemerkte nehmen
+            if (eintrag->bezeichnung)
+                geaendert |= merk_setzen(&m->bezeichnung, eintrag->bezeichnung);
+            else if (m->bezeichnung) {
+                eintrag->bezeichnung = g_strdup(m->bezeichnung);
+                eintrag->bezeichnung_gemerkt = TRUE;
+            }
+
+            //Gegenstand: ein von der aktuellen Serverfassung geschriebenes
+            //Verzeichnis ist maßgeblich (ohne G~-Eintrag gibt es keinen); fehlt
+            //es, ist es nicht lesbar oder stammt es nur aus der älteren Fassung
+            //ohne Gegenstand, gilt die gemerkte Angabe
+            if (eintrag->gegenstand)
+                geaendert |= merk_setzen(&m->gegenstand, eintrag->gegenstand);
+            else if (autoritativ)
+                geaendert |= merk_setzen(&m->gegenstand, NULL);
+            else if (m->gegenstand)
+                eintrag->gegenstand = g_strdup(m->gegenstand);
 
             g_hash_table_add(gesehen, g_strdup(lib));
             g_ptr_array_add(result, eintrag);
@@ -386,7 +505,8 @@ GPtrArray* sond_akten_suchen(GPtrArray *alle, const gchar *text) {
             passt = (e->lfd_nr == lfd) && (year == 0 || e->year == year);
         else if (woerter) {
             gchar *hay_raw = g_strconcat(e->library_name, " ",
-                    e->bezeichnung ? e->bezeichnung : "", NULL);
+                    e->bezeichnung ? e->bezeichnung : "", " ",
+                    e->gegenstand ? e->gegenstand : "", NULL);
             gchar *hay = g_utf8_casefold(hay_raw, -1);
 
             for (gchar **w = woerter; *w; w++)

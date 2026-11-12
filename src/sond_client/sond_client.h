@@ -387,7 +387,9 @@ gboolean sond_client_delete_node(SondClient *client,
  * @name: Library-Name
  * @description: (nullable): Beschreibung
  * @bezeichnung: (nullable): Aktenbezeichnung; der Server legt sie als
- *   .sond/akte/<Name> in der Library ab (Suche ohne Server)
+ *   .sond/akte/B~<Name> in der Library ab (Suche ohne Server)
+ * @gegenstand: (nullable): Gegenstand; abgelegt als .sond/akte/G~<Name>,
+ *   damit sich gleiche Bezeichnungen auch offline unterscheiden lassen
  * @error: (nullable): Fehler-Rückgabe
  *
  * Erstellt eine Seafile Library.
@@ -400,22 +402,26 @@ gchar* sond_client_create_seafile_library(SondClient *client,
                                           const gchar *name,
                                           const gchar *description,
                                           const gchar *bezeichnung,
+                                          const gchar *gegenstand,
                                           GError **error);
 
 /**
  * sond_client_set_library_bezeichnung:
  * @client: SondClient
  * @library_name: Library-Name (z.B. "2026-1")
- * @bezeichnung: neue Aktenbezeichnung
+ * @bezeichnung: (nullable): neue Aktenbezeichnung; NULL = unverändert
+ * @gegenstand: (nullable): neuer Gegenstand; NULL = unverändert, "" = entfernen
  * @error: (nullable): Fehler-Rückgabe
  *
- * Setzt bzw. ersetzt die Aktenbezeichnung (.sond/akte) der Library.
+ * Setzt bzw. ersetzt Aktenbezeichnung (B~) und/oder Gegenstand (G~) in .sond/akte
+ * der Library; mindestens eines von beiden ist anzugeben.
  *
  * Returns: TRUE bei Erfolg
  */
 gboolean sond_client_set_library_bezeichnung(SondClient *client,
                                              const gchar *library_name,
                                              const gchar *bezeichnung,
+                                             const gchar *gegenstand,
                                              GError **error);
 
 /**
