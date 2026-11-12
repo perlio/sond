@@ -1620,6 +1620,17 @@ const gchar* sond_client_get_zond_exe(SondClient *client) {
     return client->zond_exe;
 }
 
+guint sond_client_set_io_timeout(SondClient *client, guint seconds) {
+    guint alt = 0;
+
+    g_return_val_if_fail(SOND_IS_CLIENT(client), 0);
+
+    alt = soup_session_get_timeout(client->session);
+    soup_session_set_timeout(client->session, seconds);
+
+    return alt;
+}
+
 gboolean sond_client_login(SondClient *client, GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
 

@@ -93,6 +93,18 @@ typedef struct {
     gboolean lokal;         /* Library im SeaDrive vorhanden */
 } AkteSearchResult;
 
+/* Wie weit der Server an einer Suche beteiligt war */
+typedef enum {
+    SERVER_NICHT_BEFRAGT,   /* keine Sitzung: es wurde nur lokal gesucht */
+    SERVER_OK,              /* hat geantwortet (auch "nicht gefunden") */
+    SERVER_FEHLER           /* nicht erreichbar oder Fehler */
+} SuchServer;
+
+/* Zeitgrenze für Suche und Laden einer Akte (Sekunden), damit das Fenster bei
+ * toter Verbindung nicht minutenlang steht; andere Serveraufrufe behalten
+ * ihre Voreinstellung */
+#define SERVER_KURZ_TIMEOUT 5
+
 /* Forward declarations */
 static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
 static void update_ui_from_node(SondModuleAktePrivate *priv);
@@ -101,7 +113,7 @@ static void update_status_display(SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
 static void apply_widget_style(GtkWidget *widget, gboolean active);
 static gboolean ist_akte_aktiv(SondGraphNode *node);
-static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term);
+static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term, SuchServer server);
 static void akte_search_result_free(AkteSearchResult *result);
 static GPtrArray* search_akten_by_kurzbezeichnung(SondModuleAktePrivate *priv, const gchar *search_term, GError **error);
 static void update_action_widgets(SondModuleAktePrivate *priv);
@@ -109,7 +121,7 @@ static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
                                            guint lfd_nr, guint year, GError **error);
 static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
                         const gchar *bezeichnung, const gchar *gegenstand,
-                        SondGraphNode *node);
+                        SondGraphNode *node, SuchServer server);
 
 extern const gchar* sond_client_get_server_url(SondClient *client);
 extern SoupSession* sond_client_get_session(SondClient *client);
@@ -578,34 +590,40 @@ typedef struct {
     GPtrArray *results;
     GtkWidget *dialog;
     GtkWidget *listbox;
+    SuchServer server;      /* für den Zusatz in der Trefferliste */
 } SearchDialogData;
 
 /**
  * select_akte:
  *
- * Wählt eine Akte aus (ohne Sperre) und zeigt sie an. Mit Anmeldung werden die
- * Daten vom Server geholt (@node oder per RegNr), ohne Anmeldung zeigt die
- * Maske nur Nummer und Bezeichnung. Gearbeitet wird erst nach "Bearbeiten".
+ * Wählt eine Akte aus (ohne Sperre) und zeigt sie an. @node sind die Daten vom
+ * Server, falls die Suche sie lieferte; @server sagt, wie es der Server bei
+ * der Suche hielt. Hat er geantwortet, ohne die Akte zu liefern (Treffer nur
+ * über den Gegenstand), wird sie einmal gezielt geladen; bei Fehler oder ohne
+ * Befragung gibt es keinen weiteren Versuch, die Maske zeigt dann nur Nummer
+ * und Bezeichnung. Gearbeitet wird erst nach "Bearbeiten".
  */
 static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
                         const gchar *bezeichnung, const gchar *gegenstand,
-                        SondGraphNode *node) {
+                        SondGraphNode *node, SuchServer server) {
     SondGraphNode *geladen = NULL;
     const gchar *herkunft = NULL;
 
-    //Der Server wird nur befragt, wenn schon eine Sitzung besteht (kein Login
-    //von selbst); scheitert er, bleibt die lokale Ansicht
-    if (!node && sond_client_is_logged_in(priv->client)) {
+    if (!node && server == SERVER_OK) {
         GError *error = NULL;
+        guint alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
 
         geladen = search_node_by_regnr(priv, lfd_nr, year, &error);
+        sond_client_set_io_timeout(priv->client, alt);
         if (!geladen && error && error->code != G_IO_ERROR_NOT_FOUND)
             herkunft = "nur lokal bekannt (Server nicht erreichbar)";
         else if (!geladen)
             herkunft = "auf dem Server nicht gefunden";
         g_clear_error(&error);
         node = geladen;
-    } else if (!node)
+    } else if (!node && server == SERVER_FEHLER)
+        herkunft = "nur lokal bekannt (Server nicht erreichbar)";
+    else if (!node)
         herkunft = "nur lokal bekannt (Server nicht befragt)";
 
     if (priv->current_node) {
@@ -666,7 +684,8 @@ static void on_search_result_selected(GtkListBox *listbox,
     AkteSearchResult *result = g_ptr_array_index(data->results, index);
 
     select_akte(data->priv, result->lfd_nr, result->year,
-                result->kurzbezeichnung, result->gegenstand, result->node);
+                result->kurzbezeichnung, result->gegenstand, result->node,
+                data->server);
 
     /* Dialog schließen */
     gtk_window_close(GTK_WINDOW(data->dialog));
@@ -710,19 +729,24 @@ static gint search_result_compare(gconstpointer a, gconstpointer b) {
  *
  * Eine Suche für online und offline: die Libraries im SeaDrive (mit der
  * Bezeichnung aus .sond/akte oder der Merkliste) und, wenn angemeldet, der
- * Server. Gleiche Akten erscheinen einmal. Ein Serverfehler wird in
- * @server_error gemeldet, die lokalen Treffer bleiben erhalten.
+ * Server (mit kurzer Zeitgrenze). Gleiche Akten erscheinen einmal. @server
+ * sagt, ob und wie der Server beteiligt war; bei einem Fehler enthält @fehler
+ * (nullable) die Meldung, die lokalen Treffer bleiben erhalten.
  *
  * Returns: (transfer full): Array von AkteSearchResult, neueste zuerst
  */
 static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text,
-                                  gchar **server_error) {
+                                  SuchServer *server, gchar **fehler) {
     GPtrArray *results = g_ptr_array_new_with_free_func(
             (GDestroyNotify)akte_search_result_free);
     gchar *root = sond_client_find_seadrive_root(priv->client, NULL);
     gchar *merkliste = sond_akten_merkliste_pfad();
     guint lfd_nr = 0;
     guint year = 0;
+
+    *server = SERVER_NICHT_BEFRAGT;
+    if (fehler)
+        *fehler = NULL;
 
     /* SeaDrive */
     if (root) {
@@ -751,6 +775,10 @@ static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text
     /* Server, nur mit Anmeldung (sonst würde der Login-Dialog aufspringen) */
     if (sond_client_is_logged_in(priv->client)) {
         GError *error = NULL;
+        guint alt_timeout = sond_client_set_io_timeout(priv->client,
+                                                       SERVER_KURZ_TIMEOUT);
+
+        *server = SERVER_OK;
 
         if (is_valid_regnr_format(text) && parse_regnr(text, &lfd_nr, &year)) {
             SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
@@ -768,8 +796,11 @@ static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text
                 }
                 g_free(r->gegenstand);
                 r->gegenstand = sond_graph_node_get_property_string(node, "ggstd");
-            } else if (error && error->code != G_IO_ERROR_NOT_FOUND)
-                *server_error = g_strdup(error->message);
+            } else if (error && error->code != G_IO_ERROR_NOT_FOUND) {
+                *server = SERVER_FEHLER;
+                if (fehler)
+                    *fehler = g_strdup(error->message);
+            }
         } else {
             GPtrArray *srv = search_akten_by_kurzbezeichnung(priv, text, &error);
 
@@ -790,10 +821,14 @@ static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text
                     r->gegenstand = g_strdup(s->gegenstand);
                 }
                 g_ptr_array_unref(srv);
-            } else if (error)
-                *server_error = g_strdup(error->message);
+            } else if (error) {
+                *server = SERVER_FEHLER;
+                if (fehler)
+                    *fehler = g_strdup(error->message);
+            }
         }
         g_clear_error(&error);
+        sond_client_set_io_timeout(priv->client, alt_timeout);
 
         //Bezeichnungen vom Server auch für die Offline-Suche merken
         for (guint i = 0; i < results->len; i++) {
@@ -820,9 +855,7 @@ static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text
  * 
  * Zeigt Suchergebnisse in einem Dialog an.
  */
-static void show_akte_search_results(SondModuleAktePrivate *priv, 
-                                     GPtrArray *results, 
-                                     const gchar *search_term) {
+static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term, SuchServer server) {
     if (!results || results->len == 0) {
         gchar *msg = g_strdup_printf(
             "Keine Akten gefunden mit Suchbegriff: \"%s\"",
@@ -834,8 +867,7 @@ static void show_akte_search_results(SondModuleAktePrivate *priv,
     
     /* Dialog erstellen */
     GtkWidget *dialog = gtk_window_new();
-    gchar *title = g_strdup_printf("Aktensuche: \"%s\" (%u Ergebnisse)", 
-                                   search_term, results->len);
+    gchar *title = g_strdup_printf("Aktensuche: \"%s\" (%u Ergebnisse)%s", search_term, results->len, server == SERVER_FEHLER ? " - Server nicht erreichbar, nur lokale Treffer" : "");
     gtk_window_set_title(GTK_WINDOW(dialog), title);
     g_free(title);
     
@@ -858,6 +890,7 @@ static void show_akte_search_results(SondModuleAktePrivate *priv,
     data->results = g_ptr_array_ref(results);  /* Referenz erhöhen */
     data->dialog = dialog;
     data->listbox = listbox;
+    data->server = server;
     
     /* Ergebnisse in ListBox einfügen */
     for (guint i = 0; i < results->len; i++) {
@@ -867,7 +900,8 @@ static void show_akte_search_results(SondModuleAktePrivate *priv,
                                            result->kurzbezeichnung ? result->kurzbezeichnung : "",
                                            (result->gegenstand && *result->gegenstand) ? "  |  " : "",
                                            result->gegenstand ? result->gegenstand : "",
-                                           (result->node || !sond_client_is_logged_in(priv->client)) ? "" : "   (nur im SeaDrive)");
+                                           result->node ? "" : (server == SERVER_OK ? "   (nur im SeaDrive)" :
+                                               server == SERVER_FEHLER ? "   (Server nicht erreichbar)" : ""));
         GtkWidget *label = gtk_label_new(label_text);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);  /* Links ausrichten */
         gtk_widget_set_margin_start(label, 10);
@@ -1846,13 +1880,17 @@ static void on_discard_confirm_response(GObject *source, GAsyncResult *result,
 static gboolean load_node_from_server(SondModuleAktePrivate *priv) {
     guint lfd_nr = 0;
     guint year = 0;
+    guint alt_timeout = 0;
     GError *error = NULL;
     SondGraphNode *node = NULL;
 
     if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
         return FALSE;
 
+    alt_timeout = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
+
     if (!sond_client_login(priv->client, &error)) {
+        sond_client_set_io_timeout(priv->client, alt_timeout);
         show_error_dialog(priv->main_widget, "Server nicht erreichbar",
                 "Die Akte kann nicht bearbeitet werden, weil keine Verbindung "
                 "zum Server besteht. Es wurde nichts geändert.");
@@ -1861,6 +1899,7 @@ static gboolean load_node_from_server(SondModuleAktePrivate *priv) {
     }
 
     node = search_node_by_regnr(priv, lfd_nr, year, &error);
+    sond_client_set_io_timeout(priv->client, alt_timeout);
     if (!node) {
         show_error_dialog(priv->main_widget, "Akte nicht geladen",
                 error ? error->message : "Die Akte wurde auf dem Server nicht gefunden.");
@@ -2011,51 +2050,129 @@ static void ask_new_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year) 
     g_object_unref(dialog);
 }
 
-/* Enter im Suchfeld: RegNr oder Suchtext. Gesucht wird im SeaDrive und, wenn
- * angemeldet, auf dem Server. Ein einziger Treffer wird gleich gewählt, bei
- * mehreren erscheint die Trefferliste. Die Akte wird dabei nicht gesperrt. */
-static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
-    guint lfd_nr = 0;
-    guint year = 0;
-    gchar *server_error = NULL;
-    gchar *such = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(entry))));
-    GPtrArray *results = NULL;
-    gboolean online = sond_client_is_logged_in(priv->client);
+/* Nachfrage nach einer Suche ohne Treffer: auf dem Server suchen (mit
+ * Anmeldung, falls noch keine Sitzung besteht) bzw. nach einem Fehler erneut */
+typedef struct {
+    SondModuleAktePrivate *priv;
+    gchar *such;
+    gboolean anmelden;
+} ServerSucheData;
 
-    if (!*such) {
-        g_free(such);
-        return;
+static void such_ausfuehren(SondModuleAktePrivate *priv, const gchar *such);
+
+static void on_server_suche_response(GObject *source, GAsyncResult *result,
+                                     gpointer user_data) {
+    ServerSucheData *d = user_data;
+    GError *error = NULL;
+    int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result,
+                                                &error);
+
+    g_clear_error(&error);
+
+    if (button == 0) {
+        gboolean weiter = TRUE;
+
+        if (d->anmelden) {
+            guint alt = sond_client_set_io_timeout(d->priv->client,
+                                                   SERVER_KURZ_TIMEOUT);
+
+            weiter = sond_client_login(d->priv->client, &error);
+            sond_client_set_io_timeout(d->priv->client, alt);
+            g_clear_error(&error);
+
+            if (!weiter)
+                show_info_dialog(d->priv->main_widget, "Keine Anmeldung",
+                        "Die Anmeldung am Server war nicht möglich oder wurde "
+                        "abgebrochen. Gesucht wurde nur im SeaDrive-Laufwerk.");
+        }
+
+        if (weiter)
+            such_ausfuehren(d->priv, d->such);
     }
 
-    results = collect_results(priv, such, &server_error);
+    g_free(d->such);
+    g_free(d);
+}
+
+static void frage_server_suche(SondModuleAktePrivate *priv, const gchar *such,
+                               gboolean anmelden, const gchar *fehler) {
+    GtkAlertDialog *dialog = NULL;
+    ServerSucheData *d = g_new0(ServerSucheData, 1);
+    gchar *detail = NULL;
+    const char *buttons_ja[] = {"Ja", "Nein", NULL};
+    const char *buttons_erneut[] = {"Erneut suchen", "Abbrechen", NULL};
+
+    d->priv = priv;
+    d->such = g_strdup(such);
+    d->anmelden = anmelden;
+
+    if (anmelden) {
+        dialog = gtk_alert_dialog_new("Auf dem Server suchen?");
+        detail = g_strdup("Im SeaDrive-Laufwerk wurde nichts gefunden. Soll auf "
+                "dem Server gesucht werden? Dafür ist eine Anmeldung nötig.");
+        gtk_alert_dialog_set_buttons(dialog, buttons_ja);
+    } else {
+        dialog = gtk_alert_dialog_new("Server nicht erreichbar");
+        detail = g_strdup_printf("Im SeaDrive-Laufwerk wurde nichts gefunden, und "
+                "der Server hat nicht geantwortet (%s). Erneut suchen?",
+                fehler ? fehler : "unbekannter Fehler");
+        gtk_alert_dialog_set_buttons(dialog, buttons_erneut);
+    }
+    gtk_alert_dialog_set_detail(dialog, detail);
+    g_free(detail);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_set_cancel_button(dialog, 1);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+
+    gtk_alert_dialog_choose(dialog,
+                            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                            NULL, on_server_suche_response, d);
+    g_object_unref(dialog);
+}
+
+/* Suche ausführen: RegNr oder Suchtext, im SeaDrive und, wenn angemeldet, auf
+ * dem Server. Lokale Treffer gelten (ein einziger wird gleich gewählt, bei
+ * mehreren erscheint die Trefferliste). Ohne lokalen Treffer sagt das nichts,
+ * deshalb wird dann gefragt, ob der Server befragt werden soll. */
+static void such_ausfuehren(SondModuleAktePrivate *priv, const gchar *such) {
+    guint lfd_nr = 0;
+    guint year = 0;
+    gchar *fehler = NULL;
+    SuchServer server = SERVER_NICHT_BEFRAGT;
+    GPtrArray *results = collect_results(priv, such, &server, &fehler);
 
     if (results->len == 1) {
         AkteSearchResult *r = g_ptr_array_index(results, 0);
 
         select_akte(priv, r->lfd_nr, r->year, r->kurzbezeichnung, r->gegenstand,
-                    r->node);
+                    r->node, server);
     } else if (results->len > 1) {
-        show_akte_search_results(priv, results, such);
-    } else if (server_error) {
-        gchar *msg = g_strdup_printf("Fehler bei der Suche: %s", server_error);
-
-        show_error_dialog(priv->main_widget, "Suchfehler", msg);
-        g_free(msg);
-    } else if (online && is_valid_regnr_format(such) &&
-               parse_regnr(such, &lfd_nr, &year)) {
+        show_akte_search_results(priv, results, such, server);
+    } else if (server == SERVER_NICHT_BEFRAGT) {
+        frage_server_suche(priv, such, TRUE, NULL);
+    } else if (server == SERVER_FEHLER) {
+        frage_server_suche(priv, such, FALSE, fehler);
+    } else if (is_valid_regnr_format(such) && parse_regnr(such, &lfd_nr, &year)) {
         sond_client_set_last_regnr(priv->client, lfd_nr, year);
         ask_new_akte(priv, lfd_nr, year);
     } else {
-        gchar *msg = g_strdup_printf("Keine Akten gefunden mit Suchbegriff: \"%s\"%s",
-                such, online ? "" :
-                "\n\nDer Server wurde nicht befragt (keine Sitzung): gesucht wurde nur im SeaDrive-Laufwerk.");
+        gchar *msg = g_strdup_printf("Keine Akten gefunden mit Suchbegriff: \"%s\"",
+                                     such);
 
         show_info_dialog(priv->main_widget, "Keine Ergebnisse", msg);
         g_free(msg);
     }
 
-    g_free(server_error);
+    g_free(fehler);
     g_ptr_array_unref(results);
+}
+
+/* Enter im Suchfeld */
+static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
+    gchar *such = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(entry))));
+
+    if (*such)
+        such_ausfuehren(priv, such);
     g_free(such);
 }
 

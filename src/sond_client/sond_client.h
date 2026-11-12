@@ -501,6 +501,19 @@ gchar* sond_client_find_seadrive_root(SondClient *client, GError **error);
 const gchar* sond_client_get_zond_exe(SondClient *client);
 
 /**
+ * sond_client_set_io_timeout:
+ * @client: SondClient
+ * @seconds: Zeitgrenze für Verbindungsaufbau und Antworten, 0 = keine
+ *
+ * Setzt die Zeitgrenze der Serververbindung und liefert die bisherige zurück
+ * (zum Wiederherstellen). Gedacht für kurze Abfragen wie Suche und Laden einer
+ * Akte, damit die Oberfläche bei toter Verbindung nicht lange steht.
+ *
+ * Returns: bisherige Zeitgrenze in Sekunden
+ */
+guint sond_client_set_io_timeout(SondClient *client, guint seconds);
+
+/**
  * sond_client_login:
  * @client: SondClient
  * @error: (nullable): Fehler-Rückgabe
