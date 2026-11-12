@@ -1088,17 +1088,10 @@ static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GErro
     guint year = g_date_time_get_year(now);
     g_date_time_unref(now);
     
-    /* Suche nach allen Ablagen in diesem Jahr */
-    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-    criteria->label = g_strdup("Akte");
-    
-    /* Filter: "bis" Property mit Sub-Property "ablnr" die mit "Jahr-" beginnt */
-    gchar *year_prefix = g_strdup_printf("%u-", year);
-    sond_graph_node_search_criteria_add_property_filter(criteria, "ablnr", year_prefix);
-    g_free(year_prefix);
-    
-    criteria->limit = 0;  /* Alle holen */
-    
+    /* Alle Akten mit einer Ablage in diesem Jahr (über das bis-Datum; die Unter-Property
+     * "ablnr" selbst lässt sich nicht suchen) */
+    SondGraphNodeSearchCriteria *criteria = sond_archiv_ablnr_suchkriterien(year);
+
     /* Client-Methode verwenden */
     GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
     sond_graph_node_search_criteria_free(criteria);
@@ -1107,39 +1100,7 @@ static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GErro
         return FALSE;
     }
 
-    guint max_lfd_nr = 0;
-
-    for (guint i = 0; i < nodes->len; i++) {
-        SondGraphNode *node = g_ptr_array_index(nodes, i);
-        GPtrArray *node_props = sond_graph_node_get_properties(node);
-        
-        /* Durchlaufe alle "bis" Properties */
-        for (guint j = 0; j < node_props->len; j++) {
-            SondGraphProperty *prop = g_ptr_array_index(node_props, j);
-            
-            if (g_strcmp0(sond_graph_property_get_key(prop), "bis") == 0) {
-                GPtrArray *sub_props = sond_graph_property_get_properties(prop);
-                if (sub_props) {
-                    SondGraphProperty *ablnr_prop = sond_graph_property_find(sub_props, "ablnr");
-                    if (ablnr_prop) {
-                        const gchar *ablnr_str = sond_graph_property_get_first_value(ablnr_prop);
-                        
-                        /* Parse "2026-5" -> lfd_nr = 5 */
-                        if (ablnr_str) {
-                            gchar **parts = g_strsplit(ablnr_str, "-", 2);
-                            if (g_strv_length(parts) == 2) {
-                                guint lfd = (guint)g_ascii_strtoull(parts[1], NULL, 10);
-                                if (lfd > max_lfd_nr) {
-                                    max_lfd_nr = lfd;
-                                }
-                            }
-                            g_strfreev(parts);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    guint max_lfd_nr = sond_archiv_hoechste_ablnr(nodes, year);
 
     g_ptr_array_unref(nodes);
     

@@ -251,3 +251,41 @@ gboolean sond_archiv_markieren(SondGraphNode *node, const gchar *archiv_name) {
 
     return TRUE;
 }
+
+SondGraphNodeSearchCriteria* sond_archiv_ablnr_suchkriterien(guint year) {
+    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+    gchar *muster = g_strdup_printf("%u-*", year);
+
+    criteria->label = g_strdup("Akte");
+    sond_graph_node_search_criteria_add_property_filter(criteria, "bis", muster);
+    criteria->limit = 0;
+    g_free(muster);
+
+    return criteria;
+}
+
+guint sond_archiv_hoechste_ablnr(GPtrArray *nodes, guint year) {
+    guint hoechste = 0;
+
+    for (guint n = 0; nodes && n < nodes->len; n++) {
+        GPtrArray *props = sond_graph_node_get_properties(g_ptr_array_index(nodes, n));
+
+        for (guint i = 0; props && i < props->len; i++) {
+            SondGraphProperty *prop = g_ptr_array_index(props, i);
+            const gchar *wert = NULL;
+            guint j = 0;
+            guint lfd = 0;
+            gchar extra = 0;
+
+            if (g_strcmp0(sond_graph_property_get_key(prop), "bis"))
+                continue;
+            wert = sub_wert(prop, "ablnr");
+            if (!wert || sscanf(wert, "%u-%u%c", &j, &lfd, &extra) != 2 || j != year)
+                continue;
+            if (lfd > hoechste)
+                hoechste = lfd;
+        }
+    }
+
+    return hoechste;
+}

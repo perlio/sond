@@ -79,6 +79,30 @@ void sond_archiv_kandidat_free(SondArchivKandidat *kandidat);
 SondGraphNodeSearchCriteria* sond_archiv_suchkriterien(void);
 
 /**
+ * sond_archiv_ablnr_suchkriterien:
+ * @year: Jahr
+ *
+ * Suchkriterien für alle Akten mit einer Ablage im Jahr @year (Label "Akte", ein
+ * "bis" mit Datum "@year-*"). Die Ablagenummer eines "bis" trägt das Jahr der
+ * Ablage; ihre Unter-Property "ablnr" lässt sich nicht direkt suchen, deshalb wird
+ * über das Datum eingegrenzt und mit sond_archiv_hoechste_ablnr() ausgewertet.
+ *
+ * Returns: (transfer full): mit sond_graph_node_search_criteria_free() freigeben
+ */
+SondGraphNodeSearchCriteria* sond_archiv_ablnr_suchkriterien(guint year);
+
+/**
+ * sond_archiv_hoechste_ablnr:
+ * @nodes: (element-type SondGraphNode): Akten-Nodes
+ * @year: Jahr
+ *
+ * Returns: höchste laufende Nummer aller Ablagenummern "@year-N" in den "bis"-
+ *   Properties der Nodes; 0, wenn es keine gibt. Ablagenummern anderer Jahre
+ *   zählen nicht.
+ */
+guint sond_archiv_hoechste_ablnr(GPtrArray *nodes, guint year);
+
+/**
  * sond_archiv_kandidat_pruefen:
  * @node: Akten-Node
  * @ueberliege_tage: Überliegedauer in Tagen
