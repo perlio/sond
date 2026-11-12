@@ -18,6 +18,7 @@
 
 #include "sond_module_verwaltung.h"
 #include "sond_archiv_kandidaten.h"
+#include "sond_module_akte.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_db.h"
@@ -30,13 +31,25 @@ typedef enum {
     ZEILE_BEREIT,        /* gesperrt (von uns), kann archiviert werden */
     ZEILE_FREMD,         /* von jemand anderem gesperrt oder Job läuft: außen vor */
     ZEILE_FEHLER,        /* Sperre scheiterte aus anderem Grund */
-    ZEILE_ABGEWAEHLT     /* vom Nutzer abgewählt, wieder entsperrt */
+    ZEILE_ABGEWAEHLT,    /* vom Nutzer abgewählt, wieder entsperrt */
+    ZEILE_ARCHIVIERT,    /* archiviert und markiert */
+    ZEILE_UEBERSPRUNGEN  /* beim Lauf nicht mehr Kandidat (z. B. inzwischen reaktiviert) */
 } ZeilenZustand;
+
+/* Schritte des Archivierungslaufs für die aktuelle Akte */
+typedef enum {
+    PH_NEXT,
+    PH_PRUEFEN,
+    PH_START,
+    PH_POLL,
+    PH_MARK
+} LaufPhase;
 
 typedef struct {
     SondArchivKandidat *k;
     ZeilenZustand zustand;
     gboolean gesperrt;       /* wir halten die Sperre */
+    gboolean behalten;       /* Sperre nicht freigeben (Server-Job könnte noch laufen) */
     GtkWidget *row;
     GtkWidget *check;
     GtkWidget *status;
@@ -48,6 +61,8 @@ typedef struct {
     GtkWidget *main_widget;
     GtkWidget *spin_tage;
     GtkWidget *btn_suchen;
+    GtkWidget *btn_archivieren;
+    GtkWidget *btn_stopp;
     GtkWidget *progress;
     GtkWidget *info_label;
     GtkWidget *list;
@@ -56,6 +71,22 @@ typedef struct {
     guint lock_source;       /* Idle-Quelle des Sperrens, 0 = keine */
     guint lock_index;        /* nächste Zeile, die gesperrt wird */
     guint fehler_folge;      /* aufeinanderfolgende Verbindungsfehler */
+
+    /* Archivierungslauf */
+    gboolean lauf_aktiv;
+    gboolean lauf_stopp;     /* nach der laufenden Akte anhalten */
+    guint lauf_source;
+    LaufPhase phase;
+    guint lauf_index;        /* nächste Zeile, die geprüft wird */
+    guint lauf_nr;           /* wievielte Akte des Laufs */
+    guint lauf_gesamt;
+    Zeile *aktuell;
+    SondGraphNode *aktuell_node;
+    gchar *aktuell_archiv;
+    gint64 job_start;        /* Monotonic-Zeit des Job-Starts in us */
+    guint start_versuche;
+    guint poll_fehler;
+    gint tage_suche;         /* Überliegedauer der letzten Suche */
 } VerwPrivate;
 
 static void zeile_free(Zeile *z) {
@@ -84,6 +115,7 @@ static void zusammenfassung_aktualisieren(VerwPrivate *priv) {
     guint bereit = 0;
     guint fremd = 0;
     guint fehler = 0;
+    guint fertig = 0;
     gchar *text = NULL;
 
     for (guint i = 0; i < priv->zeilen->len; i++) {
@@ -93,11 +125,15 @@ static void zusammenfassung_aktualisieren(VerwPrivate *priv) {
             bereit++;
         else if (z->zustand == ZEILE_FREMD)
             fremd++;
-        else if (z->zustand == ZEILE_FEHLER)
+        else if (z->zustand == ZEILE_FEHLER || z->zustand == ZEILE_UEBERSPRUNGEN)
             fehler++;
+        else if (z->zustand == ZEILE_ARCHIVIERT)
+            fertig++;
     }
-    text = g_strdup_printf("%u Kandidaten: %u bereit, %u gesperrt oder in Arbeit, %u Fehler",
-            priv->zeilen->len, bereit, fremd, fehler);
+    text = g_strdup_printf("%u Kandidaten: %u bereit, %u archiviert, %u gesperrt oder in Arbeit, "
+            "%u Fehler oder übersprungen", priv->zeilen->len, bereit, fertig, fremd, fehler);
+    gtk_widget_set_sensitive(priv->btn_archivieren, bereit > 0 && !priv->lauf_aktiv &&
+            !priv->lock_source);
     gtk_label_set_text(GTK_LABEL(priv->info_label), text);
     g_free(text);
 }
@@ -155,7 +191,7 @@ static void zeile_sperren(VerwPrivate *priv, Zeile *z) {
 }
 
 static void zeile_entsperren(VerwPrivate *priv, Zeile *z) {
-    if (!z->gesperrt)
+    if (!z->gesperrt || z->behalten)
         return;
     if (!sond_client_unlock_node(priv->client, z->k->node_id, NULL))
         LOG_WARN("Sperre von Node %" G_GINT64_FORMAT " konnte nicht freigegeben werden\n",
@@ -198,8 +234,8 @@ static gboolean sperr_schritt(gpointer data) {
         }
         gtk_widget_set_visible(priv->progress, FALSE);
         gtk_widget_set_sensitive(priv->btn_suchen, TRUE);
-        zusammenfassung_aktualisieren(priv);
         priv->lock_source = 0;
+        zusammenfassung_aktualisieren(priv);
 
         return G_SOURCE_REMOVE;
     }
@@ -361,6 +397,8 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
     alle_entsperren(priv);
     liste_leeren(priv);
     gtk_label_set_text(GTK_LABEL(priv->info_label), "Suche läuft ...");
+    gtk_widget_set_sensitive(priv->btn_archivieren, FALSE);
+    priv->tage_suche = tage;
 
     kriterien = sond_archiv_suchkriterien();
     nodes = sond_client_search_nodes(priv->client, kriterien, &error);
@@ -419,12 +457,339 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
 }
 
 /* ------------------------------------------------------------------------
+ * Archivierungslauf
+ * ---------------------------------------------------------------------- */
+
+static void lauf_planen(VerwPrivate *priv, guint ms);
+
+static void lauf_oberflaeche(VerwPrivate *priv, gboolean laeuft) {
+    gtk_widget_set_sensitive(priv->list, !laeuft);
+    gtk_widget_set_sensitive(priv->spin_tage, !laeuft);
+    gtk_widget_set_sensitive(priv->btn_suchen, !laeuft);
+    gtk_widget_set_visible(priv->btn_stopp, laeuft);
+    gtk_widget_set_sensitive(priv->btn_stopp, laeuft);
+    gtk_widget_set_visible(priv->progress, laeuft);
+}
+
+static void lauf_ende(VerwPrivate *priv) {
+    guint fertig = 0;
+    guint probleme = 0;
+    gchar *text = NULL;
+
+    for (guint i = 0; i < priv->zeilen->len; i++) {
+        Zeile *z = g_ptr_array_index(priv->zeilen, i);
+
+        if (z->zustand == ZEILE_ARCHIVIERT)
+            fertig++;
+        else if (z->zustand == ZEILE_FEHLER || z->zustand == ZEILE_UEBERSPRUNGEN)
+            probleme++;
+    }
+
+    priv->lauf_aktiv = FALSE;
+    priv->aktuell = NULL;
+    g_clear_object(&priv->aktuell_node);
+    g_clear_pointer(&priv->aktuell_archiv, g_free);
+    lauf_oberflaeche(priv, FALSE);
+    zusammenfassung_aktualisieren(priv);
+
+    text = g_strdup_printf("%s: %u archiviert, %u mit Fehler oder übersprungen",
+            priv->lauf_stopp ? "Lauf angehalten" : "Lauf beendet", fertig, probleme);
+    gtk_label_set_text(GTK_LABEL(priv->info_label), text);
+    g_free(text);
+    priv->lauf_stopp = FALSE;
+}
+
+/* Die aktuelle Akte ist fertig (gut oder schlecht): weiter zur nächsten */
+static void lauf_weiter(VerwPrivate *priv) {
+    g_clear_object(&priv->aktuell_node);
+    g_clear_pointer(&priv->aktuell_archiv, g_free);
+    priv->aktuell = NULL;
+    priv->phase = PH_NEXT;
+    lauf_planen(priv, 10);
+}
+
+static void lauf_zeile_fehler(VerwPrivate *priv, Zeile *z, const gchar *text, gboolean entsperren) {
+    gchar *s = g_strdup_printf("Fehler: %s", text);
+
+    z->zustand = ZEILE_FEHLER;
+    status_setzen(z, s);
+    g_free(s);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(z->check), FALSE);
+    if (entsperren)
+        zeile_entsperren(priv, z);
+}
+
+static gboolean lauf_schritt(gpointer data) {
+    VerwPrivate *priv = data;
+    Zeile *z = priv->aktuell;
+    GError *error = NULL;
+
+    priv->lauf_source = 0;
+
+    switch (priv->phase) {
+    case PH_NEXT: {
+        Zeile *naechste = NULL;
+        gchar *text = NULL;
+
+        if (priv->lauf_stopp) {
+            lauf_ende(priv);
+
+            return G_SOURCE_REMOVE;
+        }
+        while (priv->lauf_index < priv->zeilen->len) {
+            Zeile *c = g_ptr_array_index(priv->zeilen, priv->lauf_index++);
+
+            if (c->zustand == ZEILE_BEREIT &&
+                    gtk_check_button_get_active(GTK_CHECK_BUTTON(c->check))) {
+                naechste = c;
+                break;
+            }
+        }
+        if (!naechste) {
+            lauf_ende(priv);
+
+            return G_SOURCE_REMOVE;
+        }
+        priv->aktuell = naechste;
+        priv->lauf_nr++;
+        priv->start_versuche = 0;
+        priv->poll_fehler = 0;
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(priv->progress),
+                (gdouble) (priv->lauf_nr - 1) / (gdouble) priv->lauf_gesamt);
+        text = g_strdup_printf("Akte %u von %u: %u/%u", priv->lauf_nr, priv->lauf_gesamt,
+                naechste->k->lfd_nr, naechste->k->year);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(priv->progress), text);
+        g_free(text);
+        status_setzen(naechste, "prüfe ...");
+        priv->phase = PH_PRUEFEN;
+        lauf_planen(priv, 10);
+        break;
+    }
+
+    case PH_PRUEFEN: {
+        SondArchivKandidat *frisch = NULL;
+        const gchar *grund = NULL;
+
+        //frisch vom Server laden: zwischen Suche und Sperre kann sich etwas geändert haben
+        priv->aktuell_node = sond_module_akte_find_by_regnr(priv->client,
+                z->k->lfd_nr, z->k->year, &error);
+        if (!priv->aktuell_node) {
+            lauf_zeile_fehler(priv, z, error ? error->message : "Akte nicht geladen", TRUE);
+            g_clear_error(&error);
+            lauf_weiter(priv);
+            break;
+        }
+        frisch = sond_archiv_kandidat_pruefen(priv->aktuell_node, priv->tage_suche, NULL, &grund);
+        if (!frisch) {
+            gchar *s = g_strdup_printf("übersprungen: %s", grund ? grund : "kein Kandidat mehr");
+
+            z->zustand = ZEILE_UEBERSPRUNGEN;
+            status_setzen(z, s);
+            g_free(s);
+            gtk_check_button_set_active(GTK_CHECK_BUTTON(z->check), FALSE);
+            zeile_entsperren(priv, z);
+            lauf_weiter(priv);
+            break;
+        }
+        priv->aktuell_archiv = g_strdup(frisch->archiv_name);
+        sond_archiv_kandidat_free(frisch);
+        priv->phase = PH_START;
+        lauf_planen(priv, 10);
+        break;
+    }
+
+    case PH_START:
+        if (sond_client_archiv_start(priv->client, z->k->library_name,
+                priv->aktuell_archiv, FALSE, &error)) {
+            priv->job_start = g_get_monotonic_time();
+            status_setzen(z, "archiviere ...");
+            priv->phase = PH_POLL;
+            lauf_planen(priv, 2000);
+        } else if (g_error_matches(error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_BUSY)) {
+            //anderer Job auf dem Server: warten und erneut versuchen
+            status_setzen(z, "wartet (Server belegt)");
+            if (priv->lauf_stopp) {
+                z->zustand = ZEILE_BEREIT;
+                status_setzen(z, "bereit");
+                lauf_ende(priv);
+            } else {
+                lauf_planen(priv, 3000);
+            }
+        } else {
+            lauf_zeile_fehler(priv, z, error ? error->message : "Start fehlgeschlagen", TRUE);
+            lauf_weiter(priv);
+        }
+        g_clear_error(&error);
+        break;
+
+    case PH_POLL: {
+        SondArchivJob *job = sond_client_archiv_status(priv->client, z->k->library_name, &error);
+
+        if (!job) {
+            //Verbindung weg: der Job läuft evtl. weiter, die Sperre bleibt deshalb bestehen
+            if (++priv->poll_fehler >= 10) {
+                z->behalten = TRUE;
+                lauf_zeile_fehler(priv, z, "Stand des Jobs unbekannt - er läuft eventuell "
+                        "noch; bitte später prüfen", FALSE);
+                g_clear_error(&error);
+                lauf_weiter(priv);
+                break;
+            }
+            g_clear_error(&error);
+            lauf_planen(priv, 3000);
+            break;
+        }
+        priv->poll_fehler = 0;
+
+        if (job->state == SOND_ARCHIV_RUNNING) {
+            gchar *s = g_strdup_printf("archiviere seit %d s ...",
+                    (gint) ((g_get_monotonic_time() - priv->job_start) / G_USEC_PER_SEC));
+
+            status_setzen(z, s);
+            g_free(s);
+            lauf_planen(priv, 2000);
+        } else if (job->state == SOND_ARCHIV_OK) {
+            priv->phase = PH_MARK;
+            lauf_planen(priv, 10);
+        } else if (job->state == SOND_ARCHIV_ERROR) {
+            lauf_zeile_fehler(priv, z, job->message ? job->message : "Archivierung gescheitert", TRUE);
+            lauf_weiter(priv);
+        } else if (++priv->start_versuche < 3) {
+            //Server kennt den Job nicht mehr (Neustart): Start wiederholen, ist unschädlich
+            priv->phase = PH_START;
+            lauf_planen(priv, 500);
+        } else {
+            lauf_zeile_fehler(priv, z, "Job auf dem Server unbekannt", TRUE);
+            lauf_weiter(priv);
+        }
+        sond_archiv_job_free(job);
+        break;
+    }
+
+    case PH_MARK:
+        if (sond_archiv_markieren(priv->aktuell_node, priv->aktuell_archiv) &&
+                sond_client_save_node(priv->client, priv->aktuell_node, &error)) {
+            z->zustand = ZEILE_ARCHIVIERT;
+            status_setzen(z, "archiviert");
+            gtk_check_button_set_active(GTK_CHECK_BUTTON(z->check), FALSE);
+            gtk_widget_set_sensitive(z->check, FALSE);
+            zeile_entsperren(priv, z);
+        } else {
+            //Archiv ist angelegt, die Library gelöscht; beim nächsten Lauf wird nur noch markiert
+            gchar *s = g_strdup_printf("archiviert, Markierung nicht gespeichert: %s",
+                    error ? error->message : "unbekannt");
+
+            z->zustand = ZEILE_FEHLER;
+            status_setzen(z, s);
+            g_free(s);
+            gtk_check_button_set_active(GTK_CHECK_BUTTON(z->check), FALSE);
+            zeile_entsperren(priv, z);
+        }
+        g_clear_error(&error);
+        lauf_weiter(priv);
+        break;
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+static void lauf_planen(VerwPrivate *priv, guint ms) {
+    priv->lauf_source = g_timeout_add(ms, lauf_schritt, priv);
+}
+
+static void lauf_starten(VerwPrivate *priv) {
+    guint anzahl = 0;
+
+    for (guint i = 0; i < priv->zeilen->len; i++) {
+        Zeile *z = g_ptr_array_index(priv->zeilen, i);
+
+        if (z->zustand == ZEILE_BEREIT &&
+                gtk_check_button_get_active(GTK_CHECK_BUTTON(z->check)))
+            anzahl++;
+    }
+    if (anzahl == 0)
+        return;
+
+    priv->lauf_aktiv = TRUE;
+    priv->lauf_stopp = FALSE;
+    priv->lauf_index = 0;
+    priv->lauf_nr = 0;
+    priv->lauf_gesamt = anzahl;
+    priv->phase = PH_NEXT;
+    lauf_oberflaeche(priv, TRUE);
+    gtk_widget_set_sensitive(priv->btn_archivieren, FALSE);
+    gtk_label_set_text(GTK_LABEL(priv->info_label), "Archivierung läuft ...");
+    lauf_planen(priv, 10);
+}
+
+static void on_archivieren_bestaetigt(GObject *source, GAsyncResult *result, gpointer user_data) {
+    VerwPrivate *priv = user_data;
+    GError *error = NULL;
+    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+
+    if (error) {
+        g_error_free(error);
+
+        return;
+    }
+    if (button == 0)
+        lauf_starten(priv);
+}
+
+static void on_archivieren_clicked(GtkButton *button, VerwPrivate *priv) {
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("Ausgewählte Akten archivieren?");
+    const gchar *buttons[] = { "Archivieren", "Abbrechen", NULL };
+    guint anzahl = 0;
+    gchar *detail = NULL;
+
+    (void) button;
+    for (guint i = 0; i < priv->zeilen->len; i++) {
+        Zeile *z = g_ptr_array_index(priv->zeilen, i);
+
+        if (z->zustand == ZEILE_BEREIT &&
+                gtk_check_button_get_active(GTK_CHECK_BUTTON(z->check)))
+            anzahl++;
+    }
+    detail = g_strdup_printf("%u Akten werden archiviert.\n\nJeder Dokumentenordner wird als ZIP "
+            "in die Library \"%s\" abgelegt und danach auf dem Server gelöscht. Zum "
+            "Reaktivieren muss er wiederhergestellt werden, was länger dauern kann.",
+            anzahl, "abgelegteAkten");
+    gtk_alert_dialog_set_detail(dialog, detail);
+    g_free(detail);
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_default_button(dialog, 1);
+    gtk_alert_dialog_set_cancel_button(dialog, 1);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    gtk_alert_dialog_choose(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+            NULL, on_archivieren_bestaetigt, priv);
+    g_object_unref(dialog);
+}
+
+static void on_stopp_clicked(GtkButton *button, VerwPrivate *priv) {
+    (void) button;
+    priv->lauf_stopp = TRUE;
+    gtk_widget_set_sensitive(priv->btn_stopp, FALSE);
+    gtk_label_set_text(GTK_LABEL(priv->info_label),
+            "Stopp angefordert: nach der laufenden Akte wird angehalten ...");
+}
+
+/* ------------------------------------------------------------------------
  * Aufbau und Abbau des Moduls
  * ---------------------------------------------------------------------- */
 
 static void on_main_destroy(GtkWidget *widget, VerwPrivate *priv) {
     (void) widget;
 
+    //läuft gerade ein Server-Job, bleibt die Sperre dieser Akte bestehen (sonst könnte sie
+    //mitten im Job reaktiviert werden)
+    if (priv->lauf_source) {
+        g_source_remove(priv->lauf_source);
+        priv->lauf_source = 0;
+    }
+    if (priv->lauf_aktiv && priv->aktuell && (priv->phase == PH_POLL || priv->phase == PH_MARK))
+        priv->aktuell->behalten = TRUE;
+    g_clear_object(&priv->aktuell_node);
+    g_free(priv->aktuell_archiv);
     sperren_anhalten(priv);
     alle_entsperren(priv);
     g_ptr_array_unref(priv->zeilen);
@@ -467,6 +832,19 @@ GtkWidget* sond_module_verwaltung_new(SondClient *client) {
             "Sucht abgelegte Akten und sperrt sie für die Archivierung");
     g_signal_connect(priv->btn_suchen, "clicked", G_CALLBACK(on_suchen_clicked), priv);
     gtk_box_append(GTK_BOX(steuer), priv->btn_suchen);
+
+    priv->btn_archivieren = gtk_button_new_with_label("Ausgewählte archivieren");
+    gtk_widget_set_tooltip_text(priv->btn_archivieren,
+            "Archiviert die bereiten, angehakten Akten nacheinander");
+    gtk_widget_set_sensitive(priv->btn_archivieren, FALSE);
+    g_signal_connect(priv->btn_archivieren, "clicked", G_CALLBACK(on_archivieren_clicked), priv);
+    gtk_box_append(GTK_BOX(steuer), priv->btn_archivieren);
+
+    priv->btn_stopp = gtk_button_new_with_label("Anhalten");
+    gtk_widget_set_tooltip_text(priv->btn_stopp, "Hält nach der laufenden Akte an");
+    gtk_widget_set_visible(priv->btn_stopp, FALSE);
+    g_signal_connect(priv->btn_stopp, "clicked", G_CALLBACK(on_stopp_clicked), priv);
+    gtk_box_append(GTK_BOX(steuer), priv->btn_stopp);
     gtk_box_append(GTK_BOX(main_box), steuer);
 
     priv->info_label = gtk_label_new("");

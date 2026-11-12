@@ -1837,20 +1837,35 @@ static void start_edit_attempt(SondModuleAktePrivate *priv) {
         return;
     }
 
-    //Archivierung läuft oder ist vorbereitet: das Lock wird nicht gebrochen,
-    //weil der Server-Job danach die Library der Akte löscht
+    //Gesperrt für die Archivierung: solange der Server-Job läuft (oder sein Stand nicht
+    //abrufbar ist), wird das Lock nicht gebrochen, weil der Job danach die Library der
+    //Akte löscht. Läuft kein Job, ist die Sperre verwaist (z. B. Client abgestürzt) und
+    //lässt sich wie jede andere brechen.
     if (!g_strcmp0(priv->lock_reason_other, SOND_LOCK_REASON_ARCHIVIERUNG)) {
-        gchar *seit = priv->locked_at_other ?
-                g_strdup_printf(" (gesperrt seit: %s)", priv->locked_at_other) : g_strdup("");
-        gchar *text = g_strdup_printf("Diese Akte wird gerade von '%s' archiviert%s.\n\n"
-                "Die Sperre kann nicht übernommen werden. Bitte später erneut versuchen.",
-                priv->locked_by_other ? priv->locked_by_other : "einem anderen Benutzer", seit);
+        GPtrArray *regnr = sond_graph_node_get_property(priv->current_node, "regnr");
+        gchar *lib = (regnr && regnr->len == 2) ?
+                g_strdup_printf("%s-%s", (const gchar*) g_ptr_array_index(regnr, 0),
+                        (const gchar*) g_ptr_array_index(regnr, 1)) : NULL;
+        SondArchivJob *job = lib ? sond_client_archiv_status(priv->client, lib, NULL) : NULL;
 
-        show_error_dialog(priv->main_widget, "Akte wird archiviert", text);
-        g_free(text);
-        g_free(seit);
+        if (regnr)
+            g_ptr_array_unref(regnr);
+        g_free(lib);
+        if (!job || job->state == SOND_ARCHIV_RUNNING) {
+            gchar *seit = priv->locked_at_other ?
+                    g_strdup_printf(" (gesperrt seit: %s)", priv->locked_at_other) : g_strdup("");
+            gchar *text = g_strdup_printf("Diese Akte wird gerade von '%s' archiviert%s.\n\n"
+                    "Die Sperre kann nicht übernommen werden. Bitte später erneut versuchen.",
+                    priv->locked_by_other ? priv->locked_by_other : "einem anderen Benutzer", seit);
 
-        return;
+            show_error_dialog(priv->main_widget, "Akte wird archiviert", text);
+            g_free(text);
+            g_free(seit);
+            sond_archiv_job_free(job);
+
+            return;
+        }
+        sond_archiv_job_free(job);
     }
 
     gchar *detail = priv->locked_by_other ?
