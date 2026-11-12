@@ -77,6 +77,7 @@ typedef struct {
      * (AKTE_STATE_READONLY), und seit wann - fuer Anzeige + "Lock brechen" */
     gchar *locked_by_other;
     gchar *locked_at_other;
+    gchar *lock_reason_other;   /* Grund der fremden Sperre (nullable) */
     GtkWidget *btn_break_lock;
     gboolean last_save_ok;   /* Ergebnis des letzten save_node() - fuer on_ok_clicked */
     gboolean unsaved_conflict; /* Konflikt (gesperrt/geaendert): Eingaben stehen noch in der Maske, wurden aber nicht gespeichert */
@@ -268,10 +269,14 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
 
             if (priv->locked_by_other) {
+                gchar *grund = (priv->lock_reason_other &&
+                        g_strcmp0(priv->lock_reason_other, SOND_LOCK_REASON_BEARBEITUNG)) ?
+                        g_strdup_printf("%s, ", priv->lock_reason_other) : g_strdup("");
                 gchar *text = priv->locked_at_other ?
-                    g_strdup_printf("Gesperrt von: %s (seit %s)",
-                                    priv->locked_by_other, priv->locked_at_other) :
+                    g_strdup_printf("Gesperrt von: %s (%sseit %s)",
+                                    priv->locked_by_other, grund, priv->locked_at_other) :
                     g_strdup_printf("Gesperrt von: %s", priv->locked_by_other);
+                g_free(grund);
                 gtk_label_set_text(GTK_LABEL(priv->status_label), text);
                 g_free(text);
             }
@@ -1434,6 +1439,8 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
     priv->locked_by_other = NULL;
     g_free(priv->locked_at_other);
     priv->locked_at_other = NULL;
+    g_free(priv->lock_reason_other);
+    priv->lock_reason_other = NULL;
     if (code == SOND_CLIENT_ERROR_LOCK_NOT_HELD && locked_by && *locked_by) {
         priv->locked_by_other = g_strdup(locked_by);
         priv->locked_at_other = (locked_at && *locked_at) ? g_strdup(locked_at) : NULL;
@@ -1758,15 +1765,17 @@ static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
 
     gint64 node_id = sond_graph_node_get_id(priv->current_node);
     GError *lock_error = NULL;
-    gchar *locked_by = NULL, *locked_at = NULL;
+    gchar *locked_by = NULL, *locked_at = NULL, *lock_reason = NULL;
 
-    if (!sond_client_lock_node_ex(priv->client, node_id, "Bearbeitung",
-                                  &locked_by, &locked_at, &lock_error)) {
+    if (!sond_client_lock_node_ex(priv->client, node_id, SOND_LOCK_REASON_BEARBEITUNG,
+                                  &locked_by, &locked_at, &lock_reason, &lock_error)) {
         /* Weiterhin gesperrt: aktuellen Sperrer anzeigen, READONLY bleibt */
         g_free(priv->locked_by_other);
         priv->locked_by_other = locked_by;
         g_free(priv->locked_at_other);
         priv->locked_at_other = locked_at;
+        g_free(priv->lock_reason_other);
+        priv->lock_reason_other = lock_reason;
         if (lock_error) g_error_free(lock_error);
 
         /* Auch die Leseansicht auf den aktuellen Stand bringen (kein Lock noetig) */
@@ -1785,6 +1794,7 @@ static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
     }
     g_free(locked_by);
     g_free(locked_at);
+    g_free(lock_reason);
 
     /* Lock gehalten -> jetzt erst aktuellen Stand laden */
     GError *error = NULL;
@@ -1804,6 +1814,8 @@ static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
     priv->locked_by_other = NULL;
     g_free(priv->locked_at_other);
     priv->locked_at_other = NULL;
+    g_free(priv->lock_reason_other);
+    priv->lock_reason_other = NULL;
 
     //Akte ist gesperrt und frisch geladen: Namensdateien in der Library prüfen
     namensdateien_abgleichen(priv);
@@ -1822,6 +1834,22 @@ static void start_edit_attempt(SondModuleAktePrivate *priv) {
 
     /* Erst pruefen, ob der Lock inzwischen frei ist; nur wenn nicht, nachfragen. */
     if (!reload_and_try_lock(priv)) {
+        return;
+    }
+
+    //Archivierung läuft oder ist vorbereitet: das Lock wird nicht gebrochen,
+    //weil der Server-Job danach die Library der Akte löscht
+    if (!g_strcmp0(priv->lock_reason_other, SOND_LOCK_REASON_ARCHIVIERUNG)) {
+        gchar *seit = priv->locked_at_other ?
+                g_strdup_printf(" (gesperrt seit: %s)", priv->locked_at_other) : g_strdup("");
+        gchar *text = g_strdup_printf("Diese Akte wird gerade von '%s' archiviert%s.\n\n"
+                "Die Sperre kann nicht übernommen werden. Bitte später erneut versuchen.",
+                priv->locked_by_other ? priv->locked_by_other : "einem anderen Benutzer", seit);
+
+        show_error_dialog(priv->main_widget, "Akte wird archiviert", text);
+        g_free(text);
+        g_free(seit);
+
         return;
     }
 
@@ -1996,7 +2024,7 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
         /* SOFORT in DB speichern UND locken (atomar)! */
         GError *save_error = NULL;
         if (!sond_client_create_and_lock_node(priv->client, priv->current_node, 
-                                              "Bearbeitung", &save_error)) {
+                                              SOND_LOCK_REASON_BEARBEITUNG, &save_error)) {
             gchar *msg = g_strdup_printf("Fehler beim Anlegen der Akte: %s",
                                         save_error ? save_error->message : "Unbekannt");
             show_error_dialog(priv->main_widget, "Fehler", msg);
@@ -2732,6 +2760,8 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     priv->locked_by_other = NULL;
     g_free(priv->locked_at_other);
     priv->locked_at_other = NULL;
+    g_free(priv->lock_reason_other);
+    priv->lock_reason_other = NULL;
 
     g_signal_handlers_disconnect_by_data(priv->client, priv);
     g_object_unref(priv->client);

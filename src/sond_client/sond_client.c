@@ -667,12 +667,14 @@ gboolean sond_client_lock_node_ex(SondClient *client,
                                    const gchar *lock_reason,
                                    gchar **out_locked_by,
                                    gchar **out_locked_at,
+                                   gchar **out_lock_reason,
                                    GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
     g_return_val_if_fail(node_id > 0, FALSE);
 
     if (out_locked_by) *out_locked_by = NULL;
     if (out_locked_at) *out_locked_at = NULL;
+    if (out_lock_reason) *out_lock_reason = NULL;
 
     if (!ensure_authenticated(client, error)) {
         return FALSE;
@@ -743,7 +745,7 @@ gboolean sond_client_lock_node_ex(SondClient *client,
         if (!success) {
             /* Bei Konflikt (409) stehen locked_by/locked_at im Body - fuer
              * die Anzeige im Client ("Gesperrt von X, seit Y"). */
-            if (status == 409 && (out_locked_by || out_locked_at)) {
+            if (status == 409 && (out_locked_by || out_locked_at || out_lock_reason)) {
                 gsize resp_len = 0;
                 const gchar *resp_data = g_bytes_get_data(response, &resp_len);
                 JsonParser *resp_parser = json_parser_new();
@@ -754,6 +756,11 @@ gboolean sond_client_lock_node_ex(SondClient *client,
                     }
                     if (out_locked_at && json_object_has_member(resp_obj, "locked_at")) {
                         *out_locked_at = g_strdup(json_object_get_string_member(resp_obj, "locked_at"));
+                    }
+                    if (out_lock_reason && json_object_has_member(resp_obj, "lock_reason")) {
+                        const gchar *grund = json_object_get_string_member(resp_obj, "lock_reason");
+
+                        *out_lock_reason = (grund && *grund) ? g_strdup(grund) : NULL;
                     }
                 }
                 g_object_unref(resp_parser);
@@ -779,7 +786,7 @@ gboolean sond_client_lock_node(SondClient *client,
                                 gint64 node_id,
                                 const gchar *lock_reason,
                                 GError **error) {
-    return sond_client_lock_node_ex(client, node_id, lock_reason, NULL, NULL, error);
+    return sond_client_lock_node_ex(client, node_id, lock_reason, NULL, NULL, NULL, error);
 }
 
 gboolean sond_client_unlock_node(SondClient *client,

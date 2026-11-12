@@ -33,6 +33,11 @@ G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
  * Fehler beim Speichern/Loeschen von Nodes (generisch fuer alle Module)
  * ======================================================================== */
 
+/* Gründe für Sperren (node_locks.lock_reason). Bei "Archivierung" wird das Lock
+ * im Client nicht gebrochen (der Server-Job löscht danach die Library). */
+#define SOND_LOCK_REASON_BEARBEITUNG "Bearbeitung"
+#define SOND_LOCK_REASON_ARCHIVIERUNG "Archivierung"
+
 #define SOND_CLIENT_ERROR (sond_client_error_quark())
 
 /**
@@ -267,6 +272,9 @@ gboolean sond_client_lock_node(SondClient *client,
  *   aktuelle Lock-Inhaber
  * @out_locked_at: (out) (nullable) (transfer full): bei Konflikt (409)
  *   Zeitpunkt der letzten Lock-Erneuerung durch den Inhaber
+ * @out_lock_reason: (out) (nullable) (transfer full): bei Konflikt (409) der
+ *   Grund, mit dem der Inhaber gesperrt hat (z. B. "Bearbeitung" oder
+ *   "Archivierung"); NULL, wenn keiner bekannt ist
  * @error: (nullable): Fehler-Rückgabe
  *
  * Wie sond_client_lock_node(), liefert bei Konflikt aber zusätzlich
@@ -280,6 +288,7 @@ gboolean sond_client_lock_node_ex(SondClient *client,
                                    const gchar *lock_reason,
                                    gchar **out_locked_by,
                                    gchar **out_locked_at,
+                                   gchar **out_lock_reason,
                                    GError **error);
 
 /**

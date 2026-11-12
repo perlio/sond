@@ -1837,6 +1837,7 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
                                    gint64 node_id,
                                    gchar **locked_by,
                                    gchar **locked_at,
+                                   gchar **lock_reason,
                                    GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
 
@@ -1848,7 +1849,7 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
         return FALSE;
     }
 
-    const char *query = "SELECT locked_by, locked_at FROM node_locks WHERE node_id = ?";
+    const char *query = "SELECT locked_by, locked_at, lock_reason FROM node_locks WHERE node_id = ?";
 
     if (mysql_stmt_prepare(stmt, query, strlen(query))) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1885,8 +1886,11 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
     unsigned long user_length;
     char time_buffer[32] = {0};   /* reicht fuer "YYYY-MM-DD HH:MM:SS" */
     unsigned long time_length;
+    char reason_buffer[256] = {0};
+    unsigned long reason_length = 0;
+    my_bool reason_is_null = 0;
 
-    MYSQL_BIND bind_result[2];
+    MYSQL_BIND bind_result[3];
     memset(bind_result, 0, sizeof(bind_result));
 
     bind_result[0].buffer_type = MYSQL_TYPE_STRING;
@@ -1900,6 +1904,13 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
     bind_result[1].buffer = time_buffer;
     bind_result[1].buffer_length = sizeof(time_buffer);
     bind_result[1].length = &time_length;
+
+    /* lock_reason kann NULL sein */
+    bind_result[2].buffer_type = MYSQL_TYPE_STRING;
+    bind_result[2].buffer = reason_buffer;
+    bind_result[2].buffer_length = sizeof(reason_buffer);
+    bind_result[2].length = &reason_length;
+    bind_result[2].is_null = &reason_is_null;
 
     if (mysql_stmt_bind_result(stmt, bind_result)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1922,6 +1933,9 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
         if (locked_at != NULL) {
             *locked_at = g_strdup(time_buffer);
         }
+        if (lock_reason != NULL) {
+            *lock_reason = reason_is_null ? NULL : g_strdup(reason_buffer);
+        }
     } else {
         /* Kein Lock */
         if (locked_by != NULL) {
@@ -1929,6 +1943,9 @@ gboolean sond_graph_db_check_lock(MYSQL *conn,
         }
         if (locked_at != NULL) {
             *locked_at = NULL;
+        }
+        if (lock_reason != NULL) {
+            *lock_reason = NULL;
         }
     }
 

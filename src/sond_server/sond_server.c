@@ -462,7 +462,7 @@ static void send_db_write_error(SondServer *server,
     if (error->code == SOND_GRAPH_DB_ERROR_LOCK_NOT_HELD) {
         gchar *locked_by = NULL;
         gchar *locked_at = NULL;
-        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL);
+        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL, NULL);
         json_builder_set_member_name(builder, "locked_by");
         json_builder_add_string_value(builder, locked_by ? locked_by : "");
         json_builder_set_member_name(builder, "locked_at");
@@ -969,7 +969,9 @@ static void handle_node_lock(SoupServer *soup_server,
          * Felder einfach leer. */
         gchar *locked_by = NULL;
         gchar *locked_at = NULL;
-        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at, NULL);
+        gchar *lock_reason = NULL;
+        sond_graph_db_check_lock(server->db_conn, node_id, &locked_by, &locked_at,
+                                  &lock_reason, NULL);
 
         JsonBuilder *conflict_builder = json_builder_new();
         json_builder_begin_object(conflict_builder);
@@ -979,6 +981,8 @@ static void handle_node_lock(SoupServer *soup_server,
         json_builder_add_string_value(conflict_builder, locked_by ? locked_by : "");
         json_builder_set_member_name(conflict_builder, "locked_at");
         json_builder_add_string_value(conflict_builder, locked_at ? locked_at : "");
+        json_builder_set_member_name(conflict_builder, "lock_reason");
+        json_builder_add_string_value(conflict_builder, lock_reason ? lock_reason : "");
         json_builder_end_object(conflict_builder);
 
         JsonGenerator *conflict_gen = json_generator_new();
@@ -992,6 +996,7 @@ static void handle_node_lock(SoupServer *soup_server,
         json_node_free(conflict_root);
         g_object_unref(conflict_gen);
         g_object_unref(conflict_builder);
+        g_free(lock_reason);
         g_free(locked_by);
         g_free(locked_at);
         g_free(err_msg);
@@ -1234,7 +1239,7 @@ static void handle_node_unlock(SoupServer *soup_server,
         gchar *previous_holder = NULL;
         gchar *previous_locked_at = NULL;
         sond_graph_db_check_lock(server->db_conn, node_id, &previous_holder,
-                                  &previous_locked_at, NULL);
+                                  &previous_locked_at, NULL, NULL);
         g_free(previous_locked_at);
 
         if (!sond_graph_db_force_unlock_node(server->db_conn, node_id, &error)) {
