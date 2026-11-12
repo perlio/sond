@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "../sond_zond_schema.h"
+#include "../sond_akte_name.h"
 
 /* Forward declarations */
 typedef struct _SondServer SondServer;
@@ -502,16 +503,17 @@ static gboolean seafile_delete_library(SondServer *server,
 /**
  * seafile_upload_bytes:
  *
- * Lädt eine Datei in das Wurzelverzeichnis einer Library hoch (vorhandene
- * gleichnamige Datei wird ersetzt). Anders als der Worker prüft diese Funktion
- * die HTTP-Status beider Schritte.
+ * Lädt eine Datei in ein (vorhandenes) Verzeichnis einer Library hoch
+ * (vorhandene gleichnamige Datei wird ersetzt). Anders als der Worker prüft
+ * diese Funktion die HTTP-Status beider Schritte.
  *
  * Seafile API:
- * GET  https://seafile.example.com/api2/repos/{repo_id}/upload-link/?p=/
+ * GET  https://seafile.example.com/api2/repos/{repo_id}/upload-link/?p={parent_dir}
  * POST {upload-link} (multipart: file, parent_dir, replace)
  */
 static gboolean seafile_upload_bytes(SondServer *server,
                                       const gchar *library_id,
+                                      const gchar *parent_dir,
                                       const gchar *filename,
                                       const guchar *data, gsize size,
                                       GError **error) {
@@ -526,8 +528,10 @@ static gboolean seafile_upload_bytes(SondServer *server,
     SoupSession *session = soup_session_new();
 
     /* 1. Upload-Link holen */
-    gchar *url = g_strdup_printf("%s/api2/repos/%s/upload-link/?p=/",
-                                  seafile_url, library_id);
+    gchar *parent_esc = g_uri_escape_string(parent_dir, "/", FALSE);
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/upload-link/?p=%s",
+                                  seafile_url, library_id, parent_esc);
+    g_free(parent_esc);
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
 
@@ -581,8 +585,9 @@ static gboolean seafile_upload_bytes(SondServer *server,
     g_string_append(body, "\r\n");
 
     g_string_append_printf(body, "--%s\r\n", boundary);
-    g_string_append(body,
-        "Content-Disposition: form-data; name=\"parent_dir\"\r\n\r\n/\r\n");
+    g_string_append_printf(body,
+        "Content-Disposition: form-data; name=\"parent_dir\"\r\n\r\n%s\r\n",
+        parent_dir);
 
     g_string_append_printf(body, "--%s\r\n", boundary);
     g_string_append(body,
@@ -673,7 +678,7 @@ static gboolean seafile_create_project_file(SondServer *server,
     gchar *filename = g_strdup_printf(".%s.ZND", safe_name);
     g_free(safe_name);
 
-    ok = seafile_upload_bytes(server, library_id, filename,
+    ok = seafile_upload_bytes(server, library_id, "/", filename,
                               (const guchar*)contents, length, error);
     g_free(filename);
 
@@ -681,6 +686,210 @@ out:
     g_free(contents);
     g_remove(tmp_path);
     g_free(tmp_path);
+
+    return ok;
+}
+
+/**
+ * seafile_api_call:
+ *
+ * Einfacher Aufruf der Seafile-API. @path_query ist alles hinter der Server-URL
+ * (z. B. "/api2/repos/ID/dir/?p=%2F.sond"), @form_body ein optionaler
+ * form-kodierter Body. Rückgabe TRUE, wenn eine Antwort eintraf (Status in
+ * @status_out, Antworttext in @body_out); FALSE nur bei Verbindungsfehlern.
+ */
+static gboolean seafile_api_call(SondServer *server, const gchar *method,
+                                 const gchar *path_query, const gchar *form_body,
+                                 guint *status_out, gchar **body_out,
+                                 GError **error) {
+    gchar const *seafile_url = sond_server_get_seafile_url(server);
+    gchar const *auth_token = sond_server_get_seafile_token(server);
+    gchar *url = NULL;
+    gchar *auth_header = NULL;
+    SoupSession *session = NULL;
+    SoupMessage *msg = NULL;
+    GBytes *response = NULL;
+
+    if (!seafile_url || !auth_token) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile URL/token not available");
+        return FALSE;
+    }
+
+    url = g_strdup_printf("%s%s", seafile_url, path_query);
+    session = soup_session_new();
+    msg = soup_message_new(method, url);
+    g_free(url);
+
+    auth_header = g_strdup_printf("Token %s", auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                               "Authorization", auth_header);
+    g_free(auth_header);
+
+    if (form_body) {
+        GBytes *bytes = g_bytes_new(form_body, strlen(form_body));
+
+        soup_message_set_request_body_from_bytes(msg,
+                "application/x-www-form-urlencoded", bytes);
+        g_bytes_unref(bytes);
+    }
+
+    response = soup_session_send_and_read(session, msg, NULL, error);
+    if (response) {
+        gsize size = 0;
+        const gchar *data = g_bytes_get_data(response, &size);
+
+        if (status_out)
+            *status_out = soup_message_get_status(msg);
+        if (body_out)
+            *body_out = g_strndup(data ? data : "", size);
+        g_bytes_unref(response);
+    }
+
+    g_object_unref(msg);
+    g_object_unref(session);
+
+    return response != NULL;
+}
+
+/* Verzeichnis der Library anlegen, falls es fehlt (@path absolut, z. B. "/.sond") */
+static gboolean seafile_ensure_dir(SondServer *server, const gchar *library_id,
+                                   const gchar *path, GError **error) {
+    gchar *esc = g_uri_escape_string(path, "/", FALSE);
+    gchar *query = g_strdup_printf("/api2/repos/%s/dir/?p=%s", library_id, esc);
+    guint status = 0;
+    gchar *body = NULL;
+    gboolean ok = FALSE;
+
+    g_free(esc);
+
+    //vorhanden?
+    if (!seafile_api_call(server, "GET", query, NULL, &status, &body, error))
+        goto out;
+    g_clear_pointer(&body, g_free);
+    if (status == 200) {
+        ok = TRUE;
+        goto out;
+    }
+
+    if (!seafile_api_call(server, "POST", query, "operation=mkdir", &status,
+            &body, error))
+        goto out;
+    ok = (status == 200 || status == 201);
+    if (!ok)
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to create directory '%s' (HTTP %u): %s", path,
+                   status, body ? body : "");
+
+out:
+    g_free(body);
+    g_free(query);
+
+    return ok;
+}
+
+/**
+ * seafile_set_bezeichnung:
+ *
+ * Legt die Aktenbezeichnung als leere Datei .sond/akte/<kodierte Bezeichnung>
+ * in der Library ab (s. sond_akte_name.h). Eine andere dort vorhandene Datei
+ * wird gelöscht, die Bezeichnung ersetzt also die bisherige; ist sie schon
+ * so eingetragen, geschieht nichts. Eine leere Bezeichnung lässt alles
+ * unverändert.
+ */
+static gboolean seafile_set_bezeichnung(SondServer *server,
+                                        const gchar *library_id,
+                                        const gchar *bezeichnung,
+                                        GError **error) {
+    gchar *name = sond_akte_name_escape(bezeichnung);
+    gchar *dir_esc = NULL;
+    gchar *query = NULL;
+    gchar *body = NULL;
+    guint status = 0;
+    gboolean present = FALSE;
+    gboolean ok = FALSE;
+    GPtrArray *others = g_ptr_array_new_with_free_func(g_free);
+
+    if (!name) {
+        g_ptr_array_unref(others);
+
+        return TRUE;
+    }
+
+    if (!seafile_ensure_dir(server, library_id, "/.sond", error) ||
+            !seafile_ensure_dir(server, library_id, "/" SOND_AKTE_NAME_DIR,
+                    error))
+        goto out;
+
+    //vorhandene Einträge
+    dir_esc = g_uri_escape_string("/" SOND_AKTE_NAME_DIR, "/", FALSE);
+    query = g_strdup_printf("/api2/repos/%s/dir/?p=%s", library_id, dir_esc);
+    if (!seafile_api_call(server, "GET", query, NULL, &status, &body, error))
+        goto out;
+
+    if (status == 200 && body) {
+        JsonParser *parser = json_parser_new();
+
+        if (json_parser_load_from_data(parser, body, -1, NULL)) {
+            JsonNode *root = json_parser_get_root(parser);
+
+            if (root && JSON_NODE_HOLDS_ARRAY(root)) {
+                JsonArray *arr = json_node_get_array(root);
+
+                for (guint i = 0; i < json_array_get_length(arr); i++) {
+                    JsonObject *entry = json_array_get_object_element(arr, i);
+                    const gchar *entry_name = NULL;
+
+                    if (!entry || !json_object_has_member(entry, "name"))
+                        continue;
+                    entry_name = json_object_get_string_member(entry, "name");
+                    if (!entry_name)
+                        continue;
+
+                    if (g_strcmp0(entry_name, name) == 0)
+                        present = TRUE;
+                    else
+                        g_ptr_array_add(others, g_strdup(entry_name));
+                }
+            }
+        }
+        g_object_unref(parser);
+    }
+
+    if (!present && !seafile_upload_bytes(server, library_id,
+            "/" SOND_AKTE_NAME_DIR, name, (const guchar*) "", 0, error))
+        goto out;
+
+    //erst nach erfolgreichem Anlegen die bisherige Bezeichnung entfernen
+    for (guint i = 0; i < others->len; i++) {
+        gchar *path = g_strconcat("/" SOND_AKTE_NAME_DIR "/",
+                (gchar*) g_ptr_array_index(others, i), NULL);
+        gchar *path_esc = g_uri_escape_string(path, "/", FALSE);
+        gchar *del_query = g_strdup_printf("/api2/repos/%s/file/?p=%s",
+                library_id, path_esc);
+        gchar *del_body = NULL;
+        GError *del_error = NULL;
+
+        if (!seafile_api_call(server, "DELETE", del_query, NULL, &status,
+                &del_body, &del_error) || (status != 200 && status != 204))
+            LOG_ERROR("Alte Aktenbezeichnung '%s' konnte nicht entfernt werden: "
+                      "%s\n", path, del_error ? del_error->message :
+                      (del_body ? del_body : "unknown"));
+        g_clear_error(&del_error);
+        g_free(del_body);
+        g_free(del_query);
+        g_free(path_esc);
+        g_free(path);
+    }
+
+    ok = TRUE;
+
+out:
+    g_ptr_array_unref(others);
+    g_free(dir_esc);
+    g_free(query);
+    g_free(body);
+    g_free(name);
 
     return ok;
 }
@@ -874,7 +1083,8 @@ static void send_success_response(SoupServerMessage *msg,
  * handle_seafile_library_create:
  * POST /seafile/library
  * 
- * Body: {"name": "2026-23", "desc": "optional"}
+ * Body: {"name": "2026-23", "desc": "optional", "bezeichnung": "optional"}
+ * (bezeichnung: Aktenbezeichnung, wird als .sond/akte/<Name> abgelegt)
  * Response: {"success": true, "data": {"library_id": "xxx", "name": "2026-23"}}
  */
 static void handle_seafile_library_create(SoupServer *soup_server,
@@ -926,6 +1136,34 @@ static void handle_seafile_library_create(SoupServer *soup_server,
         return;
     }
 
+    /* Der Library-Name (Jahr-LfdNr) darf nie doppelt vorkommen; Seafile selbst
+     * lässt gleiche Namen zu, deshalb hier prüfen. */
+    gchar *existing_id = sond_server_seafile_get_library_id_by_name(server, name,
+            &error);
+
+    if (existing_id) {
+        gchar *err_msg = g_strdup_printf("Library '%s' already exists", name);
+
+        send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
+        g_free(err_msg);
+        g_free(existing_id);
+        g_object_unref(parser);
+
+        return;
+    }
+    if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+        gchar *err_msg = g_strdup_printf("Could not check for existing library: "
+                "%s", error->message);
+
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(parser);
+
+        return;
+    }
+    g_clear_error(&error);
+
     /* Library erstellen */
     gchar *library_id = seafile_create_library(server, name, desc, &error);
 
@@ -967,6 +1205,21 @@ static void handle_seafile_library_create(SoupServer *soup_server,
         return;
     }
 
+    /* Aktenbezeichnung als Dateiname ablegen. Reine Zusatzangabe für die
+     * Suche ohne Server: ein Fehlschlag lässt die Akte bestehen (der Client
+     * kann die Bezeichnung über /seafile/library-bezeichnung nachtragen). */
+    if (json_object_has_member(obj, "bezeichnung")) {
+        const gchar *bezeichnung = json_object_get_string_member(obj,
+                "bezeichnung");
+
+        if (bezeichnung && !seafile_set_bezeichnung(server, library_id,
+                bezeichnung, &error)) {
+            LOG_ERROR("Aktenbezeichnung fuer Library '%s' nicht abgelegt: %s\n",
+                      name, error ? error->message : "unknown");
+            g_clear_error(&error);
+        }
+    }
+
     /* Response */
     JsonBuilder *response_builder = json_builder_new();
     json_builder_begin_object(response_builder);
@@ -988,6 +1241,95 @@ static void handle_seafile_library_create(SoupServer *soup_server,
     g_free(response_json);
     g_object_unref(gen);
     g_object_unref(response_builder);
+}
+
+/**
+ * handle_seafile_library_bezeichnung:
+ * POST /seafile/library-bezeichnung
+ *
+ * Body: {"name": "2026-23", "bezeichnung": "Meier ./. Müller"}
+ * Setzt bzw. ersetzt die Aktenbezeichnung (.sond/akte) der Library.
+ * Response: {"success": true, "data": {"name": "2026-23"}}
+ */
+static void handle_seafile_library_bezeichnung(SoupServer *soup_server,
+                                               SoupServerMessage *msg,
+                                               const char *path,
+                                               GHashTable *query,
+                                               gpointer user_data) {
+    SondServer *server = (SondServer*)user_data;
+    const gchar *username = NULL;
+    SoupMessageBody *body = NULL;
+    GError *error = NULL;
+    JsonParser *parser = NULL;
+    JsonObject *obj = NULL;
+    const gchar *name = NULL;
+    const gchar *bezeichnung = NULL;
+    gchar *library_id = NULL;
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only POST allowed");
+        return;
+    }
+
+    if (!sond_server_check_authorization(server, msg, &username))
+        return;  /* 401 wurde bereits gesendet */
+
+    body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Empty request body");
+        return;
+    }
+
+    parser = json_parser_new();
+    if (!json_parser_load_from_data(parser, body->data, -1, &error) ||
+            !JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser))) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid JSON");
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    obj = json_node_get_object(json_parser_get_root(parser));
+    name = json_object_has_member(obj, "name") ?
+            json_object_get_string_member(obj, "name") : NULL;
+    bezeichnung = json_object_has_member(obj, "bezeichnung") ?
+            json_object_get_string_member(obj, "bezeichnung") : NULL;
+
+    if (!name || !*name || !bezeichnung) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                "Missing 'name' or 'bezeichnung' field");
+        g_object_unref(parser);
+        return;
+    }
+
+    library_id = sond_server_seafile_get_library_id_by_name(server, name, &error);
+    if (!library_id) {
+        gchar *err_msg = g_strdup_printf("Library '%s' not found: %s", name,
+                error ? error->message : "unknown");
+
+        send_error_response(msg, SOUP_STATUS_NOT_FOUND, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    if (!seafile_set_bezeichnung(server, library_id, bezeichnung, &error)) {
+        gchar *err_msg = g_strdup_printf("Failed to set Aktenbezeichnung: %s",
+                error ? error->message : "unknown");
+
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+    } else {
+        gchar *response_json = g_strdup("{\"ok\":true}");
+
+        send_success_response(msg, response_json);
+        g_free(response_json);
+    }
+
+    g_free(library_id);
+    g_object_unref(parser);
 }
 
 /**
@@ -1084,6 +1426,8 @@ void sond_server_seafile_register_handlers(SondServer *server) {
     
     soup_server_add_handler(soup_server, "/seafile/library-id",
                             handle_seafile_library_id_get, server, NULL);
+    soup_server_add_handler(soup_server, "/seafile/library-bezeichnung",
+                            handle_seafile_library_bezeichnung, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library",
                            handle_seafile_library_create, server, NULL);
 

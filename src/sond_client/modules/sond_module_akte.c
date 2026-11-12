@@ -1111,6 +1111,7 @@ static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint
  */
 static gchar* create_seafile_library(SondModuleAktePrivate *priv,
                                       guint year, guint lfd_nr,
+                                      const gchar *bezeichnung,
                                       GError **error) {
     /* Library-Name: Jahr-LfdNr */
     gchar *library_name = g_strdup_printf("%u-%u", year, lfd_nr);
@@ -1122,6 +1123,7 @@ static gchar* create_seafile_library(SondModuleAktePrivate *priv,
     gchar *library_id = sond_client_create_seafile_library(priv->client,
                                                             library_name,
                                                             desc,
+                                                            bezeichnung,
                                                             error);
     
     g_free(desc);
@@ -1870,7 +1872,8 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             /* Node erfolgreich gespeichert - JETZT Library erstellen */
             gchar *library_id = NULL;
             GError *lib_error = NULL;
-            library_id = create_seafile_library(priv, year, lfd_nr, &lib_error);
+            library_id = create_seafile_library(priv, year, lfd_nr,
+                    kurzbezeichnung, &lib_error);
 
             if (!library_id) {
                 /* Library-Erstellung fehlgeschlagen - Node wieder löschen (Rollback) */
@@ -1970,7 +1973,8 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             }
 
             /* Node gespeichert - JETZT Library erstellen */
-            gchar *library_id = create_seafile_library(priv, year, lfd, &error);
+            gchar *library_id = create_seafile_library(priv, year, lfd,
+                    kurzbezeichnung, &error);
 
             if (!library_id) {
                 /* Library-Erstellung fehlgeschlagen - Node wieder löschen (Rollback).
@@ -2023,15 +2027,16 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 
     /* RegNr vorhanden (manuelle Eingabe oder bereits gespeichert) */
     const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
+    gchar *kurzb_alt = sond_graph_node_get_property_string(priv->current_node, "kurzb");
     if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
         sond_graph_node_set_property_string(priv->current_node, "kurzb", kurzbezeichnung);
     }
-    
+
     const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));  /* Jetzt Entry */
     if (gegenstand && strlen(gegenstand) > 0) {
         sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
     }
-    
+
     /* "von"-Property setzen falls noch nicht vorhanden (bei erster Speicherung) */
     von_props = sond_graph_node_get_property(priv->current_node, "von");
     if (!von_props || von_props->len == 0) {
@@ -2062,7 +2067,31 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         
         /* UI mit RegNr updaten (falls sie gerade erst vergeben wurde) */
         update_ui_from_node(priv);
-        
+
+        /* Geänderte Bezeichnung: auch die Namensdatei in der Library nachführen
+         * (nur Zusatzangabe für die Suche ohne Server; Fehler nur melden) */
+        if (kurzbezeichnung && *kurzbezeichnung &&
+                g_strcmp0(kurzb_alt, kurzbezeichnung) != 0) {
+            GPtrArray *rn = sond_graph_node_get_property(priv->current_node, "regnr");
+
+            if (rn && rn->len == 2) {
+                guint year = (guint)g_ascii_strtoull(g_ptr_array_index(rn, 0), NULL, 10);
+                guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(rn, 1), NULL, 10);
+                gchar *lib_name = sond_module_akte_library_name(lfd, year);
+                GError *name_error = NULL;
+
+                if (!sond_client_set_library_bezeichnung(priv->client, lib_name,
+                        kurzbezeichnung, &name_error))
+                    LOG_ERROR("Aktenbezeichnung in Library '%s' nicht "
+                            "nachgeführt: %s\n", lib_name, name_error ?
+                            name_error->message : "Unbekannt");
+                g_clear_error(&name_error);
+                g_free(lib_name);
+            }
+            if (rn)
+                g_ptr_array_unref(rn);
+        }
+
         show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
     } else {
         gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannt");
@@ -2070,6 +2099,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         g_free(msg);
         if (error) g_error_free(error);
     }
+    g_free(kurzb_alt);
 }
 
 /* Akte freigeben (Lock abgeben) und Maske zuruecksetzen - gemeinsamer

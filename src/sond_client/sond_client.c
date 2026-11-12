@@ -1238,6 +1238,7 @@ gchar* sond_client_check_lock(SondClient *client,
 gchar* sond_client_create_seafile_library(SondClient *client,
                                           const gchar *name,
                                           const gchar *description,
+                                          const gchar *bezeichnung,
                                           GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     g_return_val_if_fail(name != NULL, NULL);
@@ -1256,7 +1257,12 @@ gchar* sond_client_create_seafile_library(SondClient *client,
         json_builder_set_member_name(builder, "desc");
         json_builder_add_string_value(builder, description);
     }
-    
+
+    if (bezeichnung && *bezeichnung) {
+        json_builder_set_member_name(builder, "bezeichnung");
+        json_builder_add_string_value(builder, bezeichnung);
+    }
+
     json_builder_end_object(builder);
     
     JsonGenerator *gen = json_generator_new();
@@ -1341,6 +1347,87 @@ gchar* sond_client_create_seafile_library(SondClient *client,
     
     g_free(request_json);
     return library_id;
+}
+
+gboolean sond_client_set_library_bezeichnung(SondClient *client,
+                                             const gchar *library_name,
+                                             const gchar *bezeichnung,
+                                             GError **error) {
+    JsonBuilder *builder = NULL;
+    JsonGenerator *gen = NULL;
+    gchar *request_json = NULL;
+    gboolean ok = FALSE;
+    gboolean retry = TRUE;
+
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    g_return_val_if_fail(library_name != NULL && bezeichnung != NULL, FALSE);
+
+    if (!ensure_authenticated(client, error))
+        return FALSE;
+
+    builder = json_builder_new();
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "name");
+    json_builder_add_string_value(builder, library_name);
+    json_builder_set_member_name(builder, "bezeichnung");
+    json_builder_add_string_value(builder, bezeichnung);
+    json_builder_end_object(builder);
+
+    gen = json_generator_new();
+    json_generator_set_root(gen, json_builder_get_root(builder));
+    request_json = json_generator_to_data(gen, NULL);
+    g_object_unref(gen);
+    g_object_unref(builder);
+
+    while (retry) {
+        gchar *url = g_strdup_printf("%s/seafile/library-bezeichnung",
+                client->server_url);
+        SoupMessage *msg = soup_message_new("POST", url);
+        GBytes *body = g_bytes_new(request_json, strlen(request_json));
+        GBytes *response = NULL;
+        guint status = 0;
+
+        retry = FALSE;
+        g_free(url);
+        add_auth_header(client, msg);
+        soup_message_set_request_body_from_bytes(msg, "application/json", body);
+        g_bytes_unref(body);
+
+        response = soup_session_send_and_read(client->session, msg, NULL, error);
+        if (!response) {
+            g_object_unref(msg);
+            break;
+        }
+
+        status = soup_message_get_status(msg);
+        if (status == 401) {
+            g_bytes_unref(response);
+            g_object_unref(msg);
+
+            if (handle_auth_error(client, error)) {
+                retry = TRUE;
+                continue;
+            }
+            break;
+        }
+
+        if (status != 200) {
+            gsize size = 0;
+            const gchar *text = g_bytes_get_data(response, &size);
+
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Server returned status %u: %.*s", status, (int) size,
+                       text ? text : "");
+        } else
+            ok = TRUE;
+
+        g_bytes_unref(response);
+        g_object_unref(msg);
+    }
+
+    g_free(request_json);
+
+    return ok;
 }
 
 gchar* sond_client_get_seafile_library_id(SondClient *client,
