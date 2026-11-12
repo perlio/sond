@@ -19,6 +19,7 @@
 #include "sond_module_verwaltung.h"
 #include "sond_archiv_kandidaten.h"
 #include "sond_module_akte.h"
+#include "../../sond_graph/sond_graph_property.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_db.h"
@@ -65,6 +66,7 @@ typedef struct {
     GtkWidget *btn_stopp;
     GtkWidget *progress;
     GtkWidget *info_label;
+    GtkWidget *detail_label;     // Beispiele für abgelehnte Akten (markierbar)
     GtkWidget *list;
     GPtrArray *zeilen;       /* Zeile* */
     GHashTable *laufende;    /* Library-Name -> Nutzer eines laufenden Jobs */
@@ -384,7 +386,7 @@ static void laufende_jobs_laden(VerwPrivate *priv) {
 
 static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
     GError *error = NULL;
-    gint tage = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(priv->spin_tage));
+    gint tage = 0;
     SondGraphNodeSearchCriteria *kriterien = NULL;
     GPtrArray *nodes = NULL;
     GPtrArray *kandidaten = NULL;
@@ -392,11 +394,16 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
 
     (void) button;
 
+    //ein eben getippter Wert im Zahlenfeld gilt erst nach dem Übernehmen
+    gtk_spin_button_update(GTK_SPIN_BUTTON(priv->spin_tage));
+    tage = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(priv->spin_tage));
+
     //vorherige Suche beenden: laufendes Sperren stoppen, Sperren freigeben
     sperren_anhalten(priv);
     alle_entsperren(priv);
     liste_leeren(priv);
     gtk_label_set_text(GTK_LABEL(priv->info_label), "Suche läuft ...");
+    gtk_widget_set_visible(priv->detail_label, FALSE);
     gtk_widget_set_sensitive(priv->btn_archivieren, FALSE);
     priv->tage_suche = tage;
 
@@ -413,15 +420,53 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
     }
 
     kandidaten = g_ptr_array_new_with_free_func((GDestroyNotify) sond_archiv_kandidat_free);
-    for (guint i = 0; i < nodes->len; i++) {
-        SondArchivKandidat *k = sond_archiv_kandidat_pruefen(g_ptr_array_index(nodes, i),
-                tage, NULL, NULL);
+    {
+        GHashTable *gruende = g_hash_table_new(g_str_hash, g_str_equal);   // statische Texte -> Anzahl
+        GString *s = g_string_new(NULL);
+        GString *beispiele = g_string_new(NULL);   // je Ablehnungsgrund ein Beispiel (Tooltip)
+        GHashTable *gezeigt = g_hash_table_new(g_str_hash, g_str_equal);
+        GHashTableIter it;
+        gpointer key = NULL;
+        gpointer value = NULL;
+        gboolean erster = TRUE;
 
-        if (k)
-            g_ptr_array_add(kandidaten, k);
+        for (guint i = 0; i < nodes->len; i++) {
+            const gchar *grund = NULL;
+            SondArchivKandidat *k = sond_archiv_kandidat_pruefen(g_ptr_array_index(nodes, i),
+                    tage, NULL, &grund);
+
+            if (k)
+                g_ptr_array_add(kandidaten, k);
+            else if (grund) {
+                if (!g_hash_table_contains(gezeigt, grund)) {
+                    SondGraphNode *nd = g_ptr_array_index(nodes, i);
+                    gchar *json = sond_graph_property_list_to_json(
+                            sond_graph_node_get_properties(nd));
+
+                    g_string_append_printf(beispiele, "%s\nBeispiel Node %" G_GINT64_FORMAT ": %s\n\n",
+                            grund, sond_graph_node_get_id(nd), json);
+                    g_free(json);
+                    g_hash_table_add(gezeigt, (gpointer) grund);
+                }
+                g_hash_table_replace(gruende, (gpointer) grund, GUINT_TO_POINTER(
+                        GPOINTER_TO_UINT(g_hash_table_lookup(gruende, grund)) + 1));
+            }
+        }
+        g_string_printf(s, "%u abgelegte Akten gefunden, davon %u mit abgelaufener "
+                "Überliegedauer (%d Tage)", nodes->len, kandidaten->len, tage);
+        g_hash_table_iter_init(&it, gruende);
+        while (g_hash_table_iter_next(&it, &key, &value)) {
+            g_string_append_printf(s, "%s%u x %s", erster ? ". Nicht übernommen: " : ", ",
+                    GPOINTER_TO_UINT(value), (const gchar*) key);
+            erster = FALSE;
+        }
+        text = g_string_free(s, FALSE);
+        g_hash_table_unref(gruende);
+        gtk_label_set_text(GTK_LABEL(priv->detail_label), beispiele->str);
+        gtk_widget_set_visible(priv->detail_label, beispiele->len > 0);
+        g_string_free(beispiele, TRUE);
+        g_hash_table_unref(gezeigt);
     }
-    text = g_strdup_printf("%u abgelegte Akten gefunden, davon %u mit abgelaufener "
-            "Überliegedauer (%d Tage)", nodes->len, kandidaten->len, tage);
     g_ptr_array_unref(nodes);
 
     if (kandidaten->len == 0) {
@@ -850,6 +895,15 @@ GtkWidget* sond_module_verwaltung_new(SondClient *client) {
     priv->info_label = gtk_label_new("");
     gtk_widget_set_halign(priv->info_label, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(main_box), priv->info_label);
+
+    priv->detail_label = gtk_label_new("");
+    gtk_label_set_selectable(GTK_LABEL(priv->detail_label), TRUE);
+    gtk_label_set_wrap(GTK_LABEL(priv->detail_label), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(priv->detail_label), PANGO_WRAP_CHAR);
+    gtk_label_set_xalign(GTK_LABEL(priv->detail_label), 0.0f);
+    gtk_widget_set_halign(priv->detail_label, GTK_ALIGN_START);
+    gtk_widget_set_visible(priv->detail_label, FALSE);
+    gtk_box_append(GTK_BOX(main_box), priv->detail_label);
 
     priv->progress = gtk_progress_bar_new();
     gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(priv->progress), TRUE);
