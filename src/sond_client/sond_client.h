@@ -145,6 +145,17 @@ gboolean sond_client_connect(SondClient *client, GError **error);
  */
 const gchar* sond_client_get_user_id(SondClient *client);
 
+/**
+ * sond_client_is_logged_in:
+ * @client: SondClient
+ *
+ * Besteht eine Anmeldung am Server? Löst keinen Login aus und fragt den
+ * Server nicht.
+ *
+ * Returns: TRUE, wenn Sitzung und Benutzer gesetzt sind
+ */
+gboolean sond_client_is_logged_in(SondClient *client);
+
 const gchar* sond_client_get_user_token(SondClient *client);
 
 /**

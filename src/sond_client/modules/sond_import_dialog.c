@@ -1,5 +1,5 @@
 /*
- sond (sond_module_import.c) - Akten, Beweisstücke, Unterlagen
+ sond (sond_import_dialog.c) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026 pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "sond_module_import.h"
+#include "sond_import_dialog.h"
 #include "sond_module_akte.h"
 #include "sond_import.h"
 #include "../../sond_log_and_error.h"
@@ -50,8 +50,8 @@ typedef struct {
 struct _ImportPriv {
     SondClient *client;
 
+    GtkWidget *window;
     GtkWidget *main_box;
-    GtkWidget *entry_regnr;
     GtkWidget *lbl_akte;
     GtkWidget *btn_folder;
     GtkWidget *btn_files;
@@ -65,7 +65,8 @@ struct _ImportPriv {
     GtkWidget *log_view;
 
     GPtrArray *sources;      /* (element-type SourceRow) gewählte Quellen */
-    gchar *library_name;     /* geprüfte, aktive Akte; NULL = keine */
+    gchar *library_name;     /* Library der Akte, z. B. "2026-23" */
+    gboolean gesperrt;       /* Akte abgelegt oder nicht angelegt: kein Import */
     ImportJob *job;          /* laufender Import oder NULL */
 };
 
@@ -161,20 +162,19 @@ static void update_sensitivity(ImportPriv *priv) {
 
     gtk_widget_set_sensitive(priv->list, !running);
 
-    gtk_widget_set_sensitive(priv->entry_regnr, !running);
     gtk_widget_set_sensitive(priv->btn_folder, !running);
     gtk_widget_set_sensitive(priv->btn_files, !running);
     gtk_widget_set_sensitive(priv->btn_clear,
             !running && priv->sources->len > 0);
     gtk_widget_set_sensitive(priv->btn_import,
-            !running && priv->library_name && priv->sources->len > 0);
+            !running && !priv->gesperrt && priv->sources->len > 0);
     gtk_widget_set_visible(priv->btn_cancel, running);
     gtk_widget_set_sensitive(priv->btn_cancel, running);
 
     //Grund nennen, solange "Importieren" gesperrt ist
     if (!running) {
-        if (!priv->library_name)
-            why = "Registernummer mit Enter prüfen";
+        if (priv->gesperrt)
+            why = "Für diese Akte ist kein Import möglich";
         else if (priv->sources->len == 0)
             why = "Quelle wählen";
     }
@@ -371,101 +371,58 @@ static void set_log(ImportPriv *priv, const gchar *text) {
 }
 
 /* ========================================================================
- * Akte prüfen
+ * Akte
  * ======================================================================== */
 
-static void check_akte(ImportPriv *priv) {
-    const gchar *text = gtk_editable_get_text(GTK_EDITABLE(priv->entry_regnr));
-    guint lfd_nr = 0;
-    guint year = 0;
-    GError *error = NULL;
-    SondGraphNode *node = NULL;
-    SondAkteStatus status = SOND_AKTE_STATUS_NICHT_ANGELEGT;
+/* Anzeige der Akte und, soweit möglich, Prüfung ihres Status. Ist der Client
+ * angemeldet, fragt sie den Server; sonst (offline oder nicht angemeldet) wird
+ * nur darauf hingewiesen, dass der Status nicht geprüft wurde - der Import
+ * selbst braucht den Server nicht. */
+static void init_akte(ImportPriv *priv, guint lfd_nr, guint year,
+        const gchar *bezeichnung) {
+    gchar *titel = g_strdup_printf("Akte %u/%02u%s%s", lfd_nr, year % 100,
+            (bezeichnung && *bezeichnung) ? ": " : "",
+            (bezeichnung && *bezeichnung) ? bezeichnung : "");
+    gchar *msg = NULL;
+    gboolean fehler = FALSE;
 
-    g_clear_pointer(&priv->library_name, g_free);
+    priv->library_name = sond_module_akte_library_name(lfd_nr, year);
+    priv->gesperrt = FALSE;
 
-    if (!sond_module_akte_parse_regnr(text, &lfd_nr, &year)) {
-        set_akte_label(priv, "Bitte eine Registernummer eingeben (z. B. 23/26).",
-                TRUE);
-        update_sensitivity(priv);
-        return;
-    }
+    if (sond_client_is_logged_in(priv->client)) {
+        GError *error = NULL;
+        SondGraphNode *node = sond_module_akte_find_by_regnr(priv->client,
+                lfd_nr, year, &error);
 
-    node = sond_module_akte_find_by_regnr(priv->client, lfd_nr, year, &error);
-    if (!node) {
-        gchar *msg = NULL;
+        if (node) {
+            SondAkteStatus status = sond_module_akte_get_status(node);
 
-        if (error && error->code == G_IO_ERROR_NOT_FOUND)
-            msg = g_strdup_printf("Akte %u/%02u nicht gefunden.", lfd_nr,
-                    year % 100);
-        else
-            msg = g_strdup_printf("Fehler bei der Suche: %s",
-                    error ? error->message : "unbekannt");
-
-        set_akte_label(priv, msg, TRUE);
-        g_free(msg);
+            if (status == SOND_AKTE_STATUS_AKTIV)
+                msg = g_strdup(titel);
+            else {
+                msg = g_strdup_printf("%s\n\nDie Akte ist %s.", titel,
+                        status == SOND_AKTE_STATUS_ABGELEGT ? "abgelegt" :
+                                "noch nicht angelegt");
+                priv->gesperrt = TRUE;
+                fehler = TRUE;
+            }
+            g_object_unref(node);
+        } else if (error && error->code == G_IO_ERROR_NOT_FOUND) {
+            msg = g_strdup_printf("%s\n\nDie Akte gibt es auf dem Server "
+                    "nicht.", titel);
+            priv->gesperrt = TRUE;
+            fehler = TRUE;
+        } else
+            msg = g_strdup_printf("%s\n\nStatus nicht geprüft (Server nicht "
+                    "erreichbar).", titel);
         g_clear_error(&error);
-        update_sensitivity(priv);
-        return;
-    }
+    } else
+        msg = g_strdup_printf("%s\n\nStatus nicht geprüft (nicht "
+                "angemeldet).", titel);
 
-    status = sond_module_akte_get_status(node);
-
-    if (status != SOND_AKTE_STATUS_AKTIV) {
-        gchar *msg = g_strdup_printf("Akte %u/%02u ist %s.", lfd_nr,
-                year % 100, (status == SOND_AKTE_STATUS_ABGELEGT) ?
-                        "abgelegt" : "noch nicht angelegt");
-
-        set_akte_label(priv, msg, TRUE);
-        g_free(msg);
-    } else {
-        gchar *kurzb = sond_graph_node_get_property_string(node, "kurzb");
-        gchar *msg = g_strdup_printf("Akte %u/%02u: %s", lfd_nr, year % 100,
-                kurzb ? kurzb : "");
-
-        priv->library_name = sond_module_akte_library_name(lfd_nr, year);
-        set_akte_label(priv, msg, FALSE);
-        g_free(msg);
-        g_free(kurzb);
-    }
-
-    g_object_unref(node);
-    update_sensitivity(priv);
-}
-
-static void on_entry_activate(GtkEntry *entry, gpointer user_data) {
-    check_akte(user_data);
-}
-
-/* Eingabe geändert: bisherige Prüfung gilt nicht mehr */
-static void on_entry_changed(GtkEditable *editable, gpointer user_data) {
-    ImportPriv *priv = user_data;
-
-    g_clear_pointer(&priv->library_name, g_free);
-    set_akte_label(priv, "", FALSE);
-    update_sensitivity(priv);
-}
-
-/* Modul wird sichtbar: die im Aktenmodul angezeigte Akte nur als Vorschlag in
- * das Eingabefeld übernehmen; geprüft wird erst auf Enter oder "Akte prüfen". */
-static void on_map(GtkWidget *widget, gpointer user_data) {
-    ImportPriv *priv = user_data;
-    guint lfd_nr = 0;
-    guint year = 0;
-    gchar *suggestion = NULL;
-
-    if (priv->job)
-        return;
-    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
-        return;
-
-    suggestion = g_strdup_printf("%u/%02u", lfd_nr, year % 100);
-
-    if (g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(priv->entry_regnr)),
-            suggestion) != 0)
-        gtk_editable_set_text(GTK_EDITABLE(priv->entry_regnr), suggestion);
-
-    g_free(suggestion);
+    set_akte_label(priv, msg, fehler);
+    g_free(msg);
+    g_free(titel);
 }
 
 /* ========================================================================
@@ -744,7 +701,8 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
     ImportJob *job = NULL;
     GPtrArray *job_sources = NULL;
 
-    if (priv->job || !priv->library_name || priv->sources->len == 0)
+    if (priv->job || priv->gesperrt || !priv->library_name ||
+            priv->sources->len == 0)
         return;
 
     //Angaben je Quelle prüfen und übernehmen, bevor etwas kopiert wird
@@ -820,7 +778,9 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
     g_weak_ref_init(&job->box, priv->main_box);
     job->sources = job_sources;
     job->target = target;
-    job->user = g_strdup(sond_client_get_user_id(priv->client));
+    //ohne Anmeldung (offline) gilt der Systembenutzer
+    job->user = g_strdup(sond_client_get_user_id(priv->client) ?
+            sond_client_get_user_id(priv->client) : g_get_user_name());
 
     priv->job = job;
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(priv->progress), 0.0);
@@ -843,7 +803,15 @@ static void on_cancel_clicked(GtkButton *button, gpointer user_data) {
  * Aufbau
  * ======================================================================== */
 
-GtkWidget* sond_module_import_new(SondClient *client) {
+/* Solange ein Import läuft, bleibt der Dialog offen (dort ist "Abbrechen") */
+static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
+    ImportPriv *priv = user_data;
+
+    return priv->job != NULL;
+}
+
+void sond_import_dialog_show(SondClient *client, GtkWindow *parent,
+        guint lfd_nr, guint year, const gchar *bezeichnung) {
     ImportPriv *priv = g_new0(ImportPriv, 1);
     GtkWidget *row = NULL;
     GtkWidget *label = NULL;
@@ -852,29 +820,26 @@ GtkWidget* sond_module_import_new(SondClient *client) {
     priv->client = g_object_ref(client);
     priv->sources = g_ptr_array_new_with_free_func(source_row_free);
 
+    priv->window = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(priv->window), "Dokumente importieren");
+    gtk_window_set_default_size(GTK_WINDOW(priv->window), 900, 700);
+    if (parent) {
+        gtk_window_set_transient_for(GTK_WINDOW(priv->window), parent);
+        gtk_window_set_modal(GTK_WINDOW(priv->window), TRUE);
+    }
+    g_signal_connect(priv->window, "close-request",
+            G_CALLBACK(on_close_request), priv);
+
     priv->main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_start(priv->main_box, 20);
     gtk_widget_set_margin_end(priv->main_box, 20);
     gtk_widget_set_margin_top(priv->main_box, 20);
     gtk_widget_set_margin_bottom(priv->main_box, 20);
+    gtk_window_set_child(GTK_WINDOW(priv->window), priv->main_box);
     g_object_set_data_full(G_OBJECT(priv->main_box), "sond-import-priv", priv,
             import_priv_free);
 
     /* Akte */
-    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_box_append(GTK_BOX(priv->main_box), row);
-
-    label = gtk_label_new("Registernummer (Enter zum Prüfen):");
-    gtk_box_append(GTK_BOX(row), label);
-
-    priv->entry_regnr = gtk_entry_new();
-    gtk_editable_set_width_chars(GTK_EDITABLE(priv->entry_regnr), 7);
-    g_signal_connect(priv->entry_regnr, "activate",
-            G_CALLBACK(on_entry_activate), priv);
-    g_signal_connect(priv->entry_regnr, "changed",
-            G_CALLBACK(on_entry_changed), priv);
-    gtk_box_append(GTK_BOX(row), priv->entry_regnr);
-
     priv->lbl_akte = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(priv->lbl_akte), 0.0);
     gtk_label_set_wrap(GTK_LABEL(priv->lbl_akte), TRUE);
@@ -953,9 +918,8 @@ GtkWidget* sond_module_import_new(SondClient *client) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), priv->log_view);
     gtk_box_append(GTK_BOX(priv->main_box), scrolled);
 
-    g_signal_connect(priv->main_box, "map", G_CALLBACK(on_map), priv);
-
+    init_akte(priv, lfd_nr, year, bezeichnung);
     update_sensitivity(priv);
 
-    return priv->main_box;
+    gtk_window_present(GTK_WINDOW(priv->window));
 }

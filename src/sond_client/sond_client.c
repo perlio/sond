@@ -355,6 +355,11 @@ const gchar* sond_client_get_user_id(SondClient *client) {
     return client->username;
 }
 
+gboolean sond_client_is_logged_in(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    return client->session_token != NULL && client->username != NULL;
+}
+
 const gchar* sond_client_get_user_token(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     return client->seafile_token;
