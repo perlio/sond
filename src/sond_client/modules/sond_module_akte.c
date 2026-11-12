@@ -82,6 +82,8 @@ typedef struct {
     GtkWidget *btn_break_lock;
     gboolean last_save_ok;   /* Ergebnis des letzten save_node() - fuer on_ok_clicked */
     gboolean unsaved_conflict; /* Konflikt (gesperrt/geaendert): Eingaben stehen noch in der Maske, wurden aber nicht gespeichert */
+    gboolean ablegen_vorgemerkt;      /* "Akte ablegen" gedrückt: bis/Ablagenr. kommen erst beim Speichern dazu */
+    gboolean reaktivieren_vorgemerkt; /* "Akte reaktivieren" gedrückt: von kommt erst beim Speichern dazu */
 } SondModuleAktePrivate;
 
 /* Struktur für Suchergebnis */
@@ -295,7 +297,7 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             apply_widget_style(priv->textview_gegenstand, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
-            gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
+            gtk_widget_set_sensitive(priv->btn_speichern, priv->ablegen_vorgemerkt || priv->reaktivieren_vorgemerkt);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
             gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
             break;
@@ -348,6 +350,8 @@ static void update_action_widgets(SondModuleAktePrivate *priv) {
 
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
     priv->unsaved_conflict = FALSE;
+    priv->ablegen_vorgemerkt = FALSE;
+    priv->reaktivieren_vorgemerkt = FALSE;
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
@@ -1111,6 +1115,18 @@ static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GErro
     return TRUE;
 }
 
+/* Aktiv, wie es nach dem Speichern wäre: die vorgemerkte Aktion (Ablegen oder
+ * Reaktivieren) ist wie eine Eingabe in der Maske berücksichtigt, aber noch nicht
+ * am Node eingetragen. */
+static gboolean effektiv_aktiv(SondModuleAktePrivate *priv) {
+    if (priv->ablegen_vorgemerkt)
+        return FALSE;
+    if (priv->reaktivieren_vorgemerkt)
+        return TRUE;
+
+    return ist_akte_aktiv(priv->current_node);
+}
+
 static void update_status_display(SondModuleAktePrivate *priv) {
     if (!priv->current_node) {
         return;
@@ -1135,12 +1151,18 @@ static void update_status_display(SondModuleAktePrivate *priv) {
     }
     g_ptr_array_unref(von_props);
     
-    gboolean aktiv = ist_akte_aktiv(priv->current_node);
-    
+    gboolean aktiv = effektiv_aktiv(priv);
+
     if (aktiv) {
-        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: Aktiv");
+        gtk_label_set_text(GTK_LABEL(priv->status_label), priv->reaktivieren_vorgemerkt ?
+                "Status: wird beim Speichern reaktiviert" : "Status: Aktiv");
         gtk_widget_set_visible(priv->btn_ablegen, TRUE);
         gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+    } else if (priv->ablegen_vorgemerkt) {
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: wird beim Speichern abgelegt");
+        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, TRUE);
+        gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
     } else {
         gchar *ablnr = get_letzte_ablage(priv->current_node);
         if (ablnr) {
@@ -1409,6 +1431,8 @@ static void on_client_node_conflict(SondClient *client, gint64 node_id, guint co
         priv->locked_at_other = (locked_at && *locked_at) ? g_strdup(locked_at) : NULL;
     }
 
+    priv->ablegen_vorgemerkt = FALSE;
+    priv->reaktivieren_vorgemerkt = FALSE;
     set_akte_state(priv, AKTE_STATE_READONLY);
     priv->unsaved_conflict = TRUE;
 
@@ -1463,66 +1487,101 @@ static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError 
  * UI Event Handlers
  * ======================================================================== */
 
-/* Event Handler für Ablage/Reaktivierung */
+/* Nach einer Änderung der vorgemerkten Aktion: Anzeige und Zustand der Maske
+ * aus dem Zustand "wie nach dem Speichern" ableiten. */
+static void aktion_neu_darstellen(SondModuleAktePrivate *priv) {
+    update_status_display(priv);
+    set_akte_state(priv, effektiv_aktiv(priv) ? AKTE_STATE_EDITING : AKTE_STATE_ABGELEGT);
+}
+
+/* Beim Speichern am Node eingetragene Properties der vorgemerkten Aktion (für den
+ * Rückbau, falls das Speichern scheitert) */
+typedef struct {
+    SondGraphProperty *bis;
+    SondGraphProperty *von;
+} AngewendeteAktion;
+
+/* Die vorgemerkte Aktion jetzt am Node eintragen: bei "Ablegen" ein "bis" mit der
+ * dann nächsten Ablagenummer (die Nummer wird also erst beim Speichern vergeben),
+ * bei "Reaktivieren" ein "von"; jeweils mit dem Datum des Speicherns. */
+static gboolean aktion_anwenden(SondModuleAktePrivate *priv, AngewendeteAktion *a, GError **error) {
+    GPtrArray *properties = NULL;
+    GDateTime *now = NULL;
+    gchar *datum = NULL;
+
+    a->bis = NULL;
+    a->von = NULL;
+    if (!priv->ablegen_vorgemerkt && !priv->reaktivieren_vorgemerkt)
+        return TRUE;
+
+    properties = sond_graph_node_get_properties(priv->current_node);
+    now = g_date_time_new_now_local();
+    datum = g_date_time_format(now, "%Y-%m-%d");
+    g_date_time_unref(now);
+
+    if (priv->ablegen_vorgemerkt) {
+        gchar *ablnr = NULL;
+
+        if (!get_next_ablnr(priv, &ablnr, error)) {
+            g_free(datum);
+
+            return FALSE;
+        }
+        {
+            const gchar *bis_value[] = {datum};
+            const gchar *ablnr_value[] = {ablnr};
+            SondGraphProperty *bis_prop = sond_graph_property_new("bis", bis_value, 1);
+
+            sond_graph_property_add_subproperty(bis_prop,
+                    sond_graph_property_new("ablnr", ablnr_value, 1));
+            g_ptr_array_add(properties, bis_prop);
+            a->bis = bis_prop;
+        }
+        g_free(ablnr);
+    } else {
+        const gchar *von_value[] = {datum};
+        SondGraphProperty *von_prop = sond_graph_property_new("von", von_value, 1);
+
+        g_ptr_array_add(properties, von_prop);
+        a->von = von_prop;
+    }
+    g_free(datum);
+
+    return TRUE;
+}
+
+/* Wieder austragen, falls das Speichern gescheitert ist */
+static void aktion_zurueckbauen(SondModuleAktePrivate *priv, AngewendeteAktion *a) {
+    GPtrArray *properties = priv->current_node ?
+            sond_graph_node_get_properties(priv->current_node) : NULL;
+
+    if (properties && a->bis)
+        g_ptr_array_remove(properties, a->bis);
+    if (properties && a->von)
+        g_ptr_array_remove(properties, a->von);
+    a->bis = NULL;
+    a->von = NULL;
+}
+
+/* Event Handler für Ablage/Reaktivierung: "Akte ablegen" merkt die Ablage nur vor
+ * (wie eine Eingabe in der Maske); Ablagenummer und bis-Datum entstehen beim
+ * Speichern ("Speichern" oder "Ok"). Ein vorgemerktes Reaktivieren nimmt es zurück. */
 static void on_ablegen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    (void) button;
     if (!priv->current_node) {
         return;
     }
-    
-    if (!ist_akte_aktiv(priv->current_node)) {
+
+    if (!effektiv_aktiv(priv)) {
         show_error_dialog(priv->main_widget, "Fehler", "Akte ist bereits abgelegt.");
         return;
     }
-    
-    /* Nächste Ablagenummer ermitteln */
-    gchar *ablnr = NULL;
-    GError *error = NULL;
-    
-    if (!get_next_ablnr(priv, &ablnr, &error)) {
-        gchar *msg = g_strdup_printf("Fehler bei Ablagenr-Vergabe: %s",
-                                    error ? error->message : "Unbekannt");
-        show_error_dialog(priv->main_widget, "Fehler", msg);
-        g_free(msg);
-        if (error) g_error_free(error);
-        return;
-    }
-    
-    /* Aktuelles Datum als ISO-String */
-    GDateTime *now = g_date_time_new_now_local();
-    gchar *datum = g_date_time_format(now, "%Y-%m-%d");
-    g_date_time_unref(now);
-    
-    /* "bis"-Property mit Sub-Property "ablnr" hinzufügen */
-    GPtrArray *properties = sond_graph_node_get_properties(priv->current_node);
-    
-    /* Neue "bis"-Property erstellen */
-    const gchar *bis_value[] = {datum};
-    SondGraphProperty *bis_prop = sond_graph_property_new("bis", bis_value, 1);
-    
-    /* Sub-Property "ablnr" hinzufügen */
-    const gchar *ablnr_value[] = {ablnr};
-    SondGraphProperty *ablnr_prop = sond_graph_property_new("ablnr", ablnr_value, 1);
-    sond_graph_property_add_subproperty(bis_prop, ablnr_prop);
-    
-    /* Zur Property-Liste hinzufügen */
-    g_ptr_array_add(properties, bis_prop);
-    
-    g_free(datum);
-    g_free(ablnr);
-    
-    /* Speichern */
-    if (!save_node(priv, &error)) {
-        gchar *msg = g_strdup_printf("Fehler beim Speichern: %s",
-                                    error ? error->message : "Unbekannt");
-        show_error_dialog(priv->main_widget, "Fehler", msg);
-        g_free(msg);
-        if (error) g_error_free(error);
-        return;
-    }
-    
-    update_status_display(priv);
-    set_akte_state(priv, AKTE_STATE_ABGELEGT);  /* Nach Ablage nicht mehr editierbar */
-    show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde abgelegt.");
+
+    if (priv->reaktivieren_vorgemerkt)
+        priv->reaktivieren_vorgemerkt = FALSE;
+    else
+        priv->ablegen_vorgemerkt = TRUE;
+    aktion_neu_darstellen(priv);
 }
 
 /* Library-Name ("Jahr-LfdNr") eines Akten-Nodes; NULL ohne gültige RegNr */
@@ -1738,7 +1797,15 @@ static void on_restore_frage_response(GObject *source, GAsyncResult *result, gpo
 }
 
 static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    (void) button;
     if (!priv->current_node) {
+        return;
+    }
+
+    /* Ein noch nicht gespeichertes Ablegen wird damit einfach zurückgenommen */
+    if (priv->ablegen_vorgemerkt) {
+        priv->ablegen_vorgemerkt = FALSE;
+        aktion_neu_darstellen(priv);
         return;
     }
 
@@ -1817,8 +1884,11 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
     }
 
     if (!archiv) {
+        /* Dokumentenordner ist da: das Reaktivieren wird nur vorgemerkt, das "von"
+         * entsteht beim Speichern ("Speichern" oder "Ok") */
         g_free(lib);
-        reaktivieren_ausfuehren(priv, FALSE);
+        priv->reaktivieren_vorgemerkt = TRUE;
+        aktion_neu_darstellen(priv);
         return;
     }
 
@@ -2029,6 +2099,8 @@ static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
             g_object_unref(priv->current_node);
             priv->current_node = fresh;
         }
+        priv->ablegen_vorgemerkt = FALSE;
+        priv->reaktivieren_vorgemerkt = FALSE;
         if (load_error) g_error_free(load_error);
 
         priv->unsaved_conflict = FALSE;
@@ -2053,6 +2125,8 @@ static gboolean reload_and_try_lock(SondModuleAktePrivate *priv) {
 
     g_object_unref(priv->current_node);
     priv->current_node = node;
+    priv->ablegen_vorgemerkt = FALSE;
+    priv->reaktivieren_vorgemerkt = FALSE;
 
     g_free(priv->locked_by_other);
     priv->locked_by_other = NULL;
@@ -2766,11 +2840,30 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         von_props = NULL;
     }
     
-    /* Speichern */
+    /* Vorgemerktes Ablegen/Reaktivieren jetzt am Node eintragen (Ablagenummer und
+     * Datum entstehen erst hier) */
+    AngewendeteAktion aktion = { NULL, NULL };
     GError *error = NULL;
+    if (!aktion_anwenden(priv, &aktion, &error)) {
+        gchar *msg = g_strdup_printf("Fehler bei Ablagenr-Vergabe: %s",
+                error ? error->message : "Unbekannt");
+
+        show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen", msg);
+        g_free(msg);
+        g_clear_error(&error);
+        g_free(kurzb_alt);
+        g_free(ggstd_alt);
+        return;
+    }
+
+    /* Speichern */
     if (save_node(priv, &error)) {
+        gboolean aktion_war_vorgemerkt = priv->ablegen_vorgemerkt || priv->reaktivieren_vorgemerkt;
+
+        priv->ablegen_vorgemerkt = FALSE;
+        priv->reaktivieren_vorgemerkt = FALSE;
         priv->is_new_from_entry = FALSE; /* Nach Speichern nicht mehr löschen */
-        
+
         /* RegNr merken */
         GPtrArray *regnr_vals = sond_graph_node_get_property(priv->current_node, "regnr");
         if (regnr_vals && regnr_vals->len == 2) {
@@ -2782,6 +2875,8 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         
         /* UI mit RegNr updaten (falls sie gerade erst vergeben wurde) */
         update_ui_from_node(priv);
+        if (aktion_war_vorgemerkt)
+            aktion_neu_darstellen(priv);   /* Ablegen/Reaktivieren ist jetzt gespeichert */
 
         /* Geänderte Bezeichnung oder geänderter Gegenstand: auch die Dateien in
          * der Library nachführen (nur Zusatzangaben für die Suche ohne Server;
@@ -2816,6 +2911,9 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
     } else {
         gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannt");
+
+        /* Der Node bleibt, wie er war; die Aktion bleibt vorgemerkt */
+        aktion_zurueckbauen(priv, &aktion);
         show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen", msg);
         g_free(msg);
         if (error) g_error_free(error);
