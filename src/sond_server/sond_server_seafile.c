@@ -1474,3 +1474,28 @@ void sond_server_seafile_register_handlers(SondServer *server) {
 
     LOG_INFO("Seafile handlers registered\n");
 }
+
+/* Öffentliche Zugänge zu den internen Seafile-Hilfen (für das Archivieren) */
+
+gboolean sond_server_seafile_api_call(SondServer *server, const gchar *method,
+                                      const gchar *path_query, const gchar *form_body,
+                                      guint *status_out, gchar **body_out,
+                                      GError **error) {
+    return seafile_api_call(server, method, path_query, form_body, status_out,
+            body_out, error);
+}
+
+gboolean sond_server_seafile_ensure_dir(SondServer *server, const gchar *library_id,
+                                        const gchar *path, GError **error) {
+    return seafile_ensure_dir(server, library_id, path, error);
+}
+
+gchar* sond_server_seafile_create_library(SondServer *server, const gchar *name,
+                                          const gchar *desc, GError **error) {
+    return seafile_create_library(server, name, desc, error);
+}
+
+gboolean sond_server_seafile_delete_library(SondServer *server,
+                                            const gchar *library_id, GError **error) {
+    return seafile_delete_library(server, library_id, error);
+}

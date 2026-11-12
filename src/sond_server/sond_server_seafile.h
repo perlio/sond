@@ -96,6 +96,45 @@ gchar* sond_server_seafile_get_library_id_by_name(SondServer *server,
                                                    const gchar *library_name,
                                                    GError **error);
 
+/**
+ * sond_server_seafile_api_call:
+ *
+ * Einfacher Aufruf der Seafile-API. @path_query ist alles hinter der Server-URL,
+ * @form_body ein optionaler form-kodierter Body. TRUE, wenn eine Antwort
+ * eintraf (HTTP-Status in @status_out, Text in @body_out, g_free());
+ * FALSE nur bei Verbindungsfehlern.
+ */
+gboolean sond_server_seafile_api_call(SondServer *server, const gchar *method,
+                                      const gchar *path_query, const gchar *form_body,
+                                      guint *status_out, gchar **body_out,
+                                      GError **error);
+
+/**
+ * sond_server_seafile_ensure_dir:
+ *
+ * Legt ein Verzeichnis (absoluter Pfad) in der Library an, falls es fehlt.
+ */
+gboolean sond_server_seafile_ensure_dir(SondServer *server, const gchar *library_id,
+                                        const gchar *path, GError **error);
+
+/**
+ * sond_server_seafile_create_library:
+ *
+ * Legt eine Library an (und teilt sie mit der konfigurierten Gruppe).
+ *
+ * Returns: (transfer full) (nullable): Library-ID.
+ */
+gchar* sond_server_seafile_create_library(SondServer *server, const gchar *name,
+                                          const gchar *desc, GError **error);
+
+/**
+ * sond_server_seafile_delete_library:
+ *
+ * Löscht eine Library.
+ */
+gboolean sond_server_seafile_delete_library(SondServer *server,
+                                            const gchar *library_id, GError **error);
+
 G_END_DECLS
 
 #endif /* SOND_SERVER_SEAFILE_H */
