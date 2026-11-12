@@ -18,6 +18,7 @@
 
 #include "sond_client_window.h"
 #include "modules/sond_module_akte.h"
+#include "modules/sond_module_verwaltung.h"
 #include "../sond_log_and_error.h"
 
 struct _SondClientWindow {
@@ -31,6 +32,7 @@ struct _SondClientWindow {
     
     /* Module */
     GtkWidget *module_akte;
+    GtkWidget *module_verwaltung;
 };
 
 G_DEFINE_TYPE(SondClientWindow, sond_client_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -74,6 +76,12 @@ static void sond_client_window_init(SondClientWindow *self) {
     g_signal_connect(btn_akte, "clicked", G_CALLBACK(on_module_button_clicked), self);
     gtk_box_append(GTK_BOX(module_box), btn_akte);
 
+    /* Button für "Verwaltung"-Modul */
+    GtkWidget *btn_verwaltung = gtk_button_new_with_label("Verwaltung");
+    g_object_set_data(G_OBJECT(btn_verwaltung), "module-name", (gpointer)"verwaltung");
+    g_signal_connect(btn_verwaltung, "clicked", G_CALLBACK(on_module_button_clicked), self);
+    gtk_box_append(GTK_BOX(module_box), btn_verwaltung);
+
     /* Separator */
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(main_box), separator);
@@ -103,6 +111,10 @@ SondClientWindow* sond_client_window_new(GtkApplication *app, SondClient *client
     /* Akte-Modul erstellen */
     window->module_akte = sond_module_akte_new(client);
     gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_akte, "akte");
+
+    /* Verwaltungs-Modul erstellen */
+    window->module_verwaltung = sond_module_verwaltung_new(client);
+    gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_verwaltung, "verwaltung");
 
     return window;
 }
