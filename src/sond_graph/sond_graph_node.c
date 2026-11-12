@@ -179,31 +179,22 @@ void sond_graph_node_set_property_string(SondGraphNode *node,
 /**
  * sond_graph_node_set_properties:
  *
- * Setzt mehrere Properties auf einmal aus einem GPtrArray von SondGraphProperty.
+ * Ersetzt alle Properties des Nodes durch tiefe Kopien der Properties in @props:
+ * mit Unter-Properties und mit mehrfach vorkommenden Schlüsseln (z. B. "von"
+ * und "bis" einer Akte, die mehrmals abgelegt und reaktiviert wurde).
  */
 void sond_graph_node_set_properties(SondGraphNode *node, GPtrArray *props) {
     g_return_if_fail(SOND_IS_GRAPH_NODE(node));
 
-    if (!props || props->len == 0)
+    if (!props)
         return;
 
+    g_ptr_array_set_size(node->properties, 0);
     for (guint i = 0; i < props->len; i++) {
-        SondGraphProperty *prop = g_ptr_array_index(props, i);
+        SondGraphProperty *kopie = sond_graph_property_copy(g_ptr_array_index(props, i));
 
-        const gchar *key = sond_graph_property_get_key(prop);
-        if (!key)
-            continue;
-
-        GPtrArray *values = sond_graph_property_get_values(prop);
-        if (!values || values->len == 0) {
-            continue;
-        }
-
-        sond_graph_property_list_set(node->properties, key,
-                                      (const gchar **)values->pdata,
-                                      values->len);
-
-        /* TODO: Sub-Properties kopieren wenn nötig */
+        if (kopie)
+            g_ptr_array_add(node->properties, kopie);
     }
 }
 

@@ -80,6 +80,33 @@ void sond_graph_property_free(SondGraphProperty *prop) {
     g_free(prop);
 }
 
+/**
+ * sond_graph_property_copy:
+ *
+ * Tiefe Kopie einer Property samt Unter-Properties.
+ */
+SondGraphProperty* sond_graph_property_copy(const SondGraphProperty *prop) {
+    SondGraphProperty *kopie = NULL;
+
+    if (prop == NULL || prop->key == NULL || prop->values == NULL ||
+            prop->values->len == 0) {
+        return NULL;
+    }
+
+    kopie = sond_graph_property_new(prop->key,
+            (const gchar**) prop->values->pdata, prop->values->len);
+
+    for (guint i = 0; prop->properties && i < prop->properties->len; i++) {
+        SondGraphProperty *sub = sond_graph_property_copy(
+                g_ptr_array_index(prop->properties, i));
+
+        if (sub)
+            sond_graph_property_add_subproperty(kopie, sub);
+    }
+
+    return kopie;
+}
+
 /* ========================================================================
  * Basis-Funktionen
  * ======================================================================== */

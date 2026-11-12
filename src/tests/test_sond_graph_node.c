@@ -196,12 +196,10 @@ test_set_properties_bulk(void)
 }
 
 static void
-test_set_properties_bulk_ignores_subproperties(void)
+test_set_properties_bulk_copies_subproperties(void)
 {
-    /* Dokumentiert den bekannten TODO in sond_graph_node_set_properties()
-     * ("Sub-Properties kopieren wenn noetig"): Sub-Properties werden beim
-     * Bulk-Setzen aktuell NICHT uebernommen. Wird das irgendwann behoben,
-     * schlaegt dieser Test an und muss angepasst werden. */
+    /* Unter-Properties werden mitkopiert (beim Laden aus der Datenbank hängt
+     * z. B. die Ablagenummer "ablnr" als Unter-Property am "bis" einer Akte). */
     SondGraphNode *node = sond_graph_node_new();
     GPtrArray *props = g_ptr_array_new_with_free_func(
             (GDestroyNotify) sond_graph_property_free);
@@ -213,9 +211,57 @@ test_set_properties_bulk_ignores_subproperties(void)
 
     sond_graph_node_set_properties(node, props);
 
-    g_assert_false(sond_graph_node_has_nested_property(node, "address", "type"));
+    g_assert_true(sond_graph_node_has_nested_property(node, "address", "type"));
 
+    /* es sind Kopien: Freigeben der Quelle lässt den Node unberührt */
     g_ptr_array_unref(props);
+    g_assert_true(sond_graph_node_has_nested_property(node, "address", "type"));
+    g_object_unref(node);
+}
+
+static void
+test_set_properties_bulk_keeps_repeated_keys(void)
+{
+    /* Mehrfach vorkommende Schlüssel bleiben getrennte Einträge (eine Akte
+     * kann mehrmals "von" und "bis" haben); sie dürfen nicht zu einem Eintrag
+     * zusammenfallen. */
+    SondGraphNode *node = sond_graph_node_new();
+    GPtrArray *props = g_ptr_array_new_with_free_func(
+            (GDestroyNotify) sond_graph_property_free);
+
+    g_ptr_array_add(props, sond_graph_property_new_string("von", "2026-01-01"));
+    g_ptr_array_add(props, sond_graph_property_new_string("bis", "2026-02-01"));
+    g_ptr_array_add(props, sond_graph_property_new_string("von", "2026-03-01"));
+
+    sond_graph_node_set_properties(node, props);
+    g_ptr_array_unref(props);
+
+    GPtrArray *alle = sond_graph_node_get_properties(node);
+
+    g_assert_cmpuint(alle->len, ==, 3);
+    g_assert_cmpstr(sond_graph_property_get_key(g_ptr_array_index(alle, 0)), ==, "von");
+    g_assert_cmpstr(sond_graph_property_get_key(g_ptr_array_index(alle, 1)), ==, "bis");
+    g_assert_cmpstr(sond_graph_property_get_key(g_ptr_array_index(alle, 2)), ==, "von");
+    g_assert_cmpstr(sond_graph_property_get_first_value(g_ptr_array_index(alle, 2)), ==, "2026-03-01");
+
+    g_object_unref(node);
+}
+
+static void
+test_set_properties_bulk_replaces_existing(void)
+{
+    SondGraphNode *node = sond_graph_node_new();
+    GPtrArray *props = g_ptr_array_new_with_free_func(
+            (GDestroyNotify) sond_graph_property_free);
+
+    sond_graph_node_set_property_string(node, "alt", "x");
+    g_ptr_array_add(props, sond_graph_property_new_string("neu", "y"));
+    sond_graph_node_set_properties(node, props);
+    g_ptr_array_unref(props);
+
+    g_assert_false(sond_graph_node_has_property(node, "alt"));
+    g_assert_true(sond_graph_node_has_property(node, "neu"));
+
     g_object_unref(node);
 }
 
@@ -317,7 +363,9 @@ test_sond_graph_node_register(void)
     g_test_add_func("/sond_graph_node/property_keys", test_property_keys);
     g_test_add_func("/sond_graph_node/nested_property", test_nested_property);
     g_test_add_func("/sond_graph_node/set_properties_bulk", test_set_properties_bulk);
-    g_test_add_func("/sond_graph_node/set_properties_bulk_ignores_subproperties", test_set_properties_bulk_ignores_subproperties);
+    g_test_add_func("/sond_graph_node/set_properties_bulk_copies_subproperties", test_set_properties_bulk_copies_subproperties);
+    g_test_add_func("/sond_graph_node/set_properties_bulk_keeps_repeated_keys", test_set_properties_bulk_keeps_repeated_keys);
+    g_test_add_func("/sond_graph_node/set_properties_bulk_replaces_existing", test_set_properties_bulk_replaces_existing);
     g_test_add_func("/sond_graph_node/edges", test_edges);
     g_test_add_func("/sond_graph_node/json_roundtrip", test_json_roundtrip);
     g_test_add_func("/sond_graph_node/json_from_invalid_json_fails", test_json_from_invalid_json_fails);

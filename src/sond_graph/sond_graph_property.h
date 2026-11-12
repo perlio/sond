@@ -83,6 +83,17 @@ SondGraphProperty* sond_graph_property_new_string(const gchar *key,
  */
 void sond_graph_property_free(SondGraphProperty *prop);
 
+/**
+ * sond_graph_property_copy:
+ * @prop: Property
+ *
+ * Tiefe Kopie einer Property samt aller Unter-Properties.
+ *
+ * Returns: (transfer full) (nullable): Kopie oder %NULL, wenn @prop keinen
+ *          Schlüssel oder keine Werte hat
+ */
+SondGraphProperty* sond_graph_property_copy(const SondGraphProperty *prop);
+
 /* ========================================================================
  * Basis-Funktionen
  * ======================================================================== */

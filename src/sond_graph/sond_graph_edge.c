@@ -352,33 +352,17 @@ void sond_graph_edge_set_property_string(SondGraphEdge *edge,
 void sond_graph_edge_set_properties(SondGraphEdge *edge, GPtrArray *properties) {
     g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
 
-    if (!properties || properties->len == 0)
+    if (!properties)
         return;
 
-    /* Iteriere durch alle Properties und füge sie hinzu */
+    /* Ersetzt alle Properties durch tiefe Kopien (mit Unter-Properties und
+     * mehrfach vorkommenden Schlüsseln) */
+    g_ptr_array_set_size(edge->properties, 0);
     for (guint i = 0; i < properties->len; i++) {
-        SondGraphProperty *prop = g_ptr_array_index(properties, i);
+        SondGraphProperty *kopie = sond_graph_property_copy(g_ptr_array_index(properties, i));
 
-        const gchar *key = sond_graph_property_get_key(prop);
-        if (!key)
-            continue;
-
-        GPtrArray *values = sond_graph_property_get_values(prop);
-        if (!values || values->len == 0) {
-            continue;
-        }
-
-        /* Setze Property */
-        sond_graph_property_list_set(edge->properties, key,
-                                      (const gchar **)values->pdata,
-                                      values->len);
-
-        /* TODO: Sub-Properties kopieren wenn nötig */
-        GPtrArray *sub_props = sond_graph_property_get_properties(prop);
-        if (sub_props && sub_props->len > 0) {
-            /* Sub-Properties kopieren - hier vereinfacht */
-            /* Für vollständige Implementierung: Rekursiv kopieren */
-        }
+        if (kopie)
+            g_ptr_array_add(edge->properties, kopie);
     }
 }
 

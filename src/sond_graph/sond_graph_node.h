@@ -196,7 +196,8 @@ void sond_graph_node_set_property_string(SondGraphNode *node,
  * @node: Ein SondGraphNode
  * @props: (element-type SondGraphProperty): GPtrArray von SondGraphProperty
  *
- * Setzt mehrere Properties auf einmal aus einem Property-Array.
+ * Ersetzt alle Properties des Nodes durch tiefe Kopien der Properties in @props,
+ * einschließlich Unter-Properties und mehrfach vorkommender Schlüssel.
  * Nützlich beim Laden von Properties aus der Datenbank.
  *
  * Beispiel:

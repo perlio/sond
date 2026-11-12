@@ -221,7 +221,8 @@ void sond_graph_edge_set_property_string(SondGraphEdge *edge,
  * @edge: Eine SondGraphEdge
  * @properties: (element-type SondGraphProperty): GPtrArray von SondGraphProperty
  *
- * Setzt mehrere Properties auf einmal aus einem Property-Array.
+ * Ersetzt alle Properties der Edge durch tiefe Kopien der Properties in
+ * @properties, einschließlich Unter-Properties und mehrfach vorkommender Schlüssel.
  *
  * Beispiel:
  * |[<!-- language="C" -->
