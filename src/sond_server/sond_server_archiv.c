@@ -332,6 +332,23 @@ out:
     return ok;
 }
 
+/* Liegt das Archiv @datei schon in "abgelegteAkten"? */
+static gboolean bereits_archiviert(SondServer *server, const gchar *datei) {
+    GError *err = NULL;
+    gchar *arch_id = sond_server_seafile_get_library_id_by_name(server,
+            SOND_SERVER_ARCHIV_LIBRARY, &err);
+    gboolean da = FALSE;
+
+    g_clear_error(&err);
+    if (arch_id) {
+        da = root_file_size(server, arch_id, datei, &err) >= 0;
+        g_clear_error(&err);
+    }
+    g_free(arch_id);
+
+    return da;
+}
+
 gboolean sond_server_archiv_library(SondServer *server, const gchar *library_name,
                                     const gchar *archiv_name, gboolean delete_after,
                                     GError **error) {
@@ -355,9 +372,19 @@ gboolean sond_server_archiv_library(SondServer *server, const gchar *library_nam
     }
     datei = g_strdup_printf("%s.zip", archiv_name);
 
-    lib_id = sond_server_seafile_get_library_id_by_name(server, library_name, error);
-    if (!lib_id)
+    lib_id = sond_server_seafile_get_library_id_by_name(server, library_name, &local);
+    if (!lib_id) {
+        //Library fehlt, Archiv ist da: ein früherer Lauf war schon erfolgreich
+        if (g_error_matches(local, G_IO_ERROR, G_IO_ERROR_NOT_FOUND) &&
+                bereits_archiviert(server, datei)) {
+            LOG_INFO("'%s' ist bereits als '%s' archiviert\n", library_name, datei);
+            ok = TRUE;
+        } else {
+            g_propagate_error(error, local);
+            local = NULL;
+        }
         goto out;
+    }
 
     arch_id = sond_server_seafile_get_library_id_by_name(server,
             SOND_SERVER_ARCHIV_LIBRARY, &local);

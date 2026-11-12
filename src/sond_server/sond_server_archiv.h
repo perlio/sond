@@ -49,7 +49,8 @@ G_BEGIN_DECLS
  * CRC), lädt es nach "abgelegteAkten" und prüft dort die Größe. Erst danach
  * wird die Library gelöscht (@delete_after). Bei jedem Fehler bleibt die
  * Library unverändert. Ein vorhandenes Archiv gleichen Namens wird nicht
- * überschrieben (Fehler).
+ * überschrieben (Fehler). Die Funktion ist wiederholbar: Gibt es die Library
+ * nicht mehr, aber das Archiv, gilt das als Erfolg.
  *
  * Das temporäre Verzeichnis (TMPDIR) braucht Platz für Library plus ZIP.
  * Die Funktion blockiert, bis alles erledigt ist.

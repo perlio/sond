@@ -23,6 +23,7 @@
 
 #include "sond_server.h"
 #include "sond_server_seafile.h"
+#include "sond_server_archiv_job.h"
 #include "sond_server_auth.h"
 #include "../sond_graph/sond_graph_db.h"
 #include "../sond_graph/sond_graph_node.h"
@@ -1620,7 +1621,10 @@ static gboolean sond_server_prepare(SondServer*server,
 
     /* Seafile Endpoints registrieren */
     sond_server_seafile_register_handlers(server);
-    
+
+    /* Archivierung abgelegter Akten */
+    sond_server_archiv_job_register_handlers(server);
+
     return TRUE;
 }
 
