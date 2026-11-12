@@ -214,9 +214,10 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
             apply_widget_style(priv->textview_gegenstand, FALSE);
 
+            /* Keine Bearbeitungssitzung: nichts zu bestätigen oder zu verwerfen */
             gtk_widget_set_sensitive(priv->btn_ok, FALSE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
-            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, FALSE);
             break;
 
         case AKTE_STATE_CREATING:
@@ -304,9 +305,10 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
             apply_widget_style(priv->textview_gegenstand, FALSE);
 
-            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            /* Keine Sperre gehalten: nichts zu bestätigen oder zu verwerfen */
+            gtk_widget_set_sensitive(priv->btn_ok, FALSE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
-            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, FALSE);
             gtk_widget_set_visible(priv->btn_ablegen, FALSE);
             gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
             break;
