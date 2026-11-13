@@ -153,6 +153,38 @@ gboolean sond_archiv_ist_archiviert(SondGraphNode *node, gchar **archiv_name);
  */
 gboolean sond_archiv_markieren(SondGraphNode *node, const gchar *archiv_name);
 
+/**
+ * sond_archiv_wiederherstellung:
+ * @node: Akten-Node
+ * @datum: (out) (nullable) (transfer full): Datum, seit dem die Wiederherstellung läuft
+ *
+ * Returns: TRUE, wenn das letzte "bis" die Markierung "wiederherstellung" trägt
+ *   (die Akte wird gerade aus dem Archiv wiederhergestellt)
+ */
+gboolean sond_archiv_wiederherstellung(SondGraphNode *node, gchar **datum);
+
+/**
+ * sond_archiv_wiederherstellung_markieren:
+ * @node: Akten-Node (mit mindestens einem "bis")
+ * @datum: Datum ("JJJJ-MM-TT") des Starts
+ *
+ * Setzt die Unter-Property "wiederherstellung" am letzten "bis".
+ *
+ * Returns: FALSE, wenn der Node kein "bis" hat
+ */
+gboolean sond_archiv_wiederherstellung_markieren(SondGraphNode *node, const gchar *datum);
+
+/**
+ * sond_archiv_wiederherstellung_entfernen:
+ * @node: Akten-Node
+ *
+ * Entfernt die Markierung "wiederherstellung" vom letzten "bis" (die Markierung
+ * "archiv" bleibt als Historie).
+ *
+ * Returns: TRUE, wenn eine Markierung entfernt wurde
+ */
+gboolean sond_archiv_wiederherstellung_entfernen(SondGraphNode *node);
+
 G_END_DECLS
 
 #endif /* SOND_ARCHIV_KANDIDATEN_H */

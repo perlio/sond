@@ -144,6 +144,10 @@ SondArchivKandidat* sond_archiv_kandidat_pruefen(SondGraphNode *node,
         *grund = "kein bis";
         return NULL;
     }
+    if (sub_wert(letztes_bis, "wiederherstellung")) {
+        *grund = "wird wiederhergestellt";
+        return NULL;
+    }
     if (sub_wert(letztes_bis, "archiv")) {
         *grund = "bereits archiviert";
         return NULL;
@@ -288,4 +292,66 @@ guint sond_archiv_hoechste_ablnr(GPtrArray *nodes, guint year) {
     }
 
     return hoechste;
+}
+
+gboolean sond_archiv_wiederherstellung(SondGraphNode *node, gchar **datum) {
+    SondGraphProperty *letztes_bis = NULL;
+    guint von = 0;
+    guint bis = 0;
+    const gchar *wert = NULL;
+
+    if (datum)
+        *datum = NULL;
+    if (!node)
+        return FALSE;
+    von_bis_auswerten(node, &von, &bis, &letztes_bis);
+    wert = sub_wert(letztes_bis, "wiederherstellung");
+    if (!wert)
+        return FALSE;
+    if (datum)
+        *datum = g_strdup(wert);
+
+    return TRUE;
+}
+
+gboolean sond_archiv_wiederherstellung_markieren(SondGraphNode *node, const gchar *datum) {
+    SondGraphProperty *letztes_bis = NULL;
+    GPtrArray *subs = NULL;
+    SondGraphProperty *vorhanden = NULL;
+    guint von = 0;
+    guint bis = 0;
+
+    g_return_val_if_fail(datum != NULL, FALSE);
+    if (!node)
+        return FALSE;
+    von_bis_auswerten(node, &von, &bis, &letztes_bis);
+    if (!letztes_bis)
+        return FALSE;
+
+    subs = sond_graph_property_get_properties(letztes_bis);
+    vorhanden = subs ? sond_graph_property_find(subs, "wiederherstellung") : NULL;
+    if (vorhanden)
+        sond_graph_property_set_string(vorhanden, datum);
+    else
+        sond_graph_property_add_subproperty(letztes_bis,
+                sond_graph_property_new_string("wiederherstellung", datum));
+
+    return TRUE;
+}
+
+gboolean sond_archiv_wiederherstellung_entfernen(SondGraphNode *node) {
+    SondGraphProperty *letztes_bis = NULL;
+    GPtrArray *subs = NULL;
+    guint von = 0;
+    guint bis = 0;
+
+    if (!node)
+        return FALSE;
+    von_bis_auswerten(node, &von, &bis, &letztes_bis);
+    subs = letztes_bis ? sond_graph_property_get_properties(letztes_bis) : NULL;
+    if (!subs || !sond_graph_property_find(subs, "wiederherstellung"))
+        return FALSE;
+    sond_graph_property_list_remove(subs, "wiederherstellung");
+
+    return TRUE;
 }
