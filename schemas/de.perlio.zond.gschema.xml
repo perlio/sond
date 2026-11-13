@@ -13,7 +13,7 @@
 		</key>
 
 		<key name='autosave' type='b'>
-			<default>false</default>
+			<default>true</default>
 		</key>
 
 		<key name='zoom' type='d'>

@@ -47,42 +47,14 @@
 #include "10init/icons.h"
 #include "10init/app_window.h"
 
-/* Ein liegengebliebenes Rollback-Journal (<path>-journal) gehört zum Dateinamen,
- * nicht zum Inhalt. Würde die Datei vor dem Abspielen umbenannt, bliebe das
- * Journal neben dem alten Namen liegen und würde später in eine andere
- * Datenbank eingespielt (bzw. nie in diese). Deshalb vorher einmal öffnen und
- * lesen: SQLite spielt ein Hot Journal dabei selbst ab. */
-static gboolean recover_settle_journal(gchar const *path, GError **error) {
-	g_autofree gchar *path_journal = g_strconcat(path, "-journal", NULL);
-	sqlite3 *db = NULL;
-	gchar *errmsg = NULL;
-	gint rc = 0;
-
-	if (!g_file_test(path_journal, G_FILE_TEST_EXISTS))
-		return TRUE;
-
-	rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL);
-	if (rc == SQLITE_OK)
-		rc = sqlite3_exec(db, "SELECT count(*) FROM sqlite_master;", NULL, NULL,
-				&errmsg);
-	if (rc != SQLITE_OK) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-				"%s: Rollback-Journal konnte nicht abgespielt werden: %s", path,
-				errmsg ? errmsg : (db ? sqlite3_errmsg(db) : sqlite3_errstr(rc)));
-		sqlite3_free(errmsg);
-		sqlite3_close(db);
-
-		return FALSE;
-	}
-	sqlite3_close(db);
-
-	return TRUE;
-}
-
-static void recover(Projekt *zond, gchar *project, GApplication *app) {
-	gchar *path_bak = NULL;
+/* Rückgabe TRUE: Merker project/speichern in den Settings müssen erhalten
+ * bleiben (Abbruch oder Fehler), damit die Wiederherstellung nicht verloren
+ * geht. Unabhängig davon prüft project_open() auf eine vorhandene
+ * Arbeitskopie. */
+static gboolean recover(Projekt *zond, gchar *project, GApplication *app) {
 	gchar *path_tmp = NULL;
 	GError* error = NULL;
+	gboolean behalten = FALSE;
 
 	gchar *text_abfrage = g_strconcat("Projekt ", project,
 			" wurde nicht richtig "
@@ -91,53 +63,61 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 			NULL);
 	g_free(text_abfrage);
 
-	if (res == GTK_RESPONSE_YES) {
-		/* Bewußt NICHT mehr <project>.tmp - s. Kommentar bei
-		 * project_get_local_tmp_path(). Derselbe project-Pfad wie beim
-		 * ursprünglichen Anlegen (project_create_dbase_zond()) liefert
-		 * deterministisch denselben lokalen Pfad zurück. */
-		path_tmp = project_get_local_tmp_path(project, &error);
-		if (!path_tmp) {
-			display_message(zond->app_window,
-					"Konnte Pfad der temporären Datenbank nicht ermitteln: ",
-					error->message, NULL);
-			g_clear_error(&error);
-		} else if (!g_file_test(path_tmp, G_FILE_TEST_EXISTS)) {
-			//vor jeder Umbenennung prüfen: sonst wäre die Projektdatei weg
+	if (res != GTK_RESPONSE_YES && res != GTK_RESPONSE_NO) {
+		//[X]/Esc: beenden, Merker behalten (g_application_quit() kehrt zurück)
+		g_application_quit(app);
+
+		return TRUE;
+	}
+
+	/* Bewußt NICHT mehr <project>.tmp - s. Kommentar bei
+	 * project_get_local_tmp_path(). Derselbe project-Pfad wie beim
+	 * ursprünglichen Anlegen (project_create_dbase_zond()) liefert
+	 * deterministisch denselben lokalen Pfad zurück. */
+	path_tmp = project_get_local_tmp_path(project, &error);
+	if (!path_tmp) {
+		display_message(zond->app_window,
+				"Konnte Pfad der temporären Datenbank nicht ermitteln: ",
+				error->message, NULL);
+		g_clear_error(&error);
+		behalten = TRUE;
+	} else if (!g_file_test(path_tmp, G_FILE_TEST_EXISTS)) {
+		//vor jeder Umbenennung prüfen: sonst wäre die Projektdatei weg
+		if (res == GTK_RESPONSE_YES)
 			display_message(zond->app_window,
 					"Wiederherstellung nicht möglich - Arbeitskopie nicht "
 					"gefunden: ", path_tmp, NULL);
-		} else if (!recover_settle_journal(path_tmp, &error)
-				|| !recover_settle_journal(project, &error)) {
+	} else if (res == GTK_RESPONSE_YES) {
+		if (!project_arbeitskopie_uebernehmen(project, path_tmp, &error)) {
 			display_message(zond->app_window,
-					"Wiederherstellung abgebrochen, Projektdatei unverändert: ",
-					error->message, NULL);
+					"Wiederherstellung fehlgeschlagen: ", error->message, NULL);
 			g_clear_error(&error);
+			behalten = TRUE;
+		} else
+			display_message(zond->app_window, project,
+					" erfolgreich wiederhergestellt", NULL);
+	} else { //Nein: Arbeitskopie aufbewahren, nicht liegen lassen
+		gchar *path_neu = NULL;
+
+		if (!project_arbeitskopie_sichern(project, path_tmp, &path_neu, &error)) {
+			display_message(zond->app_window,
+					"Arbeitskopie nicht sicherbar: ", error->message, NULL);
+			g_clear_error(&error);
+			behalten = TRUE;
 		} else {
-			path_bak = g_strconcat(project, ".bak", NULL);
-			if (!sond_rename(project, path_bak, &error)) {
-				display_message(zond->app_window,
-						"Konnte Sicherungskopie (.bak) nicht erstellen: ",
-						error->message, NULL);
-				g_clear_error(&error);
-			} else if (!sond_rename(path_tmp, project, &error)) {
-				display_message(zond->app_window,
-						"Konnte wiederhergestellte Datei (.tmp) nicht umbenennen: ",
-						error->message, NULL);
-				g_clear_error(&error);
-			} else
-				display_message(zond->app_window, project,
-						" erfolgreich wiederhergestellt", NULL);
-			g_free(path_bak);
+			display_message(zond->app_window, "Arbeitskopie gesichert als\n",
+					path_neu, NULL);
+			g_free(path_neu);
 		}
-		g_free(path_tmp);
-	} else if (res != GTK_RESPONSE_NO)
-		g_application_quit(app);
+	}
+	g_free(path_tmp);
 
-	g_settings_set_string(zond->settings, "project", "");
-	g_settings_set_boolean(zond->settings, "speichern", FALSE);
+	if (!behalten) {
+		g_settings_set_string(zond->settings, "project", "");
+		g_settings_set_boolean(zond->settings, "speichern", FALSE);
+	}
 
-	return;
+	return behalten;
 }
 
 
@@ -300,12 +280,14 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 	//(d.h. in den Settings wurde project nicht auf "" gesetzt)
 	gchar *proj_settings = g_settings_get_string(zond->settings, "project");
 	gboolean speichern = g_settings_get_boolean(zond->settings, "speichern");
+	gboolean merker_behalten = FALSE;
 	if (g_strcmp0(proj_settings, "") != 0 && speichern)
-		recover(zond, proj_settings, G_APPLICATION(app));
+		merker_behalten = recover(zond, proj_settings, G_APPLICATION(app));
 	g_free(proj_settings);
 
 	project_set_widgets_sensitive(zond, FALSE);
-	g_settings_set_boolean(zond->settings, "speichern", FALSE);
+	if (!merker_behalten)
+		g_settings_set_boolean(zond->settings, "speichern", FALSE);
 
 	/* Fenster links einrasten — plattformübergreifend per GDK */
 	GdkDisplay *display = gdk_display_get_default();

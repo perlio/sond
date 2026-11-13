@@ -17,6 +17,9 @@ typedef void *gpointer;
 typedef int gint;
 typedef char gchar;
 
+/* Intervall des automatischen Speicherns (Projekt öffnen und Menü) */
+#define AUTOSAVE_INTERVAL_SECONDS (5 * 60)
+
 // Project state management
 void project_reset_changed(Projekt*, gboolean);
 void project_set_widgets_sensitive(Projekt*, gboolean);
@@ -55,6 +58,16 @@ gchar* resolve_model_path(Projekt *zond, gchar const *settings_key,
  * zwei verschiedene Projekte mit gleichem Dateinamen in unterschiedlichen
  * Ordnern würden sonst auf denselben lokalen Pfad kollidieren. */
 gchar* project_get_local_tmp_path(gchar const *project_path, GError **error);
+
+/* Arbeitskopie path_tmp zur Projektdatei machen (alte Projektdatei wird
+ * <project>.bak_<Zeit>). Spielt vorher liegengebliebene Journale ab. */
+gboolean project_arbeitskopie_uebernehmen(gchar const *project,
+		gchar const *path_tmp, GError **error);
+
+/* Arbeitskopie path_tmp als <project>.recovery_<Zeit> aufbewahren (statt sie
+ * zu überschreiben oder liegen zu lassen). *path_neu (g_free) = neuer Pfad. */
+gboolean project_arbeitskopie_sichern(gchar const *project,
+		gchar const *path_tmp, gchar **path_neu, GError **error);
 
 /* Container-bewusste Alternative zu filename_oeffnen() (misc.c) - öffnet
  * einen modalen Dialog mit einem eigenen, frischen Dateiverzeichnis-Baum

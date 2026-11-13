@@ -1109,7 +1109,7 @@ static void cb_app_autosave(GSimpleAction *a, GVariant *p, gpointer d) {
 	g_settings_set_boolean(zond->settings, "autosave", active);
 	if (!zond->dbase_zond) return;
 	if (active)
-		g_timeout_add_seconds(10 * 60, project_timeout_autosave, zond);
+		g_timeout_add_seconds(AUTOSAVE_INTERVAL_SECONDS, project_timeout_autosave, zond);
 	else if (!g_source_remove_by_user_data(zond))
 		display_message(zond->app_window,
 				"autosave-Timeout konnte nicht entfernt werden", NULL);

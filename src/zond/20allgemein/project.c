@@ -50,9 +50,6 @@
 #include "db_check.h"
 #include "db_check_fenster.h"
 
-// Constants
-#define AUTOSAVE_INTERVAL_SECONDS (10 * 60)  // 10 minutes
-
 // ============================================================================
 // Project State Management
 // ============================================================================
@@ -163,12 +160,156 @@ static gint project_restart_work(ZondDBase *zond_dbase, gpointer data,
 	return 0;
 }
 
+/* Ein liegengebliebenes Rollback-Journal (<path>-journal) gehört zum Dateinamen,
+ * nicht zum Inhalt. Würde die Datei vor dem Abspielen umbenannt, bliebe das
+ * Journal neben dem alten Namen liegen und würde später in eine andere
+ * Datenbank eingespielt (bzw. nie in diese). Deshalb vorher einmal öffnen und
+ * lesen: SQLite spielt ein Hot Journal dabei selbst ab. */
+static gboolean project_journal_abspielen(gchar const *path, GError **error) {
+	g_autofree gchar *path_journal = g_strconcat(path, "-journal", NULL);
+	sqlite3 *db = NULL;
+	gchar *errmsg = NULL;
+	gint rc = 0;
+
+	if (!g_file_test(path_journal, G_FILE_TEST_EXISTS))
+		return TRUE;
+
+	rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL);
+	if (rc == SQLITE_OK)
+		rc = sqlite3_exec(db, "SELECT count(*) FROM sqlite_master;", NULL, NULL,
+				&errmsg);
+	if (rc != SQLITE_OK) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"%s: Rollback-Journal konnte nicht abgespielt werden: %s", path,
+				errmsg ? errmsg : (db ? sqlite3_errmsg(db) : sqlite3_errstr(rc)));
+		sqlite3_free(errmsg);
+		sqlite3_close(db);
+
+		return FALSE;
+	}
+	sqlite3_close(db);
+
+	return TRUE;
+}
+
+/* Arbeitskopie zur Projektdatei machen; die bisherige Projektdatei bleibt als
+ * <project>.bak_<Zeit> erhalten (der Zeitstempel verhindert, dass eine frühere
+ * Sicherung überschrieben wird). Bei Fehler bleibt die Projektdatei unverändert,
+ * solange nicht erst das zweite Umbenennen scheitert (dann liegt sie als .bak_...). */
+gboolean project_arbeitskopie_uebernehmen(gchar const *project,
+		gchar const *path_tmp, GError **error) {
+	g_autofree gchar *path_bak = NULL;
+	g_autofree gchar *zeit = NULL;
+	g_autoptr(GDateTime) jetzt = NULL;
+
+	if (!project_journal_abspielen(path_tmp, error)
+			|| !project_journal_abspielen(project, error))
+		return FALSE;
+
+	jetzt = g_date_time_new_now_local();
+	zeit = g_date_time_format(jetzt, "%Y%m%d_%H%M%S");
+	path_bak = g_strdup_printf("%s.bak_%s", project, zeit);
+	if (!sond_rename(project, path_bak, error)) {
+		g_prefix_error(error, "Sicherungskopie (.bak_...) nicht möglich: ");
+
+		return FALSE;
+	}
+
+	if (!sond_rename(path_tmp, project, error)) {
+		g_prefix_error(error, "Arbeitskopie nicht umbenennbar (Projektdatei "
+				"liegt jetzt als .bak_... vor): ");
+
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/* Arbeitskopie unter Zeitstempel neben der Projektdatei sichern (statt sie
+ * zu überschreiben). */
+gboolean project_arbeitskopie_sichern(gchar const *project,
+		gchar const *path_tmp, gchar **path_neu, GError **error) {
+	g_autofree gchar *zeit = NULL;
+	g_autoptr(GDateTime) jetzt = NULL;
+	gchar *ziel = NULL;
+
+	if (!project_journal_abspielen(path_tmp, error))
+		return FALSE;
+
+	jetzt = g_date_time_new_now_local();
+	zeit = g_date_time_format(jetzt, "%Y%m%d_%H%M%S");
+	ziel = g_strdup_printf("%s.recovery_%s", project, zeit);
+
+	if (!sond_rename(path_tmp, ziel, error)) {
+		g_free(ziel);
+
+		return FALSE;
+	}
+
+	if (path_neu)
+		*path_neu = ziel;
+	else
+		g_free(ziel);
+
+	return TRUE;
+}
+
+/* Existiert zum Projekt schon eine Arbeitskopie, ist das Projekt nicht sauber
+ * geschlossen worden (project_close() löscht sie) - unabhängig von GSettings.
+ * Sie wird nie blind überschrieben: Wiederherstellen oder als .recovery_<Zeit>
+ * sichern. Rückgabe 0 weitermachen, 1 Nutzer hat abgebrochen, -1 Fehler. */
+static gint project_arbeitskopie_pruefen(Projekt *zond, gchar const *path,
+		gchar const *path_tmp, gboolean create, GError **error) {
+	g_autofree gchar *text = NULL;
+	g_autofree gchar *path_neu = NULL;
+	gint res = 0;
+
+	if (!g_file_test(path_tmp, G_FILE_TEST_EXISTS))
+		return 0;
+
+	if (create) { //neues Projekt: alte Arbeitskopie gehört nicht dazu, aber sichern
+		if (!project_arbeitskopie_sichern(path, path_tmp, &path_neu, error)) {
+			g_prefix_error(error, "Vorhandene Arbeitskopie nicht sicherbar: ");
+
+			return -1;
+		}
+
+		return 0;
+	}
+
+	text = g_strdup_printf("Zu %s gibt es eine Arbeitskopie mit möglicherweise "
+			"nicht gespeicherten Änderungen (Projekt nicht richtig geschlossen "
+			"oder in einem anderen Zond geöffnet).\n\nWiederherstellen? Bei "
+			"\"Nein\" wird sie als Datei \"%s.recovery_...\" aufbewahrt.",
+			zond->project_name, zond->project_name);
+	res = abfrage_frage(zond->app_window, "Wiederherstellen", text, NULL);
+
+	if (res == GTK_RESPONSE_YES) {
+		if (!project_arbeitskopie_uebernehmen(path, path_tmp, error)) {
+			g_prefix_error(error, "Wiederherstellung fehlgeschlagen: ");
+
+			return -1;
+		}
+	} else if (res == GTK_RESPONSE_NO) {
+		if (!project_arbeitskopie_sichern(path, path_tmp, &path_neu, error)) {
+			g_prefix_error(error, "Arbeitskopie nicht sicherbar: ");
+
+			return -1;
+		}
+		display_message(zond->app_window, "Arbeitskopie gesichert als\n",
+				path_neu, NULL);
+	} else
+		return 1;
+
+	return 0;
+}
+
 /**
  * Create and initialize the project databases
  * @param zond The project structure
  * @param create TRUE to create new database, FALSE to open existing
  * @param error GError for error reporting
- * @return 0 on success, -1 on error
+ * @return 0 on success, -1 on error, 1 if user cancelled
  */
 static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **error) {
 	gint rc = 0;
@@ -178,15 +319,25 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	gchar *path_tmp = NULL;
 
 	path = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
-	zond_dbase_store = zond_dbase_new(path, FALSE, create, error);
-	if (!zond_dbase_store)
-		return -1;
 
 	/* Bewußt NICHT mehr neben der Projektdatei (die auf einem Cloud-Sync-
 	 * Laufwerk liegen kann) - s. Kommentar bei project_get_local_tmp_path(). */
 	path_tmp = project_get_local_tmp_path(path, error);
-	if (!path_tmp) {
-		g_object_unref(zond_dbase_store);
+	if (!path_tmp)
+		return -1;
+
+	//vorhandene Arbeitskopie nie blind überschreiben (vor dem Öffnen von store)
+	rc = project_arbeitskopie_pruefen(zond, path, path_tmp, create, error);
+	if (rc) {
+		g_free(path_tmp);
+
+		return rc;
+	}
+
+	zond_dbase_store = zond_dbase_new(path, FALSE, create, error);
+	if (!zond_dbase_store) {
+		g_free(path_tmp);
+
 		return -1;
 	}
 
@@ -719,7 +870,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	rc = project_create_dbase_zond(zond, create, error);
 	if (rc) {
 		project_open_cleanup(zond);
-		return -1;
+
+		return (rc == 1) ? 0 : -1; //1: Nutzer hat abgebrochen
 	}
 
 	// Eingangsangaben vor dem Dateibaum bereitstellen (er fragt sie beim Anzeigen ab)

@@ -6022,3 +6022,29 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Bekannte Grenzen: Änderungen außerhalb von zond lassen verwaiste Stempel zurück;
  Rechneruhren können die Zettelreihenfolge verschieben; Ersatzdatum nicht grau markiert.
 ```
+
+## Absturz-Wiederherstellung: Arbeitskopie nie blind überschreiben (13.11.2026) (#250)
+
+```text
+ Anlass: Fachbericht zu einem Datenverlust nach Absturz (Arbeitskopie .tmp wurde beim erneuten
+ Öffnen überschrieben).
+ recover() (zond_init.c): nach g_application_quit() (Dialog mit [X]/Esc) fehlte das return,
+ die Merker project/speichern in den Settings wurden trotzdem gelöscht. Jetzt Rücksprung;
+ ebenso bleiben die Merker bei Fehlern der Wiederherstellung erhalten (Rückgabewert, auch das
+ anschliessende Zurücksetzen von speichern in zond_init() entfällt dann).
+ project_create_dbase_zond() (project.c): vor dem Öffnen prüft project_arbeitskopie_pruefen(),
+ ob zur Projektdatei schon eine Arbeitskopie existiert (unabhängig von GSettings, project_close()
+ löscht sie sonst). Ja: Arbeitskopie wird Projektdatei, alte Datei als <name>.bak_JJJJMMTT_HHMMSS
+ (Zeitstempel, damit eine frühere Sicherung nie überschrieben wird); Nein: Sicherung als
+ <name>.recovery_JJJJMMTT_HHMMSS neben der Projektdatei; [X]: Öffnen abgebrochen. Neues
+ Projekt: alte Arbeitskopie wird still als .recovery_ gesichert. Läuft das Projekt in einer
+ zweiten Instanz, scheitert das Umbenennen der geöffneten Datei unter Windows mit Meldung.
+ "Nein" in recover() sichert die Arbeitskopie ebenfalls als .recovery_ (vorher blieb sie
+ liegen und wurde beim Öffnen erneut abgefragt).
+ Journal-Behandlung (project_journal_abspielen) und project_arbeitskopie_uebernehmen() liegen
+ jetzt in project.c und werden von recover() mitbenutzt.
+ Autosave: Standard im Schema jetzt true (de.perlio.zond.gschema.xml, neu kompilieren);
+ Intervall 5 statt 10 Minuten, einmal definiert als AUTOSAVE_INTERVAL_SECONDS (project.h) und
+ in project.c und headerbar.c benutzt (vorher an beiden Stellen hart codiert).
+ Offen: install-assoc.bat (UserChoice-Verknüpfung, .pdf-Zuordnung) nicht geändert.
+```
