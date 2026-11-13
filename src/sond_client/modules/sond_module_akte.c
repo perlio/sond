@@ -84,6 +84,7 @@ typedef struct {
     gboolean unsaved_conflict; /* Konflikt (gesperrt/geaendert): Eingaben stehen noch in der Maske, wurden aber nicht gespeichert */
     gboolean ablegen_vorgemerkt;      /* "Akte ablegen" gedrückt: bis/Ablagenr. kommen erst beim Speichern dazu */
     gboolean reaktivieren_vorgemerkt; /* "Akte reaktivieren" gedrückt: von kommt erst beim Speichern dazu */
+    gboolean ok_laeuft;               /* "Ok" ruft das Speichern auf: dann keine Erfolgsmeldung */
     gboolean wiederherstellung_vorgemerkt; /* archivierte Akte: "Ok" stößt die Wiederherstellung an */
     gchar *wh_library;                /* dazu: Library-Name */
     gchar *wh_archiv;                 /* dazu: Archivname */
@@ -401,6 +402,13 @@ static void show_info_dialog(GtkWidget *parent, const gchar *title, const gchar 
     
     gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(parent)));
     g_object_unref(dialog);
+}
+
+/* Erfolgsmeldung nach dem Speichern; bei "Ok" entfällt sie (die Maske schließt sich) */
+static void speicher_hinweis(SondModuleAktePrivate *priv, const gchar *message) {
+    if (priv->ok_laeuft)
+        return;
+    show_info_dialog(priv->main_widget, "Gespeichert", message);
 }
 
 static gboolean parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) {
@@ -2970,7 +2978,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 
 			gchar *regnr_display = format_regnr(lfd_nr, year);
 			gchar *msg = g_strdup_printf("Akte %s wurde erfolgreich gespeichert.", regnr_display);
-			show_info_dialog(priv->main_widget, "Gespeichert", msg);
+			speicher_hinweis(priv, msg);
 			g_free(msg);
 			g_free(regnr_display);
 			g_free(library_id);
@@ -3072,7 +3080,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             sond_client_set_last_regnr(priv->client, lfd, year);
 
             update_ui_from_node(priv);
-            show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
+            speicher_hinweis(priv, "Akte wurde erfolgreich gespeichert.");
 
             return;  /* Fertig! */
         }
@@ -3173,7 +3181,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 g_ptr_array_unref(rn);
         }
 
-        show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
+        speicher_hinweis(priv, "Akte wurde erfolgreich gespeichert.");
     } else {
         gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannt");
 
@@ -3286,7 +3294,9 @@ static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
      * gezeigt), bleibt die Akte offen - sonst gingen die Eingaben verloren. */
     if (priv->state != AKTE_STATE_READONLY) {   /* Lesemodus: nichts zu speichern */
         priv->last_save_ok = FALSE;
+        priv->ok_laeuft = TRUE;   //bei "Ok" kein Hinweis: das Schließen der Maske ist die Rückmeldung
         on_speichern_clicked(button, priv);
+        priv->ok_laeuft = FALSE;
 
         if (priv->current_node && !priv->last_save_ok) {
             return;
