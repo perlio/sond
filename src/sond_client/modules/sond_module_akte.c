@@ -307,7 +307,8 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, priv->ablegen_vorgemerkt || priv->reaktivieren_vorgemerkt);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
-            gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
+            //bei vorgemerkter Wiederherstellung bleibt nur Ok oder Abbrechen
+            gtk_widget_set_sensitive(priv->btn_reaktivieren, !priv->wiederherstellung_vorgemerkt);
             break;
 
         case AKTE_STATE_AUSGEWAEHLT:
@@ -333,22 +334,43 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
     update_action_widgets(priv);
 }
 
+/* Die geladene Akte ist (gespeichert) abgelegt, auch wenn sie archiviert ist oder
+ * gerade wiederhergestellt wird. Eine Akte ohne "von" (noch nicht angelegt) und
+ * die Offline-Anzeige ohne Node zählen nicht. */
+static gboolean akte_ist_abgelegt(SondModuleAktePrivate *priv) {
+    GPtrArray *von_props = NULL;
+    gboolean materiell = FALSE;
+
+    if (!priv->current_node || sond_graph_node_get_id(priv->current_node) <= 0)
+        return FALSE;
+
+    von_props = sond_graph_node_get_property(priv->current_node, "von");
+    if (von_props) {
+        materiell = von_props->len > 0;
+        g_ptr_array_unref(von_props);
+    }
+
+    return materiell && !ist_akte_aktiv(priv->current_node);
+}
+
 /* Freischaltung der Knöpfe. Es gibt keinen Online-Zustand: Serverfunktionen
  * (Neue Akte, Bearbeiten, Speichern, Ablegen ...) sind bedienbar, wo sie
  * inhaltlich Sinn haben, und scheitern beim Klick mit einer Meldung, wenn der
  * Server nicht zu erreichen ist. Import und zond brauchen nur die gewählte
- * Akte und das SeaDrive-Laufwerk. */
+ * Akte und das SeaDrive-Laufwerk; bei einer abgelegten Akte sind beide gesperrt
+ * (erst reaktivieren). */
 static void update_action_widgets(SondModuleAktePrivate *priv) {
     gboolean gewaehlt = sond_client_get_current_akte(priv->client, NULL, NULL);
+    gboolean arbeit = gewaehlt && !akte_ist_abgelegt(priv);
     AkteState st = priv->state;
 
     gtk_widget_set_sensitive(priv->btn_neue_akte,
             st == AKTE_STATE_INITIAL || st == AKTE_STATE_AUSGEWAEHLT);
 
     gtk_widget_set_sensitive(priv->btn_import,
-            gewaehlt && st != AKTE_STATE_CREATING);
+            arbeit && st != AKTE_STATE_CREATING);
     gtk_widget_set_sensitive(priv->btn_zond,
-            gewaehlt && st != AKTE_STATE_CREATING);
+            arbeit && st != AKTE_STATE_CREATING);
 
     //"Bearbeiten": solange die Akte gewählt oder nur gesperrt angezeigt wird
     gtk_widget_set_sensitive(priv->btn_break_lock,
@@ -1210,7 +1232,7 @@ static void update_status_display(SondModuleAktePrivate *priv) {
         gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: wird beim Ok wiederhergestellt");
         gtk_widget_set_visible(priv->btn_ablegen, FALSE);
         gtk_widget_set_visible(priv->btn_reaktivieren, TRUE);
-        gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
+        gtk_widget_set_sensitive(priv->btn_reaktivieren, FALSE);   //nur noch Ok oder Abbrechen
     } else if (priv->ablegen_vorgemerkt) {
         gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: wird beim Speichern abgelegt");
         gtk_widget_set_visible(priv->btn_ablegen, FALSE);
@@ -1276,6 +1298,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     
     /* Status-Anzeige aktualisieren */
     update_status_display(priv);
+    update_action_widgets(priv);
 
     /* Library-Name (heißt wie die RegNr) für OCR merken */
     g_free(priv->library_name);
@@ -1893,6 +1916,7 @@ static void wh_beim_auswaehlen(SondModuleAktePrivate *priv) {
     sond_client_set_io_timeout(priv->client, alt);
     g_free(text);
     update_status_display(priv);
+    update_action_widgets(priv);
 }
 
 typedef struct {
@@ -2053,12 +2077,9 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
         return;
     }
 
-    /* Eine vorgemerkte Wiederherstellung wird damit zurückgenommen */
-    if (priv->wiederherstellung_vorgemerkt) {
-        wiederherstellung_vormerkung_loeschen(priv);
-        aktion_neu_darstellen(priv);
+    //eine vorgemerkte Wiederherstellung lässt sich nur mit "Abbrechen" zurücknehmen
+    if (priv->wiederherstellung_vorgemerkt)
         return;
-    }
 
     /* Ein noch nicht gespeichertes Ablegen wird damit einfach zurückgenommen */
     if (priv->ablegen_vorgemerkt) {
@@ -3223,9 +3244,10 @@ static void finish_akte(SondModuleAktePrivate *priv) {
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
-    
-    /* Letzte RegNr vorschlagen */
+
+    /* Letzte RegNr vorschlagen; der Fokus zeigt, dass die nächste Akte erwartet wird */
     suggest_last_regnr(priv);
+    gtk_widget_grab_focus(priv->regnr_entry);
 }
 
 static void on_ok_discard_response(GObject *source, GAsyncResult *result,
@@ -3340,9 +3362,10 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
-    
-    /* Letzte RegNr vorschlagen */
+
+    /* Letzte RegNr vorschlagen; der Fokus zeigt, dass die nächste Akte erwartet wird */
     suggest_last_regnr(priv);
+    gtk_widget_grab_focus(priv->regnr_entry);
 }
 
 /**
