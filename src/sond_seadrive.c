@@ -24,6 +24,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 
+#include "sond_seadrive_core.h"
 #include "sond_treeview.h"
 #include "sond_treeviewfm_private.h"
 #include "sond_fileparts.h"
@@ -98,37 +99,12 @@ typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder)(
     LPOVERLAPPED Overlapped);
 
 /* ------------------------------------------------------------------ */
-/*  Runtime-loaded CF-API pointers                                     */
+/*  CfGetPlaceholderInfo (geladen in sond_seadrive_core.c)             */
 /* ------------------------------------------------------------------ */
 
-static PFN_CfSetPinState           g_CfSetPinState           = NULL;
-static PFN_CfGetPlaceholderInfo    g_CfGetPlaceholderInfo    = NULL;
-static PFN_CfGetSyncRootInfoByPath g_CfGetSyncRootInfoByPath = NULL;
-static PFN_CfHydratePlaceholder    g_CfHydratePlaceholder    = NULL;
-static HMODULE                     g_hCldApi                 = NULL;
-static GOnce                       g_cfapi_once              = G_ONCE_INIT;
-
-static gpointer cfapi_init_once(gpointer data)
+static PFN_CfGetPlaceholderInfo cf_get_placeholder_info(void)
 {
-    (void)data;
-    g_hCldApi = LoadLibraryA("cldapi.dll");
-    if (!g_hCldApi)
-        return NULL;
-
-    g_CfSetPinState = (PFN_CfSetPinState)
-        GetProcAddress(g_hCldApi, "CfSetPinState");
-    g_CfGetPlaceholderInfo = (PFN_CfGetPlaceholderInfo)
-        GetProcAddress(g_hCldApi, "CfGetPlaceholderInfo");
-    g_CfGetSyncRootInfoByPath = (PFN_CfGetSyncRootInfoByPath)
-        GetProcAddress(g_hCldApi, "CfGetSyncRootInfoByPath");
-    g_CfHydratePlaceholder = (PFN_CfHydratePlaceholder)
-        GetProcAddress(g_hCldApi, "CfHydratePlaceholder");
-    return g_hCldApi;
-}
-
-static void cfapi_init(void)
-{
-    g_once(&g_cfapi_once, cfapi_init_once, NULL);
+    return (PFN_CfGetPlaceholderInfo) sond_seadrive_core_placeholder_info();
 }
 
 /* ------------------------------------------------------------------ */
@@ -425,7 +401,7 @@ static gboolean watcher_check_in_sync(const gchar *utf8_path)
     HANDLE h;
     wchar_t *lp;
 
-    if (!g_CfGetPlaceholderInfo)
+    if (!cf_get_placeholder_info())
         return FALSE; /* im Zweifel: not in sync */
 
     lp = prepare_long_path(utf8_path, NULL);
@@ -440,7 +416,7 @@ static gboolean watcher_check_in_sync(const gchar *utf8_path)
     if (h == INVALID_HANDLE_VALUE)
         return FALSE;
 
-    hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_BASIC,
+    hr = cf_get_placeholder_info()(h, CF_PLACEHOLDER_INFO_BASIC,
             &basic, sizeof(basic), &returned);
     CloseHandle(h);
 
@@ -459,7 +435,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
     SondTreeviewFM *stvfm = SOND_TREEVIEWFM(user_data);
 
     /* CF-API initialisieren - muss vor dem Thread-Start erfolgen */
-    cfapi_init();
+    (void) cf_get_placeholder_info();
 
     /* Eigene Kopie statt geliehenem Zeiger auf stvfm_priv->root: der
      * Aufrufer (sond_treeviewfm_set_root()) joint diesen Thread zwar immer
@@ -703,134 +679,6 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
     return NULL;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_is_seadrive_path                        */
-/* ------------------------------------------------------------------ */
-
-gboolean sond_seadrive_is_seadrive_path(const gchar *full_path)
-{
-    wchar_t *lp;
-    BYTE     buf[8];
-    DWORD    returned = 0;
-    HRESULT  hr;
-
-    cfapi_init();
-    if (!g_CfGetSyncRootInfoByPath)
-        return FALSE;
-
-    lp = prepare_long_path(full_path, NULL);
-    if (!lp)
-        return FALSE;
-
-    hr = g_CfGetSyncRootInfoByPath(lp, 0, buf, sizeof(buf), &returned);
-    g_free(lp);
-
-    return SUCCEEDED(hr) || hr == HRESULT_MORE_DATA;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_get_pin_state                           */
-/* ------------------------------------------------------------------ */
-
-guint sond_seadrive_get_pin_state(const gchar *full_path)
-{
-    wchar_t *lp;
-    DWORD    attrs;
-
-    lp = prepare_long_path(full_path, NULL);
-    if (!lp)
-        return STVFM_PIN_STATE_UNSPECIFIED;
-
-    attrs = GetFileAttributesW(lp);
-    g_free(lp);
-
-    if (attrs == INVALID_FILE_ATTRIBUTES)
-        return STVFM_PIN_STATE_UNSPECIFIED;
-
-    if (attrs & FILE_ATTRIBUTE_PINNED)
-        return STVFM_PIN_STATE_PINNED;
-    if (attrs & FILE_ATTRIBUTE_UNPINNED)
-        return STVFM_PIN_STATE_UNPINNED;
-    return STVFM_PIN_STATE_UNSPECIFIED;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_set_pin_state                           */
-/* ------------------------------------------------------------------ */
-
-gboolean sond_seadrive_set_pin_state(const gchar *full_path,
-                                     guint        pin_state,
-                                     gboolean     recurse,
-                                     GError     **error)
-{
-    wchar_t *lp;
-    HANDLE   h;
-    HRESULT  hr;
-
-    cfapi_init();
-    if (!g_CfSetPinState) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                "CfSetPinState nicht verfügbar");
-        return FALSE;
-    }
-
-    lp = prepare_long_path(full_path, error);
-    if (!lp)
-        return FALSE;
-
-    h = CreateFileW(lp,
-                    FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    g_free(lp);
-
-    if (h == INVALID_HANDLE_VALUE) {
-        if (error) {
-            gchar *msg = g_win32_error_message(GetLastError());
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "Cannot open '%s': %s", full_path, msg);
-            g_free(msg);
-        }
-        return FALSE;
-    }
-
-    hr = g_CfSetPinState(h, (DWORD)pin_state,
-                         recurse ? CF_SET_PIN_FLAG_RECURSE : CF_SET_PIN_FLAG_NONE,
-                         NULL);
-    CloseHandle(h);
-
-    if (FAILED(hr)) {
-        if (error) {
-            gchar *msg = g_win32_error_message(hr & 0xFFFF);
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "CfSetPinState('%s'): %s (0x%08lX)",
-                    full_path, msg, (unsigned long)hr);
-            g_free(msg);
-        }
-        return FALSE;
-    }
-    return TRUE;
-}
-
-void sond_seadrive_pin_note_failure(GPtrArray *failed, const gchar *full_path,
-        GError *error)
-{
-    gchar *base = NULL;
-    const gchar *reason = error ? error->message : "unbekannter Fehler";
-    const gchar *sep = strstr(reason, "): ");
-
-    if (!failed)
-        return;
-
-    //die Meldung von sond_seadrive_set_pin_state() beginnt mit dem Pfad
-    if (sep)
-        reason = sep + 3;
-
-    base = g_path_get_basename(full_path);
-    g_ptr_array_add(failed, g_strdup_printf("%s - %s", base, reason));
-    g_free(base);
-}
-
 void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
 {
     GString *text = NULL;
@@ -852,131 +700,6 @@ void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
 
     display_message(parent, "SeaDrive\n\n", text->str, NULL);
     g_string_free(text, TRUE);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_hydrate                                 */
-/* ------------------------------------------------------------------ */
-
-/*
- * sond_seadrive_hydrate:
- *
- * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
- * Cloud-Datei an, über die offizielle, für genau diesen Zweck vorgesehene
- * CfHydratePlaceholder()-API (cfapi.h/cldapi.dll, dynamisch geladen wie der
- * Rest dieser Datei - s. Kommentar bei cfapi_init_once(), derselbe Grund:
- * kein cfapi.h im hier verwendeten MinGW-Toolchain). Der Trick
- * CreateFileW(GENERIC_READ)+ReadFile() (ein Byte lesen, um SeaDrive/Windows
- * zum "Recall" zu bewegen) schlägt unter aktuellem Windows zuverlässig mit
- * ERROR_CLOUD_FILE_ACCESS_DENIED fehl. Laut Microsoft-Dokumentation genügt
- * für CfHydratePlaceholder ein Handle mit reinem Attribut-Zugriff
- * (FILE_READ_ATTRIBUTES statt GENERIC_READ), das ist vermutlich der
- * Unterschied, den Windows jetzt strenger prüft. Length ist auf 1 Byte
- * begrenzt.
- *
- * Bereits lokal vorhandene Dateien (kein FILE_ATTRIBUTE_RECALL_ON_DATA_
- * ACCESS) sind ein No-Op (TRUE, kein Fehler). Gibt FALSE mit gesetztem
- * error zurück, wenn cldapi.dll/CfHydratePlaceholder nicht verfügbar ist
- * oder der Aufruf selbst fehlschlägt - der Aufrufer fällt in diesem Fall
- * auf den normalen Öffnen-Weg zurück (s. sond_treeviewfm_open()).
- *
- * Die Begrenzung auf 1 Byte spart das Warten auf die Downloaddauer nicht:
- * bei einer 51-GB-Datei blockierte der Aufruf trotzdem minutenlang
- * (vermutlich lädt der SeaDrive-Provider unabhängig von der angeforderten
- * Länge grundsätzlich die ganze Datei, bevor CfHydratePlaceholder
- * zurückkehrt). Diese Funktion ist deshalb synchron/blockierend - s.
- * sond_seadrive_hydrate_async() weiter unten, die sie in einem
- * Hintergrund-Thread aufruft, und sond_seadrive_needs_hydration() für einen
- * schnellen, nicht-blockierenden Vorab-Check (nur GetFileAttributesW), mit
- * dem der Aufrufer entscheiden kann, ob eine Hydrierung überhaupt nötig ist,
- * ohne dafür einen Thread zu starten.
- */
-gboolean sond_seadrive_needs_hydration(const gchar *full_path)
-{
-    wchar_t *lp;
-    DWORD    attrs;
-
-    lp = prepare_long_path(full_path, NULL);
-    if (!lp)
-        return FALSE;
-
-    attrs = GetFileAttributesW(lp);
-    g_free(lp);
-
-    if (attrs == INVALID_FILE_ATTRIBUTES)
-        return FALSE;
-
-    return (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-}
-gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
-{
-    wchar_t *lp;
-    DWORD    attrs;
-    HANDLE   h;
-    HRESULT  hr;
-    LARGE_INTEGER offset = { .QuadPart = 0 };
-    LARGE_INTEGER length = { .QuadPart = 1 };
-
-    lp = prepare_long_path(full_path, error);
-    if (!lp)
-        return FALSE;
-
-    attrs = GetFileAttributesW(lp);
-    if (attrs == INVALID_FILE_ATTRIBUTES) {
-        if (error) {
-            gchar *msg = g_win32_error_message(GetLastError());
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "GetFileAttributesW('%s'): %s", full_path, msg);
-            g_free(msg);
-        }
-        g_free(lp);
-        return FALSE;
-    }
-
-    if (!(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)) {
-        /* schon lokal - nichts zu tun */
-        g_free(lp);
-        return TRUE;
-    }
-
-    cfapi_init();
-    if (!g_CfHydratePlaceholder) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                "CfHydratePlaceholder nicht verfügbar (cldapi.dll)");
-        g_free(lp);
-        return FALSE;
-    }
-
-    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    g_free(lp);
-
-    if (h == INVALID_HANDLE_VALUE) {
-        if (error) {
-            gchar *msg = g_win32_error_message(GetLastError());
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "CreateFileW('%s'): %s", full_path, msg);
-            g_free(msg);
-        }
-        return FALSE;
-    }
-
-    hr = g_CfHydratePlaceholder(h, offset, length, CF_HYDRATE_FLAG_NONE, NULL);
-    CloseHandle(h);
-
-    if (FAILED(hr)) {
-        if (error) {
-            gchar *msg = g_win32_error_message(hr & 0xFFFF);
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "CfHydratePlaceholder('%s'): %s (0x%08lX)",
-                    full_path, msg, (unsigned long) hr);
-            g_free(msg);
-        }
-        return FALSE;
-    }
-
-    return TRUE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1316,7 +1039,7 @@ void sond_seadrive_hydrate_cancel(const gchar *full_path)
 /* CF_PLACEHOLDER_INFO_STANDARD liefert u.a. OnDiskDataSize (bereits lokal
  * vorhandene Bytes) - Struktur-Layout 1:1 aus der offiziellen cfapi.h
  * übernommen, hier wie beim Rest der Datei manuell dupliziert (kein cfapi.h
- * im verwendeten MinGW-Toolchain, s. Kommentar bei cfapi_init_once()).
+ * im verwendeten MinGW-Toolchain, s. sond_seadrive_core.c).
  * PinState/InSyncState hier bewusst als DWORD (nicht als CF_PIN_STATE/
  * CF_IN_SYNC_STATE-Enum) deklariert, analog SeaDrivePlaceholderBasicInfo
  * oben - nur OnDiskDataSize wird tatsächlich ausgewertet.
@@ -1434,11 +1157,10 @@ static void load_entry_query(LoadEntry *entry)
     if (h == INVALID_HANDLE_VALUE)
         return;
 
-    cfapi_init();
-    if (g_CfGetPlaceholderInfo) {
+    if (cf_get_placeholder_info()) {
         SeaDrivePlaceholderStandardInfo info = { 0 };
         DWORD returned_length = 0;
-        HRESULT hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_STANDARD,
+        HRESULT hr = cf_get_placeholder_info()(h, CF_PLACEHOLDER_INFO_STANDARD,
                 &info, sizeof(info), &returned_length);
 
         if (SUCCEEDED(hr)) {

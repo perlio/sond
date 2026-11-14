@@ -1,6 +1,7 @@
 #ifndef SOND_SEADRIVE_H_INCLUDED
 #define SOND_SEADRIVE_H_INCLUDED
 
+#include "sond_seadrive_core.h"
 #include "sond_treeviewfm.h"
 #include "sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus */
 
@@ -13,12 +14,7 @@ G_BEGIN_DECLS
  * All functions below are no-ops on non-Windows platforms.
  */
 
-/* Pin state values (mirror CF_PIN_STATE_* from cfapi.h) */
-#define STVFM_PIN_STATE_UNSPECIFIED  0   /* "Always available" deactivated  */
-#define STVFM_PIN_STATE_PINNED       1   /* "Always available" activated    */
-#define STVFM_PIN_STATE_UNPINNED     2   /* clear cache                     */
-#define STVFM_PIN_STATE_EXCLUDED     3
-#define STVFM_PIN_STATE_INHERIT      4
+/* Pin state values: s. sond_seadrive_core.h */
 
 /* Der Viewer linkt sond_seadrive.c nicht (haengt am TreeviewFM): Stubs. */
 #if defined(_WIN32) && !defined(VIEWER)

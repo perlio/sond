@@ -35,12 +35,12 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
-	$(SRC_DIRS)/sond_tvfm_item.c \
+	$(SRC_DIRS)/sond_tvfm_item.c $(SRC_DIRS)/sond_tvfm_owner.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c \
 	$(SRC_DIRS)/sond_text_extract.c \
-	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_seadrive.c \
+	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_seadrive.c $(SRC_DIRS)/sond_seadrive_core.c \
 	$(SRC_DIRS)/sond_icon_util.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c $(SRC_DIRS)/sond_zond_schema.c \
 	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_eingang_cache.c \
@@ -87,7 +87,8 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/misc_stdlib.c \
 	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_akte_name.c \
-	$(SRC_DIRS)/sond_zond_ctl.c $(SRC_DIRS)/sond_seadrive_sync.c
+	$(SRC_DIRS)/sond_zond_ctl.c $(SRC_DIRS)/sond_seadrive_sync.c \
+	$(SRC_DIRS)/sond_seadrive_core.c
 CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb)
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb)
 endif

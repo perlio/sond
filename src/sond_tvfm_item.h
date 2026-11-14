@@ -12,7 +12,12 @@
 
 #include <glib.h>
 #include <glib-object.h>
-#include <gtk/gtk.h>
+/* GTK ist optional: das Item selbst braucht es nicht (nur die GTK3-Helfer unten) */
+#if defined(__has_include)
+#  if __has_include(<gtk/gtk.h>)
+#    include <gtk/gtk.h>
+#  endif
+#endif
 
 typedef struct _SondFilePart SondFilePart;
 /* Vorwärtsdeklaration - die eigentliche G_DECLARE_DERIVABLE_TYPE()-
@@ -62,22 +67,40 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
 
 gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 
-SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
+/* owner: der Baum/die Ansicht, zu der das Item gehört (muss SondTVFMOwner, s.
+ * sond_tvfm_owner.h, implementieren) */
+SondTVFMItem* sond_tvfm_item_create(gpointer owner,
 		SondFilePart *, gchar const*);
 
 /* Item der Zeile iter aus Spalte 0 des Baummodells. Neue Referenz (mit
  * g_object_unref() bzw. g_autoptr() freigeben); NULL bei einer Dummy-Zeile
  * (Platzhalter für den Aufklapp-Pfeil, trägt kein Item) - der Aufrufer muss
  * darauf prüfen. */
+#if defined(GTK_MAJOR_VERSION) && GTK_MAJOR_VERSION < 4
 SondTVFMItem* sond_tvfm_item_from_model(GtkTreeModel*, GtkTreeIter*);
 
 SondTVFMItem* sond_tvfm_item_from_view(GtkTreeView*, GtkTreeIter*);
+#endif
 
 /* Filepart-String des Items: Filepart des SondFilePart und, davon mit "//"
  * getrennt, path_or_section (sfp//Pfad); ohne SondFilePart nur der Pfad, ohne
  * Pfad nur der Filepart. Neu alloziert (g_free()); NULL, wenn das Item weder
  * ein SondFilePart noch einen Pfad hat (Wurzel). */
 gchar* sond_tvfm_item_get_filepart(SondTVFMItem*);
+
+/* Ist filename ein zulässiger Dateiname (bleibt von sond_sanitize_filename() unverändert)? */
+gboolean sond_tvfm_item_is_valid_filename(const gchar *filename);
+
+/* Führt die geöffneten Dateien unterhalb von path_old in sfp_dir nach, wenn das
+ * Verzeichnis nach path_new (ggf. in sfp_dst) umbenannt oder verschoben wurde. */
+void sond_tvfm_item_adjust_sfps_in_dir(SondFilePart *sfp_dir, SondFilePart *sfp_dst,
+		gchar const *path_old, gchar const *path_new);
+
+/* Legt ein neues Verzeichnis ("Neues Verzeichnis", ggf. nummeriert) im
+ * Verzeichnis parent an (Dateisystem oder ZIP). *path: Pfad des neuen
+ * Verzeichnisses (g_free()). 0 bei Erfolg, -1 bei Fehler (PDF, E-Mail: nicht möglich). */
+gint sond_tvfm_item_mkdir(SondTVFMItem *parent, gboolean child, gchar **path,
+		GError **error);
 
 /* SondTVFMProgress:
  *
