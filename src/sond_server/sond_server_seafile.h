@@ -82,6 +82,24 @@ gint sond_server_seafile_find_group_id_by_name(SondServer *server,
                                                 GError **error);
 
 /**
+ * sond_server_seafile_user_in_group:
+ * @server: SondServer Instanz
+ * @user_token: Seafile-Token des Benutzers (aus dem Login)
+ * @group_id: Gruppen-ID (>0)
+ * @error: (nullable): nur bei Kommunikations-/Parse-Fehler gesetzt
+ *
+ * Prüft über GET /api2/groups/ mit dem Token des Benutzers, ob er Mitglied
+ * der Gruppe ist.
+ *
+ * Returns: TRUE bei Mitgliedschaft; FALSE ohne error bei Nichtmitgliedschaft,
+ *          FALSE mit error bei Fehler.
+ */
+gboolean sond_server_seafile_user_in_group(SondServer *server,
+                                           const gchar *user_token,
+                                           guint group_id,
+                                           GError **error);
+
+/**
  * sond_server_seafile_get_library_id_by_name:
  * @server: SondServer Instanz
  * @library_name: Name der Library

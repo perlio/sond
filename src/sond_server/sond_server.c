@@ -264,6 +264,26 @@ static void handle_auth_login(SoupServer *soup_server,
         return;
     }
 
+    /* Zugang nur fuer Mitglieder der konfigurierten Gruppe (sonst keine Pruefung) */
+    if (server->seafile_group_id > 0 &&
+            !sond_server_seafile_user_in_group(server, seafile_token,
+                    (guint) server->seafile_group_id, &error)) {
+        if (error) {
+            gchar *err_msg = g_strdup_printf("Gruppenmitgliedschaft nicht pruefbar: %s",
+                                            error->message);
+            send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+            g_free(err_msg);
+            g_clear_error(&error);
+        } else {
+            LOG_WARN("Login von '%s' abgelehnt: kein Mitglied der Gruppe\n", username);
+            send_error_response(msg, SOUP_STATUS_FORBIDDEN,
+                    "Kein Mitglied der zugelassenen Seafile-Gruppe");
+        }
+        g_free(seafile_token);
+        g_object_unref(parser);
+        return;
+    }
+
     /* Session erstellen */
     gchar *session_token = session_manager_create(server->session_manager,
                                                    username);
@@ -1447,9 +1467,8 @@ static gboolean sond_server_load_config(SondServer *server,
     data_config->sf_passfile = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
     /* Gruppe wird per Name statt per (manuell in der Web-UI/DB nachgeschlagener)
      * ID referenziert - sond_server_init_seafile() löst den Namen nach dem
-     * Seafile-Login in server->seafile_group_id auf. Key fehlt/leer ->
-     * seafile_group_id bleibt 0 -> Libraries werden nicht automatisch geteilt
-     * (z.B. in der Dev-Umgebung gewollt). */
+     * Seafile-Login in server->seafile_group_id auf. Pflichtangabe: sie steuert
+     * das Teilen der Libraries und die Zugangskontrolle beim Login. */
     data_config->sf_group_name = g_key_file_get_string(keyfile, "seafile", "group_name", NULL);
 
     g_key_file_free(keyfile);
@@ -1530,14 +1549,17 @@ static gboolean sond_server_init_seafile(SondServer *server,
 	if (!server->auth_token)
 		return FALSE;
 
-	/* Gruppen-Name (falls konfiguriert) jetzt - mit gueltigem auth_token -
-	 * in die numerische Group-ID auflösen. Nicht konfiguriert (Key fehlt/
-	 * leer) ist kein Fehler - dann wird einfach nicht geteilt (z.B. Dev-
-	 * Umgebung). Ist aber ein Name konfiguriert und die Gruppe existiert
-	 * nicht (oder der Service-Account ist nicht Mitglied) bzw. die Abfrage
-	 * schlägt fehl, bricht der Serverstart ab - eine konfigurierte, aber
-	 * nicht funktionierende Freigabe soll nicht unbemerkt durchrutschen. */
-	if (data_config->sf_group_name && *data_config->sf_group_name) {
+	/* Gruppen-Name (Pflicht) jetzt - mit gueltigem auth_token - in die
+	 * numerische Group-ID auflösen. Fehlt er, existiert die Gruppe nicht (oder
+	 * der Service-Account ist nicht Mitglied) bzw. schlägt die Abfrage fehl,
+	 * bricht der Serverstart ab: Teilen der Libraries und Zugangskontrolle
+	 * beim Login dürfen nicht unbemerkt entfallen. */
+	if (!data_config->sf_group_name || !*data_config->sf_group_name) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"In der Konfiguration fehlt [seafile] group_name (Pflichtangabe)");
+		return FALSE;
+	}
+	{
 		gint found_id = sond_server_seafile_find_group_id_by_name(
 			server, data_config->sf_group_name, error);
 

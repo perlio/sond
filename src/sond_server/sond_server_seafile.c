@@ -140,14 +140,11 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
  * Authorization: Token xxx
  * Response: {"groups": [{"id": 1, "name": "xxx", ...}, ...], "replynum": N}
  */
-gint sond_server_seafile_find_group_id_by_name(SondServer *server,
-                                                const gchar *group_name,
-                                                GError **error) {
-    g_return_val_if_fail(server != NULL, -1);
-    g_return_val_if_fail(group_name != NULL, -1);
-
+/* Sucht in den Gruppen des Kontos zu auth_token: nach Name (group_name != NULL) oder
+ * nach ID (group_id > 0). Rueckgabe: ID der Gruppe, 0 = nicht gefunden, -1 = Fehler. */
+static gint seafile_find_group(SondServer *server, const gchar *auth_token,
+                               const gchar *group_name, guint group_id, GError **error) {
     gchar const* seafile_url = sond_server_get_seafile_url(server);
-    gchar const* auth_token = sond_server_get_seafile_token(server);
     if (!seafile_url || !auth_token) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Seafile URL/token not available");
@@ -205,14 +202,23 @@ gint sond_server_seafile_find_group_id_by_name(SondServer *server,
             for (guint i = 0; i < json_array_get_length(groups); i++) {
                 JsonObject *group = json_array_get_object_element(groups, i);
 
-                if (json_object_has_member(group, "name")) {
-                    const gchar *name = json_object_get_string_member(group, "name");
+                if (!json_object_has_member(group, "id"))
+                    continue;
+
+                gint id = (gint) json_object_get_int_member(group, "id");
+
+                if (group_name) {
+                    const gchar *name = json_object_has_member(group, "name") ?
+                            json_object_get_string_member(group, "name") : NULL;
+
                     /* EXAKTER Match! */
-                    if (name && g_strcmp0(name, group_name) == 0 &&
-                        json_object_has_member(group, "id")) {
-                        found_id = (gint)json_object_get_int_member(group, "id");
+                    if (g_strcmp0(name, group_name) == 0) {
+                        found_id = id;
                         break;
                     }
+                } else if (id > 0 && (guint) id == group_id) {
+                    found_id = id;
+                    break;
                 }
             }
         } else {
@@ -232,6 +238,30 @@ gint sond_server_seafile_find_group_id_by_name(SondServer *server,
     g_object_unref(session);
 
     return found_id;
+}
+
+/* Gruppe des Dienstkontos nach Namen suchen (Rueckgabe wie seafile_find_group) */
+gint sond_server_seafile_find_group_id_by_name(SondServer *server,
+                                                const gchar *group_name,
+                                                GError **error) {
+    g_return_val_if_fail(server != NULL, -1);
+    g_return_val_if_fail(group_name != NULL, -1);
+
+    return seafile_find_group(server, sond_server_get_seafile_token(server),
+            group_name, 0, error);
+}
+
+/* Ist der Benutzer (Seafile-Token des Benutzers) Mitglied der Gruppe group_id?
+ * Bei Fehler FALSE mit gesetztem error, bei Nichtmitgliedschaft FALSE ohne error. */
+gboolean sond_server_seafile_user_in_group(SondServer *server,
+                                           const gchar *user_token,
+                                           guint group_id,
+                                           GError **error) {
+    g_return_val_if_fail(server != NULL, FALSE);
+    g_return_val_if_fail(user_token != NULL, FALSE);
+    g_return_val_if_fail(group_id > 0, FALSE);
+
+    return seafile_find_group(server, user_token, NULL, group_id, error) > 0;
 }
 
 /**
