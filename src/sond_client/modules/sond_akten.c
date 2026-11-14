@@ -200,6 +200,66 @@ void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
     g_hash_table_unref(map);
 }
 
+void sond_akten_bereinigen(const gchar *merkliste, GPtrArray *bekannt) {
+    GHashTable *map = NULL;
+    GHashTable *set = NULL;
+    GHashTableIter iter;
+    gpointer key = NULL;
+    gboolean geaendert = FALSE;
+
+    if (!merkliste || !bekannt)
+        return;
+
+    map = merkliste_laden(merkliste);
+    set = g_hash_table_new(g_str_hash, g_str_equal);
+    for (guint i = 0; i < bekannt->len; i++)
+        g_hash_table_add(set, g_ptr_array_index(bekannt, i));
+
+    g_hash_table_iter_init(&iter, map);
+    while (g_hash_table_iter_next(&iter, &key, NULL)) {
+        if (!g_hash_table_contains(set, key)) {
+            g_hash_table_iter_remove(&iter);
+            geaendert = TRUE;
+        }
+    }
+
+    if (geaendert)
+        merkliste_speichern(merkliste, map);
+
+    g_hash_table_unref(set);
+    g_hash_table_unref(map);
+}
+
+void sond_akten_instanz_pruefen(const gchar *merkliste, const gchar *instanz_id) {
+    gchar *pfad = NULL;
+    gchar *alt = NULL;
+    gchar *dir = NULL;
+
+    if (!merkliste || !instanz_id || !*instanz_id)
+        return;
+
+    pfad = g_strconcat(merkliste, ".instanz", NULL);
+    if (g_file_get_contents(pfad, &alt, NULL, NULL)) {
+        g_strstrip(alt);
+        if (g_strcmp0(alt, instanz_id) == 0) {
+            g_free(alt);
+            g_free(pfad);
+
+            return;
+        }
+        //anderer Server (z. B. nach dem Löschen der Volumes): Merkliste verwerfen
+        g_remove(merkliste);
+    }
+    g_free(alt);
+
+    dir = g_path_get_dirname(pfad);
+    g_mkdir_with_parents(dir, 0700);
+    g_file_set_contents(pfad, instanz_id, -1, NULL);
+
+    g_free(dir);
+    g_free(pfad);
+}
+
 /* ========================================================================
  * Lesen aus dem SeaDrive
  * ======================================================================== */

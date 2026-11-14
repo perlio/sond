@@ -17,6 +17,7 @@
  */
 
 #include "sond_client_window.h"
+#include "sond_module.h"
 #include "modules/sond_module_akte.h"
 #include "modules/sond_module_verwaltung.h"
 #include "../sond_log_and_error.h"
@@ -45,9 +46,21 @@ static void on_module_button_clicked(GtkButton *button, SondClientWindow *window
     }
 }
 
+/* Schließen des Clients: alle Module führen ihr "Abbrechen" aus (s. sond_module.h) */
+static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
+    SondClientWindow *self = SOND_CLIENT_WINDOW(window);
+
+    (void) user_data;
+
+    sond_module_abort_stack(GTK_STACK(self->main_stack));
+
+    return FALSE;   //Schließen fortsetzen
+}
+
 static void sond_client_window_init(SondClientWindow *self) {
     /* Fenster-Eigenschaften */
     gtk_window_set_title(GTK_WINDOW(self), "SOND Client");
+    g_signal_connect(self, "close-request", G_CALLBACK(on_close_request), NULL);
     gtk_window_set_default_size(GTK_WINDOW(self), 1024, 768);
     
     /* Haupt-Layout: Vertical Box */

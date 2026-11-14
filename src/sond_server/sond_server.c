@@ -1026,7 +1026,18 @@ static void handle_node_lock(SoupServer *soup_server,
 
     g_object_unref(parser);
 
-    send_success_response(msg, NULL);
+    /* Zeitpunkt der Sperre (Uhr der Datenbank) mitgeben: Clients brauchen
+     * eine verlaessliche Serverzeit, z.B. fuer ablaufende Leases. */
+    gchar *locked_at_ok = NULL;
+    gchar *data_json = NULL;
+    if (sond_graph_db_check_lock(server->db_conn, node_id, NULL, &locked_at_ok,
+                                  NULL, NULL) && locked_at_ok) {
+        data_json = g_strdup_printf("{\"locked_at\":\"%s\"}", locked_at_ok);
+    }
+    g_free(locked_at_ok);
+
+    send_success_response(msg, data_json);
+    g_free(data_json);
 }
 
 /**

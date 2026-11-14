@@ -59,4 +59,17 @@ gchar* sond_zond_find_exe(const gchar *configured, GError **error);
 gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
         GError **error);
 
+/**
+ * sond_zond_start_pid:
+ * @pid: (out) (nullable): Prozess-Kennung des gestarteten zond. Wird sie
+ *   angefordert, wird der Prozess nicht automatisch abgeräumt: der Aufrufer
+ *   muss sie mit g_spawn_close_pid() schließen (oder g_child_watch_add()
+ *   verwenden).
+ *
+ * Wie sond_zond_start(). Achtung: zond ist eine Einzelinstanz-Anwendung; läuft
+ * schon eine Instanz, beendet sich der neue Prozess sofort.
+ */
+gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
+        GPid *pid, GError **error);
+
 #endif /* SOND_ZOND_START_H */

@@ -175,6 +175,13 @@ typedef struct _Projekt {
 
 	DBaseZond *dbase_zond;
 
+	//Schreibschutz und Verständigung mit sond_client (s. sond_zond_ctl.h)
+	gboolean readonly; //Projekt schreibgeschützt: es wird nicht in die Projektdatei gespeichert
+	guint ctl_source; //Takt, der die Steuerdateien auswertet (0 = keiner)
+	gpointer ctl_data; //Benutzerdaten des Takts (Zeiger auf das Projekt)
+	gboolean ctl_in_tick;
+	gboolean ro_hinweis_gezeigt;
+
 	Menu menu;
 	GtkWidget *fs_button;
 } Projekt;

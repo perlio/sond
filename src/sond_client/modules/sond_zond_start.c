@@ -100,8 +100,8 @@ gchar* sond_zond_find_exe(const gchar *configured, GError **error) {
     return NULL;
 }
 
-gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
-        GError **error) {
+gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
+        GPid *pid, GError **error) {
     gchar *work_dir = NULL;
     gchar *argv[3] = { NULL, NULL, NULL };
     gboolean ok = FALSE;
@@ -122,9 +122,15 @@ gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
     argv[0] = (gchar*) exe;
     argv[1] = (gchar*) project_file;
 
-    ok = g_spawn_async(work_dir, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL,
+    ok = g_spawn_async(work_dir, argv, NULL,
+            pid ? G_SPAWN_DO_NOT_REAP_CHILD : G_SPAWN_DEFAULT, NULL, NULL, pid,
             error);
     g_free(work_dir);
 
     return ok;
+}
+
+gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
+        GError **error) {
+    return sond_zond_start_pid(exe, project_file, NULL, error);
 }

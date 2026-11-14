@@ -29,6 +29,7 @@
 #include "../../sond_seadrive.h"
 #include "../../sond_process_file.h"
 #include "../../sond_password.h"
+#include "../../sond_zond_ctl.h"
 #include "../../misc.h"
 
 #include "../zond_init.h"
@@ -67,6 +68,183 @@ void project_reset_changed(Projekt *zond, gboolean changed) {
 	return;
 }
 
+// ============================================================================
+// Schreibschutz und Verständigung mit sond_client (Steuerdateien)
+// ============================================================================
+
+//Takt, in dem der gewünschte Modus gelesen und der Zustand veröffentlicht wird
+#define CTL_INTERVAL_SECONDS 2
+
+typedef struct {
+	Projekt *zond;
+	gchar *text;
+} CtlHinweis;
+
+static gchar* project_ctl_path(Projekt *zond) {
+	return g_build_filename(zond->project_dir, zond->project_name, NULL);
+}
+
+static void project_set_title(Projekt *zond) {
+	gchar *title = g_strdup_printf("%s%s", zond->project_name,
+			zond->readonly ? " [schreibgeschützt]" : "");
+
+	gtk_header_bar_set_title(
+			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))),
+			title);
+	g_free(title);
+}
+
+//Hinweis ohne die Takt-Funktion zu blockieren (display_message wartet auf den Dialog)
+static gboolean project_hinweis_idle(gpointer data) {
+	CtlHinweis *h = data;
+
+	if (h->zond->dbase_zond)
+		display_message(h->zond->app_window, "Hinweis\n\n", h->text, NULL);
+	g_free(h->text);
+	g_free(h);
+
+	return G_SOURCE_REMOVE;
+}
+
+static void project_hinweis(Projekt *zond, const gchar *text) {
+	CtlHinweis *h = g_new0(CtlHinweis, 1);
+
+	h->zond = zond;
+	h->text = g_strdup(text);
+	g_idle_add(project_hinweis_idle, h);
+}
+
+static gboolean project_ctl_tick(gpointer data) {
+	Projekt *zond = *(Projekt**) data;
+	gchar *path = NULL;
+	gchar *mode = NULL;
+	guint source_alt = zond->ctl_source;
+
+	if (!zond->dbase_zond || zond->ctl_in_tick)
+		return G_SOURCE_CONTINUE;
+	zond->ctl_in_tick = TRUE;
+
+	path = project_ctl_path(zond);
+	mode = sond_zond_ctl_get_mode(path);
+
+	if (mode) {
+		gboolean will_ro = (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 ||
+				g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0);
+
+		if (will_ro && !zond->readonly) {
+			gboolean ok = TRUE;
+
+			//vor dem Schreibschutz speichern ("lost": nicht, die Berechtigung fehlt)
+			if (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 &&
+					zond->dbase_zond->changed) {
+				GError *error = NULL;
+
+				if (project_save(zond, &error)) {
+					LOG_WARN("Speichern vor dem Schreibschutz fehlgeschlagen: %s",
+							error ? error->message : "?");
+					g_clear_error(&error);
+					ok = FALSE; //beim nächsten Takt erneut versuchen
+				}
+			}
+
+			if (ok) {
+				zond->readonly = TRUE;
+				zond->ro_hinweis_gezeigt = FALSE;
+				project_set_title(zond);
+				if (g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0)
+					project_hinweis(zond, "Die Schreibberechtigung für dieses "
+							"Projekt liegt nicht mehr bei diesem Rechner. Das "
+							"Projekt ist jetzt schreibgeschützt; Änderungen seit dem "
+							"letzten Speichern werden nicht gespeichert.");
+				else
+					project_hinweis(zond, "Die Schreibberechtigung wurde an einen "
+							"anderen Rechner abgegeben. Das Projekt ist "
+							"gespeichert und jetzt schreibgeschützt.");
+			}
+		} else if (!will_ro && zond->readonly) {
+			if (!zond->dbase_zond->changed) {
+				//wieder Schreibberechtigung: neu aus der Projektdatei laden
+				GError *error = NULL;
+
+				zond->ctl_in_tick = FALSE;
+				if (project_open(zond, path, FALSE, &error) == -1) {
+					display_message(zond->app_window, "Fehler - Projekt kann nicht "
+							"neu geöffnet werden\n\n",
+							error ? error->message : "?", NULL);
+					g_clear_error(&error);
+				}
+				g_free(mode);
+				g_free(path);
+
+				//project_open hat den Takt ersetzt (neue Kennung) oder beendet
+				return (zond->ctl_source == source_alt) ?
+						G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+			} else if (!zond->ro_hinweis_gezeigt) {
+				zond->ro_hinweis_gezeigt = TRUE;
+				project_hinweis(zond, "Die Schreibberechtigung liegt wieder bei "
+						"diesem Rechner. Das Projekt enthält aber Änderungen, die "
+						"nicht gespeichert werden können. Bitte das Projekt "
+						"schließen und neu öffnen.");
+			}
+		}
+	}
+
+	sond_zond_ctl_write_state(path, zond->readonly ? SOND_ZOND_MODE_RO :
+			SOND_ZOND_MODE_RW, zond->dbase_zond->changed);
+
+	g_free(mode);
+	g_free(path);
+	zond->ctl_in_tick = FALSE;
+
+	return G_SOURCE_CONTINUE;
+}
+
+//Nach dem Öffnen: Modus aus der Steuerdatei übernehmen, Zustand veröffentlichen
+static void project_ctl_start(Projekt *zond) {
+	gchar *path = project_ctl_path(zond);
+	gchar *mode = sond_zond_ctl_get_mode(path);
+	Projekt **ref = g_new0(Projekt*, 1);
+
+	zond->readonly = (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 ||
+			g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0);
+	zond->ro_hinweis_gezeigt = FALSE;
+	project_set_title(zond);
+	sond_zond_ctl_write_state(path, zond->readonly ? SOND_ZOND_MODE_RO :
+			SOND_ZOND_MODE_RW, FALSE);
+
+	*ref = zond;
+	zond->ctl_data = ref;
+	zond->ctl_in_tick = FALSE;
+	zond->ctl_source = g_timeout_add_seconds(CTL_INTERVAL_SECONDS,
+			project_ctl_tick, ref);
+
+	if (zond->readonly)
+		project_hinweis(zond, "Dieses Projekt wurde schreibgeschützt geöffnet "
+				"(keine Schreibberechtigung). Änderungen werden nicht "
+				"gespeichert.");
+
+	g_free(mode);
+	g_free(path);
+}
+
+//Beim Schließen: Takt beenden, Zustand entfernen
+static void project_ctl_stop(Projekt *zond) {
+	if (zond->ctl_source) {
+		g_source_remove(zond->ctl_source);
+		zond->ctl_source = 0;
+	}
+	g_free(zond->ctl_data); //Takt ist beendet; ein laufender Aufruf braucht ihn nicht mehr
+	zond->ctl_data = NULL;
+
+	if (zond->project_dir && zond->project_name) {
+		gchar *path = project_ctl_path(zond);
+
+		sond_zond_ctl_clear_state(path);
+		g_free(path);
+	}
+	zond->readonly = FALSE;
+}
+
 /**
  * Mark the project as having unsaved changes
  * @param user_data Pointer to Projekt structure
@@ -74,6 +252,12 @@ void project_reset_changed(Projekt *zond, gboolean changed) {
 static void project_set_changed(gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 	project_reset_changed(zond, TRUE);
+
+	if (zond->readonly && !zond->ro_hinweis_gezeigt) {
+		zond->ro_hinweis_gezeigt = TRUE;
+		project_hinweis(zond, "Dieses Projekt ist schreibgeschützt: Änderungen "
+				"werden nicht gespeichert und gehen beim Schließen verloren.");
+	}
 
 	return;
 }
@@ -446,6 +630,10 @@ gint project_save(Projekt *zond, GError **error) {
 	if (!(zond->dbase_zond) || !(zond->dbase_zond->changed))
 		return 0;
 
+	//Schreibschutz (keine Schreibberechtigung): nie in die Projektdatei schreiben
+	if (zond->readonly)
+		return 0;
+
 	rc = zond_dbase_backup(zond->dbase_zond->zond_dbase_work,
 			zond->dbase_zond->zond_dbase_store, error);
 	if (rc)
@@ -496,8 +684,8 @@ gint project_close(Projekt *zond, GError **error) {
 	if (!zond->arr_pv || !zond->app_window)
 		return 0;
 
-	// Ask to save if there are unsaved changes
-	if (zond->dbase_zond->changed) {
+	// Ask to save if there are unsaved changes (schreibgeschützt: nichts zu speichern)
+	if (zond->dbase_zond->changed && !zond->readonly) {
 		gint rc = abfrage_frage(zond->app_window, "Datei schließen",
 				"Änderungen aktuelles Projekt speichern?", NULL);
 
@@ -529,6 +717,9 @@ gint project_close(Projekt *zond, GError **error) {
 			return 1;  // User cancelled
 		}
 	}
+
+	//Takt der Steuerdateien beenden, Zustand entfernen
+	project_ctl_stop(zond);
 
 	//Diagnose-Fenster arbeitet auf der Datenbank des Projekts
 	db_check_fenster_schliessen();
@@ -1012,6 +1203,9 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	// Enable autosave if configured
 	if (g_settings_get_boolean(zond->settings, "autosave"))
 		g_timeout_add_seconds(AUTOSAVE_INTERVAL_SECONDS, project_timeout_autosave, zond);
+
+	//Schreibschutz laut sond_client übernehmen, Zustand veröffentlichen
+	project_ctl_start(zond);
 
 	//Bäume sind geladen: bei Mängeln das Diagnose-Fenster daneben zeigen
 	if (nach_laden_pruefen)

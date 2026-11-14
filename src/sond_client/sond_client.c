@@ -662,19 +662,24 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
     return success;
 }
 
-gboolean sond_client_lock_node_ex(SondClient *client,
-                                   gint64 node_id,
-                                   const gchar *lock_reason,
-                                   gchar **out_locked_by,
-                                   gchar **out_locked_at,
-                                   gchar **out_lock_reason,
-                                   GError **error) {
+/* Gemeinsame Umsetzung von sond_client_lock_node_ex() und
+ * sond_client_lock_node_timed(). out_server_time (optional) erhaelt bei Erfolg
+ * den Sperrzeitpunkt laut Server ("JJJJ-MM-TT HH:MM:SS"). */
+static gboolean lock_node_impl(SondClient *client,
+                                gint64 node_id,
+                                const gchar *lock_reason,
+                                gchar **out_locked_by,
+                                gchar **out_locked_at,
+                                gchar **out_lock_reason,
+                                gchar **out_server_time,
+                                GError **error) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
     g_return_val_if_fail(node_id > 0, FALSE);
 
     if (out_locked_by) *out_locked_by = NULL;
     if (out_locked_at) *out_locked_at = NULL;
     if (out_lock_reason) *out_lock_reason = NULL;
+    if (out_server_time) *out_server_time = NULL;
 
     if (!ensure_authenticated(client, error)) {
         return FALSE;
@@ -772,6 +777,34 @@ gboolean sond_client_lock_node_ex(SondClient *client,
             gint64 *key = g_new(gint64, 1);
             *key = node_id;
             g_hash_table_replace(client->held_locks, key, GINT_TO_POINTER(1));
+
+            if (out_server_time) {
+                gsize resp_len = 0;
+                const gchar *resp_data = g_bytes_get_data(response, &resp_len);
+                JsonParser *resp_parser = json_parser_new();
+
+                if (resp_data && json_parser_load_from_data(resp_parser,
+                        resp_data, resp_len, NULL)) {
+                    JsonNode *resp_root = json_parser_get_root(resp_parser);
+                    JsonObject *resp_obj = (resp_root &&
+                            JSON_NODE_HOLDS_OBJECT(resp_root)) ?
+                            json_node_get_object(resp_root) : NULL;
+
+                    if (resp_obj && json_object_has_member(resp_obj, "data")) {
+                        JsonNode *data_node = json_object_get_member(resp_obj, "data");
+
+                        if (JSON_NODE_HOLDS_OBJECT(data_node)) {
+                            JsonObject *data_obj = json_node_get_object(data_node);
+
+                            if (json_object_has_member(data_obj, "locked_at"))
+                                *out_server_time = g_strdup(
+                                        json_object_get_string_member(data_obj,
+                                                "locked_at"));
+                        }
+                    }
+                }
+                g_object_unref(resp_parser);
+            }
         }
 
         g_bytes_unref(response);
@@ -780,6 +813,28 @@ gboolean sond_client_lock_node_ex(SondClient *client,
 
     g_free(request_json);
     return success;
+}
+
+gboolean sond_client_lock_node_ex(SondClient *client,
+                                   gint64 node_id,
+                                   const gchar *lock_reason,
+                                   gchar **out_locked_by,
+                                   gchar **out_locked_at,
+                                   gchar **out_lock_reason,
+                                   GError **error) {
+    return lock_node_impl(client, node_id, lock_reason, out_locked_by,
+            out_locked_at, out_lock_reason, NULL, error);
+}
+
+gboolean sond_client_lock_node_timed(SondClient *client,
+                                      gint64 node_id,
+                                      const gchar *lock_reason,
+                                      gchar **out_server_time,
+                                      gchar **out_locked_by,
+                                      gchar **out_locked_at,
+                                      GError **error) {
+    return lock_node_impl(client, node_id, lock_reason, out_locked_by,
+            out_locked_at, NULL, out_server_time, error);
 }
 
 gboolean sond_client_lock_node(SondClient *client,

@@ -17,6 +17,7 @@
  */
 
 #include "sond_module_verwaltung.h"
+#include "../sond_module.h"
 #include "sond_archiv_kandidaten.h"
 #include "sond_module_akte.h"
 #include "../../sond_graph/sond_graph_property.h"
@@ -804,21 +805,30 @@ static void on_stopp_clicked(GtkButton *button, VerwPrivate *priv) {
  * Aufbau und Abbau des Moduls
  * ---------------------------------------------------------------------- */
 
-static void on_main_destroy(GtkWidget *widget, VerwPrivate *priv) {
-    (void) widget;
+/* Abbruch (Beenden des Clients, s. sond_module.h): den Lauf anhalten und alle
+ * Sperren zurückgeben. Läuft gerade ein Server-Job, bleibt die Sperre dieser Akte
+ * bestehen (sonst könnte sie mitten im Job reaktiviert werden). */
+static void verwaltung_abort_cb(GtkWidget *module, gpointer user_data) {
+    VerwPrivate *priv = user_data;
 
-    //läuft gerade ein Server-Job, bleibt die Sperre dieser Akte bestehen (sonst könnte sie
-    //mitten im Job reaktiviert werden)
+    (void) module;
+
     if (priv->lauf_source) {
         g_source_remove(priv->lauf_source);
         priv->lauf_source = 0;
     }
     if (priv->lauf_aktiv && priv->aktuell && (priv->phase == PH_POLL || priv->phase == PH_MARK))
         priv->aktuell->behalten = TRUE;
-    g_clear_object(&priv->aktuell_node);
-    g_free(priv->aktuell_archiv);
     sperren_anhalten(priv);
     alle_entsperren(priv);
+}
+
+static void on_main_destroy(GtkWidget *widget, VerwPrivate *priv) {
+    //falls das Fenster nicht über "Schließen" ging, ist der Abbruch noch nicht gelaufen
+    sond_module_abort(widget);
+
+    g_clear_object(&priv->aktuell_node);
+    g_free(priv->aktuell_archiv);
     g_ptr_array_unref(priv->zeilen);
     g_hash_table_unref(priv->laufende);
     g_object_unref(priv->client);
@@ -892,6 +902,7 @@ GtkWidget* sond_module_verwaltung_new(SondClient *client) {
     gtk_box_append(GTK_BOX(main_box), scroll);
 
     g_signal_connect(main_box, "destroy", G_CALLBACK(on_main_destroy), priv);
+    sond_module_set_abort(main_box, verwaltung_abort_cb, priv);
 
     return main_box;
 }

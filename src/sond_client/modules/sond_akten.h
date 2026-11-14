@@ -117,4 +117,25 @@ GPtrArray* sond_akten_suchen(GPtrArray *alle, const gchar *text);
 void sond_akten_merken(const gchar *merkliste, const gchar *library_name,
         const gchar *bezeichnung, const gchar *gegenstand);
 
+/**
+ * sond_akten_bereinigen:
+ * @merkliste: Pfad der Merkliste
+ * @bekannt: (element-type utf8): Library-Namen, die der Server kennt
+ *
+ * Entfernt alle Merkeinträge, die nicht in @bekannt stehen. Nur aufrufen, wenn
+ * der Server die vollständige Liste geliefert hat.
+ */
+void sond_akten_bereinigen(const gchar *merkliste, GPtrArray *bekannt);
+
+/**
+ * sond_akten_instanz_pruefen:
+ * @merkliste: Pfad der Merkliste
+ * @instanz_id: Kennung der Datenbank des Servers
+ *
+ * Die Merkliste gehört zu einem bestimmten Server. Weicht die gemerkte Kennung
+ * ab (neue Volumes, anderer Server), wird die Merkliste verworfen; die Kennung
+ * liegt in <merkliste>.instanz.
+ */
+void sond_akten_instanz_pruefen(const gchar *merkliste, const gchar *instanz_id);
+
 #endif /* SOND_AKTEN_H */

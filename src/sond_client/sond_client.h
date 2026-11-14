@@ -294,6 +294,31 @@ gboolean sond_client_lock_node_ex(SondClient *client,
                                    GError **error);
 
 /**
+ * sond_client_lock_node_timed:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @lock_reason: (nullable): Grund für Lock
+ * @out_server_time: (out) (nullable) (transfer full): bei Erfolg der
+ *   Sperrzeitpunkt laut Server ("JJJJ-MM-TT HH:MM:SS", Uhr der Datenbank);
+ *   NULL, wenn der Server ihn nicht mitgeliefert hat
+ * @out_locked_by: (out) (nullable) (transfer full): bei Konflikt der Inhaber
+ * @out_locked_at: (out) (nullable) (transfer full): bei Konflikt der Zeitpunkt
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Wie sond_client_lock_node_ex(), liefert bei Erfolg aber die Serverzeit.
+ * Sie dient als verlässliche Zeitquelle (unabhängig von der Uhr des Clients).
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_lock_node_timed(SondClient *client,
+                                      gint64 node_id,
+                                      const gchar *lock_reason,
+                                      gchar **out_server_time,
+                                      gchar **out_locked_by,
+                                      gchar **out_locked_at,
+                                      GError **error);
+
+/**
  * sond_client_unlock_node:
  * @client: SondClient
  * @node_id: Node-ID

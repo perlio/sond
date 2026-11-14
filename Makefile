@@ -43,7 +43,8 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_seadrive.c \
 	$(SRC_DIRS)/sond_icon_util.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c $(SRC_DIRS)/sond_zond_schema.c \
-	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_eingang_cache.c
+	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_eingang_cache.c \
+	$(SRC_DIRS)/sond_zond_ctl.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)
 LDFLAGS += $(shell pkg-config --libs libmagic libxml-2.0 gtk+-3.0 sqlite3 libcurl tesseract \
@@ -85,7 +86,8 @@ ifneq (,$(findstring $(MAKECMDGOALS), sond_client))
 SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/misc_stdlib.c \
-	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_akte_name.c
+	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_akte_name.c \
+	$(SRC_DIRS)/sond_zond_ctl.c $(SRC_DIRS)/sond_seadrive_sync.c
 CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb)
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb)
 endif
