@@ -6046,5 +6046,9 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Autosave: Standard im Schema jetzt true (de.perlio.zond.gschema.xml, neu kompilieren);
  Intervall 5 statt 10 Minuten, einmal definiert als AUTOSAVE_INTERVAL_SECONDS (project.h) und
  in project.c und headerbar.c benutzt (vorher an beiden Stellen hart codiert).
- Offen: install-assoc.bat (UserChoice-Verknüpfung, .pdf-Zuordnung) nicht geändert.
+ install-assoc.bat (erzeugt von create-gtk-release.sh): setzt zusätzlich
+ Applications\zond.exe und ZND_auto_file auf den aktuellen Ordner (bestehende UserChoice-
+ Verknüpfungen zeigen nach einem Versionswechsel auf die neue Version); die .pdf-Zuordnung
+ für viewer.exe nur noch nach Rückfrage (choice), die Programmklassen bleiben immer angelegt.
+ Gilt erst ab dem nächsten Release, nicht ausgeführt geprüft.
 ```

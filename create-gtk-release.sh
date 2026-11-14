@@ -296,15 +296,26 @@ setlocal
 set "APP_DIR=%~dp0"
 set "APP_DIR=%APP_DIR:~0,-1%"
 
-REM === viewer.exe → .pdf ===
-reg add "HKCU\Software\Classes\.pdf" /ve /d "ZondViewer.pdf" /f
-reg add "HKCU\Software\Classes\ZondViewer.pdf" /ve /d "PDF-Dokument (Viewer)" /f
-reg add "HKCU\Software\Classes\ZondViewer.pdf\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
-
 REM === zond.exe → .znd ===
 reg add "HKCU\Software\Classes\.znd" /ve /d "Zond.znd" /f
 reg add "HKCU\Software\Classes\Zond.znd" /ve /d "Zond-Dokument" /f
 reg add "HKCU\Software\Classes\Zond.znd\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
+REM Hat der Nutzer .znd einmal ueber "Oeffnen mit" zugeordnet, gilt die UserChoice
+REM von Windows (per Skript nicht aenderbar) und verweist auf diese Schluessel.
+REM Sie muessen daher bei jedem Versionswechsel auf den neuen Ordner zeigen.
+reg add "HKCU\Software\Classes\Applications\zond.exe\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
+reg add "HKCU\Software\Classes\ZND_auto_file\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
+
+REM === viewer.exe → .pdf ===
+REM Die Programmklassen werden immer angelegt (waehlbar ueber "Oeffnen mit"),
+REM die Standardzuordnung fuer .pdf nur auf Nachfrage.
+reg add "HKCU\Software\Classes\ZondViewer.pdf" /ve /d "PDF-Dokument (Viewer)" /f
+reg add "HKCU\Software\Classes\ZondViewer.pdf\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
+reg add "HKCU\Software\Classes\Applications\viewer.exe\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
+
+choice /c JN /m "viewer.exe als Standardprogramm fuer .pdf registrieren"
+REM errorlevel 1 = J (ohne goto: Sprungmarken sind in Dateien mit LF unzuverlaessig)
+if errorlevel 1 if not errorlevel 2 reg add "HKCU\Software\Classes\.pdf" /ve /d "ZondViewer.pdf" /f
 
 echo Dateiverknuepfungen wurden registriert.
 endlocal
@@ -315,7 +326,7 @@ cat > "$RELEASE_DIR/README.txt" << EOF
 $APP_NAME - Version $VERSION
 
 DATEIVERKNUEPFUNGEN:
-  install-assoc.bat ausfuehren um .pdf und .znd zu registrieren
+  install-assoc.bat ausfuehren um .znd und (auf Nachfrage) .pdf zu registrieren
   (kein Adminrecht erforderlich)
 
 INSTALLATION:
