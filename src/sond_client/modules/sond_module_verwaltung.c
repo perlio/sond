@@ -66,7 +66,6 @@ typedef struct {
     GtkWidget *btn_stopp;
     GtkWidget *progress;
     GtkWidget *info_label;
-    GtkWidget *detail_label;     // Beispiele für abgelehnte Akten (markierbar)
     GtkWidget *list;
     GPtrArray *zeilen;       /* Zeile* */
     GHashTable *laufende;    /* Library-Name -> Nutzer eines laufenden Jobs */
@@ -403,7 +402,6 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
     alle_entsperren(priv);
     liste_leeren(priv);
     gtk_label_set_text(GTK_LABEL(priv->info_label), "Suche läuft ...");
-    gtk_widget_set_visible(priv->detail_label, FALSE);
     gtk_widget_set_sensitive(priv->btn_archivieren, FALSE);
     priv->tage_suche = tage;
 
@@ -423,8 +421,6 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
     {
         GHashTable *gruende = g_hash_table_new(g_str_hash, g_str_equal);   // statische Texte -> Anzahl
         GString *s = g_string_new(NULL);
-        GString *beispiele = g_string_new(NULL);   // je Ablehnungsgrund ein Beispiel (Tooltip)
-        GHashTable *gezeigt = g_hash_table_new(g_str_hash, g_str_equal);
         GHashTableIter it;
         gpointer key = NULL;
         gpointer value = NULL;
@@ -438,16 +434,6 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
             if (k)
                 g_ptr_array_add(kandidaten, k);
             else if (grund) {
-                if (!g_hash_table_contains(gezeigt, grund)) {
-                    SondGraphNode *nd = g_ptr_array_index(nodes, i);
-                    gchar *json = sond_graph_property_list_to_json(
-                            sond_graph_node_get_properties(nd));
-
-                    g_string_append_printf(beispiele, "%s\nBeispiel Node %" G_GINT64_FORMAT ": %s\n\n",
-                            grund, sond_graph_node_get_id(nd), json);
-                    g_free(json);
-                    g_hash_table_add(gezeigt, (gpointer) grund);
-                }
                 g_hash_table_replace(gruende, (gpointer) grund, GUINT_TO_POINTER(
                         GPOINTER_TO_UINT(g_hash_table_lookup(gruende, grund)) + 1));
             }
@@ -462,10 +448,6 @@ static void on_suchen_clicked(GtkButton *button, VerwPrivate *priv) {
         }
         text = g_string_free(s, FALSE);
         g_hash_table_unref(gruende);
-        gtk_label_set_text(GTK_LABEL(priv->detail_label), beispiele->str);
-        gtk_widget_set_visible(priv->detail_label, beispiele->len > 0);
-        g_string_free(beispiele, TRUE);
-        g_hash_table_unref(gezeigt);
     }
     g_ptr_array_unref(nodes);
 
@@ -895,15 +877,6 @@ GtkWidget* sond_module_verwaltung_new(SondClient *client) {
     priv->info_label = gtk_label_new("");
     gtk_widget_set_halign(priv->info_label, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(main_box), priv->info_label);
-
-    priv->detail_label = gtk_label_new("");
-    gtk_label_set_selectable(GTK_LABEL(priv->detail_label), TRUE);
-    gtk_label_set_wrap(GTK_LABEL(priv->detail_label), TRUE);
-    gtk_label_set_wrap_mode(GTK_LABEL(priv->detail_label), PANGO_WRAP_CHAR);
-    gtk_label_set_xalign(GTK_LABEL(priv->detail_label), 0.0f);
-    gtk_widget_set_halign(priv->detail_label, GTK_ALIGN_START);
-    gtk_widget_set_visible(priv->detail_label, FALSE);
-    gtk_box_append(GTK_BOX(main_box), priv->detail_label);
 
     priv->progress = gtk_progress_bar_new();
     gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(priv->progress), TRUE);
