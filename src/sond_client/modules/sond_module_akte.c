@@ -712,6 +712,12 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
         gchar *status = NULL;
 
         priv->current_node = g_object_ref(node);
+
+        //update_ui_from_node() setzt Bezeichnung und Gegenstand nur, wenn der Knoten sie
+        //hat: eine nie fertig angelegte Akte hat keine, dann blieben die Texte der
+        //zuvor gewählten Akte stehen
+        gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
+        gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");
         update_ui_from_node(priv);
 
         status = g_strdup_printf("%s (Daten vom Server)",
