@@ -102,6 +102,16 @@ void sond_tvfm_item_adjust_sfps_in_dir(SondFilePart *sfp_dir, SondFilePart *sfp_
 gint sond_tvfm_item_mkdir(SondTVFMItem *parent, gboolean child, gchar **path,
 		GError **error);
 
+/* Änderungszeit, Größe und Verzeichnis-Kennzeichen eines Dateisystem-Eintrags (kein
+ * Eintrag in einem Container). FALSE: kein Dateisystem-Eintrag oder nicht lesbar. */
+gboolean sond_tvfm_item_fs_stat(SondTVFMItem*, gint64 *mtime, gint64 *size,
+		gboolean *is_dir);
+
+/* Pfad (relativ zur Wurzel, '/' als Trenner) und Verzeichnis-Kennzeichen eines
+ * Dateisystem-Eintrags; FALSE für Einträge in Containern (ZIP, E-Mail,
+ * PDF-Anhänge, Anbindungen). rel_path ist mit g_free() freizugeben. */
+gboolean sond_tvfm_item_fs_path(SondTVFMItem*, gchar **rel_path, gboolean *is_dir);
+
 /* SondTVFMProgress:
  *
  * Optionaler Fortschritts-/Abbruch-Kontext für sond_tvfm_item_load_children()

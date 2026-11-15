@@ -18,9 +18,10 @@
 
 #include "sond_icon_util.h"
 
-#include "sond_treeview.h" /* SOND_ICON_THEME_FOR_WIDGET */
+#include "sond_gtk_compat.h" /* SOND_ICON_THEME_FOR_WIDGET */
 #include "sond_log_and_error.h"
 
+#if GTK_MAJOR_VERSION < 4
 GdkPixbuf* sond_icon_util_load_pixbuf(GtkWidget *widget,
 		gchar const *icon_name, gint size) {
 	GtkIconTheme *theme = NULL;
@@ -33,6 +34,55 @@ GdkPixbuf* sond_icon_util_load_pixbuf(GtkWidget *widget,
 			GTK_ICON_LOOKUP_USE_BUILTIN, NULL);
 
 	return pixbuf;
+}
+#endif /* GTK3: gtk_icon_theme_load_icon() gibt es in GTK4 nicht */
+
+/* Cairo-Fläche in ein GdkPixbuf umsetzen (GTK4 kennt gdk_pixbuf_get_from_surface()
+ * nicht mehr) */
+static GdkPixbuf* pixbuf_from_surface(cairo_surface_t *surface, gint width,
+		gint height) {
+#if GTK_MAJOR_VERSION < 4
+	return gdk_pixbuf_get_from_surface(surface, 0, 0, width, height);
+#else
+	GdkPixbuf *pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, TRUE, 8, width, height);
+	const guchar *src = NULL;
+	guchar *dst = NULL;
+	gint src_stride = 0;
+	gint dst_stride = 0;
+
+	if (!pixbuf)
+		return NULL;
+
+	cairo_surface_flush(surface);
+	src = cairo_image_surface_get_data(surface);
+	src_stride = cairo_image_surface_get_stride(surface);
+	dst = gdk_pixbuf_get_pixels(pixbuf);
+	dst_stride = gdk_pixbuf_get_rowstride(pixbuf);
+
+	for (gint y = 0; y < height; y++) {
+		for (gint x = 0; x < width; x++) {
+			guint32 px = *(const guint32*) (src + y * src_stride + x * 4);
+			guint a = (px >> 24) & 0xff;
+			guint r = (px >> 16) & 0xff;
+			guint g = (px >> 8) & 0xff;
+			guint b = px & 0xff;
+			guchar *out = dst + y * dst_stride + x * 4;
+
+			//Cairo liefert vormultiplizierte Werte
+			if (a > 0 && a < 255) {
+				r = MIN(r * 255 / a, 255);
+				g = MIN(g * 255 / a, 255);
+				b = MIN(b * 255 / a, 255);
+			}
+			out[0] = (guchar) r;
+			out[1] = (guchar) g;
+			out[2] = (guchar) b;
+			out[3] = (guchar) a;
+		}
+	}
+
+	return pixbuf;
+#endif
 }
 
 /* Gemeinsamer Kern für alle per Cairo gezeichneten Kreis-Badges: gefüllter
@@ -65,7 +115,7 @@ static GdkPixbuf* draw_circle_badge(gdouble r, gdouble g, gdouble b, gint size) 
 	cairo_set_line_width(cr, MAX(size * 0.10, 0.6));
 	cairo_stroke(cr);
 
-	pixbuf = gdk_pixbuf_get_from_surface(surface, 0, 0, size, size);
+	pixbuf = pixbuf_from_surface(surface, size, size);
 
 	cairo_destroy(cr);
 	cairo_surface_destroy(surface);
@@ -108,6 +158,7 @@ GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status
 	}
 }
 
+#if GTK_MAJOR_VERSION < 4
 GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size) {
 	return sond_icon_util_load_pixbuf(widget, "mail-attachment-symbolic", size);
 }
@@ -133,7 +184,89 @@ GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size,
 
 	return pixbuf;
 }
+#else
+/* GTK4: Büroklammer und Schloss per Cairo gezeichnet (das GTK3-Verfahren, ein
+ * Symbol aus dem Icon-Theme als Pixbuf zu laden, gibt es nicht mehr) */
+static cairo_surface_t* new_badge_surface(gint size, cairo_t **cr) {
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
 
+	*cr = cairo_create(surface);
+	cairo_set_operator(*cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(*cr);
+	cairo_set_operator(*cr, CAIRO_OPERATOR_OVER);
+
+	return surface;
+}
+
+GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size) {
+	cairo_t *cr = NULL;
+	cairo_surface_t *surface = NULL;
+	GdkPixbuf *pixbuf = NULL;
+
+	(void) widget;
+
+	if (size < 4)
+		size = 4;
+	surface = new_badge_surface(size, &cr);
+
+	//Büroklammer: zwei ineinanderliegende Schleifen
+	cairo_set_source_rgb(cr, 0.30, 0.30, 0.30);
+	cairo_set_line_width(cr, MAX(size * 0.11, 0.8));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_move_to(cr, size * 0.62, size * 0.30);
+	cairo_line_to(cr, size * 0.62, size * 0.72);
+	cairo_arc_negative(cr, size * 0.48, size * 0.72, size * 0.14, 0, G_PI);
+	cairo_line_to(cr, size * 0.34, size * 0.28);
+	cairo_arc(cr, size * 0.47, size * 0.28, size * 0.13, G_PI, 0);
+	cairo_line_to(cr, size * 0.60, size * 0.62);
+	cairo_stroke(cr);
+
+	pixbuf = pixbuf_from_surface(surface, size, size);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+
+	return pixbuf;
+}
+
+GdkPixbuf* sond_icon_util_locked_badge_pixbuf(GtkWidget *widget, gint size,
+		gboolean unlocked) {
+	cairo_t *cr = NULL;
+	cairo_surface_t *surface = NULL;
+	GdkPixbuf *pixbuf = NULL;
+
+	(void) widget;
+
+	if (size < 4)
+		size = 4;
+	surface = new_badge_surface(size, &cr);
+
+	if (unlocked)
+		cairo_set_source_rgb(cr, 0.20, 0.66, 0.33); //grün: entsperrt
+	else
+		cairo_set_source_rgb(cr, 0.12, 0.12, 0.12); //schwarz: gesperrt
+
+	//Bügel
+	cairo_set_line_width(cr, MAX(size * 0.12, 0.8));
+	cairo_arc(cr, size * 0.5, size * 0.42, size * 0.20, G_PI, 2 * G_PI);
+	cairo_move_to(cr, size * 0.30, size * 0.42);
+	cairo_line_to(cr, size * 0.30, size * 0.52);
+	cairo_move_to(cr, size * 0.70, size * 0.42);
+	cairo_line_to(cr, size * 0.70, size * 0.52);
+	cairo_stroke(cr);
+
+	//Körper
+	cairo_rectangle(cr, size * 0.18, size * 0.50, size * 0.64, size * 0.42);
+	cairo_fill(cr);
+
+	pixbuf = pixbuf_from_surface(surface, size, size);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+
+	return pixbuf;
+}
+#endif /* GTK3: Theme-Symbole, GTK4: Cairo */
+
+#if GTK_MAJOR_VERSION < 4
 gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {
 	gint icon_size = 0;
 	gint px = 0;
@@ -144,6 +277,7 @@ gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {
 
 	return px;
 }
+#endif
 
 gchar const* sond_icon_util_normalize_name(gchar const *name) {
 	gchar *lower = NULL;
@@ -175,6 +309,7 @@ gchar const* sond_icon_util_normalize_name(gchar const *name) {
 	return result;
 }
 
+#if GTK_MAJOR_VERSION < 4
 gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 		GtkCellRenderer *renderer, gchar const *base_icon_name,
 		SondIconOverlay const *overlays, guint n_overlays) {
@@ -251,3 +386,4 @@ gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 
 	return TRUE;
 }
+#endif /* GTK3: GtkCellRenderer */

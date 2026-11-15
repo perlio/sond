@@ -572,9 +572,17 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 			full_path = g_strconcat(root, "/", rel_path_child, NULL);
 
+			//Ansicht ohne Lesen der Dateien (nur Endung): schnell, kein Download
+			if (!sond_tvfm_owner_read_file_contents(stvfm_item_priv->owner)) {
+				mime_from_ext = mime_from_extension(filename);
+				if (!mime_from_ext)
+					mime_from_ext = "application/octet-stream";
+			}
+
 #ifdef _WIN32
 			/* Bei SeaDrive: offline-Dateien nicht lesen - nur Extension-basierter MIME-Typ */
-			if (sond_tvfm_owner_is_seadrive_path(stvfm_item_priv->owner)) {
+			if (!mime_from_ext &&
+					sond_tvfm_owner_is_seadrive_path(stvfm_item_priv->owner)) {
 				wchar_t *lp = prepare_long_path(full_path, NULL);
 				if (lp) {
 					DWORD attrs = GetFileAttributesW(lp);
@@ -962,7 +970,13 @@ gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
 		//Normale Dateien
 		if (!stvfm_item_priv->sond_file_part) {
 			//->path_or_section immer != NULL, wenn nicht root-dir
-			if (!sond_rename(stvfm_item_priv->path_or_section, path_new, error))
+			//absolute Pfade: relative hingen am Arbeitsverzeichnis des Prozesses
+			gchar const *root = sond_tvfm_owner_get_root(stvfm_item_priv->owner);
+			g_autofree gchar *abs_old = g_strconcat(root, "/",
+					stvfm_item_priv->path_or_section, NULL);
+			g_autofree gchar *abs_new = g_strconcat(root, "/", path_new, NULL);
+
+			if (!sond_rename(abs_old, abs_new, error))
 				return -1;
 
 			//path_new ist der volle neue Pfad (Eltern + Name)
@@ -1300,14 +1314,20 @@ gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
 		if (!stvfm_item_parent_priv->sond_file_part &&
 				!stvfm_item_priv->sond_file_part) {
 			gchar* path_dst = NULL;
+			gchar* abs_src = NULL;
+			gchar const* root = sond_tvfm_owner_get_root(stvfm_item_priv->owner);
 
-			path_dst = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
+			//absolute Pfade: das Arbeitsverzeichnis ist nicht die Projektwurzel
+			path_dst = g_strconcat(root, "/",
+							(stvfm_item_parent_priv->path_or_section) ?
 							stvfm_item_parent_priv->path_or_section : "",
 							(stvfm_item_parent_priv->path_or_section) ? "/" : "",
 							base_real, NULL);
 			g_free(base_real);
+			abs_src = g_strconcat(root, "/", stvfm_item_priv->path_or_section, NULL);
 
-			rc = sond_copy_r(stvfm_item_priv->path_or_section, path_dst, FALSE, error);
+			rc = sond_copy_r(abs_src, path_dst, FALSE, error);
+			g_free(abs_src);
 			g_free(path_dst);
 		}
 		else { //kopieren Verzeichnis zwischen zwei sfp-Welten
@@ -1491,7 +1511,14 @@ static gint insert_dir_in_fs(SondTVFMItemPrivate* stvfm_item_priv,
 				g_strdup_printf("%s/Neues Verzeichnis (%u)", stvfm_item_priv->path_or_section, i) :
 				g_strdup_printf("Neues Verzeichnis (%u)", i);
 
-		suc = sond_mkdir(trial_path, error);
+		//absoluter Pfad: ein relativer hinge am Arbeitsverzeichnis des Prozesses
+		{
+			g_autofree gchar *abs_path = g_strconcat(
+					sond_tvfm_owner_get_root(stvfm_item_priv->owner), "/",
+					trial_path, NULL);
+
+			suc = sond_mkdir(abs_path, error);
+		}
 		if (suc) {
 			*path = g_strdup(trial_path);
 
@@ -1539,4 +1566,85 @@ gint sond_tvfm_item_mkdir(SondTVFMItem *parent, gboolean child, gchar **path,
 			__func__);
 
 	return -1;
+}
+
+/* ------------------------------------------------------------------------
+ * Dateisystem-Angaben eines Eintrags (aus sond_treeviewfm.c herausgelöst)
+ * --------------------------------------------------------------------- */
+
+gboolean sond_tvfm_item_priv_is_fs_entry(SondTVFMItemPrivate *item_priv) {
+	if (!item_priv->sond_file_part) //Verzeichnis (oder Wurzel ohne Pfad)
+		return item_priv->path_or_section != NULL;
+
+	return !item_priv->path_or_section
+			&& !sond_file_part_get_parent(item_priv->sond_file_part);
+}
+
+/* Änderungszeit, Größe und Verzeichnis-Kennzeichen des Eintrags. Meist schon
+ * beim Einlesen des Verzeichnisses gemerkt; sonst (z.B. nach dem Einfügen)
+ * einmal nachgeholt. FALSE: kein Dateisystem-Eintrag oder nicht lesbar. */
+gboolean sond_tvfm_item_priv_fs_stat(SondTVFMItemPrivate *item_priv,
+		gint64 *mtime, gint64 *size, gboolean *is_dir) {
+	if (!sond_tvfm_item_priv_is_fs_entry(item_priv))
+		return FALSE;
+
+	if (!item_priv->stat_done) {
+		gchar const *root = sond_tvfm_owner_get_root(item_priv->owner);
+		gchar const *rel = item_priv->sond_file_part ?
+				sond_file_part_get_path(item_priv->sond_file_part) :
+				item_priv->path_or_section;
+		gchar *full = NULL;
+		GStatBuf st = { 0 };
+
+		if (!root || !rel)
+			return FALSE;
+
+		full = g_strconcat(root, "/", rel, NULL);
+		if (sond_stat(full, &st, NULL)) {
+			g_free(full);
+
+			return FALSE;
+		}
+		g_free(full);
+
+		item_priv->mtime = (gint64) st.st_mtime;
+		item_priv->size = (gint64) st.st_size;
+		item_priv->is_dir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
+		item_priv->stat_done = TRUE;
+	}
+
+	if (mtime) *mtime = item_priv->mtime;
+	if (size) *size = item_priv->size;
+	if (is_dir) *is_dir = item_priv->is_dir;
+
+	return TRUE;
+}
+
+gboolean sond_tvfm_item_fs_stat(SondTVFMItem *item, gint64 *mtime, gint64 *size,
+		gboolean *is_dir) {
+	return sond_tvfm_item_priv_fs_stat(sond_tvfm_item_get_instance_private(item),
+			mtime, size, is_dir);
+}
+
+gboolean sond_tvfm_item_fs_path(SondTVFMItem *item, gchar **rel_path,
+		gboolean *is_dir) {
+	SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_instance_private(item);
+	gboolean dir = FALSE;
+	gchar const *rel = NULL;
+
+	if (!sond_tvfm_item_priv_fs_stat(item_priv, NULL, NULL, &dir))
+		return FALSE;
+
+	rel = item_priv->sond_file_part ?
+			sond_file_part_get_path(item_priv->sond_file_part) :
+			item_priv->path_or_section;
+	if (!rel)
+		return FALSE;
+
+	if (rel_path)
+		*rel_path = g_strdup(rel);
+	if (is_dir)
+		*is_dir = dir;
+
+	return TRUE;
 }

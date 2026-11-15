@@ -82,6 +82,12 @@ gint sond_tvfm_item_move(SondTVFMItem *stvfm_item,
  * unpassend). */
 gint sond_tvfm_item_delete(SondTVFMItem *stvfm_item, GError **error);
 
+/* Dateisystem-Angaben (Zugriff über die private Struktur, s. sond_tvfm_item_fs_stat()) */
+gboolean sond_tvfm_item_priv_is_fs_entry(SondTVFMItemPrivate *item_priv);
+
+gboolean sond_tvfm_item_priv_fs_stat(SondTVFMItemPrivate *item_priv, gint64 *mtime,
+		gint64 *size, gboolean *is_dir);
+
 G_END_DECLS
 
 #endif // SOND_TVFM_ITEM_PRIVATE_H_INCLUDED

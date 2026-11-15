@@ -4,20 +4,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-/* --------------------------------------------------------------------------
- * Hilfsmakros fuer GTK3/4-Kompatibilitaet
- * -------------------------------------------------------------------------- */
-#if GTK_MAJOR_VERSION >= 4
-#  define SOND_GET_TOPLEVEL(w) \
-		GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(w)))
-#  define SOND_ICON_THEME_FOR_WIDGET(w) \
-		gtk_icon_theme_get_for_display(gtk_widget_get_display(GTK_WIDGET(w)))
-#else
-#  define SOND_GET_TOPLEVEL(w) \
-		gtk_widget_get_toplevel(GTK_WIDGET(w))
-#  define SOND_ICON_THEME_FOR_WIDGET(w) \
-		gtk_icon_theme_get_for_screen(gtk_widget_get_screen(GTK_WIDGET(w)))
-#endif
+#include "sond_gtk_compat.h" /* SOND_GET_TOPLEVEL, SOND_ICON_THEME_FOR_WIDGET */
 
 G_BEGIN_DECLS
 

@@ -39,6 +39,13 @@ gboolean sond_tvfm_owner_is_seadrive_path(SondTVFMOwner *owner) {
 			OWNER_IFACE(owner)->is_seadrive_path(owner) : FALSE;
 }
 
+gboolean sond_tvfm_owner_read_file_contents(SondTVFMOwner *owner) {
+	g_return_val_if_fail(SOND_IS_TVFM_OWNER(owner), TRUE);
+
+	return OWNER_IFACE(owner)->read_file_contents ?
+			OWNER_IFACE(owner)->read_file_contents(owner) : TRUE;
+}
+
 gboolean sond_tvfm_owner_supports_sections(SondTVFMOwner *owner) {
 	g_return_val_if_fail(SOND_IS_TVFM_OWNER(owner), FALSE);
 

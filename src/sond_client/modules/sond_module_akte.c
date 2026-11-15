@@ -28,6 +28,7 @@
 #include "sond_import_dialog.h"
 #include "sond_zond_start.h"
 #include "sond_akte_lease.h"
+#include "sond_dokumente.h"
 #include "../sond_module.h"
 #include "../../sond_zond_ctl.h"
 #include "../../sond_akte_name.h"
@@ -61,6 +62,7 @@ typedef struct {
     GtkWidget *btn_neue_akte;
     GtkWidget *btn_import;         /* Import-Dialog für die gewählte Akte */
     GtkWidget *btn_zond;           /* zond mit der Projektdatei starten */
+    GtkWidget *btn_dokumente;      /* Dokumentenverzeichnis (Baum, offline halten) */
     GtkWidget *btn_ok;
     GtkWidget *btn_speichern;
     GtkWidget *btn_abbrechen;
@@ -387,6 +389,8 @@ static void update_action_widgets(SondModuleAktePrivate *priv) {
             arbeit && st != AKTE_STATE_CREATING);
     gtk_widget_set_sensitive(priv->btn_zond,
             arbeit && st != AKTE_STATE_CREATING && !priv->lease_wait_source);
+    gtk_widget_set_sensitive(priv->btn_dokumente,
+            arbeit && st != AKTE_STATE_CREATING);
 
     //"Bearbeiten": solange die Akte gewählt oder nur gesperrt angezeigt wird
     gtk_widget_set_sensitive(priv->btn_break_lock,
@@ -4472,6 +4476,21 @@ static void on_import_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
             gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)));
 }
 
+/* Dokumentenverzeichnis der gewählten Akte (geht auch offline) */
+static void on_dokumente_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+
+    (void) button;
+
+    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
+        return;
+
+    sond_dokumente_show(priv->client,
+            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), lfd_nr, year,
+            gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)));
+}
+
 /* zond mit der Projektdatei der gewählten Akte starten. Mit Schreibberechtigung
  * (Lease) darf zond schreiben; sie wird online geholt und gilt dann auch offline
  * weiter. Ohne sie (oder mit force_ro) öffnet zond das Projekt schreibgeschützt.
@@ -4629,6 +4648,14 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
             "Die Projektdatei der gewählten Akte in zond öffnen");
     g_signal_connect(priv->btn_zond, "clicked", G_CALLBACK(on_zond_clicked), priv);
     gtk_box_append(GTK_BOX(tun_box), priv->btn_zond);
+
+    priv->btn_dokumente = gtk_button_new_with_label("Dokumente ...");
+    gtk_widget_set_tooltip_text(priv->btn_dokumente,
+            "Das Dokumentenverzeichnis der Akte zeigen, z. B. um Dateien dauerhaft "
+            "offline verfügbar zu machen");
+    g_signal_connect(priv->btn_dokumente, "clicked",
+            G_CALLBACK(on_dokumente_clicked), priv);
+    gtk_box_append(GTK_BOX(tun_box), priv->btn_dokumente);
 
     priv->btn_break_lock = gtk_button_new_with_label("Bearbeiten");
     gtk_widget_set_tooltip_text(priv->btn_break_lock,

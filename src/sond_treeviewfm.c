@@ -38,6 +38,7 @@
 #include "sond_pdf_helper.h"
 #include "sond_seadrive.h"
 #include "sond_icon_util.h"
+#include "sond_tvfm_badges.h"
 #include "sond_eingang_zettel.h"
 #include "sond_treeviewfm_private.h"
 
@@ -3847,75 +3848,9 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 /* Ist der Eintrag ein Eintrag des Dateisystems (Datei oder Verzeichnis unter
  * root) und nicht Teil eines Containers (ZIP-Eintrag, Mimepart, PDF-Anhang,
  * Section)? Nur für diese gibt es Änderungsdatum und Größe. */
-static gboolean item_is_fs_entry(SondTVFMItemPrivate *item_priv) {
-	if (!item_priv->sond_file_part) //Verzeichnis (oder Wurzel ohne Pfad)
-		return item_priv->path_or_section != NULL;
-
-	return !item_priv->path_or_section
-			&& !sond_file_part_get_parent(item_priv->sond_file_part);
-}
-
-/* Änderungszeit, Größe und Verzeichnis-Kennzeichen des Eintrags. Meist schon
- * beim Einlesen des Verzeichnisses gemerkt; sonst (z.B. nach dem Einfügen)
- * einmal nachgeholt. FALSE: kein Dateisystem-Eintrag oder nicht lesbar. */
-static gboolean item_fs_stat(SondTVFMItemPrivate *item_priv, gint64 *mtime,
-		gint64 *size, gboolean *is_dir) {
-	if (!item_is_fs_entry(item_priv))
-		return FALSE;
-
-	if (!item_priv->stat_done) {
-		gchar const *root = sond_treeviewfm_get_root(item_priv->stvfm);
-		gchar const *rel = item_priv->sond_file_part ?
-				sond_file_part_get_path(item_priv->sond_file_part) :
-				item_priv->path_or_section;
-		gchar *full = NULL;
-		GStatBuf st = { 0 };
-
-		if (!root || !rel)
-			return FALSE;
-
-		full = g_strconcat(root, "/", rel, NULL);
-		if (sond_stat(full, &st, NULL)) {
-			g_free(full);
-
-			return FALSE;
-		}
-		g_free(full);
-
-		item_priv->mtime = (gint64) st.st_mtime;
-		item_priv->size = (gint64) st.st_size;
-		item_priv->is_dir = S_ISDIR(st.st_mode) ? TRUE : FALSE;
-		item_priv->stat_done = TRUE;
-	}
-
-	if (mtime) *mtime = item_priv->mtime;
-	if (size) *size = item_priv->size;
-	if (is_dir) *is_dir = item_priv->is_dir;
-
-	return TRUE;
-}
-
 gboolean sond_treeviewfm_item_fs_path(SondTVFMItem *item, gchar **rel_path,
 		gboolean *is_dir) {
-	SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
-	gboolean dir = FALSE;
-	gchar const *rel = NULL;
-
-	if (!item_fs_stat(item_priv, NULL, NULL, &dir))
-		return FALSE;
-
-	rel = item_priv->sond_file_part ?
-			sond_file_part_get_path(item_priv->sond_file_part) :
-			item_priv->path_or_section;
-	if (!rel)
-		return FALSE;
-
-	if (rel_path)
-		*rel_path = g_strdup(rel);
-	if (is_dir)
-		*is_dir = dir;
-
-	return TRUE;
+	return sond_tvfm_item_fs_path(item, rel_path, is_dir);
 }
 
 /* Wirksames Eingangsdatum (JJJJMMTT, 0 = keine Angabe) des Eintrags. Beim
@@ -3932,7 +3867,7 @@ static gint item_eingang(SondTVFMItemPrivate *item_priv) {
 	if (item_priv->eingang_done)
 		return item_priv->eingang;
 
-	if (!item_fs_stat(item_priv, &mtime, NULL, &is_dir))
+	if (!sond_tvfm_item_priv_fs_stat(item_priv, &mtime, NULL, &is_dir))
 		return 0;
 
 	klass = SOND_TREEVIEWFM_GET_CLASS(item_priv->stvfm);
@@ -3966,7 +3901,7 @@ static void sond_treeviewfm_render_eingang(GtkTreeViewColumn *column,
 	if (item) {
 		SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
 
-		if (item_is_fs_entry(item_priv)) {
+		if (sond_tvfm_item_priv_is_fs_entry(item_priv)) {
 			gint eingang = item_eingang(item_priv);
 
 			text = (eingang > 0) ? sond_eingang_int_zu_anzeige(eingang) :
@@ -3994,7 +3929,7 @@ static void sond_treeviewfm_render_file_modify(GtkTreeViewColumn *column,
 		return;
 	}
 
-	if (item_fs_stat(sond_tvfm_item_get_priv(item), &mtime, NULL, NULL)) {
+	if (sond_tvfm_item_priv_fs_stat(sond_tvfm_item_get_priv(item), &mtime, NULL, NULL)) {
 		GDateTime *datetime = g_date_time_new_from_unix_local(mtime);
 
 		if (datetime) {
@@ -4026,7 +3961,7 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 	}
 
 	//Verzeichnisse haben keine Größe
-	if (item_fs_stat(sond_tvfm_item_get_priv(item), NULL, &size, &is_dir)
+	if (sond_tvfm_item_priv_fs_stat(sond_tvfm_item_get_priv(item), NULL, &size, &is_dir)
 			&& !is_dir)
 		text = g_format_size((guint64) size);
 
@@ -4063,8 +3998,8 @@ static gint sond_treeviewfm_sort_compare(GtkTreeModel *model, GtkTreeIter *a,
 	priv_a = sond_tvfm_item_get_priv(item_a);
 	priv_b = sond_tvfm_item_get_priv(item_b);
 
-	if (!item_fs_stat(priv_a, &mtime_a, &size_a, &dir_a)
-			|| !item_fs_stat(priv_b, &mtime_b, &size_b, &dir_b))
+	if (!sond_tvfm_item_priv_fs_stat(priv_a, &mtime_a, &size_a, &dir_a)
+			|| !sond_tvfm_item_priv_fs_stat(priv_b, &mtime_b, &size_b, &dir_b))
 		return 0;
 
 	if (column_id == STVFM_SORT_MODIFY)
@@ -4238,6 +4173,20 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 	return status;
 }
 
+#ifdef _WIN32
+static SondSeadriveBadge badges_source_file(gpointer data, gchar const *full_path) {
+	return sond_treeviewfm_seadrive_get_file_badge(SOND_TREEVIEWFM(data), full_path);
+}
+
+static SondSeadriveDirStatus badges_source_dir(gpointer data, gchar const *full_path) {
+	return sond_treeviewfm_seadrive_get_dir_status(SOND_TREEVIEWFM(data), full_path);
+}
+#endif
+
+static SondIndexStatus badges_source_index(gpointer data, SondTVFMItem *item) {
+	return sond_treeviewfm_get_index_status(SOND_TREEVIEWFM(data), item);
+}
+
 static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
@@ -4256,113 +4205,26 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
-	/* Overlay-Icon für SeaDrive-Cloud-Status ermitteln */
-	if (sond_treeviewfm_is_seadrive_path(stvfm)) {
-		gchar *full_path = NULL;
+	/* Welche Overlays zeigt der Eintrag? Die Entscheidungslogik (SeaDrive-Zustand,
+	 * Ordner-Teilbaum, Indizierung) steht in sond_tvfm_badges.c, gemeinsam mit der
+	 * GTK4-Fassung. Datei-Badges und Ordner-Statistik liest der Baum aus den
+	 * Tabellen des SeaDrive-Watchers. */
+	{
+		SondTVFMBadgeSources sources = { 0 };
+		SondTVFMBadges badges;
 
-		const gchar *root = sond_treeviewfm_get_root(stvfm);
-		const gchar* rel = NULL;
-
-		/* Dateien (LEAF) und Filesystem-Verzeichnisse erhalten Overlay-Icons.
-		 *
-		 * Der SeaDrive-Pin-/Hydrierungsstatus gehört zur realen Datei im
-		 * Dateisystem, nicht zum einzelnen (virtuellen) Teil - alle Kinder
-		 * EINER realen Datei (Mime-Parts, ZIP-Einträge, PDF-Seiten als
-		 * eigene Zeilen usw., mit sond_file_part_get_parent() != NULL)
-		 * müssen also dasselbe Badge zeigen wie die Datei selbst. Deshalb
-		 * wird immer zum obersten Vorfahren hochgelaufen (Schleife wie in
-		 * sond_file_part_get_filepart()/zond_treeview_get_seadrive_badge())
-		 * und dessen Pfad für den full_path/Hashtable-Lookup verwendet - bei
-		 * einem Top-Level-Objekt (kein Parent) macht die Schleife nichts. */
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
-				// stvfm_item_priv->sond_file_part && - überflüssig?!
-				//PDF mit children - Pagetree
-				!(SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-						sond_file_part_get_has_children(stvfm_item_priv->sond_file_part))) {
-			SondFilePart *top = stvfm_item_priv->sond_file_part;
-
-			while (sond_file_part_get_parent(top))
-				top = sond_file_part_get_parent(top);
-
-			rel = sond_file_part_get_path(top);
-		}
-		else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-			if (!stvfm_item_priv->sond_file_part) //DIR im Filesystem
-				rel = stvfm_item_priv->path_or_section;
-			else {
-				/* Auch die (virtuellen) Verzeichnisse in einem Container
-				 * (ZIP-Verzeichnis, Multipart) bekommen das Badge: ein
-				 * bereits aufgeklapptes ZIP-Unterverzeichnis oder ein
-				 * Multipart-Verzeichnis einer E-Mail hat sond_file_part
-				 * (dasselbe Objekt wie das Container-Top-Level-Item) UND
-				 * path_or_section (den internen Pfad/die Kennung
-				 * innerhalb des Containers) gesetzt - beides sind aber
-				 * virtuelle Ansichten EINER realen Datei, für die
-				 * genauso das Badge der realen Datei gelten muss (s.
-				 * Mime-Part-Kommentar oben). Deshalb immer zum obersten
-				 * Vorfahren hochlaufen. */
-				SondFilePart *top = stvfm_item_priv->sond_file_part;
-
-				while (sond_file_part_get_parent(top))
-					top = sond_file_part_get_parent(top);
-
-				rel = sond_file_part_get_path(top);
-			}
-		}
-
-		if (rel)
-			full_path = g_strconcat(root, "/", rel, NULL);
-
-		if (full_path) {
 #ifdef _WIN32
-			if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-				/* Reiner Hashtable-Lookup statt live GetFileAttributesW -
-				 * der Watcher hält seadrive_file_badges ohnehin schon
-				 * aktuell (Konsistenz mit dir_status, das schon vorher aus
-				 * der Hashtable las). */
-				seadrive_badge = sond_treeviewfm_seadrive_get_file_badge(
-						stvfm, full_path);
-			} else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-				/* Ordner selbst werden vom Scan/Watcher NICHT in
-				 * seadrive_file_badges geführt (der bezieht sich nur auf
-				 * Dateien) - eigenes Attribut bleibt hier bewusst ein
-				 * live-Check, da Ordner praktisch nie PINNED/offline
-				 * markiert sind (seltener Sonderfall, kein Performance-
-				 * Thema). Aussagekräftig ist ohnehin der aggregierte
-				 * Teilbaum-Status (dir_status) darunter. */
-				wchar_t *lp = prepare_long_path(full_path, NULL);
-				if (lp) {
-					DWORD attrs = GetFileAttributesW(lp);
-					g_free(lp);
-					if (attrs != INVALID_FILE_ATTRIBUTES) {
-						gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-						gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-
-						/* Prioritätsreihenfolge s. Kommentar bei
-						 * SondSeadriveBadge (sond_icon_util.h). */
-						if (offline && pinned)
-							seadrive_badge = SOND_SEADRIVE_BADGE_PENDING;
-						else if (offline)
-							seadrive_badge = SOND_SEADRIVE_BADGE_OFFLINE;
-						else if (pinned)
-							seadrive_badge = SOND_SEADRIVE_BADGE_PINNED;
-					}
-				}
-
-				/* Aggregierten Teilbaum-Status konsultieren, wenn das
-				 * Ordner-eigene Attribut nichts zeigt (Normalfall). */
-				if (seadrive_badge == SOND_SEADRIVE_BADGE_NONE)
-					dir_status = sond_treeviewfm_seadrive_get_dir_status(
-							stvfm, full_path);
-			}
+		sources.file_badge = badges_source_file;
+		sources.dir_status = badges_source_dir;
 #endif
-			g_free(full_path);
-		}
-	}
+		sources.index_status = badges_source_index;
 
-	/* Overlay-Icon für Indizierungsstatus ermitteln (unabhängig von
-	 * SeaDrive - beide können gleichzeitig zutreffen, dann je eine Ecke) */
-	index_status = sond_treeviewfm_get_index_status(stvfm, stvfm_item);
+		sond_tvfm_item_get_badges(stvfm_item, SOND_TVFM_OWNER(stvfm), &sources,
+				stvfm, &badges);
+		seadrive_badge = badges.seadrive;
+		dir_status = badges.dir_status;
+		index_status = badges.index;
+	}
 
 	/* Immer über sond_icon_util_render_with_overlays() rendern (auch mit
 	 * 0 Overlays), NIE mehr direkt "icon-name" auf dem Renderer setzen:

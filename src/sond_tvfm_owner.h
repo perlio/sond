@@ -51,6 +51,11 @@ struct _SondTVFMOwnerInterface {
 	gchar const* (*get_root)(SondTVFMOwner*);
 	/* Liegt die Wurzel im SeaDrive-Laufwerk? */
 	gboolean (*is_seadrive_path)(SondTVFMOwner*);
+	/* Soll das Einlesen eines Verzeichnisses den Inhalt der Dateien lesen (Typ
+	 * nach den ersten Bytes, PDF auf Anhänge prüfen)? NULL/TRUE: ja. FALSE: der
+	 * Typ ergibt sich nur aus der Endung, keine Datei wird geöffnet (schnell, löst
+	 * keinen Download aus). */
+	gboolean (*read_file_contents)(SondTVFMOwner*);
 
 	/* Abschnitte (Anbindungen) eines Items: ob sie unterstützt werden, ob das Item
 	 * welche hat, sie laden, einen löschen */
@@ -77,6 +82,8 @@ struct _SondTVFMOwnerInterface {
 gchar const* sond_tvfm_owner_get_root(SondTVFMOwner*);
 
 gboolean sond_tvfm_owner_is_seadrive_path(SondTVFMOwner*);
+
+gboolean sond_tvfm_owner_read_file_contents(SondTVFMOwner*);
 
 gboolean sond_tvfm_owner_supports_sections(SondTVFMOwner*);
 

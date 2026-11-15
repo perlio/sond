@@ -2,12 +2,12 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #251.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #252.
 
 ## Inhalt
 
 Offen: #245, #247
-Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251
 Ideen: #167, #169, #205, #232, #233
 
 ## Offen
@@ -224,6 +224,30 @@ Status: zurückgestellt
  Umbruch nach "E-"), da KEEP_HYPHENS am Blockende ein Zeilenende setzt.
  viewer_highlight_at_char_pos bleibt unverändert (Index-Texte sind je
  Seite getrennt).
+```
+
+### #251 g_chdir(root) in sond_treeviewfm_set_root() entbehrlich machen
+
+Status: zurückgestellt (Prüfauftrag)
+
+```text
+ sond_treeviewfm_set_root() setzt das Arbeitsverzeichnis des Prozesses auf die
+ Projektwurzel (g_chdir). Damit "funktionierten" projektrelative Pfade, die ohne
+ vorangestellte Wurzel an Betriebssystem-Funktionen gingen. Die GTK4-Fassung
+ (src/gtk4/sond_treeviewfm.c) setzt es bewusst nicht (prozessweit, nicht
+ threadsicher, mehrere Bäume/Projekte nebeneinander nicht möglich); die Item-Schicht
+ (sond_tvfm_item.c: Verzeichnis anlegen, Verzeichnis umbenennen) und
+ sond_file_part_rename() arbeiten dafür inzwischen mit absoluten Pfaden.
+
+ Zu klären, bevor das g_chdir in der GTK3-Fassung entfallen kann:
+ 1. Alle Zond-Dateien auf OS-Aufrufe (g_stat, sond_fopen, g_rename, ...) mit
+    projektrelativen Pfaden ohne Wurzel/path_root durchsehen (zond_treeviewfm.c,
+    Export, Import, Verwendung; zond_convert.c hat ein eigenes g_chdir(project_dir)).
+ 2. Dateidialoge: misc.c nennt das Arbeitsverzeichnis als Ursache falscher
+    Startverzeichnisse (start_path wird schon übergeben); prüfen, ob etwas darauf baut.
+ 3. Testfassung ohne g_chdir: Dateibaum, Anbinden, Export, Import, Viewer, Indizieren
+    durchgehen. Nutzen: Long-Path-Schutz auch für bisher relative Pfade.
+ Nicht eilig; Entfernen nur nach der Prüfung.
 ```
 
 ## Ideen
