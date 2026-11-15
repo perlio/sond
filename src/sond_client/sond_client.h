@@ -596,6 +596,9 @@ typedef struct {
     gchar *current_file;
     GDateTime *start_time;
     GDateTime *end_time;
+    gchar *job_token;          /* Kennung, die der Start mitgegeben hat (nullable) */
+    gboolean cancelled;        /* Abbruch wurde angefordert */
+    gchar *error_message;      /* Grund, wenn der Job nicht (vollständig) lief (nullable) */
 } OcrStatus;
 
 /**
@@ -615,6 +618,60 @@ gboolean sond_client_ocr_start_job(SondClient *client,
                                    const gchar *library_name,
                                    gboolean force_reprocess,
                                    GError **error);
+
+/**
+ * SondClientOcrMode:
+ * @SOND_CLIENT_OCR_NONE: kein OCR, nur indizieren
+ * @SOND_CLIENT_OCR_CHECK: nur Seiten ohne versteckten Text OCRen (Standard)
+ * @SOND_CLIENT_OCR_FORCE: immer OCR, vorhandener versteckter Text wird ersetzt
+ */
+typedef enum {
+    SOND_CLIENT_OCR_NONE = 0,
+    SOND_CLIENT_OCR_CHECK,
+    SOND_CLIENT_OCR_FORCE
+} SondClientOcrMode;
+
+/**
+ * sond_client_ocr_start_job_ex:
+ * @client: SondClient
+ * @library_name: Name der Library
+ * @force_reprocess: TRUE = auch unveränderte, schon verarbeitete Dateien neu verarbeiten
+ * @mode: OCR-Modus
+ * @files: (nullable) (array zero-terminated=1): Dateien (relativ zur Library), NULL = keine
+ * @dirs: (nullable) (array zero-terminated=1): Verzeichnisse (rekursiv), NULL = keine
+ * @job_token: (nullable): Kennung des Auftrags (nur Buchstaben, Ziffern, "_" und "-",
+ *   höchstens 64 Zeichen), die der Server in sond_client_ocr_get_status() zurückgibt
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Wie sond_client_ocr_start_job(), aber mit OCR-Modus und optionaler Auswahl: Ist
+ * @files oder @dirs gesetzt, beschränkt sich der Job auf diese Pfade (einzeln
+ * gewählte Dateien werden immer verarbeitet), sonst gilt die ganze Library.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_ocr_start_job_ex(SondClient *client,
+                                      const gchar *library_name,
+                                      gboolean force_reprocess,
+                                      SondClientOcrMode mode,
+                                      const gchar * const *files,
+                                      const gchar * const *dirs,
+                                      const gchar *job_token,
+                                      GError **error);
+
+/**
+ * sond_client_ocr_cancel_job:
+ * @client: SondClient
+ * @library_name: Name der Library
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Fordert den Abbruch des laufenden Jobs an; er endet nach der Datei, die er gerade
+ * bearbeitet.
+ *
+ * Returns: TRUE, wenn der Abbruch angefordert wurde
+ */
+gboolean sond_client_ocr_cancel_job(SondClient *client,
+                                    const gchar *library_name,
+                                    GError **error);
 
 /**
  * sond_client_ocr_get_status:

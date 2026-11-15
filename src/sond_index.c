@@ -2242,7 +2242,8 @@ static gboolean coverage_invalidate_impl(SondIndexCtx *ctx,
  * lediglich eine verpasste Optimierung.
  */
 static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
-        gchar const *path, gchar const *root_dir, GError **error);
+        gchar const *path, gchar const *root_dir, SondIndexListDirFunc list_func,
+        gpointer list_data, GError **error);
 
 gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
         gchar const *path, gchar const *root_dir, GError **error) {
@@ -2253,14 +2254,31 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
 
     if (!db_savepoint(ctx, error))
         return FALSE;
-    ok = coverage_try_collapse_impl(ctx, path, root_dir, error);
+    ok = coverage_try_collapse_impl(ctx, path, root_dir, NULL, NULL, error);
+    db_savepoint_end(ctx, ok);
+
+    return ok;
+}
+
+gboolean sond_index_ctx_coverage_try_collapse_listing(SondIndexCtx *ctx,
+        gchar const *path, SondIndexListDirFunc list_func, gpointer list_data,
+        GError **error) {
+    gboolean ok = FALSE;
+
+    if (!ctx || !path)
+        return TRUE;
+
+    if (!db_savepoint(ctx, error))
+        return FALSE;
+    ok = coverage_try_collapse_impl(ctx, path, NULL, list_func, list_data, error);
     db_savepoint_end(ctx, ok);
 
     return ok;
 }
 
 static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
-        gchar const *path, gchar const *root_dir, GError **error) {
+        gchar const *path, gchar const *root_dir, SondIndexListDirFunc list_func,
+        gpointer list_data, GError **error) {
     gchar *current = NULL;
 
     if (!ctx || !path)
@@ -2409,36 +2427,63 @@ static gboolean coverage_try_collapse_impl(SondIndexCtx *ctx,
         }
 
         parent = g_strndup(current, slash - current);
-        parent_abs = g_strconcat(root_dir, "/", parent, NULL);
 
-        /* sond_dir_open() statt g_dir_open(): Long-Path-sicher (Windows),
-         * wie überall sonst im Code für Dateisystemzugriffe (s.
-         * sond_file_helper.c) - bei tief verschachtelten (z.B. SeaDrive-
-         * synchronisierten) Projektverzeichnissen kann der reale Pfad
-         * sonst am klassischen MAX_PATH-Limit scheitern. */
-        dir = sond_dir_open(parent_abs, &dir_error);
-        g_free(parent_abs);
-        if (!dir) {
-            /* nicht fatal fuer den bereits erfolgten coverage_mark(path,...)
-             * - lediglich keine weitere Zusammenfassung nach oben moeglich */
-            g_clear_error(&dir_error);
-            g_free(parent);
-            break;
-        }
+        if (list_func) {
+            /* Auflistung von außen (Server: Seafile statt Dateisystem) */
+            GPtrArray *names = list_func(parent, list_data, &dir_error);
 
-        while ((entry_name = sond_dir_read_name(dir))) {
-            gchar *entry_path = g_strconcat(parent, "/", entry_name, NULL);
-            gint   entry_mode = sond_index_ctx_coverage_get(ctx, entry_path);
-
-            g_free(entry_path);
-            if (entry_mode < 0) {
-                all_covered = FALSE;
+            if (!names) {
+                g_clear_error(&dir_error);
+                g_free(parent);
                 break;
             }
-            if (entry_mode < min_mode)
-                min_mode = entry_mode;
+
+            for (guint i = 0; i < names->len; i++) {
+                gchar *entry_path = g_strconcat(parent, "/",
+                        (gchar const*) g_ptr_array_index(names, i), NULL);
+                gint   entry_mode = sond_index_ctx_coverage_get(ctx, entry_path);
+
+                g_free(entry_path);
+                if (entry_mode < 0) {
+                    all_covered = FALSE;
+                    break;
+                }
+                if (entry_mode < min_mode)
+                    min_mode = entry_mode;
+            }
+            g_ptr_array_unref(names);
+        } else {
+            parent_abs = g_strconcat(root_dir, "/", parent, NULL);
+
+            /* sond_dir_open() statt g_dir_open(): Long-Path-sicher (Windows),
+             * wie überall sonst im Code für Dateisystemzugriffe (s.
+             * sond_file_helper.c) - bei tief verschachtelten (z.B. SeaDrive-
+             * synchronisierten) Projektverzeichnissen kann der reale Pfad
+             * sonst am klassischen MAX_PATH-Limit scheitern. */
+            dir = sond_dir_open(parent_abs, &dir_error);
+            g_free(parent_abs);
+            if (!dir) {
+                /* nicht fatal fuer den bereits erfolgten coverage_mark(path,...)
+                 * - lediglich keine weitere Zusammenfassung nach oben moeglich */
+                g_clear_error(&dir_error);
+                g_free(parent);
+                break;
+            }
+
+            while ((entry_name = sond_dir_read_name(dir))) {
+                gchar *entry_path = g_strconcat(parent, "/", entry_name, NULL);
+                gint   entry_mode = sond_index_ctx_coverage_get(ctx, entry_path);
+
+                g_free(entry_path);
+                if (entry_mode < 0) {
+                    all_covered = FALSE;
+                    break;
+                }
+                if (entry_mode < min_mode)
+                    min_mode = entry_mode;
+            }
+            sond_dir_close(dir);
         }
-        sond_dir_close(dir);
 
         if (!all_covered) {
             g_free(parent);

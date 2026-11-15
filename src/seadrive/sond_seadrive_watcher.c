@@ -339,6 +339,27 @@ SondSeadriveDirStatus sond_seadrive_watcher_get_dir_status(SondSeadriveWatcher *
     return SOND_SEADRIVE_DIR_STATUS_MIXED;
 }
 
+gboolean sond_seadrive_watcher_get_pin_summary(SondSeadriveWatcher *w, guint *total,
+        guint *pinned)
+{
+    SondSeadriveDirCounts *counts = NULL;
+
+    if (!w || !w->dir_counts || !w->root)
+        return FALSE;
+
+    counts = g_hash_table_lookup(w->dir_counts, w->root);
+    if (!counts)
+        return FALSE;
+
+    if (total)
+        *total = counts->total;
+    //gepinnt und lokal, dazu gepinnt und noch nicht lokal (pending_down)
+    if (pinned)
+        *pinned = counts->hydrated_pinned + w->pending_down;
+
+    return TRUE;
+}
+
 guint sond_seadrive_watcher_get_pending_down(SondSeadriveWatcher *w)
 {
     return w ? w->pending_down : 0;

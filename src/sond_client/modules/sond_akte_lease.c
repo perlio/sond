@@ -28,6 +28,8 @@
 #include "../../seadrive/sond_seadrive_core.h"
 
 #define LEASE_LABEL "ProjektLease"
+//Halter-Kennung eines Index-Jobs auf dem Server (s. sond_akte_lease_handover_to_job)
+#define JOB_DEVICE_PREFIX "job:"
 #define LEASE_LOCK_REASON "Lease"
 
 //So lange wird auf einen fremden Node-Lock des Lease-Knotens gewartet, bevor er
@@ -446,6 +448,7 @@ static gboolean create_lease_node(SondAkteLease *lease, gint64 akte_id,
     sond_graph_node_set_property_string(mine, "zond_open", "0");
     sond_graph_node_set_property_string(mine, "pending_up", "-1");
     sond_graph_node_set_property_string(mine, "takeover_by", "");
+    sond_graph_node_set_property_string(mine, "job_token", "");
 
     if (!sond_client_save_node(lease->client, mine, error)) {
         g_object_unref(mine);
@@ -655,6 +658,8 @@ typedef struct {
     gboolean mine;
     gboolean same_user;
     gboolean expired;
+    gboolean is_job;    //Halter ist ein Index-Job: Gerät "job:<token>"
+    gchar *job_token;
 } LeaseState;
 
 static void state_clear(LeaseState *st) {
@@ -662,6 +667,7 @@ static void state_clear(LeaseState *st) {
     g_free(st->device_name);
     g_free(st->user);
     g_free(st->takeover_by);
+    g_free(st->job_token);
     memset(st, 0, sizeof(LeaseState));
 }
 
@@ -674,12 +680,14 @@ static void state_read(LeaseTxn *txn, LeaseState *st) {
     st->device_name = prop_get(txn->node, "device_name");
     st->user = prop_get(txn->node, "user");
     st->takeover_by = prop_get(txn->node, "takeover_by");
+    st->job_token = prop_get(txn->node, "job_token");
     st->epoch = prop_get_int(txn->node, "epoch", 0);
     st->seen = prop_get_int(txn->node, "seen", 0);
     st->zond_open = prop_get_int(txn->node, "zond_open", 0) != 0;
     st->pending_up = (gint) prop_get_int(txn->node, "pending_up", -1);
 
     st->held = (*st->device != '\0');
+    st->is_job = st->held && g_str_has_prefix(st->device, JOB_DEVICE_PREFIX);
     st->mine = st->held && g_strcmp0(st->device, txn->lease->device_id) == 0;
     st->same_user = st->held && own_user && g_strcmp0(st->user, own_user) == 0;
     st->expired = st->held &&
@@ -692,6 +700,7 @@ void sond_akte_lease_info_clear(SondLeaseInfo *info) {
 
     g_free(info->user);
     g_free(info->device_name);
+    g_free(info->job_token);
     memset(info, 0, sizeof(SondLeaseInfo));
 }
 
@@ -715,6 +724,8 @@ static void info_fill(SondLeaseInfo *info, LeaseTxn *txn, LeaseState *st) {
     info->epoch = st->epoch;
     info->user = g_strdup(st->user);
     info->device_name = g_strdup(st->device_name);
+    info->by_job = st->is_job;
+    info->job_token = st->is_job ? g_strdup(st->job_token) : NULL;
 }
 
 /* ------------------------------------------------------------------ */
@@ -728,6 +739,8 @@ typedef struct {
     gboolean takeover_requested; //Ausgabe von heartbeat
     gint64 granted_epoch;        //Ausgabe: Epoche nach einer Vergabe
     gint64 node_id;              //Ausgabe: Lease-Knoten nach einer Vergabe
+    const gchar *job_token;      //Kennung des Index-Jobs (handover, reclaim)
+    gboolean to_me;              //reclaim: Lease an dieses Gerät statt freigeben
     SondLeaseInfo *info;
 } TxnArgs;
 
@@ -848,6 +861,66 @@ static SondLeaseResult txn_release(LeaseTxn *txn, gpointer user_data) {
         sond_graph_node_set_property_string(txn->node, "zond_open", "0");
         txn->dirty = TRUE;
         result = SOND_LEASE_OK;
+    }
+
+    state_clear(&st);
+
+    return result;
+}
+
+static SondLeaseResult txn_handover_job(LeaseTxn *txn, gpointer user_data) {
+    TxnArgs *args = user_data;
+    LeaseState st;
+    SondLeaseResult result = SOND_LEASE_LOST;
+
+    state_read(txn, &st);
+
+    if (still_mine(txn, &st)) {
+        gchar *device = g_strconcat(JOB_DEVICE_PREFIX, args->job_token, NULL);
+
+        //der Nutzer bleibt eingetragen: nur er darf die Lease später zurückholen
+        sond_graph_node_set_property_string(txn->node, "device", device);
+        sond_graph_node_set_property_string(txn->node, "device_name",
+                "Index-Job auf dem Server");
+        sond_graph_node_set_property_string(txn->node, "job_token", args->job_token);
+        prop_set_int(txn->node, "epoch", st.epoch + 1);
+        sond_graph_node_set_property_string(txn->node, "takeover_by", "");
+        sond_graph_node_set_property_string(txn->node, "zond_open", "0");
+        sond_graph_node_set_property_string(txn->node, "pending_up", "-1");
+        txn->dirty = TRUE;
+        result = SOND_LEASE_OK;
+        g_free(device);
+    }
+
+    state_clear(&st);
+
+    return result;
+}
+
+static SondLeaseResult txn_reclaim_job(LeaseTxn *txn, gpointer user_data) {
+    TxnArgs *args = user_data;
+    LeaseState st;
+    SondLeaseResult result = SOND_LEASE_DENIED;
+
+    state_read(txn, &st);
+
+    if (st.is_job && (!args->job_token || !g_strcmp0(st.job_token, args->job_token))) {
+        if (args->to_me && !st.same_user) {
+            result = SOND_LEASE_NOT_ALLOWED;
+        } else {
+            if (args->to_me) {
+                grant(txn, &st, args);
+            } else {
+                sond_graph_node_set_property_string(txn->node, "device", "");
+                sond_graph_node_set_property_string(txn->node, "device_name", "");
+                sond_graph_node_set_property_string(txn->node, "takeover_by", "");
+                sond_graph_node_set_property_string(txn->node, "zond_open", "0");
+                prop_set_int(txn->node, "epoch", st.epoch + 1);
+                txn->dirty = TRUE;
+            }
+            sond_graph_node_set_property_string(txn->node, "job_token", "");
+            result = SOND_LEASE_OK;
+        }
     }
 
     state_clear(&st);
@@ -983,6 +1056,55 @@ SondLeaseResult sond_akte_lease_release(SondAkteLease *lease, gint64 akte_id,
 
     //freigegeben oder gar nicht mehr unsere: lokal jedenfalls nichts mehr halten
     local_remove(lease, akte_id);
+
+    return result;
+}
+
+SondLeaseResult sond_akte_lease_handover_to_job(SondAkteLease *lease, gint64 akte_id,
+        const gchar *token, GError **error) {
+    TxnArgs args = { 0 };
+    SondLeaseResult result = SOND_LEASE_LOST;
+    gboolean found = TRUE;
+
+    g_return_val_if_fail(lease != NULL, SOND_LEASE_ERROR);
+    g_return_val_if_fail(akte_id > 0, SOND_LEASE_ERROR);
+    g_return_val_if_fail(token != NULL && *token, SOND_LEASE_ERROR);
+
+    if (!local_get(lease, akte_id))
+        return SOND_LEASE_LOST;
+
+    args.job_token = token;
+    if (!lease_run(lease, akte_id, FALSE, txn_handover_job, &args, &result, &found, error))
+        return SOND_LEASE_ERROR;
+
+    if (!found)
+        result = SOND_LEASE_LOST;
+
+    //übergeben oder gar nicht mehr unsere: dieses Gerät hält sie jedenfalls nicht mehr
+    local_remove(lease, akte_id);
+
+    return result;
+}
+
+SondLeaseResult sond_akte_lease_reclaim_from_job(SondAkteLease *lease, gint64 akte_id,
+        const gchar *token, gboolean to_me, GError **error) {
+    TxnArgs args = { 0 };
+    SondLeaseResult result = SOND_LEASE_DENIED;
+    gboolean found = TRUE;
+
+    g_return_val_if_fail(lease != NULL, SOND_LEASE_ERROR);
+    g_return_val_if_fail(akte_id > 0, SOND_LEASE_ERROR);
+
+    args.job_token = token;
+    args.to_me = to_me;
+    if (!lease_run(lease, akte_id, FALSE, txn_reclaim_job, &args, &result, &found, error))
+        return SOND_LEASE_ERROR;
+
+    if (!found)
+        result = SOND_LEASE_DENIED;
+
+    if (result == SOND_LEASE_OK && to_me)
+        local_set(lease, akte_id, args.granted_epoch, args.node_id);
 
     return result;
 }

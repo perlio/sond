@@ -73,6 +73,8 @@ typedef struct {
     gint64 epoch;
     gchar *user;
     gchar *device_name;       //Rechnername des Halters
+    gboolean by_job;          //Halter ist ein Index-Job auf dem Server
+    gchar *job_token;         //dessen Kennung (nur bei by_job)
 } SondLeaseInfo;
 
 void sond_akte_lease_info_clear(SondLeaseInfo *info);
@@ -120,6 +122,22 @@ SondLeaseResult sond_akte_lease_release(SondAkteLease *lease, gint64 akte_id,
  * sie einfach erteilt (OK). Andere Nutzer: NOT_ALLOWED. info optional. */
 SondLeaseResult sond_akte_lease_takeover(SondAkteLease *lease, gint64 akte_id,
         gboolean force, SondLeaseInfo *info, GError **error);
+
+/* Übergibt die Lease, die dieses Gerät hält, an einen Index-Job auf dem Server
+ * (Halter "job:<token>", neue Epoche). OK: übergeben, dieses Gerät hält sie nicht mehr.
+ * LOST: gehörte schon nicht mehr uns. Der Aufrufer sorgt vorher dafür, dass alles
+ * hochgeladen ist und zond nur noch liest. Der Server weiß davon nichts; ob der Job
+ * noch läuft, sagt /ocr/status mit demselben Token. */
+SondLeaseResult sond_akte_lease_handover_to_job(SondAkteLease *lease, gint64 akte_id,
+        const gchar *token, GError **error);
+
+/* Nimmt die Lease aus einem Index-Job zurück, der beendet oder verwaist ist (der
+ * Aufrufer hat das über /ocr/status geprüft). token (nullable) muss zum Halter
+ * passen, NULL = jeder Job. to_me: Lease an dieses Gerät (nur für den Nutzer, der sie
+ * übergeben hat; sonst NOT_ALLOWED), sonst frei. DENIED: die Lease gehört keinem
+ * (passenden) Job. */
+SondLeaseResult sond_akte_lease_reclaim_from_job(SondAkteLease *lease, gint64 akte_id,
+        const gchar *token, gboolean to_me, GError **error);
 
 /* Merkt sich den Library-Namen der Akte beim lokalen Lease-Zustand (nur, wenn
  * dieses Gerät die Lease hält), damit die Akte auch offline gefunden wird. */

@@ -74,6 +74,12 @@ SondSeadriveBadge sond_seadrive_watcher_get_file_badge(SondSeadriveWatcher*,
 SondSeadriveDirStatus sond_seadrive_watcher_get_dir_status(SondSeadriveWatcher*,
 		const gchar *dir_path);
 
+/* Wie viele der Dateien im ganzen Projekt (Wurzel des Watchers) sind angeheftet (lokal
+ * und gepinnt, oder gepinnt und noch im Laden)? FALSE, solange der erste Scan nicht fertig
+ * ist. */
+gboolean sond_seadrive_watcher_get_pin_summary(SondSeadriveWatcher*, guint *total,
+		guint *pinned);
+
 guint sond_seadrive_watcher_get_pending_down(SondSeadriveWatcher*);
 guint sond_seadrive_watcher_get_pending_up(SondSeadriveWatcher*);
 

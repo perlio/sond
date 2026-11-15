@@ -3890,6 +3890,10 @@ static gchar* lease_info_text(const SondLeaseInfo *info) {
     if (info->mine)
         return g_strdup("Projekt: auf diesem Rechner ausgecheckt");
 
+    if (info->by_job)
+        return g_strdup_printf("Projekt: Index-Job auf dem Server (gestartet von %s)",
+                info->user ? info->user : "?");
+
     idle = lease_idle_text(info->idle_seconds);
     text = g_strdup_printf("Projekt: ausgecheckt von %s auf %s, zuletzt aktiv "
             "%s%s", info->user ? info->user : "?",
@@ -4340,10 +4344,91 @@ static void on_lease_readonly_response(GObject *source, GAsyncResult *result,
 }
 
 /* Die Akte ist an einem anderen Rechner/von einem anderen Nutzer ausgecheckt */
+/* Die Berechtigung gehört einem Index-Job auf dem Server. Läuft er noch (laut
+ * /ocr/status mit derselben Kennung, oder ist er eben erst gestartet), bleibt nur
+ * Lesen. Ist er beendet oder verwaist, wird die Berechtigung zurückgeholt: an den
+ * Nutzer, der sie übergeben hatte, sonst frei. */
+static void lease_job_denied(SondModuleAktePrivate *priv, gint64 akte_id,
+        const gchar *name, const SondLeaseInfo *info) {
+    GError *error = NULL;
+    OcrStatus *status = sond_client_ocr_get_status(priv->client, name, &error);
+    gboolean alive = FALSE;
+
+    //unbekannt (Server nicht erreichbar) gilt als "läuft noch": nichts anfassen
+    if (error)
+        alive = TRUE;
+    else if (status && status->running &&
+            !g_strcmp0(status->job_token, info->job_token))
+        alive = TRUE;
+    else if (info->idle_seconds >= 0 && info->idle_seconds < 90)
+        alive = TRUE;   //eben erst übergeben: der Start kann noch ausstehen
+
+    if (alive) {
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("Index-Job läuft");
+        const char *buttons_ro[] = { "Schreibgeschützt öffnen", "Abbrechen", NULL };
+        gchar *detail = NULL;
+
+        if (status && status->running)
+            detail = g_strdup_printf("Für diese Akte läuft ein Index-Job auf dem "
+                    "Server (%d von %d Dateien). Solange er läuft, darf niemand "
+                    "die Projektdaten schreiben.", status->processed_files,
+                    status->total_files);
+        else
+            detail = g_strdup("Für diese Akte läuft ein Index-Job auf dem Server "
+                    "(oder der Server ist gerade nicht erreichbar). Solange er "
+                    "läuft, darf niemand die Projektdaten schreiben.");
+
+        gtk_alert_dialog_set_detail(dialog, detail);
+        gtk_alert_dialog_set_buttons(dialog, buttons_ro);
+        gtk_alert_dialog_set_default_button(dialog, 1);
+        gtk_alert_dialog_set_cancel_button(dialog, 1);
+        gtk_alert_dialog_set_modal(dialog, TRUE);
+        gtk_alert_dialog_choose(dialog,
+                GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
+                on_lease_readonly_response, lease_dlg_new(priv, akte_id, name));
+        g_object_unref(dialog);
+        g_free(detail);
+    } else {
+        GError *reclaim_error = NULL;
+        SondLeaseResult res = sond_akte_lease_reclaim_from_job(priv->lease, akte_id,
+                info->job_token, info->same_user, &reclaim_error);
+
+        if (res == SOND_LEASE_OK && info->same_user) {
+            //der Job ist fertig: die Berechtigung ist wieder bei diesem Rechner
+            sond_akte_lease_set_name(priv->lease, akte_id, name);
+            lease_refresh(priv, TRUE);
+            on_zond_clicked(NULL, priv);
+        } else if (res == SOND_LEASE_OK) {
+            lease_refresh(priv, TRUE);
+            show_error_dialog(priv->main_widget, "Akte wieder frei",
+                    "Der Index-Job auf dem Server ist beendet. Die Akte ist wieder "
+                    "frei, bitte erneut versuchen.");
+        } else {
+            show_error_dialog(priv->main_widget, "Übernahme nicht möglich",
+                    reclaim_error ? reclaim_error->message :
+                            "Die Berechtigung konnte nicht aus dem Index-Job "
+                            "zurückgeholt werden.");
+        }
+        g_clear_error(&reclaim_error);
+    }
+
+    if (status)
+        sond_client_ocr_status_free(status);
+    g_clear_error(&error);
+}
+
 static void lease_denied_dialog(SondModuleAktePrivate *priv, gint64 akte_id,
         const gchar *name, const SondLeaseInfo *info) {
-    gchar *idle = lease_idle_text(info->idle_seconds);
+    gchar *idle = NULL;
     gchar *detail = NULL;
+
+    if (info->by_job) {
+        lease_job_denied(priv, akte_id, name, info);
+
+        return;
+    }
+
+    idle = lease_idle_text(info->idle_seconds);
 
     if (!info->same_user) {
         detail = g_strdup_printf("Die Akte ist von %s auf dem Rechner %s "
@@ -4486,9 +4571,16 @@ static void on_dokumente_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
         return;
 
-    sond_dokumente_show(priv->client,
-            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), lfd_nr, year,
-            gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)));
+    {
+        gchar *lease_name = lease_current_name(priv);
+        gint64 akte_id = lease_name ? lease_current_akte_id(priv, lease_name) : 0;
+
+        sond_dokumente_show(priv->client, priv->lease,
+                GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), lfd_nr, year,
+                gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)),
+                akte_id);
+        g_free(lease_name);
+    }
 }
 
 /* zond mit der Projektdatei der gewählten Akte starten. Mit Schreibberechtigung

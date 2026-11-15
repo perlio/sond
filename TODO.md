@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #254.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #255.
 
 ## Inhalt
 
-Offen: #245, #247
+Offen: #245, #247, #254
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253
 Ideen: #167, #169, #205, #232, #233
 
@@ -50,6 +50,30 @@ Status: offen (nicht implementiert)
  Zu tun: Einfügen in sond_file_part_insert() für GMESSAGE (MIME-Baum ändern,
  Mail zurückschreiben, Index-DB und DB-Pfade nachführen), danach die
  vorbereiteten Teile testen.
+```
+
+### #254 Index-Job unter der Lease: offene Punkte
+
+Status: offen (nach den Tests des Index-Jobs)
+
+```text
+ Umgesetzt: Auswahl im Dokumentenfenster -> /ocr/start (Pfadliste, ocr_mode, job_token);
+ der Client trägt die Lease auf "job:<token>" um, der Server liefert das Token in
+ /ocr/status, /ocr/cancel bricht ab; nach Jobende holt der Client die Lease zurück
+ (sond_akte_lease_reclaim_from_job). Der Server lädt die Index-DB aus Seafile, löscht
+ nur geänderte Dateien (oder bei "neu verarbeiten") und fasst Ordner über die
+ Seafile-Auflistung zusammen.
+ Offen:
+ 1. Index-Schlüssel: der Server hat bisher Pfade MIT führendem "/" in den Index
+    geschrieben (zond OHNE). Jetzt ohne; alte Server-Einträge bleiben als Dubletten
+    ("/sub/a.pdf" neben "sub/a.pdf") und sollten bei Gelegenheit bereinigt werden.
+ 2. Abbruch greift erst nach der laufenden Datei (kein Abbruch mitten in einer großen
+    PDF mit OCR).
+ 3. Der OCR-Knopf im Akten-Fenster (ganze Bibliothek) läuft noch ohne Lease-Übergabe.
+ 4. Abgelaufene Job-Lease: wird nur beim nächsten Öffnen der Akte (zond starten)
+    zurückgeholt; ein anderer Nutzer kann sie aufräumen, bekommt sie dann frei.
+ 5. Zond schreibt den Index weiterhin selbst; mit der Lease-Disziplin gibt es nur einen
+    Schreiber zur Zeit (Shard-Variante verworfen).
 ```
 
 ## Zurückgestellt

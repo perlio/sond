@@ -710,6 +710,34 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
                                                GError **error);
 
 /**
+ * SondIndexListDirFunc:
+ * @dir:   projektrelatives Verzeichnis ("/"-Konvention, ohne führenden "/")
+ * @user_data: Daten des Aufrufers
+ * @error: GError
+ *
+ * Listet die Einträge (Dateien und Verzeichnisse, nur Namen) eines Verzeichnisses.
+ *
+ * Returns: (transfer full) GPtrArray mit Namen (g_free) oder NULL, wenn das Verzeichnis
+ *          nicht gelesen werden kann (dann wird nicht weiter zusammengefasst).
+ */
+typedef GPtrArray* (*SondIndexListDirFunc)(gchar const *dir, gpointer user_data,
+                                           GError **error);
+
+/**
+ * sond_index_ctx_coverage_try_collapse_listing:
+ *
+ * Wie sond_index_ctx_coverage_try_collapse(), aber ohne Dateisystem: die Auflistung der
+ * Verzeichnisse liefert @list_func (z.B. der Server aus Seafile).
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_try_collapse_listing(SondIndexCtx *ctx,
+                                                       gchar const *path,
+                                                       SondIndexListDirFunc list_func,
+                                                       gpointer list_data,
+                                                       GError **error);
+
+/**
  * sond_index_ctx_delete_index:
  * @ctx:       SondIndexCtx
  * @path:      Datei- oder Verzeichnispfad (filepart-Konvention,

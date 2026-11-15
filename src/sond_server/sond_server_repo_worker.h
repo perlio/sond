@@ -45,6 +45,12 @@ typedef struct {
     GDateTime *start_time;
     GDateTime *end_time;
     gboolean   force_reprocess;
+    gint       ocr_mode;      /* SondOcrMode: 0 kein OCR, 1 nur Seiten ohne Text, 2 immer */
+    GPtrArray *sel_files;     /* nur diese Dateien (Pfade mit führendem '/'), NULL = alle */
+    GPtrArray *sel_dirs;      /* nur diese Verzeichnisse (rekursiv), NULL = alle */
+    gchar     *job_token;     /* vom Client vergeben, wird nur in /ocr/status zurückgegeben */
+    gint       cancel;        /* atomar: Abbruch angefordert */
+    gchar     *error_message; /* Grund, wenn der Job nicht (vollständig) lief, sonst NULL */
 } OcrJobInfo;
 
 /**

@@ -24,6 +24,7 @@
 #include "../sond_process_file.h"
 #include "../sond_index.h"
 
+#include <glib/gstdio.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
 #include <mupdf/fitz.h>
@@ -129,6 +130,7 @@ static OcrJobInfo* ocr_job_info_new(const gchar *repo_id,
     info->start_time = g_date_time_new_now_local();
     info->end_time = NULL;
     info->force_reprocess = force_reprocess;
+    info->ocr_mode = force_reprocess ? SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK;
 
     return info;
 }
@@ -145,6 +147,12 @@ static void ocr_job_info_free(OcrJobInfo *info) {
     g_free(info->repo_id);
     g_free(info->library_name);
     g_free(info->current_file);
+    if (info->sel_files)
+        g_ptr_array_unref(info->sel_files);
+    if (info->sel_dirs)
+        g_ptr_array_unref(info->sel_dirs);
+    g_free(info->job_token);
+    g_free(info->error_message);
 
     if (info->start_time) {
         g_date_time_unref(info->start_time);
@@ -355,6 +363,13 @@ static gboolean seafile_upload_file(SeafileConfig *config,
                                    guchar *data,
                                    gsize size,
 								   GError** error);
+
+static gboolean seafile_file_detail(SeafileConfig *config,
+                                    SoupSession *session,
+                                    const gchar *file_path,
+                                    gboolean *exists,
+                                    GDateTime **mtime,
+                                    GError **error);
 
 static gpointer seafile_repo_worker_thread(gpointer user_data);
 
@@ -569,10 +584,122 @@ static void ocr_log_entry_free(OcrLogEntry *entry) {
  * HTTP Endpoint Handlers
  * ======================================================================= */
 
+/* Pfad aus der Auswahl des Clients auf einen Seafile-Pfad abbilden: relativ zur
+ * Bibliothek, mit führendem '/', ohne abschließendes '/'. NULL bei leerem oder
+ * unzulässigem Pfad (".." oder "." als Bestandteil, Backslash). */
+static gchar* ocr_normalize_selection_path(const gchar *in) {
+    gchar *trimmed = NULL;
+    gchar **parts = NULL;
+    gchar *result = NULL;
+    gboolean ok = TRUE;
+
+    if (!in)
+        return NULL;
+
+    trimmed = g_strstrip(g_strdup(in));
+    g_strdelimit(trimmed, "\\", '/');
+    parts = g_strsplit(trimmed, "/", -1);
+    for (gint i = 0; parts[i]; i++)
+        if (!g_strcmp0(parts[i], "..") || !g_strcmp0(parts[i], "."))
+            ok = FALSE;
+
+    if (ok) {
+        GString *path = g_string_new(NULL);
+
+        for (gint i = 0; parts[i]; i++)
+            if (parts[i][0])
+                g_string_append_printf(path, "/%s", parts[i]);
+        if (path->len > 0)
+            result = g_string_free(path, FALSE);
+        else
+            g_string_free(path, TRUE);
+    }
+
+    g_strfreev(parts);
+    g_free(trimmed);
+
+    return result;
+}
+
+/* Liest "files" und "dirs" (Arrays von Strings) aus dem JSON-Body. Rückgabe: -1 bei
+ * ungültigem Inhalt (error_text gesetzt), 0 ohne Auswahl, 1 mit Auswahl. */
+static gint ocr_parse_selection(SoupServerMessage *msg, GPtrArray **sel_files,
+        GPtrArray **sel_dirs, const gchar **error_text) {
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    JsonParser *parser = NULL;
+    JsonObject *obj = NULL;
+    const gchar *names[] = { "files", "dirs" };
+    GPtrArray **targets[] = { sel_files, sel_dirs };
+
+    *sel_files = NULL;
+    *sel_dirs = NULL;
+
+    if (!body || !body->data || body->length == 0)
+        return 0;
+
+    parser = json_parser_new();
+    if (!json_parser_load_from_data(parser, body->data, (gssize) body->length, NULL) ||
+            !JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser))) {
+        *error_text = "Invalid JSON body";
+        g_object_unref(parser);
+
+        return -1;
+    }
+    obj = json_node_get_object(json_parser_get_root(parser));
+
+    for (guint k = 0; k < G_N_ELEMENTS(names); k++) {
+        JsonArray *arr = NULL;
+
+        if (!json_object_has_member(obj, names[k]))
+            continue;
+        if (!JSON_NODE_HOLDS_ARRAY(json_object_get_member(obj, names[k]))) {
+            *error_text = "'files' and 'dirs' must be arrays";
+            goto fail;
+        }
+
+        arr = json_object_get_array_member(obj, names[k]);
+        for (guint i = 0; i < json_array_get_length(arr); i++) {
+            gchar *norm = NULL;
+
+            if (!JSON_NODE_HOLDS_VALUE(json_array_get_element(arr, i)) ||
+                    !(norm = ocr_normalize_selection_path(
+                            json_array_get_string_element(arr, i)))) {
+                *error_text = "Invalid path in selection";
+                goto fail;
+            }
+            if (!*targets[k])
+                *targets[k] = g_ptr_array_new_with_free_func(g_free);
+            g_ptr_array_add(*targets[k], norm);
+        }
+    }
+
+    g_object_unref(parser);
+    if (!*sel_files && !*sel_dirs) {
+        *error_text = "Empty selection";
+
+        return -1;
+    }
+
+    return 1;
+
+fail:
+    g_object_unref(parser);
+    g_clear_pointer(sel_files, g_ptr_array_unref);
+    g_clear_pointer(sel_dirs, g_ptr_array_unref);
+
+    return -1;
+}
+
 /**
  * handle_ocr_start:
  *
- * POST /ocr/start?library_name=XXX&force_reprocess=false
+ * POST /ocr/start?library_name=XXX&force_reprocess=false[&ocr_mode=none|check|force]
+ *
+ * ocr_mode: none = kein OCR (nur indizieren), check = nur Seiten ohne versteckten
+ * Text, force = immer OCR (vorhandener Text wird ersetzt). Ohne Angabe gilt wie
+ * bisher check, bei force_reprocess=true force.
+ * Optionaler JSON-Body {"files":[...],"dirs":[...]} (Pfade relativ zur Bibliothek)
+ * begrenzt den Job auf diese Dateien und Verzeichnisse (rekursiv).
  */
 static void handle_ocr_start(SoupServer *soup_server,
                              SoupServerMessage *msg,
@@ -608,6 +735,43 @@ static void handle_ocr_start(SoupServer *soup_server,
     const gchar *force_str = g_hash_table_lookup(query, "force_reprocess");
     gboolean force_reprocess = (force_str && g_strcmp0(force_str, "true") == 0);
 
+    gint ocr_mode = force_reprocess ? SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK;
+    const gchar *mode_str = g_hash_table_lookup(query, "ocr_mode");
+    if (mode_str) {
+        if (!g_strcmp0(mode_str, "none"))
+            ocr_mode = SOND_OCR_MODE_NONE;
+        else if (!g_strcmp0(mode_str, "check"))
+            ocr_mode = SOND_OCR_MODE_CHECK;
+        else if (!g_strcmp0(mode_str, "force"))
+            ocr_mode = SOND_OCR_MODE_FORCE;
+        else {
+            send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                              "Invalid 'ocr_mode' (none, check, force)");
+            return;
+        }
+    }
+
+    //Kennung des Clients (undurchsichtig, nur zum Wiedererkennen in /ocr/status)
+    const gchar *token_str = g_hash_table_lookup(query, "job_token");
+    if (token_str) {
+        gsize token_len = strlen(token_str);
+
+        if (token_len == 0 || token_len > 64 ||
+                strspn(token_str, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                        "0123456789_-") != token_len) {
+            send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid 'job_token'");
+            return;
+        }
+    }
+
+    GPtrArray *sel_files = NULL;
+    GPtrArray *sel_dirs = NULL;
+    const gchar *sel_error = NULL;
+    if (ocr_parse_selection(msg, &sel_files, &sel_dirs, &sel_error) < 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, sel_error);
+        return;
+    }
+
     /* Library-ID holen */
     GError *error = NULL;
     gchar *repo_id = sond_server_seafile_get_library_id_by_name(manager->server,
@@ -620,6 +784,10 @@ static void handle_ocr_start(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_NOT_FOUND, err_msg);
         g_free(err_msg);
         g_clear_error(&error);
+        if (sel_files)
+            g_ptr_array_unref(sel_files);
+        if (sel_dirs)
+            g_ptr_array_unref(sel_dirs);
         return;
     }
 
@@ -628,6 +796,10 @@ static void handle_ocr_start(SoupServer *soup_server,
      * Race, bei dem zwei gleichzeitige Start-Requests fuer dieselbe Library
      * sich sonst gegenseitig den noch benutzten OcrJobInfo wegziehen konnten. */
     OcrJobInfo *job_info = ocr_job_info_new(repo_id, library_name, force_reprocess);
+    job_info->ocr_mode = ocr_mode;
+    job_info->job_token = g_strdup(token_str);
+    job_info->sel_files = sel_files;  /* gehen in den Besitz des Jobs über */
+    job_info->sel_dirs = sel_dirs;
 
     if (!ocr_job_try_start(manager, repo_id, job_info)) {
         gchar *err_msg = g_strdup_printf("OCR job already running for library '%s'",
@@ -647,8 +819,11 @@ static void handle_ocr_start(SoupServer *soup_server,
     GThread *thread = g_thread_new("ocr-worker", seafile_repo_worker_thread, thread_data);
     g_thread_unref(thread);
 
-    LOG_INFO("Started OCR job for library '%s' (repo_id: %s, force: %s)",
-           library_name, repo_id, force_reprocess ? "true" : "false");
+    LOG_INFO("Started OCR job for library '%s' (repo_id: %s, force: %s, ocr_mode: %d, "
+           "selection: %u files, %u dirs)",
+           library_name, repo_id, force_reprocess ? "true" : "false", ocr_mode,
+           job_info->sel_files ? job_info->sel_files->len : 0,
+           job_info->sel_dirs ? job_info->sel_dirs->len : 0);
 
     /* Response */
     JsonBuilder *builder = json_builder_new();
@@ -766,6 +941,19 @@ static void handle_ocr_status(SoupServer *soup_server,
     json_builder_set_member_name(builder, "running");
     json_builder_add_boolean_value(builder, job_info->running);
 
+    if (job_info->job_token) {
+        json_builder_set_member_name(builder, "job_token");
+        json_builder_add_string_value(builder, job_info->job_token);
+    }
+
+    json_builder_set_member_name(builder, "cancelled");
+    json_builder_add_boolean_value(builder, g_atomic_int_get(&job_info->cancel) != 0);
+
+    if (job_info->error_message) {
+        json_builder_set_member_name(builder, "error");
+        json_builder_add_string_value(builder, job_info->error_message);
+    }
+
     json_builder_set_member_name(builder, "total_files");
     json_builder_add_int_value(builder, job_info->total_files);
 
@@ -817,6 +1005,60 @@ static void handle_ocr_status(SoupServer *soup_server,
  * ======================================================================= */
 
 /**
+ * handle_ocr_cancel:
+ *
+ * POST /ocr/cancel?library_name=XXX
+ *
+ * Fordert den Abbruch des laufenden Jobs an; der Job endet nach der Datei, die er
+ * gerade bearbeitet.
+ */
+static void handle_ocr_cancel(SoupServer *soup_server,
+                              SoupServerMessage *msg,
+                              const char *path,
+                              GHashTable *query,
+                              gpointer user_data) {
+    OcrManager *manager = (OcrManager*)user_data;
+    const gchar *username = NULL;
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only POST allowed");
+        return;
+    }
+
+    if (!sond_server_check_authorization(manager->server, msg, &username))
+        return;
+
+    const gchar *library_name = query ? g_hash_table_lookup(query, "library_name") : NULL;
+    if (!library_name || strlen(library_name) == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                          "Missing 'library_name' query parameter");
+        return;
+    }
+
+    GError *error = NULL;
+    OcrJobInfo *job_info = ocr_manager_get_job_by_library_name(manager, library_name, &error);
+
+    if (!job_info) {
+        send_error_response(msg, SOUP_STATUS_NOT_FOUND, "No OCR job found");
+        g_clear_error(&error);
+        return;
+    }
+
+    g_mutex_lock(&job_info->mutex);
+    gboolean running = job_info->running;
+    g_mutex_unlock(&job_info->mutex);
+
+    if (!running) {
+        send_error_response(msg, SOUP_STATUS_CONFLICT, "OCR job is not running");
+        return;
+    }
+
+    g_atomic_int_set(&job_info->cancel, 1);
+    LOG_INFO("Cancel requested for OCR job of library '%s'", library_name);
+    send_json_response(msg, SOUP_STATUS_OK, "{\"success\":true,\"message\":\"Cancel requested\"}");
+}
+
+/**
  * ocr_manager_register_handlers:
  *
  * Registriert OCR-Endpoints
@@ -830,6 +1072,10 @@ static void ocr_manager_register_handlers(OcrManager *manager) {
 
     soup_server_add_handler(soup_server, "/ocr/status",
                            handle_ocr_status,
+                           manager, NULL);
+
+    soup_server_add_handler(soup_server, "/ocr/cancel",
+                           handle_ocr_cancel,
                            manager, NULL);
 
     LOG_INFO("Registered OCR endpoints");
@@ -1153,6 +1399,163 @@ static guchar* seafile_download_file(SeafileConfig *config,
 }
 
 /**
+ * seafile_file_detail:
+ *
+ * Fragt Dasein und Änderungszeit einer Datei ab (Seafile "file detail"). TRUE, wenn die
+ * Abfrage geklappt hat; *exists sagt dann, ob es die Datei gibt. FALSE bei einem Fehler
+ * (Netz, Seafile), dann ist nichts über die Datei bekannt. mtime (optional) bekommt eine
+ * Referenz oder NULL, wenn Seafile keine Zeit liefert.
+ */
+static gboolean seafile_file_detail(SeafileConfig *config,
+                                    SoupSession *session,
+                                    const gchar *file_path,
+                                    gboolean *exists,
+                                    GDateTime **mtime,
+                                    GError **error) {
+    gchar *encoded_path = g_uri_escape_string(file_path, "/", FALSE);
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/file/detail/?p=%s",
+                                 config->server_url, config->repo_id, encoded_path);
+    SoupMessage *msg = NULL;
+    GBytes *bytes = NULL;
+    guint status = 0;
+    gboolean ok = FALSE;
+
+    g_free(encoded_path);
+    *exists = FALSE;
+    if (mtime)
+        *mtime = NULL;
+
+    msg = soup_message_new("GET", url);
+    g_free(url);
+    if (!msg) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "SoupMessage für file/detail '%s' konnte nicht erstellt werden", file_path);
+        return FALSE;
+    }
+
+    gchar *auth_header = g_strdup_printf("Token %s", config->auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                                "Authorization", auth_header);
+    g_free(auth_header);
+
+    bytes = soup_session_send_and_read(session, msg, NULL, error);
+    if (!bytes) {
+        g_object_unref(msg);
+        return FALSE;
+    }
+
+    status = soup_message_get_status(msg);
+    if (status == 404) {
+        ok = TRUE; //es gibt die Datei nicht
+    } else if (status == 200) {
+        gsize size = 0;
+        gconstpointer data = g_bytes_get_data(bytes, &size);
+        JsonParser *parser = json_parser_new();
+
+        if (json_parser_load_from_data(parser, data, (gssize) size, NULL) &&
+                JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser))) {
+            JsonObject *obj = json_node_get_object(json_parser_get_root(parser));
+
+            *exists = TRUE;
+            ok = TRUE;
+            if (mtime && json_object_has_member(obj, "mtime")) {
+                JsonNode *node = json_object_get_member(obj, "mtime");
+
+                if (JSON_NODE_HOLDS_VALUE(node)) {
+                    if (json_node_get_value_type(node) == G_TYPE_STRING)
+                        *mtime = g_date_time_new_from_iso8601(
+                                json_node_get_string(node), NULL);
+                    else
+                        *mtime = g_date_time_new_from_unix_local(json_node_get_int(node));
+                }
+            }
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "Ungültige Antwort von file/detail für '%s'", file_path);
+        }
+        g_object_unref(parser);
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "file/detail für '%s' lieferte HTTP %u", file_path, status);
+    }
+
+    g_bytes_unref(bytes);
+    g_object_unref(msg);
+
+    return ok;
+}
+
+/* Kontext für die Verzeichnisauflistung beim Zusammenfassen der Abdeckung */
+typedef struct {
+    SeafileConfig *config;
+    SoupSession *session;
+} ListDirCtx;
+
+/**
+ * seafile_list_dir_names:
+ *
+ * Namen der Einträge (Dateien und Verzeichnisse) eines Verzeichnisses (nicht
+ * rekursiv), als Auflistung für sond_index_ctx_coverage_try_collapse_listing().
+ * dir ist projektrelativ ohne führenden "/".
+ */
+static GPtrArray* seafile_list_dir_names(gchar const *dir, gpointer user_data,
+                                         GError **error) {
+    ListDirCtx *lctx = user_data;
+    gchar *seafile_path = g_strdup_printf("/%s", dir);
+    gchar *encoded_path = g_uri_escape_string(seafile_path, "/", FALSE);
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/dir/?p=%s", lctx->config->server_url,
+                                 lctx->config->repo_id, encoded_path);
+    SoupMessage *msg = soup_message_new("GET", url);
+    GBytes *bytes = NULL;
+    GPtrArray *names = NULL;
+
+    g_free(seafile_path);
+    g_free(encoded_path);
+    g_free(url);
+    if (!msg) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "SoupMessage für Auflistung '%s' konnte nicht erstellt werden", dir);
+        return NULL;
+    }
+
+    gchar *auth_header = g_strdup_printf("Token %s", lctx->config->auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                                "Authorization", auth_header);
+    g_free(auth_header);
+
+    bytes = soup_session_send_and_read(lctx->session, msg, NULL, error);
+    if (bytes && soup_message_get_status(msg) == 200) {
+        gsize size = 0;
+        gconstpointer data = g_bytes_get_data(bytes, &size);
+        JsonParser *parser = json_parser_new();
+
+        if (json_parser_load_from_data(parser, data, (gssize) size, NULL) &&
+                JSON_NODE_HOLDS_ARRAY(json_parser_get_root(parser))) {
+            JsonArray *array = json_node_get_array(json_parser_get_root(parser));
+
+            names = g_ptr_array_new_with_free_func(g_free);
+            for (guint i = 0; i < json_array_get_length(array); i++) {
+                JsonObject *obj = json_array_get_object_element(array, i);
+
+                if (obj && json_object_has_member(obj, "name"))
+                    g_ptr_array_add(names,
+                            g_strdup(json_object_get_string_member(obj, "name")));
+            }
+        }
+        g_object_unref(parser);
+    } else if (bytes) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Auflistung '%s' lieferte HTTP %u", dir, soup_message_get_status(msg));
+    }
+
+    if (bytes)
+        g_bytes_unref(bytes);
+    g_object_unref(msg);
+
+    return names;
+}
+
+/**
  * seafile_upload_file:
  *
  * Lädt eine Datei zu Seafile hoch
@@ -1340,10 +1743,76 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
 		return NULL;
     }
 
-    /* Index-Kontext erstellen (lokale DB im tmp-Verzeichnis) */
+    /* Index-Kontext: Arbeitsstand ist die Index-DB in Seafile. Sie wird zu Beginn
+     * geladen, damit alles, was dort schon steht (auch aus zond), erhalten bleibt;
+     * hochgeladen wird später der erweiterte Stand. Ohne vorhandene DB beginnt der Job
+     * mit einer leeren. Ist die Abfrage selbst nicht möglich, bricht der Job ab: sonst
+     * würde eine leere DB den vorhandenen Index überschreiben. */
 #define INDEX_UPLOAD_INTERVAL 50  /* DB alle N Dateien hochladen */
     gchar *db_path = g_strdup_printf("%s/.sond_index_%s.db",
     		g_get_tmp_dir(), job_info->repo_id);
+    gchar *db_journal = g_strconcat(db_path, "-journal", NULL);
+    gboolean db_exists = FALSE;
+
+    if (!seafile_file_detail(&config, session, INDEX_DB_FILENAME, &db_exists, NULL, &error)) {
+        gchar *msg_text = g_strdup_printf("Index-DB in Seafile nicht abfragbar: %s",
+                error ? error->message : "unknown");
+
+        LOG_ERROR("%s", msg_text);
+        g_mutex_lock(&job_info->mutex);
+        job_info->error_message = msg_text;
+        g_mutex_unlock(&job_info->mutex);
+        g_clear_error(&error);
+        g_free(db_path);
+        g_free(db_journal);
+        ocr_log_entry_free(log_entry);
+        fz_drop_context(ctx);
+        sond_ocr_pool_free(ocr_pool);
+        g_object_unref(session);
+        g_free(config.server_url);
+        g_free(config.auth_token);
+        g_free(config.repo_id);
+        g_free(config.base_path);
+        ocr_job_mark_complete(job_info);
+        return NULL;
+    }
+
+    g_remove(db_journal);
+    g_free(db_journal);
+    g_remove(db_path); //eine Kopie aus einem früheren Job ist nicht maßgeblich
+    if (db_exists) {
+        gsize db_size = 0;
+        guchar *db_data = seafile_download_file(&config, session, INDEX_DB_FILENAME,
+                &db_size, &error);
+
+        if (!db_data || !g_file_set_contents(db_path, (gchar const*) db_data,
+                (gssize) db_size, &error)) {
+            gchar *msg_text = g_strdup_printf("Index-DB konnte nicht geladen werden: %s",
+                    error ? error->message : "unknown");
+
+            LOG_ERROR("%s", msg_text);
+            g_mutex_lock(&job_info->mutex);
+            job_info->error_message = msg_text;
+            g_mutex_unlock(&job_info->mutex);
+            g_clear_error(&error);
+            g_free(db_data);
+            g_free(db_path);
+            ocr_log_entry_free(log_entry);
+            fz_drop_context(ctx);
+            sond_ocr_pool_free(ocr_pool);
+            g_object_unref(session);
+            g_free(config.server_url);
+            g_free(config.auth_token);
+            g_free(config.repo_id);
+            g_free(config.base_path);
+            ocr_job_mark_complete(job_info);
+            return NULL;
+        }
+        g_free(db_data);
+    } else {
+        ocr_log_add_message(log_entry, "Keine Index-DB in der Bibliothek, beginne mit leerer DB");
+    }
+
     SondIndexCtx *index_ctx = sond_index_ctx_new(db_path, NULL /*kein Embedding vorerst*/,
     		0, 0, &error);
     if (!index_ctx) {
@@ -1356,24 +1825,80 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
     /* Designated initializers, da SondProcessFileCtx zusätzliche Felder
      * (cancel, progress, ocr_mode) hat, die hier zuvor stillschweigend
      * falsch belegt wurden (positionelle Initialisierung ohne diese Felder).
-     * ocr_mode: bei force_reprocess wird auch bereits vorhandener
-     * versteckter Text entfernt und die Seite neu geOCRt, sonst der
-     * bisherige "prüfen und ggf. überspringen"-Modus. */
+     * ocr_mode (vom Client gewählt): NONE = kein OCR, nur indizieren (ohne
+     * Pool), CHECK = Seiten mit vorhandenem versteckten Text überspringen,
+     * FORCE = vorhandenen Text entfernen und neu OCRen. */
     SondProcessFileCtx wctx = {
     		.ctx = ctx,
     		.cancel = 0,
     		.progress = 0,
     		.log_func = (void (*)(void*, gchar const*, ...)) ocr_log_add_message,
     		.log_func_data = (gpointer) log_entry,
-    		.ocr_pool = ocr_pool,
+    		.ocr_pool = (job_info->ocr_mode == SOND_OCR_MODE_NONE) ? NULL : ocr_pool,
     		.index_ctx = index_ctx,
-    		.ocr_mode = job_info->force_reprocess
-    				? SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK,
+    		.ocr_mode = job_info->ocr_mode,
     };
 
     /* Liste alle Dateien rekursiv */
     GList *files = NULL;
-    if (!seafile_list_files_recursive(&config, session, config.base_path, &files, &error)) {
+    gboolean selection = (job_info->sel_files || job_info->sel_dirs);
+
+    if (selection) {
+        /* Nur die gewählten Verzeichnisse (rekursiv) und Dateien; eine Datei, die
+         * in einem gewählten Verzeichnis liegt, kommt nur einmal vor. */
+        GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
+
+        for (guint k = 0; job_info->sel_dirs && k < job_info->sel_dirs->len; k++) {
+            GList *sub = NULL;
+            gchar const *dir = g_ptr_array_index(job_info->sel_dirs, k);
+
+            if (!seafile_list_files_recursive(&config, session, dir, &sub, &error)) {
+                ocr_log_add_message(log_entry, "Verzeichnis '%s' nicht lesbar: %s",
+                        dir, error ? error->message : "unknown");
+                g_clear_error(&error);
+                continue;
+            }
+            for (GList *l = sub; l; l = l->next) {
+                SeafileFile *f = l->data;
+
+                if (g_hash_table_add(seen, f->path))
+                    files = g_list_append(files, f);
+                else
+                    seafile_file_free(f);
+            }
+            g_list_free(sub);
+        }
+
+        for (guint k = 0; job_info->sel_files && k < job_info->sel_files->len; k++) {
+            gchar const *path = g_ptr_array_index(job_info->sel_files, k);
+            SeafileFile *f = NULL;
+
+            gboolean exists = FALSE;
+            GDateTime *mtime = NULL;
+
+            if (g_hash_table_contains(seen, path))
+                continue;
+
+            //Änderungszeit holen: gleiche Prüfung wie bei ganzen Verzeichnissen
+            if (!seafile_file_detail(&config, session, path, &exists, &mtime, &error)) {
+                ocr_log_add_message(log_entry, "Datei '%s' nicht abfragbar: %s",
+                        path, error ? error->message : "unknown");
+                g_clear_error(&error);
+                continue;
+            }
+            if (!exists) {
+                ocr_log_add_message(log_entry, "Datei '%s' nicht gefunden", path);
+                continue;
+            }
+
+            f = g_new0(SeafileFile, 1);
+            f->path = g_strdup(path);
+            f->mtime = mtime;
+            g_hash_table_add(seen, f->path);
+            files = g_list_append(files, f);
+        }
+        g_hash_table_destroy(seen);
+    } else if (!seafile_list_files_recursive(&config, session, config.base_path, &files, &error)) {
 		LOG_ERROR("Failed to list files in repository '%s': %s",
 				config.repo_id, error->message);
 		g_error_free(error);
@@ -1400,14 +1925,28 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
     job_info->total_files = file_count;
     g_mutex_unlock(&job_info->mutex);
 
+    /* Verzeichnis -> ein darin verarbeiteter Schlüssel, von dem aus zusammengefasst wird */
+    GHashTable *collapse_groups = g_hash_table_new_full(g_str_hash, g_str_equal,
+            g_free, g_free);
+
     /* Verarbeite jede Datei */
     guint i = 0;
     for (GList *l = files; l != NULL; l = l->next) {
         SeafileFile *file = (SeafileFile*)l->data;
         i++;
 
-        /* Soll Datei verarbeitet werden? */
+        if (g_atomic_int_get(&job_info->cancel)) {
+            ocr_log_add_message(log_entry, "Job abgebrochen");
+            break;
+        }
+
+        /* Soll Datei verarbeitet werden? Der alte Index einer Datei wird nur dann
+         * verworfen, wenn sie sich seit der letzten Verarbeitung geändert hat oder
+         * ausdrücklich alles neu verarbeitet werden soll. Sonst überspringt
+         * sond_process_file() Seiten, die schon ausreichend indiziert sind, von selbst
+         * (auch solche, die zond indiziert hat und die in keinem Log stehen). */
         gboolean should_process = job_info->force_reprocess;
+        gboolean needs_clear = job_info->force_reprocess;
 
         if (!should_process && file->mtime) {
             GDateTime *last_processed = g_hash_table_lookup(log_entry->files, file->path);
@@ -1415,11 +1954,10 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             if (!last_processed) {
                 /* Nie verarbeitet */
                 should_process = TRUE;
-            } else {
-                /* Vergleiche Timestamps */
-                if (g_date_time_compare(file->mtime, last_processed) > 0) {
-                    should_process = TRUE;  /* Datei wurde geändert */
-                }
+            } else if (g_date_time_compare(file->mtime, last_processed) > 0) {
+                /* Datei wurde geändert */
+                should_process = TRUE;
+                needs_clear = TRUE;
             }
         }
 
@@ -1448,17 +1986,35 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
          * (should_process==TRUE) - also explizit vorher den alten Index
          * für diese Datei verwerfen, damit veralteter Inhalt nicht stehen
          * bleibt bzw. fälschlich als "schon erledigt" übersprungen wird. */
-        if (wctx.index_ctx) {
+        /* Der Index kennt Dateien unter ihrem projektrelativen Pfad ohne führenden
+         * "/" (wie zond), Seafile liefert ihn mit. */
+        gchar const *index_key = (file->path[0] == '/') ? file->path + 1 : file->path;
+
+        if (wctx.index_ctx && needs_clear) {
             GError *clear_error = NULL;
-            if (!sond_index_ctx_clear_file(wctx.index_ctx, file->path, &clear_error)) {
+            if (!sond_index_ctx_clear_file(wctx.index_ctx, index_key, &clear_error)) {
                 ocr_log_add_message(log_entry, "clear_file '%s' failed: %s",
                         file->path, clear_error ? clear_error->message : "unknown");
                 g_clear_error(&clear_error);
             }
         }
 
-		sond_process_file(&wctx, data, data_size, file->path,
+		sond_process_file(&wctx, data, data_size, index_key,
         				&result.data, &result.size, &result.pdf_count, NULL);
+
+        /* Ordner zusammenfassen: einmal je Verzeichnis nach dem Lauf vormerken */
+        if (index_ctx && sond_index_ctx_coverage_get(index_ctx, index_key) >= wctx.ocr_mode) {
+            gchar const *slash = strrchr(index_key, '/');
+
+            if (slash) {
+                gchar *group = g_strndup(index_key, (gsize) (slash - index_key));
+
+                if (!g_hash_table_contains(collapse_groups, group))
+                    g_hash_table_insert(collapse_groups, group, g_strdup(index_key));
+                else
+                    g_free(group);
+            }
+        }
         g_free(data);
 
         /* PDF Count aktualisieren */
@@ -1498,6 +2054,29 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             g_clear_error(&upload_err);
         }
     }
+
+    /* Ordner zusammenfassen (Auflistung über Seafile statt Dateisystem) */
+    if (index_ctx) {
+        ListDirCtx list_ctx = { &config, session };
+        GHashTableIter iter;
+        gpointer key = NULL;
+        gpointer value = NULL;
+
+        g_hash_table_iter_init(&iter, collapse_groups);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            GError *collapse_error = NULL;
+
+            if (!sond_index_ctx_coverage_try_collapse_listing(index_ctx,
+                    (gchar const*) value, seafile_list_dir_names, &list_ctx,
+                    &collapse_error)) {
+                ocr_log_add_message(log_entry, "coverage_try_collapse '%s': %s",
+                        (gchar const*) value,
+                        collapse_error ? collapse_error->message : "unknown");
+                g_clear_error(&collapse_error);
+            }
+        }
+    }
+    g_hash_table_destroy(collapse_groups);
 
     /* Log aktualisieren */
     if (log_entry->last_run) {

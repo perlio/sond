@@ -32,14 +32,17 @@
 #include <gtk/gtk.h>
 
 #include "../sond_client.h"
+#include "sond_akte_lease.h"
 
 G_BEGIN_DECLS
 
 /* Öffnet das Fenster für die Akte (lfd_nr/year); bezeichnung (nullable) für die
  * Titelzeile. Meldungen bei Fehlern (SeaDrive oder Library nicht gefunden) kommen
- * als Dialog über parent. */
-void sond_dokumente_show(SondClient *client, GtkWindow *parent, guint lfd_nr,
-        guint year, const gchar *bezeichnung);
+ * als Dialog über parent. lease und akte_id (0 = unbekannt) brauchen die Übergabe
+ * der Schreibberechtigung an einen Index-Job; die Lease gehört dem Aufrufer und muss
+ * das Fenster überdauern. */
+void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
+        guint lfd_nr, guint year, const gchar *bezeichnung, gint64 akte_id);
 
 G_END_DECLS
 

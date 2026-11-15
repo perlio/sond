@@ -128,6 +128,11 @@ GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM*);
  * Ohne SeaDrive ohne Wirkung. */
 void sond_treeviewfm_pin_selection(SondTreeviewFM*, guint pin_state);
 
+/* Wie viele Dateien des Projekts gibt es, und wie viele davon sind angeheftet (lokal und
+ * gepinnt oder gepinnt und noch im Laden)? FALSE, wenn das nicht bekannt ist (kein
+ * SeaDrive-Laufwerk, Scan noch nicht fertig). */
+gboolean sond_treeviewfm_get_pin_summary(SondTreeviewFM*, guint *total, guint *pinned);
+
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
 

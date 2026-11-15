@@ -1735,14 +1735,18 @@ gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *ye
  * ======================================================================= */
 
 /**
- * sond_client_ocr_start_job:
+ * sond_client_ocr_start_job_ex:
  *
- * Startet OCR-Job auf dem Server
+ * Startet einen OCR-/Index-Job auf dem Server (ganze Library oder Auswahl)
  */
-gboolean sond_client_ocr_start_job(SondClient *client,
-                                   const gchar *library_name,
-                                   gboolean force_reprocess,
-                                   GError **error) {
+gboolean sond_client_ocr_start_job_ex(SondClient *client,
+                                      const gchar *library_name,
+                                      gboolean force_reprocess,
+                                      SondClientOcrMode mode,
+                                      const gchar * const *files,
+                                      const gchar * const *dirs,
+                                      const gchar *job_token,
+                                      GError **error) {
     g_return_val_if_fail(client != NULL, FALSE);
     g_return_val_if_fail(library_name != NULL, FALSE);
 
@@ -1751,16 +1755,53 @@ gboolean sond_client_ocr_start_job(SondClient *client,
         return FALSE;
     }
 
-    /* URL: POST /ocr/start?library_name=XXX&force_reprocess=false */
+    /* URL: POST /ocr/start?library_name=XXX&force_reprocess=false&ocr_mode=check */
     gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
-    gchar *url = g_strdup_printf("%s/ocr/start?library_name=%s&force_reprocess=%s",
+    gchar *url = g_strdup_printf("%s/ocr/start?library_name=%s&force_reprocess=%s&ocr_mode=%s%s%s",
                                  client->server_url,
                                  escaped_name,
-                                 force_reprocess ? "true" : "false");
+                                 force_reprocess ? "true" : "false",
+                                 mode == SOND_CLIENT_OCR_NONE ? "none" :
+                                 mode == SOND_CLIENT_OCR_FORCE ? "force" : "check",
+                                 job_token ? "&job_token=" : "",
+                                 job_token ? job_token : "");
     g_free(escaped_name);
 
     SoupMessage *msg = soup_message_new("POST", url);
     g_free(url);
+
+    /* Auswahl als JSON-Body {"files":[...],"dirs":[...]} */
+    if ((files && files[0]) || (dirs && dirs[0])) {
+        JsonBuilder *builder = json_builder_new();
+        const gchar * const *lists[] = { files, dirs };
+        const gchar *names[] = { "files", "dirs" };
+
+        json_builder_begin_object(builder);
+        for (guint k = 0; k < 2; k++) {
+            if (!lists[k] || !lists[k][0])
+                continue;
+            json_builder_set_member_name(builder, names[k]);
+            json_builder_begin_array(builder);
+            for (guint i = 0; lists[k][i]; i++)
+                json_builder_add_string_value(builder, lists[k][i]);
+            json_builder_end_array(builder);
+        }
+        json_builder_end_object(builder);
+
+        JsonGenerator *gen = json_generator_new();
+        JsonNode *root_node = json_builder_get_root(builder);
+        gsize len = 0;
+
+        json_generator_set_root(gen, root_node);
+        gchar *json = json_generator_to_data(gen, &len);
+        GBytes *bytes = g_bytes_new_take(json, len);
+
+        soup_message_set_request_body_from_bytes(msg, "application/json", bytes);
+        g_bytes_unref(bytes);
+        json_node_free(root_node);
+        g_object_unref(gen);
+        g_object_unref(builder);
+    }
 
     /* Session-Token im Header */
     add_auth_header(client, msg);
@@ -1784,7 +1825,8 @@ gboolean sond_client_ocr_start_job(SondClient *client,
         }
 
         /* Retry */
-        return sond_client_ocr_start_job(client, library_name, force_reprocess, error);
+        return sond_client_ocr_start_job_ex(client, library_name, force_reprocess, mode,
+                                            files, dirs, job_token, error);
     }
 
     if (status_code != 200) {
@@ -1819,6 +1861,74 @@ gboolean sond_client_ocr_start_job(SondClient *client,
     g_object_unref(msg);
 
     LOG_INFO("OCR job started for library: %s", library_name);
+    return TRUE;
+}
+
+/**
+ * sond_client_ocr_start_job:
+ *
+ * Startet OCR-Job für die ganze Library (bisheriges Verhalten)
+ */
+gboolean sond_client_ocr_start_job(SondClient *client,
+                                   const gchar *library_name,
+                                   gboolean force_reprocess,
+                                   GError **error) {
+    return sond_client_ocr_start_job_ex(client, library_name, force_reprocess,
+                                        force_reprocess ? SOND_CLIENT_OCR_FORCE :
+                                                          SOND_CLIENT_OCR_CHECK,
+                                        NULL, NULL, NULL, error);
+}
+
+/**
+ * sond_client_ocr_cancel_job:
+ *
+ * Fordert den Abbruch des laufenden OCR-/Index-Jobs an
+ */
+gboolean sond_client_ocr_cancel_job(SondClient *client,
+                                    const gchar *library_name,
+                                    GError **error) {
+    g_return_val_if_fail(client != NULL, FALSE);
+    g_return_val_if_fail(library_name != NULL, FALSE);
+
+    if (!ensure_authenticated(client, error))
+        return FALSE;
+
+    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
+    gchar *url = g_strdup_printf("%s/ocr/cancel?library_name=%s", client->server_url,
+                                 escaped_name);
+    g_free(escaped_name);
+
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    add_auth_header(client, msg);
+
+    GBytes *response = soup_session_send_and_read(client->session, msg, NULL, error);
+    if (!response) {
+        g_object_unref(msg);
+        return FALSE;
+    }
+
+    guint status_code = soup_message_get_status(msg);
+
+    if (status_code == 401) {
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        if (!handle_auth_error(client, error))
+            return FALSE;
+
+        return sond_client_ocr_cancel_job(client, library_name, error);
+    }
+
+    g_bytes_unref(response);
+    g_object_unref(msg);
+
+    if (status_code != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    status_code == 409 ? "Es läuft kein Job" :
+                    "Abbruch nicht möglich (HTTP %u)", status_code);
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -1914,6 +2024,13 @@ OcrStatus* sond_client_ocr_get_status(SondClient *client,
         status->current_file = g_strdup(json_object_get_string_member(obj, "current_file"));
     }
 
+    if (json_object_has_member(obj, "job_token"))
+        status->job_token = g_strdup(json_object_get_string_member(obj, "job_token"));
+    if (json_object_has_member(obj, "cancelled"))
+        status->cancelled = json_object_get_boolean_member(obj, "cancelled");
+    if (json_object_has_member(obj, "error"))
+        status->error_message = g_strdup(json_object_get_string_member(obj, "error"));
+
     if (json_object_has_member(obj, "start_time")) {
         const gchar *start_str = json_object_get_string_member(obj, "start_time");
         status->start_time = g_date_time_new_from_iso8601(start_str, NULL);
@@ -1940,6 +2057,8 @@ void sond_client_ocr_status_free(OcrStatus *status) {
     if (!status) return;
 
     g_free(status->current_file);
+    g_free(status->job_token);
+    g_free(status->error_message);
 
     if (status->start_time) {
         g_date_time_unref(status->start_time);

@@ -383,3 +383,19 @@ void fm_watcher_stop(SondTreeviewFM *self) {
 }
 #endif
 
+gboolean sond_treeviewfm_get_pin_summary(SondTreeviewFM *self, guint *total, guint *pinned) {
+#ifdef G_OS_WIN32
+	SondTreeviewFMPrivate *priv = NULL;
+
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), FALSE);
+	priv = fm_get_priv(self);
+
+	return priv->watcher && sond_seadrive_watcher_get_pin_summary(priv->watcher, total, pinned);
+#else
+	(void) self;
+	(void) total;
+	(void) pinned;
+
+	return FALSE;
+#endif
+}
