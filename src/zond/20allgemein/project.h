@@ -1,8 +1,6 @@
 #ifndef PROJECT_H_INCLUDED
 #define PROJECT_H_INCLUDED
 
-#include "../dbase_zond.h"
-
 typedef struct _Projekt Projekt;
 typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GtkWidget GtkWidget;

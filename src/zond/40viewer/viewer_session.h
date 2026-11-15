@@ -36,6 +36,8 @@ PdfViewerSession* pdf_viewer_session_new(fz_context *ctx, GSettings *settings);
 /* Signale (Rückgabe gint: 0 = in Ordnung, -1 = Fehler mit error, 1 = nur bei
  * pages-deleting: abgelehnt, Begründung in error):
  *
+ *   viewer-created (PdfViewer*)
+ *      Ein Viewer-Fenster ist eingerichtet; der Host darf es ergänzen.
  *   anbindung-requested (PdfViewer*, GError**) -> gint
  *      Doppelklick hat eine Anbindung (pv->anbindung) festgelegt, der Host
  *      legt sie an. Ohne Handler reagiert der Viewer auf Doppelklicks nicht.
@@ -53,6 +55,8 @@ PdfViewerSession* pdf_viewer_session_new(fz_context *ctx, GSettings *settings);
  *   save-done (PdfViewer*)
  *      Alle Abschnitte erfolgreich gespeichert. */
 gboolean pdf_viewer_session_wants_anbindung(PdfViewerSession*);
+
+void pdf_viewer_session_viewer_created(PdfViewerSession*, PdfViewer*);
 
 gint pdf_viewer_session_anbindung_requested(PdfViewerSession*, PdfViewer*,
 		GError**);

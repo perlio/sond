@@ -47,6 +47,7 @@
 #include "../40viewer/viewer_save.h"
 #include "../zond_tree_store.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "db_check.h"
 #include "db_check_fenster.h"

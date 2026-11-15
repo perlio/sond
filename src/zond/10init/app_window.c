@@ -30,6 +30,7 @@
 #include "../zond_tree_store.h"
 #include "../zond_treeviewfm.h"
 
+#include "../dbase_zond.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/suchen.h"
 

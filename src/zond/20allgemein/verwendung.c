@@ -34,6 +34,7 @@
 #include "../zond_dbase.h"
 #include "../zond_tree_store.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "suchen.h"
 #include "verwendung.h"

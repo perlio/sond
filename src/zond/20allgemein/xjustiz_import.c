@@ -41,6 +41,7 @@
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "xjustiz_import.h"
 

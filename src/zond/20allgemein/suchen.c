@@ -32,6 +32,7 @@
 #include "../anbindung.h"
 #include "../20allgemein/ziele.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "suchen.h"
 #include "verwendung.h"

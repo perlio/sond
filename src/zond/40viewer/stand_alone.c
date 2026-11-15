@@ -306,10 +306,36 @@ init(GtkApplication *app) {
 	return pdf_viewer_session_new(ctx, init_schema());
 }
 
+//Datei-Menü des eigenständigen Viewers: oben im Viewer-Menü einfügen
+static void cb_viewer_created(PdfViewerSession *session, PdfViewer *pv,
+		gpointer data) {
+	GtkWidget *item_oeffnen = gtk_menu_item_new_with_label("Datei öffnen");
+	GtkWidget *item_beenden = gtk_menu_item_new_with_label("Beenden");
+	GtkWidget *item_sep1 = gtk_separator_menu_item_new();
+
+	pv->item_schliessen = gtk_menu_item_new_with_label("Datei schließen");
+
+	gtk_menu_shell_insert(GTK_MENU_SHELL(pv->menu_viewer), item_oeffnen, 0);
+	gtk_menu_shell_insert(GTK_MENU_SHELL(pv->menu_viewer), pv->item_schliessen, 1);
+	gtk_menu_shell_insert(GTK_MENU_SHELL(pv->menu_viewer), item_beenden, 2);
+	gtk_menu_shell_insert(GTK_MENU_SHELL(pv->menu_viewer), item_sep1, 3);
+	gtk_widget_show(item_oeffnen);
+	gtk_widget_show(pv->item_schliessen);
+	gtk_widget_show(item_beenden);
+	gtk_widget_show(item_sep1);
+
+	g_signal_connect(item_oeffnen, "activate", G_CALLBACK(cb_datei_oeffnen), pv);
+	g_signal_connect(pv->item_schliessen, "activate", G_CALLBACK(cb_datei_schliessen), pv);
+	g_signal_connect_swapped(item_beenden, "activate", G_CALLBACK(viewer_save_and_close), pv);
+
+	return;
+}
+
 static void startup_app(GtkApplication *app, gpointer user_data) {
 	PdfViewerSession **session = (PdfViewerSession**) user_data;
 
 	*session = init(app);
+	g_signal_connect(*session, "viewer-created", G_CALLBACK(cb_viewer_created), NULL);
 
 	return;
 }

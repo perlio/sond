@@ -36,6 +36,7 @@
 #include "../anbindung.h"
 #include "../zond_dbase.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 
 static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,

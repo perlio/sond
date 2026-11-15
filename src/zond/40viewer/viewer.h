@@ -98,7 +98,8 @@ typedef struct _Pdf_Viewer {
 	GdkCursor *cursor_annot;
 	GtkWidget *layout;
 	GtkWidget *headerbar;
-	GtkWidget *item_schliessen;
+	GtkWidget *menu_viewer; //Menü des Viewers, Host darf Einträge ergänzen
+	GtkWidget *item_schliessen; //nur eigenständiger Viewer
 	GtkWidget *item_kopieren;
 	GtkWidget *item_ausschneiden;
 	GtkWidget *item_drehen;

@@ -35,9 +35,6 @@
 #include "viewer_annot.h"
 #include "viewer_save.h"
 #include "viewer_search.h"
-#ifdef VIEWER
-#include "stand_alone.h"
-#endif
 
 
 static void cb_thumb_sel_changed(GtkTreeSelection *sel, gpointer data) {
@@ -67,7 +64,6 @@ static void cb_thumb_activated(GtkTreeView *tv, GtkTreePath *path,
 	return;
 }
 
-#ifndef VIEWER
 static void cb_viewer_loeschen_anbindung_button_clicked(GtkButton *button,
 		gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
@@ -81,7 +77,6 @@ static void cb_viewer_loeschen_anbindung_button_clicked(GtkButton *button,
 
 	return;
 }
-#endif
 
 static void cb_viewer_auswahlwerkzeug(GtkButton *button, gpointer data) {
 	gint button_ID = 0;
@@ -484,12 +479,6 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_window_add_accel_group(GTK_WINDOW(pv->vf), accel_group);
 
 	// Menu
-#ifdef VIEWER
-	GtkWidget* item_oeffnen = gtk_menu_item_new_with_label("Datei öffnen");
-	pv->item_schliessen = gtk_menu_item_new_with_label("Datei schließen");
-	GtkWidget* item_beenden = gtk_menu_item_new_with_label("Beenden");
-	GtkWidget* item_sep1 = gtk_separator_menu_item_new();
-#endif
 	pv->item_kopieren = gtk_menu_item_new_with_label("Seiten kopieren");
 	gtk_widget_add_accelerator(pv->item_kopieren, "activate", accel_group,
 			GDK_KEY_c, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
@@ -515,14 +504,9 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 
 	// Menu erzeugen
 	GtkWidget *menu_viewer = gtk_menu_new();
+	pv->menu_viewer = menu_viewer;
 
 	// Füllen
-#ifdef VIEWER
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), item_oeffnen);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_schliessen);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), item_beenden);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), item_sep1);
-#endif
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_kopieren);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_ausschneiden);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_einfuegen);
@@ -584,11 +568,12 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	g_object_set_data(G_OBJECT(button_underline), "ID", GINT_TO_POINTER(2));
 	g_object_set_data(G_OBJECT(button_paint), "ID", GINT_TO_POINTER(3));
 
-#ifndef VIEWER
-	pv->button_anbindung = gtk_button_new_from_icon_name("edit-delete", GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_sensitive(pv->button_anbindung, FALSE);
-	gtk_widget_set_tooltip_text(pv->button_anbindung, "Anbindung Anfang löschen");
-#endif
+	//Anbindungen gibt es nur, wenn der Host sie anlegt (zond)
+	if (pdf_viewer_session_wants_anbindung(pv->session)) {
+		pv->button_anbindung = gtk_button_new_from_icon_name("edit-delete", GTK_ICON_SIZE_BUTTON);
+		gtk_widget_set_sensitive(pv->button_anbindung, FALSE);
+		gtk_widget_set_tooltip_text(pv->button_anbindung, "Anbindung Anfang löschen");
+	}
 
 	// vbox Tools
 	GtkWidget *vbox_tools = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -601,9 +586,8 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_box_pack_start(GTK_BOX(vbox_tools), button_underline, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox_tools), button_paint, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox_tools), frame_spin, FALSE, FALSE, 0);
-#ifndef VIEWER
-	gtk_box_pack_start(GTK_BOX(vbox_tools), pv->button_anbindung, FALSE, FALSE, 0);
-#endif
+	if (pv->button_anbindung)
+		gtk_box_pack_start(GTK_BOX(vbox_tools), pv->button_anbindung, FALSE, FALSE, 0);
 
 	// Box mit Eingabemöglichkeiten
 	pv->entry = gtk_entry_new();
@@ -703,12 +687,6 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	pv->cursor_annot = gdk_cursor_new_from_name(display, "pointer");
 
 	// Signale Menu
-#ifdef VIEWER
-	g_signal_connect(item_oeffnen, "activate", G_CALLBACK(cb_datei_oeffnen), pv);
-	g_signal_connect(pv->item_schliessen, "activate", G_CALLBACK(cb_datei_schliessen), pv);
-	g_signal_connect_swapped(item_beenden, "activate", G_CALLBACK(viewer_save_and_close), pv);
-#endif
-
 	g_signal_connect(pv->item_kopieren, "activate", G_CALLBACK(cb_seiten_kopieren), pv);
 	g_signal_connect(pv->item_ausschneiden, "activate", G_CALLBACK(cb_seiten_ausschneiden), pv);
 	g_signal_connect(pv->item_loeschen, "activate", G_CALLBACK(cb_pv_seiten_loeschen), pv);
@@ -737,10 +715,9 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	g_signal_connect(button_highlight, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
 	g_signal_connect(button_underline, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
 	g_signal_connect(button_paint, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
-#ifndef VIEWER
-	g_signal_connect(pv->button_anbindung, "clicked",
-			G_CALLBACK(cb_viewer_loeschen_anbindung_button_clicked), pv);
-#endif
+	if (pv->button_anbindung)
+		g_signal_connect(pv->button_anbindung, "clicked",
+				G_CALLBACK(cb_viewer_loeschen_anbindung_button_clicked), pv);
 
 	g_signal_connect_swapped(pv->v_adj, "value-changed",
 			G_CALLBACK(cb_viewer_render_visible_pages), pv);
@@ -796,6 +773,9 @@ viewer_init(PdfViewerSession *session) {
 
 	//  Fenster erzeugen und anzeigen
 	viewer_einrichten_fenster(pv);
+
+	//Host kann das Fenster ergänzen (z.B. Menüeinträge)
+	pdf_viewer_session_viewer_created(session, pv);
 
 	return pv;
 }

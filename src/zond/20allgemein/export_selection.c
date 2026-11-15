@@ -26,6 +26,7 @@
 #include "../10init/app_window.h"
 #include "../anbindung.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "export_selection.h"
 

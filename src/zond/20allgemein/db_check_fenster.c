@@ -28,6 +28,7 @@
 #include "../zond_dbase.h"
 #include "../zond_tree_store.h"
 
+#include "../dbase_zond.h"
 #include "project.h"
 #include "db_regeln.h"
 #include "db_check_fenster.h"
