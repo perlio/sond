@@ -27,7 +27,7 @@
 #include <glib.h>
 #include <gio/gio.h>
 
-#include "sond_file_helper.h"
+#include "../sond_file_helper.h"
 
 /* ------------------------------------------------------------------ */
 /*  FILE_ATTRIBUTE_* not always defined in older MinGW headers        */

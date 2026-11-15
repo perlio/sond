@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-#include "sond_gtk_compat.h" /* SOND_GET_TOPLEVEL, SOND_ICON_THEME_FOR_WIDGET */
+#include "../sond_gtk_compat.h" /* SOND_GET_TOPLEVEL, SOND_ICON_THEME_FOR_WIDGET */
 
 G_BEGIN_DECLS
 

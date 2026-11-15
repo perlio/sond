@@ -21,7 +21,7 @@
 
 #include "../../misc.h"
 #include "../../sond_log_and_error.h"
-#include "../../sond_treeview.h"
+#include "../../gtk3/sond_treeview.h"
 #include "../../sond_file_helper.h"
 
 #include "../zond_init.h"

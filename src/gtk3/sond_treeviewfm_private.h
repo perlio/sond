@@ -19,7 +19,7 @@
 
 #include "sond_treeviewfm.h"
 #ifdef _WIN32
-#include "sond_seadrive_watcher.h"
+#include "../seadrive/sond_seadrive_watcher.h"
 #endif
 
 G_BEGIN_DECLS
@@ -47,7 +47,7 @@ typedef struct {
  * durch. Definiert in sond_treeviewfm.c. */
 SondTreeviewFMPrivate *sond_treeviewfm_get_priv(SondTreeviewFM *stvfm);
 
-#include "sond_tvfm_item_private.h"
+#include "../tvfm/sond_tvfm_item_private.h"
 
 G_END_DECLS
 

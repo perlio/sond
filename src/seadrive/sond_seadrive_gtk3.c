@@ -16,7 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "sond_seadrive.h"
+#include "sond_seadrive_gtk3.h"
 
 #ifdef _WIN32
 
@@ -25,13 +25,13 @@
 #include <gtk/gtk.h>
 
 #include "sond_seadrive_core.h"
-#include "sond_treeview.h"
-#include "sond_treeviewfm_private.h"
-#include "sond_fileparts.h"
-#include "sond_file_helper.h"
-#include "sond_log_and_error.h"
-#include "sond_mime.h"
-#include "misc.h"
+#include "../gtk3/sond_treeview.h"
+#include "../gtk3/sond_treeviewfm_private.h"
+#include "../sond_fileparts.h"
+#include "../sond_file_helper.h"
+#include "../sond_log_and_error.h"
+#include "../sond_mime.h"
+#include "../misc.h"
 
 /* FILE_ATTRIBUTE_PINNED/UNPINNED fehlen in älteren MinGW-Headern */
 #ifndef FILE_ATTRIBUTE_PINNED

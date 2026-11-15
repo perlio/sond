@@ -23,9 +23,9 @@
 
 #include "../misc.h"
 #include "../sond_log_and_error.h"
-#include "../sond_treeview.h"
-#include "../sond_treeviewfm.h"
-#include "../sond_tvfm_item.h"
+#include "../gtk3/sond_treeview.h"
+#include "../gtk3/sond_treeviewfm.h"
+#include "../tvfm/sond_tvfm_item.h"
 #include "../sond_eingang_zettel.h"
 #include "../sond_eingang_cache.h"
 

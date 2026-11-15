@@ -22,7 +22,7 @@
 
 #include <windows.h>
 
-#include "sond_file_helper.h"
+#include "../sond_file_helper.h"
 
 //aus cfapi.h (nicht eingebunden, die Funktion wird zur Laufzeit geladen)
 #define CF_PLACEHOLDER_INFO_BASIC 0

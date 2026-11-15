@@ -2,8 +2,8 @@
 #define SOND_SEADRIVE_H_INCLUDED
 
 #include "sond_seadrive_core.h"
-#include "sond_treeviewfm.h"
-#include "sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus */
+#include "../gtk3/sond_treeviewfm.h"
+#include "../sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus */
 
 G_BEGIN_DECLS
 

@@ -26,16 +26,16 @@
 #include "../sond_log_and_error.h"
 #include "../sond_fileparts.h"
 #include "../sond_file_helper.h"
-#include "../sond_tvfm_item.h"
-#include "../sond_tvfm_item_private.h"
-#include "../sond_tvfm_owner.h"
-#include "../sond_seadrive_core.h"
+#include "../tvfm/sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_item_private.h"
+#include "../tvfm/sond_tvfm_owner.h"
+#include "../seadrive/sond_seadrive_core.h"
 #include "../sond_icon_util.h"
-#include "../sond_tvfm_badges.h"
-#include "../sond_tvfm_index.h"
+#include "../tvfm/sond_tvfm_badges.h"
+#include "../tvfm/sond_tvfm_index.h"
 #include "../sond_mime.h"
 #ifdef G_OS_WIN32
-#include "../sond_seadrive_watcher.h"
+#include "../seadrive/sond_seadrive_watcher.h"
 #endif
 #include "../zond/10init/icons.h"
 

@@ -21,11 +21,11 @@
 #include <string.h>
 
 #include "sond_tvfm_item_private.h"
-#include "sond_seadrive_core.h"
+#include "../seadrive/sond_seadrive_core.h"
 
 #ifdef G_OS_WIN32
 #include <windows.h>
-#include "sond_file_helper.h"
+#include "../sond_file_helper.h"
 #endif
 
 SondSeadriveBadge sond_tvfm_badge_seadrive_live(gchar const *full_path) {

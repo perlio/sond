@@ -26,8 +26,8 @@
 
 #include <glib.h>
 
-#include "sond_fileparts.h"
-#include "sond_index.h"
+#include "../sond_fileparts.h"
+#include "../sond_index.h"
 #include "sond_tvfm_item.h"
 
 G_BEGIN_DECLS

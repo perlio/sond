@@ -20,8 +20,8 @@
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
-#include "../../sond_treeviewfm.h"
-#include "../../sond_seadrive.h"
+#include "../../gtk3/sond_treeviewfm.h"
+#include "../../seadrive/sond_seadrive_gtk3.h"
 #include "../../sond_log_and_error.h"
 #include "../zond_init.h"
 #include "../zond_dbase.h"

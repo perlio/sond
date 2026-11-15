@@ -20,8 +20,8 @@
 
 #include <glib.h>
 
-#include "sond_fileparts.h"
-#include "sond_mime.h"
+#include "../sond_fileparts.h"
+#include "../sond_mime.h"
 #include "sond_tvfm_item_private.h"
 
 gboolean sond_tvfm_file_part_indexable(SondFilePart *sfp,

@@ -21,8 +21,8 @@
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
 #include "../../sond_password.h"
-#include "../../sond_seadrive.h"
-#include "../../sond_treeviewfm.h"
+#include "../../seadrive/sond_seadrive_gtk3.h"
+#include "../../gtk3/sond_treeviewfm.h"
 
 #include "export.h"
 #include "export_selection.h"

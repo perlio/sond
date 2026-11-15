@@ -34,7 +34,7 @@
 
 #include "sond_treeview.h"
 #include "../sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus, SondIndexStatus */
-#include "../sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_item.h"
 
 G_BEGIN_DECLS
 

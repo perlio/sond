@@ -34,8 +34,8 @@
 
 #include <glib.h>
 
-#include "sond_icon_util.h"
-#include "sond_fileparts.h"
+#include "../sond_icon_util.h"
+#include "../sond_fileparts.h"
 #include "sond_tvfm_item.h"
 #include "sond_tvfm_owner.h"
 

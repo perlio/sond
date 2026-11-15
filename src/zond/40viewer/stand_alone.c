@@ -24,7 +24,7 @@
 #include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
-#include "../../sond_seadrive.h"
+#include "../../seadrive/sond_seadrive_gtk3.h"
 
 #include "../zond_pdf_document.h"
 

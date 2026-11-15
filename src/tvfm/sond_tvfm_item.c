@@ -44,11 +44,11 @@
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 
-#include "sond_log_and_error.h"
-#include "sond_fileparts.h"
-#include "sond_file_helper.h"
-#include "sond_mime.h"
-#include "sond_password.h"
+#include "../sond_log_and_error.h"
+#include "../sond_fileparts.h"
+#include "../sond_file_helper.h"
+#include "../sond_mime.h"
+#include "../sond_password.h"
 #include "sond_tvfm_owner.h"
 #include "sond_tvfm_item_private.h"
 

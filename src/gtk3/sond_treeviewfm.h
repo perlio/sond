@@ -11,10 +11,10 @@
  * statt zweier Ints, die die Basisklasse dann selbst als Seitenbereich
  * interpretieren müsste - s. dortigen Doc-Kommentar. Keine zirkuläre
  * Abhängigkeit: sond_index.h inkludiert nur glib/sqlite3/mupdf. */
-#include "sond_index.h"
+#include "../sond_index.h"
 /* SondTVFMItem - MUSS vor der SondTreeviewFMClass-Deklaration stehen,
  * deren vfuncs SondTVFMItem* verwenden. */
-#include "sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_item.h"
 
 G_BEGIN_DECLS
 

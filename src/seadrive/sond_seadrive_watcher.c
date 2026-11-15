@@ -24,8 +24,8 @@
 #include <string.h>
 
 #include "sond_seadrive_core.h"
-#include "sond_file_helper.h"
-#include "sond_log_and_error.h"
+#include "../sond_file_helper.h"
+#include "../sond_log_and_error.h"
 
 #ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
 #define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS  0x00400000

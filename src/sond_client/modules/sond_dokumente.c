@@ -24,8 +24,8 @@
 #include "sond_module_akte.h"
 #include "sond_zond_start.h"
 #include "../../gtk4/sond_treeviewfm.h"
-#include "../../sond_seadrive_core.h"
-#include "../../sond_tvfm_badges.h"
+#include "../../seadrive/sond_seadrive_core.h"
+#include "../../tvfm/sond_tvfm_badges.h"
 #include "../../sond_index.h"
 
 typedef struct {

@@ -26,7 +26,7 @@
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 #include "../../sond_process_file.h"
-#include "../../sond_seadrive.h"
+#include "../../seadrive/sond_seadrive_gtk3.h"
 #include "../../misc.h"
 
 //#include "../zond_init.h"
