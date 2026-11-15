@@ -16,8 +16,7 @@ G_BEGIN_DECLS
 
 /* Pin state values: s. sond_seadrive_core.h */
 
-/* Der Viewer linkt sond_seadrive.c nicht (haengt am TreeviewFM): Stubs. */
-#if defined(_WIN32) && !defined(VIEWER)
+#if defined(_WIN32)
 
 /*
  * Returns TRUE if full_path lies inside a CF-API sync root
@@ -161,7 +160,7 @@ void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
 
 void sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm, const gchar *full_path);
 
-#else /* !_WIN32 || VIEWER */
+#else /* !_WIN32 */
 
 /* Stub inlines for Linux - compile to nothing */
 static inline guint
@@ -272,9 +271,9 @@ sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
     (void)stvfm; (void)sensitive;
 }
 
-#endif /* _WIN32 && !VIEWER */
+#endif /* _WIN32 */
 
-#if defined(_WIN32) && !defined(VIEWER)
+#if defined(_WIN32)
 /* Liefert den aktuellen, vom Scan/Watcher gepflegten Datei-Badge für
  * file_full_path (voller Pfad), oder NONE, wenn kein Eintrag existiert.
  * Ersetzt einen früheren LIVEN GetFileAttributesW-Aufruf pro Renderzeile

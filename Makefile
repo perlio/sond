@@ -61,9 +61,7 @@ SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/anbindung.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
-# -DVIEWER wird nur noch von seadrive/ und tvfm/ ausgewertet (Windows-Code,
-# der im eigenständigen Viewer nicht gebaut wird), nicht mehr von 40viewer/
-CFLAGS += -DVIEWER $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
+CFLAGS += $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
 	libxml-2.0)
 LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip \
 	json-glib-1.0 mupdf gmime-3.0 libxml-2.0) \

@@ -4,6 +4,7 @@ G_DEFINE_TYPE(PdfViewerSession, pdf_viewer_session, G_TYPE_OBJECT)
 
 enum {
 	SIGNAL_VIEWER_CREATED,
+	SIGNAL_LOAD_FILE,
 	SIGNAL_ANBINDUNG_REQUESTED,
 	SIGNAL_PAGES_DELETING,
 	SIGNAL_SAVE_STARTED,
@@ -42,6 +43,11 @@ static void pdf_viewer_session_class_init(PdfViewerSessionClass *klass) {
 	signals[SIGNAL_VIEWER_CREATED] = g_signal_new("viewer-created",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 			G_TYPE_NONE, 1, G_TYPE_POINTER);
+
+	signals[SIGNAL_LOAD_FILE] = g_signal_new("load-file",
+			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0,
+			g_signal_accumulator_first_wins, NULL, NULL, G_TYPE_INT, 2,
+			G_TYPE_POINTER, G_TYPE_STRING);
 
 	signals[SIGNAL_ANBINDUNG_REQUESTED] = g_signal_new("anbindung-requested",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0,
@@ -88,6 +94,15 @@ void pdf_viewer_session_viewer_created(PdfViewerSession *session,
 	g_signal_emit(session, signals[SIGNAL_VIEWER_CREATED], 0, pv);
 
 	return;
+}
+
+gboolean pdf_viewer_session_load_file(PdfViewerSession *session,
+		gpointer parent, gchar const *path) {
+	gint rc = 0;
+
+	g_signal_emit(session, signals[SIGNAL_LOAD_FILE], 0, parent, path, &rc);
+
+	return rc == 0;
 }
 
 gboolean pdf_viewer_session_wants_anbindung(PdfViewerSession *session) {

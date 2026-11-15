@@ -21,7 +21,7 @@
 
 #include "sond_seadrive_core.h"
 
-#if defined(_WIN32) && !defined(VIEWER)
+#if defined(_WIN32)
 
 #include <windows.h>
 #include <glib.h>
@@ -504,9 +504,9 @@ gint sond_seadrive_count_unsynced(const gchar *dir, gint64 since_unix) {
     return (gint) unsynced;
 }
 
-#endif /* _WIN32 && !VIEWER */
+#endif /* _WIN32 */
 
-#if !(defined(_WIN32) && !defined(VIEWER))
+#if !defined(_WIN32)
 
 gint sond_seadrive_count_unsynced(const gchar *dir, gint64 since_unix)
 {

@@ -42,7 +42,7 @@ G_BEGIN_DECLS
 #define STVFM_PIN_STATE_EXCLUDED     3
 #define STVFM_PIN_STATE_INHERIT      4
 
-#if defined(_WIN32) && !defined(VIEWER)
+#if defined(_WIN32)
 
 /* TRUE, wenn full_path in einer Cloud-Sync-Wurzel (SeaDrive, OneDrive o. ä.) liegt */
 gboolean sond_seadrive_is_seadrive_path(const gchar *full_path);
@@ -76,7 +76,7 @@ gpointer sond_seadrive_core_placeholder_info(void);
 /* Gilt die Datei als zum Server synchron (hochgeladen)? Im Zweifel nicht. */
 gboolean sond_seadrive_file_in_sync(const gchar *path);
 
-#endif /* _WIN32 && !VIEWER */
+#endif /* _WIN32 */
 
 /**
  * sond_seadrive_count_unsynced:

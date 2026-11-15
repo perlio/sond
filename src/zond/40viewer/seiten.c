@@ -26,7 +26,6 @@
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 #include "../../sond_process_file.h"
-#include "../../seadrive/sond_seadrive_gtk3.h"
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 
@@ -1212,8 +1211,8 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
 
 		//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
-		if (path_merge && !sond_seadrive_load_file_sync(GTK_WINDOW(pv->vf),
-				path_merge)) {
+		if (path_merge && !pdf_viewer_session_load_file(pv->session,
+				GTK_WINDOW(pv->vf), path_merge)) {
 			g_free(path_merge);
 
 			return;

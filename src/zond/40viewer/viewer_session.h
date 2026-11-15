@@ -38,6 +38,9 @@ PdfViewerSession* pdf_viewer_session_new(fz_context *ctx, GSettings *settings);
  *
  *   viewer-created (PdfViewer*)
  *      Ein Viewer-Fenster ist eingerichtet; der Host darf es ergänzen.
+ *   load-file (GtkWindow*, const gchar*) -> gint
+ *      Datei vor der Benutzung bereitstellen (z.B. Cloud-Datei laden). 0 =
+ *      bereit, sonst abbrechen. Ohne Handler ist die Datei immer bereit.
  *   anbindung-requested (PdfViewer*, GError**) -> gint
  *      Doppelklick hat eine Anbindung (pv->anbindung) festgelegt, der Host
  *      legt sie an. Ohne Handler reagiert der Viewer auf Doppelklicks nicht.
@@ -57,6 +60,10 @@ PdfViewerSession* pdf_viewer_session_new(fz_context *ctx, GSettings *settings);
 gboolean pdf_viewer_session_wants_anbindung(PdfViewerSession*);
 
 void pdf_viewer_session_viewer_created(PdfViewerSession*, PdfViewer*);
+
+/* TRUE, wenn die Datei bereit ist (parent: GtkWindow*). */
+gboolean pdf_viewer_session_load_file(PdfViewerSession*, gpointer parent,
+		gchar const *path);
 
 gint pdf_viewer_session_anbindung_requested(PdfViewerSession*, PdfViewer*,
 		GError**);

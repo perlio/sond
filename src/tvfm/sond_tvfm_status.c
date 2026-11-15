@@ -30,7 +30,7 @@
 #endif
 
 SondSeadriveBadge sond_tvfm_badge_seadrive_live(gchar const *full_path) {
-#if defined(G_OS_WIN32) && !defined(VIEWER)
+#if defined(G_OS_WIN32)
 	wchar_t *lp = prepare_long_path(full_path, NULL);
 	DWORD attrs = INVALID_FILE_ATTRIBUTES;
 	gboolean pinned = FALSE;
@@ -147,7 +147,7 @@ void sond_tvfm_item_get_badges(SondTVFMItem *item, SondTVFMOwner *owner,
 		gchar *full_path = (rel && root) ? g_strconcat(root, "/", rel, NULL) : NULL;
 
 		if (full_path) {
-#if defined(G_OS_WIN32) && !defined(VIEWER)
+#if defined(G_OS_WIN32)
 			if (item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
 				/* Datei-Badge: der Baum liest es aus seinen Tabellen (Watcher),
 				 * ohne Dateisystemzugriff */

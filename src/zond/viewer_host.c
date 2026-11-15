@@ -28,6 +28,7 @@
 #include "../sond_fileparts.h"
 #include "../sond_index.h"
 #include "../sond_process_file.h"
+#include "../seadrive/sond_seadrive_gtk3.h"
 
 #include "zond_init.h"
 #include "zond_dbase.h"
@@ -516,6 +517,12 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 	return;
 }
 
+//nicht geladene SeaDrive-Datei laden (Abbruch: 1)
+static gint viewer_host_cb_load_file(PdfViewerSession *session,
+		gpointer parent, gchar const *path, gpointer data) {
+	return sond_seadrive_load_file_sync(GTK_WINDOW(parent), path) ? 0 : 1;
+}
+
 static gint viewer_host_cb_anbindung_requested(PdfViewerSession *session,
 		PdfViewer *pv, GError **error, gpointer data) {
 	ViewerHost *host = data;
@@ -663,6 +670,8 @@ void viewer_host_connect(Projekt *zond, PdfViewerSession *session) {
 	g_object_set_data_full(G_OBJECT(session), "zond-viewer-host", host,
 			g_free);
 
+	g_signal_connect(session, "load-file",
+			G_CALLBACK(viewer_host_cb_load_file), host);
 	g_signal_connect(session, "anbindung-requested",
 			G_CALLBACK(viewer_host_cb_anbindung_requested), host);
 	g_signal_connect(session, "pages-deleting",
