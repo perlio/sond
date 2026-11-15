@@ -38,8 +38,7 @@
 #include "../sond_pdf_helper.h"
 #include "../seadrive/sond_seadrive_gtk3.h"
 #include "../sond_icon_util.h"
-#include "../tvfm/sond_tvfm_badges.h"
-#include "../tvfm/sond_tvfm_index.h"
+#include "../tvfm/sond_tvfm_status.h"
 #include "../sond_eingang_zettel.h"
 #include "sond_treeviewfm_private.h"
 
@@ -4027,7 +4026,7 @@ gboolean sond_treeviewfm_file_part_indexable(SondFilePart *sfp,
 	return sond_tvfm_file_part_indexable(sfp, filepart);
 }
 
-/* Indizierungsstatus für das Overlay-Icon (Logik in sond_tvfm_index.c); Sections
+/* Indizierungsstatus für das Overlay-Icon (Logik in sond_tvfm_status.c); Sections
  * (Anbindungen) delegiert die Basisklasse an die Unterklasse (s.
  * get_section_index_status(), sond_treeviewfm.h). */
 static SondIndexStatus sond_treeviewfm_get_index_status(
@@ -4087,7 +4086,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	/* Welche Overlays zeigt der Eintrag? Die Entscheidungslogik (SeaDrive-Zustand,
-	 * Ordner-Teilbaum, Indizierung) steht in sond_tvfm_badges.c, gemeinsam mit der
+	 * Ordner-Teilbaum, Indizierung) steht in sond_tvfm_status.c, gemeinsam mit der
 	 * GTK4-Fassung. Datei-Badges und Ordner-Statistik liest der Baum aus den
 	 * Tabellen des SeaDrive-Watchers. */
 	{

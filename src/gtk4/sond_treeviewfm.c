@@ -31,8 +31,7 @@
 #include "../tvfm/sond_tvfm_owner.h"
 #include "../seadrive/sond_seadrive_core.h"
 #include "../sond_icon_util.h"
-#include "../tvfm/sond_tvfm_badges.h"
-#include "../tvfm/sond_tvfm_index.h"
+#include "../tvfm/sond_tvfm_status.h"
 #include "../sond_mime.h"
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"

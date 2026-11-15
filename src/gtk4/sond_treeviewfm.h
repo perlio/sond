@@ -60,7 +60,7 @@ struct _SondTreeviewFMClass {
 	void (*setup_columns)(SondTreeviewFM*);
 	void (*setup_menu)(SondTreeviewFM*);
 
-	/* Quellen für die Overlay-Symbole (s. sond_tvfm_badges.h). Standard: Zustand
+	/* Quellen für die Overlay-Symbole (s. sond_tvfm_status.h). Standard: Zustand
 	 * einer Datei aus den Dateiattributen, Ordner-Teilbaum und Index leer. Zond
 	 * überschreibt sie mit dem Stand von Watcher und Index. */
 	SondSeadriveBadge (*file_badge)(SondTreeviewFM*, gchar const *full_path);

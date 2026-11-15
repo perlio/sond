@@ -73,7 +73,26 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error);
  * für Code, der Platzhalter-Informationen selbst abfragt (Sync-Zustand). */
 gpointer sond_seadrive_core_placeholder_info(void);
 
+/* Gilt die Datei als zum Server synchron (hochgeladen)? Im Zweifel nicht. */
+gboolean sond_seadrive_file_in_sync(const gchar *path);
+
 #endif /* _WIN32 && !VIEWER */
+
+/**
+ * sond_seadrive_count_unsynced:
+ * @dir: Verzeichnis (UTF-8), rekursiv durchsucht, auch Punkt-Dateien
+ * @since_unix: nur Dateien, die seit diesem Zeitpunkt (Unix-Sekunden, mit einer
+ *   Minute Toleranz) geändert wurden, kommen in Betracht
+ *
+ * Zählt die Dateien unter @dir, die seit @since_unix geändert wurden und noch
+ * nicht mit dem Server synchron sind. Im Zweifel gilt eine Datei als nicht
+ * synchron (ein fälschliches "alles hochgeladen" wäre gefährlicher).
+ *
+ * Returns: Anzahl (0 = alles hochgeladen) oder -1, wenn das nicht ermittelt
+ *   werden kann (kein Windows, Cloud-API fehlt, Verzeichnis nicht lesbar,
+ *   unverhältnismäßig viele Einträge).
+ */
+gint sond_seadrive_count_unsynced(const gchar *dir, gint64 since_unix);
 
 G_END_DECLS
 

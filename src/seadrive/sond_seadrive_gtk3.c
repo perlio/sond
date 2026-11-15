@@ -25,6 +25,7 @@
 #include <gtk/gtk.h>
 
 #include "sond_seadrive_core.h"
+#include "sond_seadrive_win.h"
 #include "../gtk3/sond_treeview.h"
 #include "../gtk3/sond_treeviewfm_private.h"
 #include "../sond_fileparts.h"
@@ -32,16 +33,6 @@
 #include "../sond_log_and_error.h"
 #include "../sond_mime.h"
 #include "../misc.h"
-
-/* FILE_ATTRIBUTE_PINNED/UNPINNED fehlen in älteren MinGW-Headern */
-#ifndef FILE_ATTRIBUTE_PINNED
-#define FILE_ATTRIBUTE_PINNED                 0x00080000
-#endif
-#ifndef FILE_ATTRIBUTE_UNPINNED
-#define FILE_ATTRIBUTE_UNPINNED               0x00100000
-#endif
-
-#define HRESULT_MORE_DATA      ((HRESULT)0x800700EAL)
 
 //CfGetPlaceholderInfo (geladen in sond_seadrive_core.c)
 typedef HRESULT (WINAPI *PFN_CfGetPlaceholderInfo)(

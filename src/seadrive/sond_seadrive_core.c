@@ -28,20 +28,7 @@
 #include <gio/gio.h>
 
 #include "../sond_file_helper.h"
-
-/* ------------------------------------------------------------------ */
-/*  FILE_ATTRIBUTE_* not always defined in older MinGW headers        */
-/* ------------------------------------------------------------------ */
-
-#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS  0x00400000
-#endif
-#ifndef FILE_ATTRIBUTE_PINNED
-#define FILE_ATTRIBUTE_PINNED                 0x00080000
-#endif
-#ifndef FILE_ATTRIBUTE_UNPINNED
-#define FILE_ATTRIBUTE_UNPINNED               0x00100000
-#endif
+#include "sond_seadrive_win.h"
 
 /* ------------------------------------------------------------------ */
 /*  CF-API constants (from cfapi.h, duplicated to avoid the header)   */
@@ -51,8 +38,6 @@
 #define CF_SET_PIN_FLAG_RECURSE      0x00000001
 
 #define CF_HYDRATE_FLAG_NONE         0x00000000
-
-#define HRESULT_MORE_DATA      ((HRESULT)0x800700EAL)
 
 /* ------------------------------------------------------------------ */
 /*  CF-API function pointer types                                      */
@@ -380,4 +365,155 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
 }
 
 
+
+/* ------------------------------------------------------------------ */
+/*  Sync-Zustand (hochgeladen?)                                        */
+/* ------------------------------------------------------------------ */
+
+//Toleranz für Zeitunterschiede zwischen Änderung und Beginn der Berechtigung
+#define SINCE_SLACK 60
+
+//Obergrenze der durchsuchten Einträge, danach "unbekannt"
+#define MAX_ENTRIES 200000
+
+//Aufbau von CF_PLACEHOLDER_BASIC_INFO (cfapi.h)
+typedef struct {
+    DWORD PinState;
+    DWORD InSyncState;
+    LARGE_INTEGER FileId;
+    LARGE_INTEGER SyncRootFileId;
+    ULONG FileIdentityLength;
+    BYTE FileIdentity[256];
+} BasicInfo;
+
+#define CF_PLACEHOLDER_INFO_BASIC 0
+#define CF_IN_SYNC_STATE_IN_SYNC 1
+
+/* Gilt die Datei als zum Server synchron (hochgeladen)? Jede Unsicherheit (API fehlt,
+ * Datei nicht zu öffnen, Abfrage scheitert) zählt als "nicht synchron": eine gerade
+ * neu angelegte Datei erkennt CfGetPlaceholderInfo womöglich noch nicht als Cloud-Datei,
+ * und ein fälschliches "alles synchron" würde ein Datenverlust-Risiko verschleiern. */
+gboolean sond_seadrive_file_in_sync(const gchar *path) {
+    PFN_CfGetPlaceholderInfo get_info = NULL;
+    BasicInfo basic = { 0 };
+    DWORD returned = 0;
+    wchar_t *lp = prepare_long_path(path, NULL);
+    HANDLE h = INVALID_HANDLE_VALUE;
+    HRESULT hr = S_OK;
+
+    cfapi_init();
+    get_info = g_CfGetPlaceholderInfo;
+    if (!get_info || !lp) {
+        g_free(lp);
+
+        return FALSE;
+    }
+
+    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    g_free(lp);
+    if (h == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    hr = get_info(h, CF_PLACEHOLDER_INFO_BASIC, &basic, sizeof(basic),
+            &returned);
+    CloseHandle(h);
+
+    if (FAILED(hr) && hr != HRESULT_MORE_DATA)
+        return FALSE;
+
+    return basic.InSyncState == CF_IN_SYNC_STATE_IN_SYNC;
+}
+
+static gint64 filetime_to_unix(const FILETIME *ft) {
+    ULARGE_INTEGER ui;
+
+    ui.LowPart = ft->dwLowDateTime;
+    ui.HighPart = ft->dwHighDateTime;
+
+    return (gint64) (ui.QuadPart / 10000000ULL) - 11644473600LL;
+}
+
+//Rückgabe: FALSE bei Abbruch (zu viele Einträge, Verzeichnis nicht lesbar)
+static gboolean scan_dir(const gchar *dir,
+        gint64 threshold, guint *visited, guint *unsynced) {
+    gchar *pattern = g_strconcat(dir, "/*", NULL);
+    wchar_t *lp = prepare_long_path(pattern, NULL);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    gboolean ok = TRUE;
+
+    g_free(pattern);
+    if (!lp)
+        return FALSE;
+
+    h = FindFirstFileW(lp, &fd);
+    g_free(lp);
+    if (h == INVALID_HANDLE_VALUE)
+        return GetLastError() == ERROR_FILE_NOT_FOUND; //leeres Verzeichnis
+
+    do {
+        gchar *name = NULL;
+        gchar *path = NULL;
+
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+            continue;
+
+        if (++(*visited) > MAX_ENTRIES) {
+            ok = FALSE;
+            break;
+        }
+
+        name = g_utf16_to_utf8((const gunichar2*) fd.cFileName, -1, NULL, NULL,
+                NULL);
+        if (!name) {
+            ok = FALSE;
+            break;
+        }
+        path = g_strdup_printf("%s/%s", dir, name);
+        g_free(name);
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            ok = scan_dir(path, threshold, visited, unsynced);
+        } else if (filetime_to_unix(&fd.ftLastWriteTime) >= threshold) {
+            if (!sond_seadrive_file_in_sync(path))
+                (*unsynced)++;
+        }
+        g_free(path);
+    } while (ok && FindNextFileW(h, &fd));
+
+    FindClose(h);
+
+    return ok;
+}
+
+gint sond_seadrive_count_unsynced(const gchar *dir, gint64 since_unix) {
+    guint visited = 0;
+    guint unsynced = 0;
+
+    g_return_val_if_fail(dir != NULL, -1);
+
+    cfapi_init();
+    if (!g_CfGetPlaceholderInfo)
+        return -1;
+
+    if (!scan_dir(dir, since_unix - SINCE_SLACK, &visited, &unsynced))
+        return -1;
+
+    return (gint) unsynced;
+}
+
 #endif /* _WIN32 && !VIEWER */
+
+#if !(defined(_WIN32) && !defined(VIEWER))
+
+gint sond_seadrive_count_unsynced(const gchar *dir, gint64 since_unix)
+{
+    (void) dir;
+    (void) since_unix;
+
+    return -1; //keine Cloud-Files-API
+}
+
+#endif

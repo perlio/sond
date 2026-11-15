@@ -25,7 +25,7 @@
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_db.h"
 #include "../../sond_zond_ctl.h"
-#include "../../seadrive/sond_seadrive_sync.h"
+#include "../../seadrive/sond_seadrive_core.h"
 
 #define LEASE_LABEL "ProjektLease"
 #define LEASE_LOCK_REASON "Lease"

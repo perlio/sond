@@ -24,45 +24,9 @@
 #include <string.h>
 
 #include "sond_seadrive_core.h"
+#include "sond_seadrive_win.h"
 #include "../sond_file_helper.h"
 #include "../sond_log_and_error.h"
-
-#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS  0x00400000
-#endif
-#ifndef FILE_ATTRIBUTE_PINNED
-#define FILE_ATTRIBUTE_PINNED                 0x00080000
-#endif
-#ifndef FILE_ATTRIBUTE_UNPINNED
-#define FILE_ATTRIBUTE_UNPINNED               0x00100000
-#endif
-
-typedef HRESULT (WINAPI *PFN_CfGetPlaceholderInfo)(
-    HANDLE  FileHandle,
-    DWORD   InfoClass,
-    PVOID   InfoBuffer,
-    DWORD   InfoBufferLength,
-    PDWORD  ReturnedLength);
-
-static PFN_CfGetPlaceholderInfo cf_get_placeholder_info(void)
-{
-    return (PFN_CfGetPlaceholderInfo) sond_seadrive_core_placeholder_info();
-}
-
-#define CF_PLACEHOLDER_INFO_BASIC      0
-#define CF_IN_SYNC_STATE_NOT_IN_SYNC   0
-#define CF_IN_SYNC_STATE_IN_SYNC       1
-
-typedef struct {
-    DWORD         PinState;
-    DWORD         InSyncState;
-    LARGE_INTEGER FileId;
-    LARGE_INTEGER SyncRootFileId;
-    ULONG         FileIdentityLength;
-    BYTE          FileIdentity[256];
-} SeaDrivePlaceholderBasicInfo;
-
-#define HRESULT_MORE_DATA  ((HRESULT)0x800700EAL)
 
 /* ------------------------------------------------------------------ */
 /*  Objekt                                                             */
@@ -523,7 +487,7 @@ static void watcher_count_pending_down(const gchar *dir_utf8,
             SondSeadriveBadge badge = SOND_SEADRIVE_BADGE_NONE;
 
             /* Dieselbe Prioritätsreihenfolge wie in
-             * sond_tvfm_badges.c. */
+             * sond_tvfm_status.c. */
             if (offline && pinned)
                 badge = SOND_SEADRIVE_BADGE_PENDING;
             else if (offline)
@@ -640,53 +604,6 @@ static void watcher_rescan(SondSeadriveWatcher *w, const gchar *root)
 /*  Watcher: Hilfsfunktionen für Thread                               */
 /* ------------------------------------------------------------------ */
 
-/* Prüft, ob die Datei bei SeaDrive als synchronisiert (hochgeladen) gilt.
- * Jede Art von Unsicherheit/Fehlschlag (CfGetPlaceholderInfo fehlt, Datei
- * nicht öffenbar, CfGetPlaceholderInfo() schlägt fehl) wertet diese Funktion
- * als "nicht in sync" (FALSE): eine gerade erst per normalem
- * CreateFile()/fwrite() (statt über die Cloud-Files-Platzhalter-APIs)
- * neu angelegte Datei wird von CfGetPlaceholderInfo() vermutlich (noch)
- * nicht als Cloud-Datei erkannt, der Aufruf schlägt fehl - und ein
- * optimistischer Fallback "in sync" würde dauerhaft verschleiern, dass die
- * Datei noch hochgeladen werden muss. Für einen Indikator, der vor "Daten
- * sind noch nicht gesichert" warnen soll, ist die Default-Richtung
- * "nicht synchron": ein fälschliches "noch nicht synchron" ist höchstens
- * ein optisches Ärgernis, ein fälschliches "alles synchron" verschleiert
- * einen echten Datenverlust-Risiko-Zustand. Eine Datei gilt nur dann als
- * synchron, wenn die Prüfung das auch tatsächlich bestätigen konnte. */
-static gboolean watcher_check_in_sync(const gchar *utf8_path)
-{
-    SeaDrivePlaceholderBasicInfo basic = { 0 };
-    DWORD returned = 0;
-    HRESULT hr;
-    HANDLE h;
-    wchar_t *lp;
-
-    if (!cf_get_placeholder_info())
-        return FALSE; /* im Zweifel: not in sync */
-
-    lp = prepare_long_path(utf8_path, NULL);
-    if (!lp)
-        return FALSE;
-
-    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    g_free(lp);
-
-    if (h == INVALID_HANDLE_VALUE)
-        return FALSE;
-
-    hr = cf_get_placeholder_info()(h, CF_PLACEHOLDER_INFO_BASIC,
-            &basic, sizeof(basic), &returned);
-    CloseHandle(h);
-
-    if (FAILED(hr) && hr != HRESULT_MORE_DATA)
-        return FALSE;
-
-    return basic.InSyncState == CF_IN_SYNC_STATE_IN_SYNC;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Watcher-Thread                                                      */
 /* ------------------------------------------------------------------ */
@@ -694,9 +611,6 @@ static gboolean watcher_check_in_sync(const gchar *utf8_path)
 static gpointer watcher_thread(gpointer user_data)
 {
     SondSeadriveWatcher *w = SOND_SEADRIVE_WATCHER(user_data);
-
-    /* CF-API initialisieren - muss vor dem Thread-Start erfolgen */
-    (void) cf_get_placeholder_info();
 
     /* Eigene Kopie der Wurzel: der Thread liest nur sie, nicht das Objekt. */
     gchar *root = g_strdup(w->root);
@@ -894,7 +808,7 @@ static gpointer watcher_thread(gpointer user_data)
 
                                     /* LAST_WRITE: In-Sync-Status prüfen */
                                     {
-                                        gboolean in_sync = watcher_check_in_sync(full);
+                                        gboolean in_sync = sond_seadrive_file_in_sync(full);
                                         d->path_up = g_strdup(full);
                                         d->up_pending = !in_sync;
                                     }

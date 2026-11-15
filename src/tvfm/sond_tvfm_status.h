@@ -1,5 +1,5 @@
 /*
- sond (sond_tvfm_badges.h) - Akten, Beweisstücke, Unterlagen
+ sond (sond_tvfm_status.h) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -17,8 +17,8 @@
  */
 
 /**
- * @file sond_tvfm_badges.h
- * @brief Welche Overlay-Symbole (Badges) zeigt ein Eintrag des Dateibaums?
+ * @file sond_tvfm_status.h
+ * @brief Welche Symbole zeigt ein Eintrag des Dateibaums? (Badges, Index-Status)
  *
  * Aus sond_treeviewfm_render_file_icon() herausgelöste Entscheidungslogik, damit
  * die GTK3-Fassung (Zellrenderer) und die GTK4-Fassung (Zellwidgets) dieselben
@@ -26,20 +26,24 @@
  * Ansicht (sond_icon_util.h für die Badge-Pixbufs).
  *
  * Die Zustände, die ein Baum selbst vorhält (Datei-Badges und Ordner-Statistik des
- * SeaDrive-Watchers, Indexstatus), liefert er über SondTVFMBadgeSources.
+ * SeaDrive-Watchers, Indexstatus), liefert er über SondTVFMBadgeSources. Der
+ * Indizierungsstatus eines Eintrags kommt aus der Index-DB.
  */
 
-#ifndef SOND_TVFM_BADGES_H_INCLUDED
-#define SOND_TVFM_BADGES_H_INCLUDED
+#ifndef SOND_TVFM_STATUS_H_INCLUDED
+#define SOND_TVFM_STATUS_H_INCLUDED
 
 #include <glib.h>
 
 #include "../sond_icon_util.h"
 #include "../sond_fileparts.h"
+#include "../sond_index.h"
 #include "sond_tvfm_item.h"
 #include "sond_tvfm_owner.h"
 
 G_BEGIN_DECLS
+
+/* --- Badges (Overlay-Symbole) --- */
 
 typedef struct {
 	SondSeadriveBadge seadrive;       //unten rechts: Datei bzw. Ordner selbst
@@ -77,6 +81,15 @@ gchar const* sond_tvfm_badge_seadrive_text(SondSeadriveBadge badge);
 
 gchar const* sond_tvfm_badge_dir_status_text(SondSeadriveDirStatus status);
 
+/* --- Index-Status aus der Index-DB --- */
+
+/* Lässt sich der Inhalt (filepart) indizieren? PDF und E-Mail immer, sonst nach MIME-Typ */
+gboolean sond_tvfm_file_part_indexable(SondFilePart *sfp, gchar const *filepart);
+
+/* Status für das Overlay-Symbol; NONE, wenn nicht indiziert, nicht indizierbar oder kein
+ * Kontext. Sections (Anbindungen) beantwortet die Unterklasse, hier liefern sie NONE. */
+SondIndexStatus sond_tvfm_item_index_status(SondTVFMItem*, SondIndexCtx*);
+
 G_END_DECLS
 
-#endif // SOND_TVFM_BADGES_H_INCLUDED
+#endif // SOND_TVFM_STATUS_H_INCLUDED
