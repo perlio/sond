@@ -581,6 +581,42 @@ gboolean sond_index_ctx_embedding_model_changed(SondIndexCtx *ctx) {
     return ctx ? ctx->embedding_model_changed : FALSE;
 }
 
+SondIndexCtx* sond_index_ctx_new_readonly(gchar const *db_path, GError **error) {
+    SondIndexCtx *ctx = g_new0(SondIndexCtx, 1);
+    sqlite3_stmt *stmt = NULL;
+    gint rc = 0;
+
+    ctx->db_path       = g_strdup(db_path);
+    ctx->chunk_size    = INDEX_DEFAULT_CHUNK_SIZE;
+    ctx->chunk_overlap = INDEX_DEFAULT_CHUNK_OVERLAP;
+
+    /* Nur lesen: weder anlegen noch Journal-Modus, Schema oder Pragmas ändern -
+     * die Datei gehört dem Indexierer und wird von Seafile verteilt. */
+    rc = sqlite3_open_v2(db_path, &ctx->db, SQLITE_OPEN_READONLY, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_new_readonly: sqlite3_open_v2 '%s': %s",
+                    db_path, ctx->db ? sqlite3_errmsg(ctx->db) : "?");
+        sond_index_ctx_free(ctx);
+        return NULL;
+    }
+
+    sqlite3_busy_timeout(ctx->db, 2000);
+
+    //Ist es eine Index-DB (und gerade lesbar)? Sonst keinen Kontext herausgeben.
+    rc = sqlite3_prepare_v2(ctx->db, "SELECT 1 FROM coverage LIMIT 1;", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_new_readonly: '%s' nicht lesbar: %s",
+                    db_path, sqlite3_errmsg(ctx->db));
+        sond_index_ctx_free(ctx);
+        return NULL;
+    }
+    sqlite3_finalize(stmt);
+
+    return ctx;
+}
+
 void sond_index_ctx_free(SondIndexCtx *ctx) {
     if (!ctx) return;
 

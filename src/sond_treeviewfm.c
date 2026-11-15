@@ -39,6 +39,7 @@
 #include "sond_seadrive.h"
 #include "sond_icon_util.h"
 #include "sond_tvfm_badges.h"
+#include "sond_tvfm_index.h"
 #include "sond_eingang_zettel.h"
 #include "sond_treeviewfm_private.h"
 
@@ -454,14 +455,6 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher(SOND_TREEVIEWFM(g_object));
-	if (stvfm_priv->seadrive_not_in_sync)
-		g_hash_table_destroy(stvfm_priv->seadrive_not_in_sync);
-	if (stvfm_priv->seadrive_pending_down_paths)
-		g_hash_table_destroy(stvfm_priv->seadrive_pending_down_paths);
-	if (stvfm_priv->seadrive_dir_counts)
-		g_hash_table_destroy(stvfm_priv->seadrive_dir_counts);
-	if (stvfm_priv->seadrive_file_badges)
-		g_hash_table_destroy(stvfm_priv->seadrive_file_badges);
 #endif
 
 	g_free(stvfm_priv->root);
@@ -4031,63 +4024,17 @@ static gint sond_treeviewfm_sort_compare(GtkTreeModel *model, GtkTreeIter *a,
 
 gboolean sond_treeviewfm_file_part_indexable(SondFilePart *sfp,
 		gchar const *filepart) {
-	gchar const *mime_type = NULL;
-
-	//PDF und E-Mail sind unabhängig von der Endung immer unterstützt
-	if (SOND_IS_FILE_PART_PDF(sfp) || SOND_IS_FILE_PART_GMESSAGE(sfp))
-		return TRUE;
-
-	mime_type = SOND_IS_FILE_PART_LEAF(sfp) ?
-			sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp)) :
-			mime_from_extension(filepart);
-
-	return sond_index_mime_type_supported(mime_type);
+	return sond_tvfm_file_part_indexable(sfp, filepart);
 }
 
-/* Ermittelt den filepart-Pfad (Datei/Verzeichnis, "//"-Konvention bei
- * eingebetteten Inhalten) für die Indizierungsstatus-Abfrage - unabhängig
- * vom OS-Pfad "rel", den der SeaDrive-Zweig weiter unten für den
- * Dateisystem-Zugriff braucht. NULL, wenn für dieses Item kein sinnvoller
- * Pfad existiert (z.B. eine reine Anbindung/Section ohne eigene Datei). */
-static gchar* sond_treeviewfm_get_coverage_path(SondTVFMItemPrivate *priv,
-		gboolean *out_is_dir) {
-	*out_is_dir = FALSE;
-
-	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF && priv->sond_file_part)
-		return sond_file_part_get_filepart(priv->sond_file_part);
-
-	if (priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-		*out_is_dir = TRUE;
-		if (!priv->sond_file_part) //DIR im Filesystem
-			return g_strdup(priv->path_or_section);
-		else if (priv->path_or_section &&
-				SOND_IS_FILE_PART_ZIP(priv->sond_file_part)) { //Ordner im ZIP
-			g_autofree gchar *zip_fp =
-					sond_file_part_get_filepart(priv->sond_file_part);
-
-			return g_strconcat(zip_fp, "//", priv->path_or_section, NULL);
-		}
-		else //Container (z.B. Zip/GMessage) als "Verzeichnis" dargestellt
-			return sond_file_part_get_filepart(priv->sond_file_part);
-	}
-
-	return NULL;
-}
-
-/* Indizierungsstatus für das Overlay-Icon, oder SOND_INDEX_STATUS_NONE
- * (kein Overlay - s. Absprache: nur teilweise/vollständig werden markiert,
- * sonst zu viel visuelles Rauschen in einem frischen, noch nicht
- * indizierten Projekt). Liefert außerdem NONE, wenn der Punkt gar nicht
- * indizierbar ist (z.B. .db/.znd) - dieselbe Prüfung wie beim
- * Abdeckungs-Check der Indexsuche (check_coverage_one()). */
+/* Indizierungsstatus für das Overlay-Icon (Logik in sond_tvfm_index.c); Sections
+ * (Anbindungen) delegiert die Basisklasse an die Unterklasse (s.
+ * get_section_index_status(), sond_treeviewfm.h). */
 static SondIndexStatus sond_treeviewfm_get_index_status(
 		SondTreeviewFM *stvfm, SondTVFMItem *stvfm_item) {
 	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(stvfm_item);
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
 	SondIndexCtx *index_ctx = NULL;
-	gchar *coverage_path = NULL;
-	gboolean is_dir = FALSE;
-	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
 
 	if (!stvfm_priv->index_ctx_func)
 		return SOND_INDEX_STATUS_NONE;
@@ -4096,12 +4043,6 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 	if (!index_ctx)
 		return SOND_INDEX_STATUS_NONE;
 
-	/* Section (Anbindung o.ä.): komplett an die Unterklasse delegiert.
-	 * "Section = Seitenbereich" ist eine zond/PDF-spezifische Annahme, die
-	 * die generische Basisklasse nicht voraussetzen darf (s. ausführlichen
-	 * Kommentar an get_section_index_status(), sond_treeviewfm.h). Die
-	 * Unterklasse bekommt den bereits ermittelten index_ctx übergeben und
-	 * liefert den fertigen Status direkt. */
 	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_index_status)
 			return SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_index_status(
@@ -4110,67 +4051,7 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 		return SOND_INDEX_STATUS_NONE;
 	}
 
-	coverage_path = sond_treeviewfm_get_coverage_path(priv, &is_dir);
-	if (!coverage_path)
-		return SOND_INDEX_STATUS_NONE;
-
-	if (is_dir)
-		status = sond_index_ctx_get_dir_status(index_ctx, coverage_path);
-	else {
-		/* Nicht indizierbare Dateitypen (.db, .znd, Bilder, ...) gar nicht
-		 * erst prüfen - sonst zeigt jede solche Datei dauerhaft "nicht
-		 * indiziert" an, obwohl sie nie indiziert werden wird.
-		 *
-		 * Der MIME-Typ wird bevorzugt vom SondFilePart selbst geholt statt
-		 * ihn aus der Endung von coverage_path zu raten. Bei einem
-		 * SondFilePartLeaf ist das der beim Erzeugen per echtem
-		 * Content-Sniffing ermittelte und gespeicherte Typ (s.
-		 * sond_file_part_create()). Das betrifft v.a. eingebettete
-		 * Container-Einträge ohne aussagekräftige Endung - z.B. einzelne
-		 * MIME-Parts einer E-Mail (eine HTML-Alternative, ein
-		 * Inline-Bild): deren "Pfad" ist ein interner, von der
-		 * MIME-Bibliothek vergebener Name ohne (oder mit irreführender)
-		 * Endung - der echte Typ ("text/html" etc.) steht aber auf dem
-		 * SondFilePartLeaf. PDF und GMessage (E-Mail) als LEAF (kein
-		 * Multipart/keine Einbettungen) sind unabhängig von der Endung
-		 * immer unterstützt. */
-		/* Message-Knoten einer E-Mail: eindeutig erkennbar wie in
-		 * zond_treeviewfm_item_get_fileparts() - LEAF ohne path_or_section,
-		 * dessen sond_file_part derselbe wie der der ganzen eml ist (kein
-		 * eigener Mimepart-Kind-sfp). coverage_path ist dafür bewusst der
-		 * BARE Dateiname ("mail.eml", s. sond_treeviewfm_get_coverage_path()) -
-		 * der Header wird aber gezielt unter "mail.eml//header" abgedeckt,
-		 * nicht unter "mail.eml" selbst. Badge zeigt FULL, wenn ENTWEDER
-		 * der Header gezielt indiziert ist ODER die ganze Mail als ein
-		 * Block/per Collapse unter "mail.eml" selbst abgedeckt ist - beides
-		 * bedeutet "Header ist durchsucht". Sonst der jeweils bessere
-		 * Teilstatus (NONE < PARTIAL < FULL), damit ein begonnener, aber
-		 * noch nicht abgeschlossener Zustand nicht fälschlich als "gar
-		 * nichts" erscheint. */
-		if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF && !priv->path_or_section &&
-				SOND_IS_FILE_PART_GMESSAGE(priv->sond_file_part)) {
-			gchar *header_path = g_strconcat(coverage_path, "//header", NULL);
-			SondIndexStatus header_status =
-					sond_index_ctx_get_file_status(index_ctx, header_path, -1, -1);
-			SondIndexStatus whole_status =
-					sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
-
-			g_free(header_path);
-			status = MAX(header_status, whole_status);
-		}
-		else {
-			if (!sond_treeviewfm_file_part_indexable(priv->sond_file_part,
-					coverage_path)) {
-				g_free(coverage_path);
-				return SOND_INDEX_STATUS_NONE;
-			}
-			status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
-		}
-	}
-
-	g_free(coverage_path);
-
-	return status;
+	return sond_tvfm_item_index_status(stvfm_item, index_ctx);
 }
 
 #ifdef _WIN32

@@ -87,6 +87,20 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
                                   GError     **error);
 
 /**
+ * sond_index_ctx_new_readonly:
+ * @db_path: Pfad zu einer vorhandenen Index-DB
+ * @error:   GError
+ *
+ * Öffnet die DB nur zum Lesen (Abfragen des Indizierungsstatus, z.B. im Client): legt
+ * nichts an und ändert weder Schema noch Journal-Modus. Mit sond_index_ctx_free()
+ * freigeben. Für Schreibfunktionen ungeeignet.
+ *
+ * Returns: (transfer full) neuer SondIndexCtx, oder NULL, wenn die Datei fehlt, keine
+ *          Index-DB ist oder gerade nicht lesbar ist.
+ */
+SondIndexCtx* sond_index_ctx_new_readonly(gchar const *db_path, GError **error);
+
+/**
  * sond_index_ctx_free:
  * @ctx: SondIndexCtx
  *

@@ -32,11 +32,24 @@
 #include "../sond_seadrive_core.h"
 #include "../sond_icon_util.h"
 #include "../sond_tvfm_badges.h"
+#include "../sond_tvfm_index.h"
+#include "../sond_mime.h"
+#ifdef G_OS_WIN32
+#include "../sond_seadrive_watcher.h"
+#endif
 #include "../zond/10init/icons.h"
 
 typedef struct {
 	gchar *root;
 	gboolean is_seadrive;
+	SondTreeviewFMIndexCtxFunc index_ctx_func;
+	gpointer index_ctx_func_data;
+	GFileMonitor *root_monitor; //Zugänge von außen auf Wurzel-Ebene
+	guint root_monitor_timer;   //Entprellung
+#ifdef G_OS_WIN32
+	SondSeadriveWatcher *watcher; //nur bei einer Wurzel im SeaDrive-Laufwerk
+	guint refresh_idle;           //gebündelte Auffrischung der Symbole
+#endif
 } SondTreeviewFMPrivate;
 
 static void sond_treeviewfm_owner_init(SondTVFMOwnerInterface *iface);
@@ -46,7 +59,7 @@ G_DEFINE_TYPE_WITH_CODE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW,
 		G_IMPLEMENT_INTERFACE(SOND_TYPE_TVFM_OWNER, sond_treeviewfm_owner_init))
 
 enum {
-	SIGNAL_PINS_CHANGED, N_SIGNALS
+	SIGNAL_PINS_CHANGED, SIGNAL_SEADRIVE_STATUS, N_SIGNALS
 };
 
 static guint signals[N_SIGNALS] = { 0 };
@@ -303,6 +316,21 @@ static void lazy_remove(SondLazyChildren *self, SondTVFMItem *item) {
 
 	g_ptr_array_remove_index(self->children, (guint) index);
 	g_list_model_items_changed(G_LIST_MODEL(self), (guint) index, 1, 0);
+}
+
+//ersetzt den Eintrag durch einen anderen (z.B. Platzhalter durch Container)
+static void lazy_replace(SondLazyChildren *self, SondTVFMItem *old_item,
+		SondTVFMItem *new_item) {
+	gint index = lazy_index_of(self, old_item);
+	gpointer old_ref = NULL;
+
+	if (index < 0)
+		return;
+
+	old_ref = g_ptr_array_index(self->children, index);
+	g_ptr_array_index(self->children, index) = g_object_ref(new_item);
+	g_list_model_items_changed(G_LIST_MODEL(self), (guint) index, 1, 1);
+	g_object_unref(old_ref);
 }
 
 //Eintrag hat sich geändert (Name, Größe, ...): Zeile neu aufbauen und neu einsortieren
@@ -574,6 +602,52 @@ static SondSeadriveBadge default_file_badge(SondTreeviewFM *self, gchar const *f
 	(void) self;
 
 	return sond_tvfm_badge_seadrive_live(full_path);
+}
+
+/* Standard der Klasse: Ordner-Status aus dem Watcher (nur im SeaDrive-Laufwerk) */
+static SondSeadriveDirStatus default_dir_status(SondTreeviewFM *self,
+		gchar const *full_path) {
+#ifdef G_OS_WIN32
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+
+	return sond_seadrive_watcher_get_dir_status(priv->watcher, full_path);
+#else
+	(void) self;
+	(void) full_path;
+
+	return SOND_SEADRIVE_DIR_STATUS_NONE;
+#endif
+}
+
+/* Standard der Klasse: Status aus der Index-DB über den gesetzten Kontext */
+static SondIndexStatus default_index_status(SondTreeviewFM *self, SondTVFMItem *item) {
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondIndexCtx *index_ctx = NULL;
+
+	if (!priv->index_ctx_func)
+		return SOND_INDEX_STATUS_NONE;
+
+	index_ctx = priv->index_ctx_func(priv->index_ctx_func_data);
+	if (!index_ctx)
+		return SOND_INDEX_STATUS_NONE;
+
+	if (sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
+		return SOND_TREEVIEWFM_GET_CLASS(self)->get_section_index_status ?
+				SOND_TREEVIEWFM_GET_CLASS(self)->get_section_index_status(item, index_ctx) :
+				SOND_INDEX_STATUS_NONE;
+
+	return sond_tvfm_item_index_status(item, index_ctx);
+}
+
+void sond_treeviewfm_set_index_ctx_func(SondTreeviewFM *self,
+		SondTreeviewFMIndexCtxFunc func, gpointer user_data) {
+	SondTreeviewFMPrivate *priv = NULL;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	priv = sond_treeviewfm_get_instance_private(self);
+
+	priv->index_ctx_func = func;
+	priv->index_ctx_func_data = user_data;
 }
 
 /* Weiterleitung an die Vfuncs der Klasse (Unterklassen überschreiben sie) */
@@ -911,6 +985,349 @@ static void update_pin_actions(SondTreeviewFM *self) {
 	}
 }
 
+/* --- Zugänge von außen auf der obersten Ebene --- */
+
+/* Fügt Einträge, die auf der obersten Ebene von außen hinzugekommen sind, in den Baum
+ * ein. Idempotent: vorhandene Zeilen bleiben unberührt. Löschen oder Umbenennen von
+ * außen wird bewusst nicht nachgeführt. */
+static void root_add_new(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondLazyChildren *lazy = lazy_from_model(sond_treeview_get_roots(SOND_TREEVIEW(self)));
+	SondTVFMItem *item_root = NULL;
+	GPtrArray *children = NULL;
+	GHashTable *known = NULL;
+	GError *error = NULL;
+
+	if (!priv->root || !lazy)
+		return;
+
+	item_root = sond_tvfm_item_create(self, NULL, NULL);
+	if (sond_tvfm_item_load_children(item_root, &children, NULL, &error)) {
+		LOG_WARN("Wurzelverzeichnis konnte nicht neu gelesen werden: %s",
+				error ? error->message : "?");
+		g_clear_error(&error);
+		g_object_unref(item_root);
+
+		return;
+	}
+
+	known = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	for (guint i = 0; lazy->children && i < lazy->children->len; i++) {
+		gchar const *name = sond_tvfm_item_get_basename(g_ptr_array_index(lazy->children, i));
+
+		if (name)
+			g_hash_table_add(known, g_strdup(name));
+	}
+
+	for (guint i = 0; i < children->len; i++) {
+		SondTVFMItem *child = g_ptr_array_index(children, i);
+		gchar const *name = sond_tvfm_item_get_basename(child);
+
+		if (name && !g_hash_table_contains(known, name))
+			lazy_insert(lazy, child);
+	}
+
+	g_hash_table_unref(known);
+	g_ptr_array_unref(children);
+	g_object_unref(item_root);
+}
+
+static gboolean root_monitor_timeout(gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+
+	priv->root_monitor_timer = 0;
+	root_add_new(self);
+
+	return G_SOURCE_REMOVE;
+}
+
+static void root_monitor_changed(GFileMonitor *monitor, GFile *file, GFile *other,
+		GFileMonitorEvent event, gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+
+	(void) monitor;
+	(void) file;
+	(void) other;
+
+	switch (event) {
+	case G_FILE_MONITOR_EVENT_CREATED:
+	case G_FILE_MONITOR_EVENT_MOVED_IN:
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+		break;
+	case G_FILE_MONITOR_EVENT_CHANGED:
+		//Datei wird noch geschrieben: nur weiter warten, wenn etwas ansteht
+		if (!priv->root_monitor_timer)
+			return;
+		break;
+	default:
+		return;
+	}
+
+	if (priv->root_monitor_timer)
+		g_source_remove(priv->root_monitor_timer);
+	priv->root_monitor_timer = g_timeout_add(500, root_monitor_timeout, self);
+}
+
+static void root_monitor_stop(SondTreeviewFMPrivate *priv) {
+	if (priv->root_monitor_timer) {
+		g_source_remove(priv->root_monitor_timer);
+		priv->root_monitor_timer = 0;
+	}
+
+	if (priv->root_monitor) {
+		g_file_monitor_cancel(priv->root_monitor);
+		g_object_unref(priv->root_monitor);
+		priv->root_monitor = NULL;
+	}
+}
+
+static void root_monitor_start(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	GFile *file_root = NULL;
+	GError *error = NULL;
+
+	file_root = g_file_new_for_path(priv->root);
+	priv->root_monitor = g_file_monitor_directory(file_root, G_FILE_MONITOR_WATCH_MOVES,
+			NULL, &error);
+	g_object_unref(file_root);
+
+	if (!priv->root_monitor) {
+		LOG_WARN("Wurzelverzeichnis kann nicht überwacht werden: %s",
+				error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	g_signal_connect(priv->root_monitor, "changed", G_CALLBACK(root_monitor_changed), self);
+}
+
+#ifdef G_OS_WIN32
+/* --- Anbindung des Watchers (sond_seadrive_watcher.c) --- */
+
+static gboolean watcher_refresh_idle(gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+
+	priv->refresh_idle = 0;
+	g_signal_emit(self, signals[SIGNAL_PINS_CHANGED], 0);
+
+	return G_SOURCE_REMOVE;
+}
+
+//Bei vielen Ereignissen hintereinander die Symbole nur einmal auffrischen
+static void watcher_changed_cb(SondSeadriveWatcher *w, gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+
+	(void) w;
+
+	if (!priv->refresh_idle)
+		priv->refresh_idle = g_idle_add_full(G_PRIORITY_LOW, watcher_refresh_idle,
+				g_object_ref(self), g_object_unref);
+}
+
+static void watcher_status_cb(SondSeadriveWatcher *w, guint pending_down,
+		guint pending_up, gpointer data) {
+	(void) w;
+
+	g_signal_emit(SOND_TREEVIEWFM(data), signals[SIGNAL_SEADRIVE_STATUS], 0,
+			pending_down, pending_up);
+}
+
+static gboolean match_fs_rel(gpointer item, gpointer user_data) {
+	gchar *rel = NULL;
+	gboolean match = FALSE;
+
+	if (sond_tvfm_item_fs_path(SOND_TVFM_ITEM(item), &rel, NULL))
+		match = !g_strcmp0(rel, (gchar const*) user_data);
+	g_free(rel);
+
+	return match;
+}
+
+//Pfad relativ zur Wurzel (Zeiger in full_path) oder NULL
+static gchar const* rel_path_of(SondTreeviewFMPrivate *priv, gchar const *full_path) {
+	gsize len = priv->root ? strlen(priv->root) : 0;
+
+	if (!len || !g_str_has_prefix(full_path, priv->root) || full_path[len] != '/' ||
+			!full_path[len + 1])
+		return NULL;
+
+	return full_path + len + 1;
+}
+
+//Ersetzt die Zeile des Eintrags bei rel durch new_item; die Zeile muss sichtbar sein
+static void replace_row_item(SondTreeviewFM *self, SondTVFMItem *old_item,
+		SondTVFMItem *new_item, gchar const *rel) {
+	SondTreeview *base = SOND_TREEVIEW(self);
+	GtkTreeListRow *row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel,
+			NULL);
+	SondLazyChildren *lazy = NULL;
+
+	if (!row)
+		return;
+
+	lazy = lazy_from_model(sond_treeview_row_get_container(base, row));
+	if (lazy)
+		lazy_replace(lazy, old_item, new_item);
+	g_object_unref(row);
+}
+
+/* Eine Datei wurde geladen: war sie beim Einlesen ein einfaches Blatt (offline, nicht
+ * auf Kinder geprüft), jetzt durch den richtigen Typ (PDF, ZIP, E-Mail) ersetzen */
+static void watcher_hydrated_cb(SondSeadriveWatcher *w, gchar const *path, gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondTreeview *base = SOND_TREEVIEW(self);
+	gchar const *rel = rel_path_of(priv, path);
+	GtkTreeListRow *row = NULL;
+	SondTVFMItem *item = NULL;
+	SondTVFMItem *item_new = NULL;
+	SondFilePart *sfp_old = NULL;
+	SondFilePart *sfp_new = NULL;
+	GPtrArray *arr = NULL;
+	GError *error = NULL;
+
+	(void) w;
+
+	if (!rel)
+		return;
+
+	row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel, NULL);
+	if (!row)
+		return; //nicht sichtbar: beim Aufklappen wird richtig geladen
+
+	item = gtk_tree_list_row_get_item(row);
+	g_object_unref(row);
+	if (!item)
+		return;
+
+	sfp_old = sond_tvfm_item_get_sond_file_part(item);
+	if (sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_LEAF ||
+			!SOND_IS_FILE_PART_LEAF(sfp_old)) {
+		g_object_unref(item);
+
+		return;
+	}
+
+	//das alte Blatt aus der Liste geöffneter Dateien nehmen, sonst gibt create() es zurück
+	arr = sond_file_part_get_arr_opened_files(sond_file_part_get_parent(sfp_old));
+	if (arr)
+		g_ptr_array_remove_fast(arr, sfp_old);
+
+	sfp_new = sond_file_part_create(sond_file_part_get_parent(sfp_old), rel, &error);
+	if (!sfp_new) {
+		LOG_WARN("SondFilePart kann nicht geöffnet werden:\n%s",
+				error ? error->message : "?");
+		g_clear_error(&error);
+		g_object_unref(item);
+
+		return;
+	}
+
+	item_new = sond_tvfm_item_create(self, sfp_new, NULL);
+	g_object_unref(sfp_new);
+	replace_row_item(self, item, item_new, rel);
+	g_object_unref(item_new);
+	g_object_unref(item);
+}
+
+/* Eine Datei wurde aus dem lokalen Speicher genommen: eine PDF, die als Container
+ * (mit Seiten und Anhängen) angezeigt wird, wieder durch ein Blatt ersetzen. ZIP und
+ * E-Mail bleiben Container, das Aufklappen lädt sie bei Bedarf neu. */
+static void watcher_dehydrated_cb(SondSeadriveWatcher *w, gchar const *path,
+		gpointer data) {
+	SondTreeviewFM *self = SOND_TREEVIEWFM(data);
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondTreeview *base = SOND_TREEVIEW(self);
+	gchar const *rel = rel_path_of(priv, path);
+	GtkTreeListRow *row = NULL;
+	SondTVFMItem *item = NULL;
+	SondTVFMItem *item_new = NULL;
+	SondFilePart *sfp_old = NULL;
+	SondFilePart *sfp_new = NULL;
+	GPtrArray *arr = NULL;
+	gchar const *mime = NULL;
+
+	(void) w;
+
+	if (!rel)
+		return;
+
+	row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel, NULL);
+	if (!row)
+		return;
+
+	item = gtk_tree_list_row_get_item(row);
+	g_object_unref(row);
+	if (!item)
+		return;
+
+	sfp_old = sond_tvfm_item_get_sond_file_part(item);
+	if (sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_DIR || !sfp_old ||
+			sond_tvfm_item_get_path_or_section(item) ||
+			!SOND_IS_FILE_PART_PDF(sfp_old)) {
+		g_object_unref(item);
+
+		return;
+	}
+
+	arr = sond_file_part_get_arr_opened_files(sond_file_part_get_parent(sfp_old));
+	if (arr)
+		g_ptr_array_remove_fast(arr, sfp_old);
+
+	mime = mime_from_extension(rel);
+	sfp_new = sond_file_part_create_leaf(rel, sond_file_part_get_parent(sfp_old),
+			mime ? mime : "application/octet-stream");
+	if (!sfp_new) {
+		g_object_unref(item);
+
+		return;
+	}
+
+	item_new = sond_tvfm_item_create(self, sfp_new, NULL);
+	g_object_unref(sfp_new);
+	replace_row_item(self, item, item_new, rel);
+	g_object_unref(item_new);
+	g_object_unref(item);
+}
+
+static void watcher_start(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondSeadriveWatcher *w = NULL;
+
+	if (priv->watcher || !priv->root || !priv->is_seadrive)
+		return;
+
+	w = sond_seadrive_watcher_new(priv->root);
+	g_signal_connect(w, "changed", G_CALLBACK(watcher_changed_cb), self);
+	g_signal_connect(w, "status-changed", G_CALLBACK(watcher_status_cb), self);
+	g_signal_connect(w, "hydrated", G_CALLBACK(watcher_hydrated_cb), self);
+	g_signal_connect(w, "dehydrated", G_CALLBACK(watcher_dehydrated_cb), self);
+	priv->watcher = w;
+	sond_seadrive_watcher_start(w);
+}
+
+/* Löst den Watcher vom Widget; danach kommen keine Signale mehr. Das Warten auf den
+ * Thread (bis ca. 20 s) übernimmt der Reaper des Watchers; er berührt das Widget nicht. */
+static void watcher_stop(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = sond_treeviewfm_get_instance_private(self);
+	SondSeadriveWatcher *w = priv->watcher;
+
+	if (!w)
+		return;
+
+	priv->watcher = NULL;
+	g_signal_handlers_disconnect_by_data(w, self);
+	sond_seadrive_watcher_stop_async(w);
+	g_object_unref(w);
+	g_signal_emit(self, signals[SIGNAL_SEADRIVE_STATUS], 0, (guint) 0, (guint) 0);
+}
+#endif
+
 gint sond_treeviewfm_set_root(SondTreeviewFM *self, const gchar *root,
 		GError **error) {
 	SondTreeviewFMPrivate *priv = NULL;
@@ -922,6 +1339,10 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *self, const gchar *root,
 	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), -1);
 	priv = sond_treeviewfm_get_instance_private(self);
 
+	root_monitor_stop(priv);
+#ifdef G_OS_WIN32
+	watcher_stop(self);
+#endif
 	g_free(priv->root);
 	priv->root = NULL;
 	priv->is_seadrive = FALSE;
@@ -978,6 +1399,11 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *self, const gchar *root,
 	g_object_unref(root_item);
 
 	sond_treeview_set_roots(SOND_TREEVIEW(self), model);
+
+#ifdef G_OS_WIN32
+	watcher_start(self);
+#endif
+	root_monitor_start(self);
 
 	return 0;
 }
@@ -2382,6 +2808,14 @@ static void sond_treeviewfm_finalize(GObject *object) {
 		g_free(sfp_class->path_root);
 		sfp_class->path_root = NULL;
 	}
+	root_monitor_stop(priv);
+#ifdef G_OS_WIN32
+	if (priv->watcher) {
+		g_signal_handlers_disconnect_by_data(priv->watcher, object);
+		sond_seadrive_watcher_stop_async(priv->watcher);
+		g_clear_object(&priv->watcher);
+	}
+#endif
 	g_free(priv->root);
 
 	G_OBJECT_CLASS(sond_treeviewfm_parent_class)->finalize(object);
@@ -2537,8 +2971,9 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->setup_columns = default_setup_columns;
 	klass->setup_menu = default_setup_menu;
 	klass->file_badge = default_file_badge;
-	klass->dir_status = NULL;
-	klass->index_status = NULL;
+	klass->dir_status = default_dir_status;
+	klass->index_status = default_index_status;
+	klass->get_section_index_status = NULL;
 	klass->has_sections = NULL;
 	klass->load_sections = NULL;
 	klass->delete_section = NULL;
@@ -2552,6 +2987,12 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	signals[SIGNAL_PINS_CHANGED] = g_signal_new("pins-changed",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 			G_TYPE_NONE, 0);
+
+	//die Zähler "wird heruntergeladen" und "nicht synchron" im SeaDrive-Laufwerk
+	//haben sich geändert (beim Schließen: 0, 0)
+	signals[SIGNAL_SEADRIVE_STATUS] = g_signal_new("seadrive-status",
+			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+			G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_UINT);
 
 	//Signale vor und nach Änderungen (Item-Schicht über SondTVFMOwner)
 	klass->signal_before_move = g_signal_new("before-move",

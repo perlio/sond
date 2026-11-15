@@ -67,6 +67,10 @@ struct _SondTreeviewFMClass {
 	SondSeadriveDirStatus (*dir_status)(SondTreeviewFM*, gchar const *full_path);
 	SondIndexStatus (*index_status)(SondTreeviewFM*, SondTVFMItem*);
 
+	/* Status einer Anbindung (Section) in der Index-DB; die Basisklasse kennt die
+	 * Bedeutung von Sections nicht. NULL = kein Symbol für Sections. */
+	SondIndexStatus (*get_section_index_status)(SondTVFMItem*, SondIndexCtx*);
+
 	/* Ein Eintrag des Dateisystems (rel_path relativ zur Wurzel, '/' als Trenner)
 	 * wurde gelöscht bzw. umbenannt: die Unterklasse kann Zusatzangaben (Eingangs-
 	 * stempel) nachführen. NULL = nichts zu tun. */
@@ -96,6 +100,14 @@ struct _SondTreeviewFMClass {
 };
 
 GtkWidget* sond_treeviewfm_new(void);
+
+/* Quelle des Index-Kontexts für das Index-Symbol (unten links). Wird bei jedem Zeichnen
+ * einer Zeile gefragt, deshalb schnell und ohne Ein-/Ausgabe; NULL liefert kein Symbol.
+ * Den Kontext besitzt der Aufrufer. Nach Änderungen sond_treeviewfm_refresh_status(). */
+typedef SondIndexCtx* (*SondTreeviewFMIndexCtxFunc)(gpointer user_data);
+
+void sond_treeviewfm_set_index_ctx_func(SondTreeviewFM*, SondTreeviewFMIndexCtxFunc func,
+		gpointer user_data);
 
 /* Setzt die Wurzel (Projektverzeichnis) und baut die oberste Ebene auf. NULL
  * leert den Baum. 0 bei Erfolg, -1 bei Fehler. */

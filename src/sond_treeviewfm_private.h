@@ -18,6 +18,9 @@
  */
 
 #include "sond_treeviewfm.h"
+#ifdef _WIN32
+#include "sond_seadrive_watcher.h"
+#endif
 
 G_BEGIN_DECLS
 
@@ -34,45 +37,7 @@ typedef struct {
 	SondTVFMSearchOpts search_opts;
 	gboolean search_settings_valid;
 #ifdef _WIN32
-	GThread *seadrive_watcher_thread;
-	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */
-	guint    seadrive_pending_down;   /* PINNED + RECALL_ON_DATA_ACCESS */
-	guint    seadrive_pending_up;     /* NOT_IN_SYNC */
-	/* Pfade, die aktuell als "nicht synchronisiert" gezählt sind (dedupliziert
-	 * seadrive_pending_up-Erhöhungen bei mehrfachen LAST_WRITE-Events für
-	 * denselben Pfad). Pro Instanz statt static/global, und beim Root-Wechsel
-	 * geleert - sonst bleiben Einträge einer vorigen Projekt-Session stehen
-	 * und der Zähler zählt beim nächsten Öffnen falsch (bleibt zu niedrig). */
-	GHashTable *seadrive_not_in_sync;
-	/* Pfade, die aktuell als "pending_down" (PINNED+offline) gezählt sind -
-	 * Ground Truth für seadrive_pending_down, analog seadrive_not_in_sync.
-	 * Ohne dieses Set wäre bei einem REMOVED-Event (Datei gelöscht, während
-	 * sie noch heruntergeladen wurde) nicht feststellbar, ob sie gerade
-	 * mitgezählt wurde - der Zähler würde langfristig auseinanderlaufen.
-	 * Wird beim Initialscan und
-	 * bei einem Resync (Buffer-Overflow von ReadDirectoryChangesW) komplett
-	 * neu aufgebaut/ersetzt. */
-	GHashTable *seadrive_pending_down_paths;
-	/* Rekursive Ordner-Statistik für den Ordner-Coverage-Badge: Pfad (voller
-	 * Pfad wie bei seadrive_pending_down_paths) -> SondSeadriveDirCounts*.
-	 * Komplett neu aufgebaut bei Initialscan/Resync (s.
-	 * sond_treeviewfm_seadrive_set_dir_counts()), inkrementell nachgezogen
-	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta()). */
-	GHashTable *seadrive_dir_counts;
-	/* Ground-Truth-Map für den Datei-eigenen SeaDrive-Badge: voller Pfad ->
-	 * GINT_TO_POINTER(SondSeadriveBadge), Einträge mit Wert NONE werden
-	 * nicht gespeichert. Ersetzt den früheren LIVEN
-	 * GetFileAttributesW-Aufruf pro Renderzeile in
-	 * sond_treeviewfm_render_file_icon() (Konsistenz mit seadrive_dir_
-	 * counts, das schon vorher aus der Hashtable statt live gelesen wurde) UND liefert gleichzeitig die
-	 * Grundlage für die Ordner-Coverage-Zähler (not_hydrated/
-	 * hydrated_pinned in seadrive_dir_counts werden aus Änderungen dieser
-	 * Map abgeleitet, s. sond_treeviewfm_seadrive_update_file_badge()) -
-	 * ANDERE, weitere Fragestellung als seadrive_pending_down_paths (das
-	 * bleibt die engere PINNED+offline-Definition für den Projekt-weiten
-	 * Zähler). Komplett neu aufgebaut bei Initialscan/Resync, inkrementell
-	 * gepflegt bei jedem Einzel-Event. */
-	GHashTable *seadrive_file_badges;
+	SondSeadriveWatcher *seadrive_watcher; //nur bei einem Projekt im SeaDrive-Laufwerk
 #endif
 } SondTreeviewFMPrivate;
 

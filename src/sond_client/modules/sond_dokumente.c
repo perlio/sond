@@ -18,11 +18,15 @@
 
 #include "sond_dokumente.h"
 
+#include <glib/gstdio.h>
+
 #include "sond_import.h"
 #include "sond_module_akte.h"
 #include "sond_zond_start.h"
 #include "../../gtk4/sond_treeviewfm.h"
 #include "../../sond_seadrive_core.h"
+#include "../../sond_tvfm_badges.h"
+#include "../../sond_index.h"
 
 typedef struct {
     gchar *lib_dir;
@@ -31,11 +35,22 @@ typedef struct {
     GtkWidget *tree;
     GtkWidget *schalter;
     gboolean setze_schalter;   /* Schalter wird gerade programmgesteuert gesetzt */
+    SondIndexCtx *index_ctx;   /* Index-DB, nur lesend; NULL, wenn nicht lesbar */
+    gchar *index_pfad;
+    gint64 index_mtime;        /* Stand der Datei beim letzten Öffnen */
+    gint64 index_size;
+    guint index_timer;
 } DokData;
 
 static void dok_free(gpointer data) {
     DokData *d = data;
 
+    if (d->index_timer)
+        g_source_remove(d->index_timer);
+    if (d->tree)
+        g_object_remove_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
+    sond_index_ctx_free(d->index_ctx);
+    g_free(d->index_pfad);
     g_free(d->lib_dir);
     g_free(d->lib_name);
     g_free(d);
@@ -48,6 +63,53 @@ static void meldung(GtkWindow *parent, const gchar *titel, const gchar *text) {
     gtk_alert_dialog_set_modal(dialog, TRUE);
     gtk_alert_dialog_show(dialog, parent);
     g_object_unref(dialog);
+}
+
+/* Index-DB für das Index-Symbol der Dateien: die synchronisierte Datei, nur lesend. */
+static SondIndexCtx* index_ctx_von(gpointer data) {
+    return ((DokData*) data)->index_ctx;
+}
+
+/* Öffnet die Index-DB neu, wenn sie sich geändert hat (Seafile ersetzt die Datei beim
+ * Abgleich, die alte Verbindung bliebe auf dem alten Stand) oder noch nicht lesbar war,
+ * und frischt dann die Symbole auf. Eine noch nicht geladene SeaDrive-Datei wird nicht
+ * geöffnet, das würde den Download in der Oberfläche auslösen. */
+static gboolean index_pruefen(gpointer data) {
+    DokData *d = data;
+    GStatBuf st = { 0 };
+    gboolean vorhanden = !g_stat(d->index_pfad, &st);
+    gint64 mtime = vorhanden ? (gint64) st.st_mtime : 0;
+    gint64 groesse = vorhanden ? (gint64) st.st_size : -1;
+    gboolean geaendert = (mtime != d->index_mtime || groesse != d->index_size);
+
+    if (!geaendert && (d->index_ctx || !vorhanden))
+        return G_SOURCE_CONTINUE;
+
+    if (vorhanden) {
+        SondSeadriveBadge badge = sond_tvfm_badge_seadrive_live(d->index_pfad);
+
+        if (badge == SOND_SEADRIVE_BADGE_OFFLINE || badge == SOND_SEADRIVE_BADGE_PENDING)
+            return G_SOURCE_CONTINUE; //noch nicht lokal, später wieder
+    }
+
+    sond_index_ctx_free(d->index_ctx);
+    d->index_ctx = NULL;
+    d->index_mtime = mtime;
+    d->index_size = groesse;
+
+    if (vorhanden) {
+        GError *error = NULL;
+
+        d->index_ctx = sond_index_ctx_new_readonly(d->index_pfad, &error);
+        if (!d->index_ctx)
+            g_debug("Index-DB nicht lesbar: %s", error ? error->message : "?");
+        g_clear_error(&error);
+    }
+
+    if (d->tree)
+        sond_treeviewfm_refresh_status(SOND_TREEVIEWFM(d->tree));
+
+    return G_SOURCE_CONTINUE;
 }
 
 #ifdef G_OS_WIN32
@@ -206,6 +268,16 @@ void sond_dokumente_show(SondClient *client, GtkWindow *parent, guint lfd_nr,
     d->tree = sond_treeviewfm_new();
     gtk_widget_set_vexpand(d->tree, TRUE);
     gtk_box_append(GTK_BOX(box), d->tree);
+
+    g_object_add_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
+
+    //Index-Symbole: Index-DB lesen und bei Änderungen neu öffnen
+    d->index_pfad = g_build_filename(d->lib_dir, ".sond_index.db", NULL);
+    d->index_mtime = -1;
+    d->index_size = -2;
+    sond_treeviewfm_set_index_ctx_func(SOND_TREEVIEWFM(d->tree), index_ctx_von, d);
+    index_pruefen(d);
+    d->index_timer = g_timeout_add_seconds(5, index_pruefen, d);
 
     if (sond_treeviewfm_set_root(SOND_TREEVIEWFM(d->tree), d->lib_dir, &error)) {
         meldung(parent, "Verzeichnis nicht lesbar", error ? error->message : "unbekannt");

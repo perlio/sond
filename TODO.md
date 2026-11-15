@@ -2,12 +2,12 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #252.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #254.
 
 ## Inhalt
 
 Offen: #245, #247
-Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253
 Ideen: #167, #169, #205, #232, #233
 
 ## Offen
@@ -248,6 +248,44 @@ Status: zurückgestellt (Prüfauftrag)
  3. Testfassung ohne g_chdir: Dateibaum, Anbinden, Export, Import, Viewer, Indizieren
     durchgehen. Nutzen: Long-Path-Schutz auch für bisher relative Pfade.
  Nicht eilig; Entfernen nur nach der Prüfung.
+```
+
+### #252 GTK4-Dateibaum: noch fehlende Funktionen
+
+Status: zurückgestellt
+
+```text
+ Der GTK4-Dateibaum (src/gtk4/sond_treeviewfm.c) kann Wurzel setzen, Anzeige mit
+ Overlays (Offline, Ordnerstatus, Index), Neues Verzeichnis, Umbenennen, Löschen,
+ Öffnen, Kopieren, Ausschneiden, Einfügen, Drag-and-drop, Pinnen, SeaDrive-Watcher
+ und Root-Monitor. Es fehlt gegenüber der GTK3-Fassung:
+ 1. Dateisuche: Suchlogik (SearchCtx, Namensvergleich, Rekursion) in eine gemeinsame
+    GTK-freie Datei auslagern, GTK3 darauf umstellen; GTK4 bekommt Dialog,
+    Fortschrittsfenster mit Abbrechen, Ergebnisfenster und "im Baum zeigen"
+    (Pfad bis zum Treffer aufklappen).
+ 2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel beim Öffnen, Kopieren,
+    Verschieben; PDF-Seiten, Anhänge, Sections.
+ 3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): zusammen mit dem
+    Passwort-Konzept (Zustände, Cache, Abfrage, Indizieren = Entsperren) bauen.
+ 4. Eingangs-Spalte (nur Zond: Zettel, Cache; Vfunc get_eingang ist in GTK3 da).
+ 5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen
+    (GTK3: sond_seadrive_load_file_sync); Vorab-Prüfung beim Einfügen (Platzhalter
+    vorab laden, Passwörter).
+ 6. Drop-Ziel im Inhaltsbaum von Zond (Anbinden): die Nutzlast beim Ziehen ist ein
+    GPtrArray aus SondTVFMItem; Strg unter Windows nur über GetAsyncKeyState lesbar.
+```
+
+### #253 Absturz beim Schließen eines Projekts (nicht reproduziert)
+
+Status: beobachten
+
+```text
+ Einmal SIGSEGV beim Projektschließen in zond_dbase_finalize (sqlite3_close, 
+ zond_dbase.c) bei einem Projekt im SeaDrive-Laufwerk, kurz nach dem Umbau des
+ Watchers (sond_seadrive_watcher). Danach nicht mehr aufgetreten; ein Stresstest des
+ Watchers allein (300 Durchläufe, Stopp während des Scans) lief sauber. Ungeklärt, ob
+ der Watcher beteiligt war. Tritt es wieder auf: vollständige Stack-Frames sichern und
+ prüfen, ob es auch bei einem Projekt außerhalb von SeaDrive (ohne Watcher) passiert.
 ```
 
 ## Ideen

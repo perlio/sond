@@ -33,13 +33,7 @@
 #include "sond_mime.h"
 #include "misc.h"
 
-/* ------------------------------------------------------------------ */
-/*  FILE_ATTRIBUTE_* not always defined in older MinGW headers        */
-/* ------------------------------------------------------------------ */
-
-#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
-#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS  0x00400000
-#endif
+/* FILE_ATTRIBUTE_PINNED/UNPINNED fehlen in älteren MinGW-Headern */
 #ifndef FILE_ATTRIBUTE_PINNED
 #define FILE_ATTRIBUTE_PINNED                 0x00080000
 #endif
@@ -47,33 +41,9 @@
 #define FILE_ATTRIBUTE_UNPINNED               0x00100000
 #endif
 
-/* ------------------------------------------------------------------ */
-/*  CF-API constants (from cfapi.h, duplicated to avoid the header)   */
-/* ------------------------------------------------------------------ */
-
-#define CF_PIN_STATE_UNSPECIFIED     0
-#define CF_PIN_STATE_PINNED          1
-#define CF_PIN_STATE_UNPINNED        2
-#define CF_PIN_STATE_EXCLUDED        3
-#define CF_PIN_STATE_INHERIT         4
-
-#define CF_SET_PIN_FLAG_NONE         0x00000000
-#define CF_SET_PIN_FLAG_RECURSE      0x00000001
-
-#define CF_HYDRATE_FLAG_NONE         0x00000000
-
 #define HRESULT_MORE_DATA      ((HRESULT)0x800700EAL)
 
-/* ------------------------------------------------------------------ */
-/*  CF-API function pointer types                                      */
-/* ------------------------------------------------------------------ */
-
-typedef HRESULT (WINAPI *PFN_CfSetPinState)(
-    HANDLE       FileHandle,
-    DWORD        PinState,
-    DWORD        PinFlags,
-    LPOVERLAPPED Overlapped);
-
+//CfGetPlaceholderInfo (geladen in sond_seadrive_core.c)
 typedef HRESULT (WINAPI *PFN_CfGetPlaceholderInfo)(
     HANDLE  FileHandle,
     DWORD   InfoClass,
@@ -81,602 +51,9 @@ typedef HRESULT (WINAPI *PFN_CfGetPlaceholderInfo)(
     DWORD   InfoBufferLength,
     PDWORD  ReturnedLength);
 
-typedef HRESULT (WINAPI *PFN_CfGetSyncRootInfoByPath)(
-    LPCWSTR SyncRootPath,
-    DWORD   InfoClass,
-    PVOID   InfoBuffer,
-    DWORD   InfoBufferLength,
-    PDWORD  ReturnedLength);
-
-/* S. Doc-Kommentar an sond_seadrive_hydrate() - offizieller
- * Ersatz für den früheren, rohen CreateFileW+ReadFile-"Trick" in
- * sond_treeviewfm_open(). */
-typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder)(
-    HANDLE       FileHandle,
-    LARGE_INTEGER StartingOffset,
-    LARGE_INTEGER Length,
-    DWORD        HydrateFlags,
-    LPOVERLAPPED Overlapped);
-
-/* ------------------------------------------------------------------ */
-/*  CfGetPlaceholderInfo (geladen in sond_seadrive_core.c)             */
-/* ------------------------------------------------------------------ */
-
 static PFN_CfGetPlaceholderInfo cf_get_placeholder_info(void)
 {
     return (PFN_CfGetPlaceholderInfo) sond_seadrive_core_placeholder_info();
-}
-
-/* ------------------------------------------------------------------ */
-/*  CF-API Konstanten für Watcher                                      */
-/* ------------------------------------------------------------------ */
-
-#define CF_PLACEHOLDER_INFO_BASIC      0
-#define CF_IN_SYNC_STATE_NOT_IN_SYNC   0
-#define CF_IN_SYNC_STATE_IN_SYNC       1
-
-typedef struct {
-    DWORD         PinState;
-    DWORD         InSyncState;
-    LARGE_INTEGER FileId;
-    LARGE_INTEGER SyncRootFileId;
-    ULONG         FileIdentityLength;
-    BYTE          FileIdentity[256];
-} SeaDrivePlaceholderBasicInfo;
-
-#define HRESULT_MORE_DATA  ((HRESULT)0x800700EAL)
-
-/* ------------------------------------------------------------------ */
-/*  Watcher: idle-Callback-Daten                                       */
-/* ------------------------------------------------------------------ */
-
-typedef struct {
-    SondTreeviewFM *stvfm;
-    gchar          *path_pending_down; /* Pfad, auf den sich delta_down bezieht
-                                         * (immer gesetzt, außer bei einer
-                                         * Dehydration ohne Zähler-Änderung -
-                                         * dann bleibt delta_down einfach 0
-                                         * und update_status ignoriert ihn).
-                                         * Wird - da ohnehin immer gesetzt -
-                                         * auch als Pfad für die Ordner-
-                                         * Coverage-Aktualisierung
-                                         * wiederverwendet (s. coverage_*
-                                         * unten). */
-    gint            delta_down;  /* +1 oder -1, 0 = keine Änderung - NUR für
-                                   * den Projekt-weiten "wird gerade
-                                   * heruntergeladen"-Zähler
-                                   * (seadrive_pending_down), s.
-                                   * sond_treeviewfm_seadrive_update_status(). */
-    gint            delta_total; /* +1 (ADDED/RENAMED_NEW_NAME) / -1 (REMOVED/
-                                   * RENAMED_OLD_NAME) / 0 (MODIFIED - Datei
-                                   * existierte schon) - für den Ordner-
-                                   * Coverage-Badge (Gesamtzahl Dateien im
-                                   * Teilbaum). */
-    SondSeadriveBadge coverage_badge; /* aktueller Badge-Wert der Datei
-                                        * (NONE bei REMOVED - Datei zählt
-                                        * dann gar nicht mehr mit, s.
-                                        * delta_total). Wird sowohl für den
-                                        * Datei-eigenen Badge (Ground-Truth-
-                                        * Map) als auch zur Herleitung der
-                                        * Ordner-Coverage-Deltas verwendet,
-                                        * s. sond_treeviewfm_seadrive_update_
-                                        * file_badge(). */
-    gchar          *path_down;       /* Pfad der hydrierten Datei, NULL sonst */
-    gchar          *path_dehydrated; /* Pfad der dehydrierten Datei, NULL sonst */
-    gchar          *path_up;     /* NULL oder Pfad für pending_up-Änderung */
-    gboolean        up_pending;  /* TRUE=NOT_IN_SYNC, FALSE=IN_SYNC */
-} WatcherIdleData;
-
-static gboolean watcher_idle_cb(gpointer user_data)
-{
-    WatcherIdleData *d = user_data;
-
-    sond_treeviewfm_seadrive_update_status(d->stvfm,
-            d->path_pending_down, d->delta_down,
-            d->path_up, d->up_pending);
-
-    /* Datei-eigenen Badge (Ground-Truth-Map) UND davon abgeleitet die
-     * Ordner-Coverage aktualisieren - path_pending_down ist in beiden
-     * Aufrufstellen unten immer gesetzt. */
-    if (d->path_pending_down)
-        sond_treeviewfm_seadrive_update_file_badge(d->stvfm,
-                d->path_pending_down, d->coverage_badge, d->delta_total);
-
-    /* Wenn Datei hydrated: Knoten im Baum korrigieren */
-    if (d->path_down)
-        sond_treeviewfm_seadrive_item_hydrated(d->stvfm, d->path_down);
-
-    /* Wenn Datei dehydrated: Knoten im Baum zurückbauen */
-    if (d->path_dehydrated)
-        sond_treeviewfm_seadrive_item_dehydrated(d->stvfm, d->path_dehydrated);
-
-    g_free(d->path_pending_down);
-    g_free(d->path_down);
-    g_free(d->path_dehydrated);
-    g_free(d->path_up);
-    g_free(d);
-    return G_SOURCE_REMOVE;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Watcher: Initialscan pending_down                                  */
-/* ------------------------------------------------------------------ */
-
-/* Trägt die vollen Pfade aller PINNED+offline Dateien unter dir_utf8
- * (rekursiv) in out_paths ein (Set, Keys = g_strdup'te Pfade - für den
- * Projekt-weiten "wird gerade heruntergeladen"-Zähler, seadrive_pending_
- * down), sowie für JEDE Datei mit einem Badge != NONE dessen Wert in
- * out_file_badges (Pfad -> GINT_TO_POINTER(SondSeadriveBadge) - Ground-
- * Truth-Map für den Datei-eigenen Badge UND Grundlage der Ordner-Coverage-
- * Statistik, s. sond_treeviewfm_seadrive_update_file_badge()) UND für JEDES
- * durchlaufene Verzeichnis dessen rekursive {not_hydrated,hydrated_pinned,
- * total}-Statistik in out_dir_counts (Pfad -> SondSeadriveDirCounts*). Wird
- * sowohl für den Initialscan als auch für einen Resync nach Buffer-
- * Overflow verwendet (s. WatcherRescanData) - beide Fälle brauchen die
- * kompletten Pfad-Sets/die komplette Ordner-Statistik, nicht nur eine
- * Anzahl, damit spätere Einzel-Events (Add/Remove/Hydration) korrekt gegen
- * ein Set/eine Statistik abgeglichen statt blind auf einen Zähler
- * angewandt werden können.
- *
- * out_not_hydrated/out_hydrated_pinned/out_total (können NULL sein):
- * liefern die für dir_utf8 selbst ermittelte rekursive Summe an den
- * Aufrufer zurück, damit dieser (bei einem Verzeichnis-Kind) seine eigene
- * Summe hochrechnen kann, ohne aus out_dir_counts nachschlagen zu
- * müssen. */
-static void watcher_count_pending_down(const gchar *dir_utf8,
-        SondTreeviewFM *stvfm, GHashTable *out_paths,
-        GHashTable *out_file_badges,
-        GHashTable *out_dir_counts, guint *out_not_hydrated,
-        guint *out_hydrated_pinned, guint *out_total)
-{
-    guint dir_not_hydrated = 0;
-    guint dir_hydrated_pinned = 0;
-    guint dir_total = 0;
-
-    gchar *pattern = g_strconcat(dir_utf8, "/*", NULL);
-    wchar_t *lp = prepare_long_path(pattern, NULL);
-    g_free(pattern);
-    if (!lp)
-        goto done;
-
-    {
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(lp, &fd);
-    g_free(lp);
-
-    if (h == INVALID_HANDLE_VALUE)
-        goto done;
-
-    do {
-        if (sond_treeviewfm_seadrive_stop_requested(stvfm))
-            break;
-
-        if (wcscmp(fd.cFileName, L".") == 0 ||
-                wcscmp(fd.cFileName, L"..") == 0)
-            continue;
-
-        /* Reparse-Points (Symlinks/Junctions) überspringen - sonst könnte
-         * eine Verzeichnisschleife diese Rekursion endlos laufen lassen. */
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-            continue;
-
-        gchar *name = g_utf16_to_utf8(
-                (gunichar2*) fd.cFileName, -1, NULL, NULL, NULL);
-        if (!name)
-            continue;
-        gchar *sub = g_strconcat(dir_utf8, "/", name, NULL);
-        g_free(name);
-
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            guint sub_not_hydrated = 0, sub_hydrated_pinned = 0, sub_total = 0;
-            watcher_count_pending_down(sub, stvfm, out_paths,
-                    out_file_badges,
-                    out_dir_counts, &sub_not_hydrated, &sub_hydrated_pinned,
-                    &sub_total);
-            dir_not_hydrated += sub_not_hydrated;
-            dir_hydrated_pinned += sub_hydrated_pinned;
-            dir_total += sub_total;
-            g_free(sub);
-        } else {
-            gboolean pinned  = (fd.dwFileAttributes & FILE_ATTRIBUTE_PINNED) != 0;
-            gboolean offline = (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-            SondSeadriveBadge badge = SOND_SEADRIVE_BADGE_NONE;
-
-            /* Dieselbe Prioritätsreihenfolge wie in
-             * sond_treeviewfm_render_file_icon()/sond_icon_util.h. */
-            if (offline && pinned)
-                badge = SOND_SEADRIVE_BADGE_PENDING;
-            else if (offline)
-                badge = SOND_SEADRIVE_BADGE_OFFLINE;
-            else if (pinned)
-                badge = SOND_SEADRIVE_BADGE_PINNED;
-
-            dir_total++;
-            if (badge == SOND_SEADRIVE_BADGE_PENDING ||
-                    badge == SOND_SEADRIVE_BADGE_OFFLINE)
-                dir_not_hydrated++;
-            else if (badge == SOND_SEADRIVE_BADGE_PINNED)
-                dir_hydrated_pinned++;
-
-            if (badge != SOND_SEADRIVE_BADGE_NONE)
-                g_hash_table_insert(out_file_badges, g_strdup(sub),
-                        GINT_TO_POINTER(badge));
-
-            /* Projekt-weiter "wird gerade heruntergeladen"-Zähler
-             * (seadrive_pending_down) bleibt bei der engeren
-             * PINNED+offline-Definition - andere Fragestellung als
-             * die Ordner-Coverage-Statistik oben. */
-            if (badge == SOND_SEADRIVE_BADGE_PENDING)
-                g_hash_table_add(out_paths, g_strdup(sub));
-
-            g_free(sub);
-        }
-    } while (FindNextFileW(h, &fd));
-
-    FindClose(h);
-    }
-
-done:
-    if (out_dir_counts) {
-        SondSeadriveDirCounts *counts = g_new(SondSeadriveDirCounts, 1);
-        counts->not_hydrated = dir_not_hydrated;
-        counts->hydrated_pinned = dir_hydrated_pinned;
-        counts->total = dir_total;
-        g_hash_table_insert(out_dir_counts, g_strdup(dir_utf8), counts);
-    }
-    if (out_not_hydrated) *out_not_hydrated = dir_not_hydrated;
-    if (out_hydrated_pinned) *out_hydrated_pinned = dir_hydrated_pinned;
-    if (out_total) *out_total = dir_total;
-    return;
-}
-
-typedef struct {
-    SondTreeviewFM *stvfm;
-    GHashTable     *paths;        /* transfer full - s. sond_treeviewfm_seadrive_set_pending_down_paths() */
-    GHashTable     *file_badges;  /* transfer full - s. sond_treeviewfm_seadrive_set_file_badges() */
-    GHashTable     *dir_counts;   /* transfer full - s. sond_treeviewfm_seadrive_set_dir_counts() */
-} WatcherRescanData;
-
-static gboolean watcher_rescan_idle_cb(gpointer user_data)
-{
-    WatcherRescanData *d = user_data;
-    /* Ersetzt die komplette Ground-Truth-Map/die Ordner-Statistik. Beim
-     * allerersten Aufruf (Initialscan) sind sie noch leer; bei einem
-     * späteren Resync (Buffer-Overflow) wird der alte, ggf. inzwischen
-     * falsche Stand komplett verworfen - Watcher-Events, die während des
-     * Scans gepuffert wurden, kommen danach und korrigieren ggf. noch
-     * einmal nach. */
-    sond_treeviewfm_seadrive_set_pending_down_paths(d->stvfm, d->paths);
-    sond_treeviewfm_seadrive_set_file_badges(d->stvfm, d->file_badges);
-    sond_treeviewfm_seadrive_set_dir_counts(d->stvfm, d->dir_counts);
-    g_free(d);
-    return G_SOURCE_REMOVE;
-}
-
-/* Stößt einen kompletten Rescan von root an und ersetzt anschließend (per
- * g_idle_add, UI-Thread) die komplette Ground-Truth-Map und die Ordner-
- * Statistik. Gemeinsam von Initialscan und Buffer-Overflow-Resync genutzt. */
-static void watcher_rescan(SondTreeviewFM *stvfm, const gchar *root)
-{
-    GHashTable *paths = g_hash_table_new_full(
-            g_str_hash, g_str_equal, g_free, NULL);
-    GHashTable *file_badges = g_hash_table_new_full(
-            g_str_hash, g_str_equal, g_free, NULL);
-    GHashTable *dir_counts = g_hash_table_new_full(
-            g_str_hash, g_str_equal, g_free, g_free);
-    watcher_count_pending_down(root, stvfm, paths, file_badges,
-            dir_counts, NULL, NULL, NULL);
-
-    WatcherRescanData *d = g_new0(WatcherRescanData, 1);
-    d->dir_counts = dir_counts;
-    d->stvfm = stvfm;
-    d->paths = paths;
-    d->file_badges = file_badges;
-    g_idle_add(watcher_rescan_idle_cb, d);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Watcher: Hilfsfunktionen für Thread                               */
-/* ------------------------------------------------------------------ */
-
-/* Prüft, ob die Datei bei SeaDrive als synchronisiert (hochgeladen) gilt.
- * Jede Art von Unsicherheit/Fehlschlag (CfGetPlaceholderInfo fehlt, Datei
- * nicht öffenbar, CfGetPlaceholderInfo() schlägt fehl) wertet diese Funktion
- * als "nicht in sync" (FALSE): eine gerade erst per normalem
- * CreateFile()/fwrite() (statt über die Cloud-Files-Platzhalter-APIs)
- * neu angelegte Datei wird von CfGetPlaceholderInfo() vermutlich (noch)
- * nicht als Cloud-Datei erkannt, der Aufruf schlägt fehl - und ein
- * optimistischer Fallback "in sync" würde dauerhaft verschleiern, dass die
- * Datei noch hochgeladen werden muss. Für einen Indikator, der vor "Daten
- * sind noch nicht gesichert" warnen soll, ist die Default-Richtung
- * "nicht synchron": ein fälschliches "noch nicht synchron" ist höchstens
- * ein optisches Ärgernis, ein fälschliches "alles synchron" verschleiert
- * einen echten Datenverlust-Risiko-Zustand. Eine Datei gilt nur dann als
- * synchron, wenn die Prüfung das auch tatsächlich bestätigen konnte. */
-static gboolean watcher_check_in_sync(const gchar *utf8_path)
-{
-    SeaDrivePlaceholderBasicInfo basic = { 0 };
-    DWORD returned = 0;
-    HRESULT hr;
-    HANDLE h;
-    wchar_t *lp;
-
-    if (!cf_get_placeholder_info())
-        return FALSE; /* im Zweifel: not in sync */
-
-    lp = prepare_long_path(utf8_path, NULL);
-    if (!lp)
-        return FALSE;
-
-    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    g_free(lp);
-
-    if (h == INVALID_HANDLE_VALUE)
-        return FALSE;
-
-    hr = cf_get_placeholder_info()(h, CF_PLACEHOLDER_INFO_BASIC,
-            &basic, sizeof(basic), &returned);
-    CloseHandle(h);
-
-    if (FAILED(hr) && hr != HRESULT_MORE_DATA)
-        return FALSE;
-
-    return basic.InSyncState == CF_IN_SYNC_STATE_IN_SYNC;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Watcher-Thread                                                      */
-/* ------------------------------------------------------------------ */
-
-gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
-{
-    SondTreeviewFM *stvfm = SOND_TREEVIEWFM(user_data);
-
-    /* CF-API initialisieren - muss vor dem Thread-Start erfolgen */
-    (void) cf_get_placeholder_info();
-
-    /* Eigene Kopie statt geliehenem Zeiger auf stvfm_priv->root: der
-     * Aufrufer (sond_treeviewfm_set_root()) joint diesen Thread zwar immer
-     * synchron VOR einer Root-Änderung, aber der Thread soll nicht von
-     * dieser Aufrufreihenfolge abhängen, falls die mal umgebaut wird. */
-    gchar *root = g_strdup(sond_treeviewfm_get_root(stvfm));
-    if (!root)
-        return NULL;
-
-    /* Verzeichnis-Handle für ReadDirectoryChangesW */
-    wchar_t *root_w = prepare_long_path(root, NULL);
-    if (!root_w) {
-        g_free(root);
-        return NULL;
-    }
-
-    HANDLE hDir = CreateFileW(root_w,
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-            NULL);
-    g_free(root_w);
-
-    if (hDir == INVALID_HANDLE_VALUE) {
-        g_free(root);
-        return NULL;
-    }
-
-    /* OVERLAPPED + Event für asynchrones ReadDirectoryChangesW */
-    OVERLAPPED ov = { 0 };
-    ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!ov.hEvent) {
-        CloseHandle(hDir);
-        g_free(root);
-        return NULL;
-    }
-
-    BYTE buf[32768];
-    DWORD bytes_returned = 0;
-
-    /* Ersten ReadDirectoryChangesW-Aufruf starten - VOR dem Scan,
-     * damit während des Scans entstehende Events nicht verloren gehen.
-     * FILE_NOTIFY_CHANGE_FILE_NAME zusätzlich zu ATTRIBUTES/LAST_WRITE:
-     * ohne diesen Filter werden neu angelegte oder gelöschte Dateien vom
-     * Watcher gar nicht bemerkt - der pending_down/pending_up-Zähler lief
-     * dadurch mit der Zeit auseinander. */
-    if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
-            FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE |
-                    FILE_NOTIFY_CHANGE_FILE_NAME,
-            NULL, &ov, NULL)) {
-        LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') fehlgeschlagen "
-                "(Fehler %lu) - Watcher wird nicht gestartet",
-                root, (unsigned long) GetLastError());
-        CloseHandle(ov.hEvent);
-        CloseHandle(hDir);
-        g_free(root);
-        return NULL;
-    }
-
-    /* Initialscan: ermittelt bereits vorhandene PINNED+offline Dateien.
-     * ReadDirectoryChangesW läuft bereits - Events während des Scans
-     * werden gepuffert und danach verarbeitet (selbstkorrigierend). */
-    if (!sond_treeviewfm_seadrive_stop_requested(stvfm))
-        watcher_rescan(stvfm, root);
-
-    while (!sond_treeviewfm_seadrive_stop_requested(stvfm)) {
-
-        /* 500ms-Timeout für reaktionsschnelles Stoppen */
-        DWORD wait = WaitForSingleObject(ov.hEvent, 500);
-
-        if (wait == WAIT_OBJECT_0) {
-            /* Ereignisse verarbeiten */
-            if (GetOverlappedResult(hDir, &ov, &bytes_returned, FALSE)) {
-              if (bytes_returned == 0) {
-                /* Buffer-Overflow: ReadDirectoryChangesW meldet Erfolg, aber
-                 * 0 Bytes - der interne Puffer ist übergelaufen, ALLE
-                 * Ereignisse seit dem letzten erfolgreichen Read sind
-                 * verloren (nicht nur die im Puffer nicht mehr unter-
-                 * gebrachten). Einzige sichere Reaktion: kompletter Resync
-                 * (unproblematisch: ~1,5s auch bei ~70.000 Dateien). */
-                LOG_WARN("SeaDrive-Watcher('%s'): ReadDirectoryChangesW-Puffer "
-                        "übergelaufen - Events verloren, erzwinge Resync",
-                        root);
-                watcher_rescan(stvfm, root);
-              } else {
-
-                FILE_NOTIFY_INFORMATION *fni =
-                        (FILE_NOTIFY_INFORMATION*) buf;
-
-                do {
-                    /* Dateiname von UTF-16 nach UTF-8 */
-                    GError *conv_error = NULL;
-                    gchar *filename = g_utf16_to_utf8(
-                            (gunichar2*) fni->FileName,
-                            fni->FileNameLength / sizeof(WCHAR),
-                            NULL, NULL, &conv_error);
-                    if (!filename) {
-                        LOG_WARN("UTF-16->UTF-8 Konvertierung fehlgeschlagen: %s",
-                                conv_error ? conv_error->message : "?");
-                        g_error_free(conv_error);
-                    }
-
-                    if (filename) {
-                        /* Schrägstriche vereinheitlichen */
-                        for (gchar *c = filename; *c; c++)
-                            if (*c == '\\')
-                                *c = '/';
-
-                        gchar *full = g_strconcat(root, "/", filename, NULL);
-                        g_free(filename);
-
-                        if (fni->Action == FILE_ACTION_REMOVED ||
-                                fni->Action == FILE_ACTION_RENAMED_OLD_NAME) {
-                            /* Datei/Verzeichnis ist weg - Attribute nicht
-                             * mehr abfragbar. Pfad bedingungslos aus beiden
-                             * Tracking-Sets entfernen (No-Op, falls nicht
-                             * enthalten - z.B. weil es ein Verzeichnis war
-                             * oder die Datei nie PINNED+offline bzw. NOT_IN_
-                             * SYNC war). Ohne das würden gelöschte Dateien,
-                             * die gerade noch heruntergeladen wurden, ewig
-                             * mitgezählt. delta_total=-1 zieht die Datei aus
-                             * der Ordner-Coverage-Gesamtzahl ab (auch ein
-                             * No-Op über die 0-Kappung, falls es ein
-                             * Verzeichnis war - dessen eigener Eintrag in
-                             * seadrive_dir_counts bleibt dann zwar stehen,
-                             * wird aber beim nächsten Rescan bereinigt). */
-                            WatcherIdleData *d = g_new0(WatcherIdleData, 1);
-                            d->stvfm = stvfm;
-                            d->path_pending_down = g_strdup(full);
-                            d->delta_down = -1;
-                            d->delta_total = -1;
-                            d->path_up = g_strdup(full);
-                            d->up_pending = FALSE;
-
-                            g_idle_add(watcher_idle_cb, d);
-                        } else {
-                            /* ADDED, RENAMED_NEW_NAME, MODIFIED (Attribute/
-                             * Last-Write) - Datei existiert (noch), aktuelle
-                             * Attribute abfragen. */
-                            wchar_t *lp = prepare_long_path(full, NULL);
-                            if (lp) {
-                                DWORD attrs = GetFileAttributesW(lp);
-                                g_free(lp);
-
-                                if (attrs != INVALID_FILE_ATTRIBUTES &&
-                                        !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-
-                                    WatcherIdleData *d = g_new0(WatcherIdleData, 1);
-                                    d->stvfm = stvfm;
-                                    d->path_pending_down = g_strdup(full);
-                                    /* Nur bei echter Neuanlage zählt die Datei
-                                     * zusätzlich zur Ordner-Gesamtzahl - bei
-                                     * MODIFIED existierte sie schon. */
-                                    if (fni->Action == FILE_ACTION_ADDED ||
-                                            fni->Action == FILE_ACTION_RENAMED_NEW_NAME)
-                                        d->delta_total = +1;
-
-                                    /* pending_down aktualisieren */
-                                    {
-                                        gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-                                        gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-                                        gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
-
-                                        /* Datei-Badge: dieselbe Prioritäts-
-                                         * reihenfolge wie im Scan
-                                         * (watcher_count_pending_down()) /
-                                         * render_file_icon(). */
-                                        if (offline && pinned)
-                                            d->coverage_badge = SOND_SEADRIVE_BADGE_PENDING;
-                                        else if (offline)
-                                            d->coverage_badge = SOND_SEADRIVE_BADGE_OFFLINE;
-                                        else if (pinned)
-                                            d->coverage_badge = SOND_SEADRIVE_BADGE_PINNED;
-                                        else
-                                            d->coverage_badge = SOND_SEADRIVE_BADGE_NONE;
-
-                                        if (pinned && offline)
-                                            d->delta_down = +1; /* gepinnt, noch nicht lokal */
-                                        else if (pinned && !offline) {
-                                            d->delta_down = -1; /* hydrated via pin */
-                                            d->path_down  = g_strdup(full);
-                                        } else if (unpinned && offline) {
-                                            /* Datei dehydriert - war nicht mehr PINNED+offline,
-                                             * also nicht im Zähler - delta_down nicht setzen */
-                                            d->path_dehydrated = g_strdup(full);
-                                        } else if (!pinned && offline)
-                                            d->delta_down = -1; /* unpinned während laufendem Download */
-                                        else if (!unpinned) {
-                                            /* !pinned && !offline && !unpinned:
-                                             * Hydration via Doppelklick-Recall -
-                                             * Knoten im Baum korrigieren */
-                                            d->path_down = g_strdup(full);
-                                        }
-                                        /* !pinned && !offline && unpinned:
-                                         * Dehydration abgeschlossen - nichts tun */
-                                    }
-
-                                    /* LAST_WRITE: In-Sync-Status prüfen */
-                                    {
-                                        gboolean in_sync = watcher_check_in_sync(full);
-                                        d->path_up = g_strdup(full);
-                                        d->up_pending = !in_sync;
-                                    }
-
-                                    g_idle_add(watcher_idle_cb, d);
-                                }
-                            }
-                        }
-                        g_free(full);
-                    }
-
-                    if (fni->NextEntryOffset == 0)
-                        break;
-                    fni = (FILE_NOTIFY_INFORMATION*)
-                            ((BYTE*) fni + fni->NextEntryOffset);
-                } while (1);
-              }
-            }
-
-            /* Nächsten ReadDirectoryChangesW-Aufruf starten */
-            ResetEvent(ov.hEvent);
-            if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
-                    FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE |
-                            FILE_NOTIFY_CHANGE_FILE_NAME,
-                    NULL, &ov, NULL)) {
-                LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') beim "
-                        "Neu-Anstoßen fehlgeschlagen (Fehler %lu) - Watcher "
-                        "wird beendet", root, (unsigned long) GetLastError());
-                break;
-            }
-        }
-    }
-
-    /* Aufräumen */
-    CancelIo(hDir);
-    CloseHandle(ov.hEvent);
-    CloseHandle(hDir);
-    g_free(root);
-
-    return NULL;
 }
 
 void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
@@ -1875,305 +1252,6 @@ void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
     }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate über die     */
-/*  Freund-Accessoren sond_treeviewfm_get_priv()/sond_tvfm_item_get_   */
-/*  priv() aus sond_treeviewfm_private.h.                              */
-/* ------------------------------------------------------------------ */
-
-void
-sond_treeviewfm_seadrive_dir_delta(SondTreeviewFM *stvfm,
-		const gchar *dir_path, gint delta_not_hydrated,
-		gint delta_hydrated_pinned, gint delta_total) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveDirCounts *counts = NULL;
-
-	if (!stvfm || !dir_path || (delta_not_hydrated == 0 &&
-			delta_hydrated_pinned == 0 && delta_total == 0))
-		return;
-
-	p = sond_treeviewfm_get_priv(stvfm);
-
-	if (!p->seadrive_dir_counts)
-		p->seadrive_dir_counts = g_hash_table_new_full(
-				g_str_hash, g_str_equal, g_free, g_free);
-
-	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
-	if (!counts) {
-		counts = g_new0(SondSeadriveDirCounts, 1);
-		g_hash_table_insert(p->seadrive_dir_counts, g_strdup(dir_path), counts);
-	}
-
-	/* Negative Deltas bei 0 kappen statt umlaufen zu lassen (guint!) -
-	 * Schutz gegen Drift durch verpasste/doppelte Events, analog den
-	 * Guards bei seadrive_pending_down/-up. */
-	if (delta_not_hydrated < 0 && (guint) -delta_not_hydrated > counts->not_hydrated)
-		counts->not_hydrated = 0;
-	else
-		counts->not_hydrated += delta_not_hydrated;
-
-	if (delta_hydrated_pinned < 0 && (guint) -delta_hydrated_pinned > counts->hydrated_pinned)
-		counts->hydrated_pinned = 0;
-	else
-		counts->hydrated_pinned += delta_hydrated_pinned;
-
-	if (delta_total < 0 && (guint) -delta_total > counts->total)
-		counts->total = 0;
-	else
-		counts->total += delta_total;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-void
-sond_treeviewfm_seadrive_update_dir_coverage(SondTreeviewFM *stvfm,
-		const gchar *file_full_path, gint delta_not_hydrated,
-		gint delta_hydrated_pinned, gint delta_total) {
-	const gchar *root = NULL;
-	gchar *dir = NULL;
-	gchar *slash = NULL;
-
-	if (!file_full_path || (delta_not_hydrated == 0 &&
-			delta_hydrated_pinned == 0 && delta_total == 0))
-		return;
-
-	root = sond_treeviewfm_get_root(stvfm);
-	if (!root)
-		return;
-
-	dir = g_strdup(file_full_path);
-
-	for (;;) {
-		slash = strrchr(dir, '/');
-		if (!slash)
-			break;
-		*slash = '\0';
-
-		sond_treeviewfm_seadrive_dir_delta(stvfm, dir, delta_not_hydrated,
-				delta_hydrated_pinned, delta_total);
-
-		if (!g_strcmp0(dir, root))
-			break; /* root selbst mit erledigt - keine Vorfahren mehr darüber */
-	}
-
-	g_free(dir);
-}
-
-void
-sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
-		const gchar *path_pending_down, gint delta_down,
-		const gchar *path_up, gboolean up_pending) {
-	gboolean changed = FALSE;
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-
-	if (delta_down > 0 && path_pending_down) {
-		if (!p->seadrive_pending_down_paths)
-			p->seadrive_pending_down_paths = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (g_hash_table_add(p->seadrive_pending_down_paths,
-				g_strdup(path_pending_down))) {
-			p->seadrive_pending_down++;
-			changed = TRUE;
-		}
-	} else if (delta_down < 0 && path_pending_down) {
-		if (p->seadrive_pending_down_paths &&
-				g_hash_table_remove(p->seadrive_pending_down_paths,
-						path_pending_down)) {
-			p->seadrive_pending_down--;
-			changed = TRUE;
-		}
-	}
-
-	if (path_up) {
-		if (!p->seadrive_not_in_sync)
-			p->seadrive_not_in_sync = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (up_pending) {
-			if (g_hash_table_add(p->seadrive_not_in_sync, g_strdup(path_up)))
-				p->seadrive_pending_up++;
-		} else {
-			if (g_hash_table_remove(p->seadrive_not_in_sync, path_up))
-				p->seadrive_pending_up--;
-		}
-		changed = TRUE;
-	}
-
-	if (changed) {
-		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-		g_signal_emit(stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-				p->seadrive_pending_down,
-				p->seadrive_pending_up);
-	}
-}
-
-void
-sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM *stvfm,
-		GHashTable *paths) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-
-	if (p->seadrive_pending_down_paths)
-		g_hash_table_destroy(p->seadrive_pending_down_paths);
-	p->seadrive_pending_down_paths = paths;
-	p->seadrive_pending_down = paths ? g_hash_table_size(paths) : 0;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			p->seadrive_pending_down,
-			p->seadrive_pending_up);
-}
-
-void
-sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM *stvfm,
-		GHashTable *dir_counts) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-
-	if (p->seadrive_dir_counts)
-		g_hash_table_destroy(p->seadrive_dir_counts);
-	p->seadrive_dir_counts = dir_counts;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-void
-sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM *stvfm,
-		GHashTable *badges) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-
-	if (p->seadrive_file_badges)
-		g_hash_table_destroy(p->seadrive_file_badges);
-	p->seadrive_file_badges = badges;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			p->seadrive_pending_down,
-			p->seadrive_pending_up);
-}
-
-SondSeadriveBadge
-sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM *stvfm,
-		const gchar *file_full_path) {
-	SondTreeviewFMPrivate *p = NULL;
-	gpointer val = NULL;
-
-	if (!stvfm || !file_full_path)
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	p = sond_treeviewfm_get_priv(stvfm);
-	if (!p->seadrive_file_badges)
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	if (!g_hash_table_lookup_extended(p->seadrive_file_badges, file_full_path,
-			NULL, &val))
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	return (SondSeadriveBadge) GPOINTER_TO_INT(val);
-}
-
-/* Leitet aus einem SondSeadriveBadge-Wert ab, ob die Datei für die Ordner-
- * Coverage-Statistik als "nicht hydriert" bzw. "hydriert+gepinnt" zählt -
- * einzige Stelle, an der diese Zuordnung getroffen wird (Konsistenz
- * zwischen Scan und Live-Update, s. watcher_count_pending_down() in
- * sond_treeviewfm_seadrive.c, die dieselbe Logik redundant, aber
- * gleichlautend anwendet). */
-static void
-seadrive_badge_to_coverage(SondSeadriveBadge badge,
-		gboolean *out_not_hydrated, gboolean *out_hydrated_pinned) {
-	*out_not_hydrated = (badge == SOND_SEADRIVE_BADGE_OFFLINE ||
-			badge == SOND_SEADRIVE_BADGE_PENDING);
-	*out_hydrated_pinned = (badge == SOND_SEADRIVE_BADGE_PINNED);
-}
-
-void
-sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM *stvfm,
-		const gchar *file_full_path, SondSeadriveBadge new_badge,
-		gint delta_total) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveBadge old_badge = SOND_SEADRIVE_BADGE_NONE;
-	gpointer old_val = NULL;
-	gboolean old_not_hydrated = FALSE, old_hydrated_pinned = FALSE;
-	gboolean new_not_hydrated = FALSE, new_hydrated_pinned = FALSE;
-	gint delta_not_hydrated = 0, delta_hydrated_pinned = 0;
-
-	if (!stvfm || !file_full_path)
-		return;
-
-	p = sond_treeviewfm_get_priv(stvfm);
-
-	if (p->seadrive_file_badges &&
-			g_hash_table_lookup_extended(p->seadrive_file_badges,
-					file_full_path, NULL, &old_val))
-		old_badge = (SondSeadriveBadge) GPOINTER_TO_INT(old_val);
-
-	if (old_badge != new_badge) {
-		seadrive_badge_to_coverage(old_badge, &old_not_hydrated,
-				&old_hydrated_pinned);
-		seadrive_badge_to_coverage(new_badge, &new_not_hydrated,
-				&new_hydrated_pinned);
-		delta_not_hydrated = (gint) new_not_hydrated - (gint) old_not_hydrated;
-		delta_hydrated_pinned = (gint) new_hydrated_pinned -
-				(gint) old_hydrated_pinned;
-
-		if (new_badge == SOND_SEADRIVE_BADGE_NONE) {
-			if (p->seadrive_file_badges)
-				g_hash_table_remove(p->seadrive_file_badges, file_full_path);
-		} else {
-			if (!p->seadrive_file_badges)
-				p->seadrive_file_badges = g_hash_table_new_full(
-						g_str_hash, g_str_equal, g_free, NULL);
-			g_hash_table_insert(p->seadrive_file_badges,
-					g_strdup(file_full_path), GINT_TO_POINTER(new_badge));
-		}
-
-		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-		g_signal_emit(stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-				p->seadrive_pending_down,
-				p->seadrive_pending_up);
-	}
-
-	if (delta_not_hydrated != 0 || delta_hydrated_pinned != 0 ||
-			delta_total != 0)
-		sond_treeviewfm_seadrive_update_dir_coverage(stvfm, file_full_path,
-				delta_not_hydrated, delta_hydrated_pinned, delta_total);
-}
-
-SondSeadriveDirStatus
-sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM *stvfm,
-		const gchar *dir_path) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveDirCounts *counts = NULL;
-
-	if (!stvfm || !dir_path)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	p = sond_treeviewfm_get_priv(stvfm);
-	if (!p->seadrive_dir_counts)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
-	if (!counts || counts->total == 0)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	if (counts->not_hydrated == counts->total)
-		return SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE;
-
-	if (counts->not_hydrated == 0) {
-		/* alle Dateien hydriert */
-		if (counts->hydrated_pinned == counts->total)
-			return SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED;
-		/* hydriert, aber nicht alle gepinnt - dieselbe "kein Icon
-		 * nötig"-Bedeutung wie beim Datei-Badge */
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-	}
-
-	/* 0 < not_hydrated < total - weder komplett hydriert noch komplett
-	 * offline, kein gemeinsamer Nenner */
-	return SOND_SEADRIVE_DIR_STATUS_MIXED;
-}
-
 void
 sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
 		const gchar *full_path) {
@@ -2361,179 +1439,126 @@ sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
 	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 }
 
-gboolean
-sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-	return g_atomic_int_get(&p->seadrive_watcher_stop) != 0;
+/* ------------------------------------------------------------------ */
+/*  Anbindung des Watchers (sond_seadrive_watcher.c) an das Widget     */
+/* ------------------------------------------------------------------ */
+
+static void watcher_changed_cb(SondSeadriveWatcher *w, gpointer user_data) {
+	(void) w;
+
+	gtk_widget_queue_draw(GTK_WIDGET(user_data));
+}
+
+static void watcher_status_cb(SondSeadriveWatcher *w, guint pending_down,
+		guint pending_up, gpointer user_data) {
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(user_data);
+
+	(void) w;
+
+	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			pending_down, pending_up);
+}
+
+static void watcher_hydrated_cb(SondSeadriveWatcher *w, const gchar *path,
+		gpointer user_data) {
+	(void) w;
+
+	sond_treeviewfm_seadrive_item_hydrated(SOND_TREEVIEWFM(user_data), path);
+}
+
+static void watcher_dehydrated_cb(SondSeadriveWatcher *w, const gchar *path,
+		gpointer user_data) {
+	(void) w;
+
+	sond_treeviewfm_seadrive_item_dehydrated(SOND_TREEVIEWFM(user_data), path);
+}
+
+SondSeadriveBadge
+sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM *stvfm,
+		const gchar *file_full_path) {
+	if (!stvfm)
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	return sond_seadrive_watcher_get_file_badge(
+			sond_treeviewfm_get_priv(stvfm)->seadrive_watcher, file_full_path);
+}
+
+SondSeadriveDirStatus
+sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM *stvfm,
+		const gchar *dir_path) {
+	if (!stvfm)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	return sond_seadrive_watcher_get_dir_status(
+			sond_treeviewfm_get_priv(stvfm)->seadrive_watcher, dir_path);
 }
 
 void
 sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
 	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-	if (p->seadrive_watcher_thread)
+	SondSeadriveWatcher *w = NULL;
+
+	if (p->seadrive_watcher || !p->root)
 		return;
-	g_atomic_int_set(&p->seadrive_watcher_stop, 0);
-	p->seadrive_watcher_thread = g_thread_new(
-			"seadrive-watcher",
-			sond_treeviewfm_seadrive_watcher_thread,
-			stvfm);
+
+	w = sond_seadrive_watcher_new(p->root);
+	g_signal_connect_object(w, "changed", G_CALLBACK(watcher_changed_cb), stvfm, 0);
+	g_signal_connect_object(w, "status-changed", G_CALLBACK(watcher_status_cb), stvfm,
+			0);
+	g_signal_connect_object(w, "hydrated", G_CALLBACK(watcher_hydrated_cb), stvfm, 0);
+	g_signal_connect_object(w, "dehydrated", G_CALLBACK(watcher_dehydrated_cb), stvfm,
+			0);
+	p->seadrive_watcher = w;
+	sond_seadrive_watcher_start(w);
 }
 
-/* Nicht-blockierende Variante von sond_treeviewfm_seadrive_stop_watcher().
- * Das synchrone g_thread_join() würde den GTK-Hauptthread (project_close() ->
- * sond_treeviewfm_set_root(NULL) -> hier) blockieren, bis der Watcher-Thread
- * sein CloseHandle() auf das ReadDirectoryChangesW-Verzeichnis-Handle
- * abgeschlossen hat. SeaDrives Cloud-Filtertreiber braucht dafür regelmäßig
- * um die 20 Sekunden (vermutlich ein interner Timeout), um die dort noch
- * ausstehende, per CancelIo() nur ANGESTOSSENE (nicht sofort abgeschlossene)
- * Directory-Change-Notification wirklich abzubrechen - CloseHandle() wartet
- * laut Windows-I/O-Modell auf den Abschluss ausstehender I/O, bevor das
- * Handle wirklich freigegeben wird.
- *
- * Der Watcher-Thread fasst nach dem Setzen des Stop-Flags (s. sond_
- * treeviewfm_seadrive_watcher_thread(), Schleifenende) keinerlei stvfm-
- * Daten mehr an - nur noch CancelIo()/CloseHandle()/g_free() auf seine
- * eigenen, rein lokalen Handles/Kopien (hDir, ov.hEvent, root). Das
- * Warten auf sein Ende kann deshalb GEFAHRLOS in einen eigenen
- * kurzlebigen "Reaper"-Thread verlagert werden, SOLANGE das stvfm-Objekt
- * selbst währenddessen am Leben bleibt - das gilt für den Aufruf aus
- * sond_treeviewfm_set_root() (Projekt schließen/wechseln: das BAUM_FS-
- * Widget bleibt über die Projekt-Lebensdauer hinaus bestehen), NICHT
- * aber für den Aufruf aus sond_treeviewfm_finalize(): dort wird direkt im
- * Anschluss der private Instanz-Speicher freigegeben, ein im Hintergrund
- * noch laufender Watcher-Thread könnte dann via sond_treeviewfm_seadrive_
- * stop_requested(stvfm) auf bereits freigegebenen Speicher zugreifen
- * (Use-after-free). Deshalb zwei Varianten: die synchrone (für finalize())
- * und die asynchrone (für set_root()). */
-static gpointer seadrive_watcher_reap(gpointer data) {
-	GThread *old_thread = (GThread*) data;
+//Löst den Watcher vom Widget; danach kommen keine Signale mehr
+static SondSeadriveWatcher*
+seadrive_watcher_detach(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+	SondSeadriveWatcher *w = p->seadrive_watcher;
 
-	g_thread_join(old_thread);
+	p->seadrive_watcher = NULL;
+	if (w)
+		g_signal_handlers_disconnect_by_data(w, stvfm);
 
-	return NULL;
+	return w;
 }
 
 void
 sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-	if (!p->seadrive_watcher_thread)
+	SondSeadriveWatcher *w = seadrive_watcher_detach(stvfm);
+
+	if (!w)
 		return;
-	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
-	g_thread_join(p->seadrive_watcher_thread);
-	p->seadrive_watcher_thread = NULL;
+
+	sond_seadrive_watcher_stop(w);
+	g_object_unref(w);
 }
 
-/* Wie sond_treeviewfm_seadrive_stop_watcher(), wartet aber NICHT im
- * aufrufenden Thread auf das Thread-Ende, s. ausführlichen Kommentar
- * oben. Nur verwenden, wenn stvfm selbst danach am Leben bleibt (aktuell:
- * sond_treeviewfm_set_root()). */
+/* Nicht-blockierende Variante für sond_treeviewfm_set_root() (Projekt
+ * schließen oder wechseln); das Warten und die Freigabe der großen Tabellen
+ * übernimmt der Reaper des Watchers. finalize() nutzt die blockierende Variante. */
 void
 sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
-	GThread *old_thread = NULL;
+	SondSeadriveWatcher *w = seadrive_watcher_detach(stvfm);
 
-	if (!p->seadrive_watcher_thread)
+	if (!w)
 		return;
 
-	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
-
-	/* Schon hier (nicht erst nach dem Join) auf NULL setzen, damit
-	 * sond_treeviewfm_seadrive_start_watcher() bei einem sofort
-	 * folgenden Öffnen eines neuen Projekts nicht fälschlich "läuft
-	 * schon" annimmt. */
-	old_thread = p->seadrive_watcher_thread;
-	p->seadrive_watcher_thread = NULL;
-
-	/* g_thread_unref() statt g_thread_join() auf den Reaper selbst -
-	 * dokumentiertes GLib-Muster für "fire and forget"-Threads, deren
-	 * Ergebnis niemanden interessiert. */
-	g_thread_unref(g_thread_new("seadrive-watcher-reaper",
-			seadrive_watcher_reap, old_thread));
+	sond_seadrive_watcher_stop_async(w);
+	g_object_unref(w);
 }
 
-/* Container für die vier SeaDrive-Ground-Truth-Hashtables, deren
- * Zerstörung von sond_treeviewfm_set_root() (über sond_seadrive_reset_
- * ground_truth()) in den Hintergrund verlagert wird. Alle vier enthalten
- * ausschließlich Strings/Zahlen ohne Rückverweis auf ein stvfm-Objekt,
- * ihre Zerstörung ist deshalb von einem beliebigen Thread aus und zu
- * einem beliebigen späteren Zeitpunkt sicher. */
-typedef struct {
-	GHashTable *not_in_sync;
-	GHashTable *pending_down_paths;
-	GHashTable *dir_counts;
-	GHashTable *file_badges;
-} SeadriveOldTables;
-
-static gpointer seadrive_old_tables_reap(gpointer data) {
-	SeadriveOldTables *old = data;
-
-	if (old->not_in_sync)
-		g_hash_table_destroy(old->not_in_sync);
-	if (old->pending_down_paths)
-		g_hash_table_destroy(old->pending_down_paths);
-	if (old->dir_counts)
-		g_hash_table_destroy(old->dir_counts);
-	if (old->file_badges)
-		g_hash_table_destroy(old->file_badges);
-
-	g_free(old);
-
-	return NULL;
-}
-
-/* Setzt die vier SeaDrive-Ground-Truth-Hashtables auf leer zurück und
- * emittiert das Status-Signal mit (0, 0) - aufgerufen von
- * sond_treeviewfm_set_root() bei Projekt-Wechsel/-Schließen.
- *
- * Bei einem großen SeaDrive-Projekt hat praktisch jede noch nicht
- * heruntergeladene (OFFLINE-)Datei einen eigenen Eintrag in
- * seadrive_file_badges - bei Zehn- oder Hunderttausenden Dateien entsprechend
- * viele Einträge, die g_hash_table_remove_all() einzeln (mit je einem
- * g_free() auf den Key-String) synchron im GTK-Hauptthread abarbeiten müsste
- * (spürbarer Hänger beim Schließen). Betrifft im Prinzip auch die drei
- * anderen SeaDrive-Hashtables, nur mit typischerweise weniger Einträgen.
- *
- * Deshalb werden die alten Tabellen hier nur aus stvfm_priv "gestohlen"
- * (Felder sofort auf NULL gesetzt, ein nachfolgender Zugriff sieht also
- * sofort "leer") und ihre komplette Zerstörung (g_hash_table_destroy()) an
- * einen kurzlebigen Hintergrund-Thread abgegeben, analog zum Watcher-Reaper
- * bei sond_treeviewfm_seadrive_stop_watcher_async(). Die Tabellen enthalten
- * ausschließlich Strings/Zahlen ohne Rückverweis auf stvfm, ihre Zerstörung
- * ist deshalb unabhängig vom weiteren Leben des stvfm-Objekts sicher. */
+/* Der Zustand liegt im Watcher und ist mit ihm weg; hier nur noch die Anzeige
+ * auf (0, 0) setzen. Aufgerufen von sond_treeviewfm_set_root(). */
 void
 sond_seadrive_reset_ground_truth(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *stvfm_priv = NULL;
-
 	if (!stvfm)
 		return;
 
-	stvfm_priv = sond_treeviewfm_get_priv(stvfm);
-
-	stvfm_priv->seadrive_pending_down = 0;
-	stvfm_priv->seadrive_pending_up = 0;
-	{
-		SeadriveOldTables *old = g_new0(SeadriveOldTables, 1);
-
-		old->not_in_sync = stvfm_priv->seadrive_not_in_sync;
-		old->pending_down_paths = stvfm_priv->seadrive_pending_down_paths;
-		old->dir_counts = stvfm_priv->seadrive_dir_counts;
-		old->file_badges = stvfm_priv->seadrive_file_badges;
-
-		stvfm_priv->seadrive_not_in_sync = NULL;
-		stvfm_priv->seadrive_pending_down_paths = NULL;
-		stvfm_priv->seadrive_dir_counts = NULL;
-		stvfm_priv->seadrive_file_badges = NULL;
-
-		if (old->not_in_sync || old->pending_down_paths || old->dir_counts ||
-				old->file_badges)
-			g_thread_unref(g_thread_new("seadrive-tables-reaper",
-					seadrive_old_tables_reap, old));
-		else
-			g_free(old);
-	}
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			(guint)0, (guint)0);
+	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			(guint) 0, (guint) 0);
 }
 
 #endif /* _WIN32 */
