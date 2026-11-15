@@ -6,20 +6,9 @@
 #include <gio/gio.h>
 
 #include "anbindung.h"
+#include "zond_error.h"
 #include "../sond_eingang_cache.h"
 
-#define ZOND_ERROR zond_error_quark()
-GQuark zond_error_quark(void);
-
-enum ZondError
-{
-	ZOND_ERROR_IO,
-	ZOND_ERROR_JSON_NO_OBJECT,
-	ZOND_ERROR_VTAG_NOT_FOUND,
-	ZOND_ERROR_CURL,
-	ZOND_ERROR_ZIP,
-	NUM_ZOND_ERROR
-};
 
 typedef struct _GtkApplication GtkApplication;
 typedef struct _GdkPixbuf GdkPixbuf;
@@ -49,6 +38,7 @@ typedef struct sqlite3 sqlite3;
 typedef struct _ZondDBase ZondDBase;
 
 typedef struct _SondProcessFileCtx SondProcessFileCtx;
+typedef struct _PdfViewerSession PdfViewerSession;
 typedef struct _SondChatCtx SondChatCtx;
 
 typedef struct pdf_document pdf_document;
@@ -123,11 +113,9 @@ typedef struct _Projekt {
 	gchar* exe_dir;
 
 	fz_context *ctx;
-	GPtrArray *arr_pv;
+	PdfViewerSession *viewer_session;
 
 	GSettings *settings;
-
-	pdf_document *pv_clip;
 
 	gchar *project_dir;
 	gchar *project_name;

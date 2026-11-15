@@ -37,8 +37,6 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 
 #include "../anbindung.h"
 
-#include "../20allgemein/project.h"
-#include "../20allgemein/ziele.h"
 
 #include "document.h"
 #include "stand_alone.h"
@@ -64,12 +62,10 @@ void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	else
 		value = viewer_page->y_pos + page * pv->zoom / 100;
 
-#ifndef VIEWER
-	if (pv->zond->state & GDK_MOD1_MASK) {
+	if (pv->session->state & GDK_MOD1_MASK) {
 		gdouble page_size = gtk_adjustment_get_page_size(pv->v_adj);
 		value -= page_size;
 	}
-#endif // VIEWER
 	gtk_adjustment_set_value(pv->v_adj, (value > delta) ? value - delta : 0);
 
 	return;
@@ -314,7 +310,7 @@ void viewer_schliessen(PdfViewer *pv) {
 	document_free_displayed_documents(pv->dd);
 
 	//pv aus Liste der geöffneten pvs entfernen
-	g_ptr_array_remove_fast(pv->zond->arr_pv, pv);
+	g_ptr_array_remove_fast(pv->session->arr_pv, pv);
 
 	g_free(pv);
 
@@ -526,10 +522,10 @@ void viewer_set_cursor(PdfViewer *pv, gint rc,
 void viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 		gint (*cb_foreach_pv)(PdfViewer*, ViewerPageNew*, gint,
 				gpointer), gpointer data) {
-	for (gint p = 0; p < pdfv->zond->arr_pv->len; p++) {
+	for (gint p = 0; p < pdfv->session->arr_pv->len; p++) {
 		gboolean dirty = FALSE;
 
-		PdfViewer *pv_vergleich = g_ptr_array_index(pdfv->zond->arr_pv, p);
+		PdfViewer *pv_vergleich = g_ptr_array_index(pdfv->session->arr_pv, p);
 
 		for (gint i = 0; i < pv_vergleich->arr_pages->len; i++) {
 			ViewerPageNew* viewer_page = NULL;
@@ -862,10 +858,10 @@ gint viewer_handle_button_press(PdfViewer* pv,
 
 		gtk_widget_queue_draw(pv->layout); //um ggf. Markierung der annot zu löschen
 	}
-#ifndef VIEWER
-//Doppelklick - nur für Anbindung interessant
+//Doppelklick - nur für Anbindung interessant, also nur wenn der Host sie anlegt
 	else if (event->button.type == GDK_2BUTTON_PRESS
-			&& event->button.button == 1) {
+			&& event->button.button == 1
+			&& pdf_viewer_session_wants_anbindung(pv->session)) {
 		gboolean punktgenau = FALSE;
 
 		if (event->button.state == GDK_SHIFT_MASK)
@@ -936,11 +932,10 @@ gint viewer_handle_button_press(PdfViewer* pv,
 						pv->anbindung.von.index = 0;
 				}
 
-				rc = zond_anbindung_erzeugen(pv, error);
+				rc = pdf_viewer_session_anbindung_requested(pv->session, pv,
+						error);
 				if (rc)
 					return -1;
-
-				gtk_window_present(GTK_WINDOW(pv->zond->app_window));
 
 				//anbindung.von "löschen"
 				pv->anbindung.von.index = -1;
@@ -952,7 +947,6 @@ gint viewer_handle_button_press(PdfViewer* pv,
 			}
 		}
 	}
-#endif
 
 	return 0;
 }

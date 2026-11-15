@@ -559,7 +559,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	return 0;
 }
 
-gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
+gint zond_anbindung_erzeugen(Projekt *zond, PdfViewer *pv, GError **error) {
 	gint rc = 0;
 	gboolean child = TRUE;
 	gint node_inserted = 0;
@@ -580,7 +580,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
 			zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document)));
 
-	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(pv->zond, filepart,
+	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(zond, filepart,
 			pv->anbindung, &anchor_pdf_abschnitt, &child, &node_inserted,
 			&node_text, error);
 	if (rc) {
@@ -588,7 +588,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 		return -1;
 	}
 
-	rc = zond_anbindung_trees(pv->zond, anchor_pdf_abschnitt, child, node_inserted,
+	rc = zond_anbindung_trees(zond, anchor_pdf_abschnitt, child, node_inserted,
 			pv->anbindung, filepart, zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document),
 			node_text, error);
 	g_free(filepart);

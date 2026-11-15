@@ -29,7 +29,7 @@
 #include "../sond_tmpfiles.h"
 
 #include "anbindung.h"
-#include "40viewer/viewer.h" //ZOND_ERROR
+#include "zond_error.h"
 
 //Fehlerdomäne, in beiden Builds (zond, viewer) vorhanden
 G_DEFINE_QUARK(zond-error-quark,zond_error)

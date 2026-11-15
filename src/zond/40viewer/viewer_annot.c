@@ -412,10 +412,10 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 
 		//erst einmal prüfen, ob Verschiebung dazu führt, daß Annot in anderem
 		//geöffneten Abschnitt aufscheint oder verschwindet
-		for (gint i = 0; i < pv->zond->arr_pv->len; i++) {
+		for (gint i = 0; i < pv->session->arr_pv->len; i++) {
 			DisplayedDocument *dd = NULL;
 
-			PdfViewer *pv_loop = g_ptr_array_index(pv->zond->arr_pv, i);
+			PdfViewer *pv_loop = g_ptr_array_index(pv->session->arr_pv, i);
 			dd = pv_loop->dd;
 			do {
 				if (viewer_annot_check_diff(dd, viewer_page->pdf_document_page,

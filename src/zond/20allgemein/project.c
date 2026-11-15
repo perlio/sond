@@ -681,7 +681,7 @@ gint project_close(Projekt *zond, GError **error) {
 	if (!zond->dbase_zond)
 		return 0;
 
-	if (!zond->arr_pv || !zond->app_window)
+	if (!zond->viewer_session || !zond->app_window)
 		return 0;
 
 	// Ask to save if there are unsaved changes (schreibgeschützt: nichts zu speichern)
@@ -725,8 +725,9 @@ gint project_close(Projekt *zond, GError **error) {
 	db_check_fenster_schliessen();
 
 	// Close all viewer windows
-	for (gint i = 0; i < zond->arr_pv->len; i++)
-		viewer_save_and_close(g_ptr_array_index(zond->arr_pv, i));
+	for (gint i = 0; i < zond->viewer_session->arr_pv->len; i++)
+		viewer_save_and_close(
+				g_ptr_array_index(zond->viewer_session->arr_pv, i));
 
 	// Gemerkte Passwörter vergessen und überschreiben
 	sond_password_clear();

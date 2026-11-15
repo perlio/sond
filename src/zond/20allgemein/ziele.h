@@ -5,10 +5,11 @@ typedef int gint;
 typedef char gchar;
 typedef int gboolean;
 typedef struct _Pdf_Viewer PdfViewer;
+typedef struct _Projekt Projekt;
 
 gint ziele_abfragen_anker_rek(ZondDBase*, Anbindung, gint, gint*, gboolean*,
 		GError**);
 
-gint zond_anbindung_erzeugen(PdfViewer *pv, GError**);
+gint zond_anbindung_erzeugen(Projekt*, PdfViewer *pv, GError**);
 
 #endif // ZIELE_H_INCLUDED

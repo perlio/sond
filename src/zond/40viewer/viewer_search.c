@@ -39,8 +39,6 @@
 
 #include "../anbindung.h"
 
-#include "../20allgemein/project.h"
-#include "../20allgemein/ziele.h"
 
 #include "document.h"
 #include "stand_alone.h"

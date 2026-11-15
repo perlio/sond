@@ -25,6 +25,7 @@
 #include "../../sond_log_and_error.h"
 #include "../zond_init.h"
 #include "../zond_dbase.h"
+#include "../40viewer/viewer_session.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeviewfm.h"
@@ -88,6 +89,7 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 static gboolean cb_button_event(GtkWidget *app_window, GdkEvent *event,
 		gpointer data) {
 	((Projekt*) data)->state = event->button.state;
+	((Projekt*) data)->viewer_session->state = event->button.state;
 	return FALSE;
 }
 

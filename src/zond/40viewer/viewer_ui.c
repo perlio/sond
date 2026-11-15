@@ -26,7 +26,6 @@
 #include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
-#include "../20allgemein/project.h"
 
 #include "document.h"
 #include "seiten.h"
@@ -767,13 +766,13 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 }
 
 PdfViewer*
-viewer_init(Projekt *zond) {
+viewer_init(PdfViewerSession *session) {
 	PdfViewer *pv = g_malloc0(sizeof(PdfViewer));
 
-	pv->zond = zond;
-	pv->zoom = g_settings_get_double(zond->settings, "zoom");
+	pv->session = session;
+	pv->zoom = g_settings_get_double(session->settings, "zoom");
 
-	g_ptr_array_add(zond->arr_pv, pv);
+	g_ptr_array_add(session->arr_pv, pv);
 
 	pv->arr_pages = g_ptr_array_new_with_free_func(g_free);
 

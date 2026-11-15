@@ -2824,9 +2824,9 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 	//Neue Instanz oder bestehende?
 	if (!neue_instanz) {
 		//Testen, ob pv mit file_part schon geöffnet
-		for (guint i = 0; i < zond->arr_pv->len; i++) {
+		for (guint i = 0; i < zond->viewer_session->arr_pv->len; i++) {
 			DisplayedDocument* dd_loop = dd;
-			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
+			PdfViewer *pv = g_ptr_array_index(zond->viewer_session->arr_pv, i);
 
 			DisplayedDocument* dd_int = pv->dd;
 
@@ -2854,7 +2854,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 	if (pos_pdf)
 		pos_von = *pos_pdf;
 
-	PdfViewer *pv = viewer_init(zond);
+	PdfViewer *pv = viewer_init(zond->viewer_session);
 	viewer_display_document(pv, dd, pos_von.seite, pos_von.index);
 
 	return 0;

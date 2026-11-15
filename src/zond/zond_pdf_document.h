@@ -18,7 +18,6 @@ G_BEGIN_DECLS
 G_DECLARE_DERIVABLE_TYPE(ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT,
 		GObject)
 
-typedef struct _Pdf_Viewer PdfViewer;
 
 typedef struct _Pdf_Document_Page {
 	ZondPdfDocument *document; //erhält keine ref - muß das mal mit dem const kapieren...
@@ -28,7 +27,7 @@ typedef struct _Pdf_Document_Page {
 	fz_display_list *display_list;
 	fz_stext_page *stext_page;
 	gint thread;
-	PdfViewer* thread_pv;
+	gpointer thread_pv; //PdfViewer, der gerade rendert (nur Viewer)
 	GPtrArray *arr_annots;
 	gint page_akt;
 	ZPDFDPart* inserted;

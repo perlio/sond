@@ -28,17 +28,14 @@
 #include "../../sond_process_file.h"
 #include "../../seadrive/sond_seadrive_gtk3.h"
 #include "../../misc.h"
+#include "../../misc_stdlib.h"
 
-//#include "../zond_init.h"
 
 #include "../zond_pdf_document.h"
 
-#include "../zond_dbase.h"
 
 #include "../anbindung.h"
 
-#include "../20allgemein/ziele.h"
-#include "../20allgemein/project.h"
 
 #include "viewer.h"
 #include "viewer_render.h"
@@ -335,6 +332,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	GPtrArray *arr_document_page = NULL;
 	InfoWindow *info_window = NULL;
 	gchar* datadir = NULL;
+	gchar* exe_dir = NULL;
 	SondOcrPool* pool = NULL;
 	gint progress = 0;
 	gint cancel = 0;
@@ -354,7 +352,9 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 	info_window = info_window_open(pv->vf, &cancel, "OCR");
 
-	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
+	exe_dir = get_exe_dir();
+	datadir = g_build_filename(exe_dir, "../share/tessdata", NULL);
+	g_free(exe_dir);
 	pool = sond_ocr_pool_new(datadir, "deu", 1,
 			info_window->cancel, &progress, &error);
 	g_free(datadir);
@@ -841,7 +841,7 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-	seiten_refresh_layouts(pv->zond->arr_pv);
+	seiten_refresh_layouts(pv->session->arr_pv);
 
 	return;
 }
@@ -880,76 +880,6 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 
 	return 1;
 }
-
-#ifndef VIEWER
-static gint seiten_anbindung_int(ZondDBase* zond_dbase,
-		PdfDocumentPage* pdf_document_page, GError** error) {
-	gint rc = 0;
-	GArray* arr_sections = NULL;
-	gchar* filepart = NULL;
-
-	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
-			zond_pdf_document_get_sfp_pdf(pdf_document_page->document)));
-
-	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
-	g_free(filepart);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
-
-		return -1;
-	}
-
-	for (gint u = 0; u < arr_sections->len; u++) {
-		Section section = { 0, };
-		Anbindung anbindung = { 0, };
-
-		section = g_array_index(arr_sections, Section, u);
-		anbindung_parse_file_section(section.section, &anbindung);
-
-		anbindung_aktualisieren(pdf_document_page->document, &anbindung);
-
-		if ((pdf_document_page->page_akt == anbindung.von.seite) ||
-				(!anbindung_is_pdf_punkt(anbindung) &&
-				pdf_document_page->page_akt == anbindung.bis.seite)) {
-			g_array_unref(arr_sections);
-
-			return 1;
-		}
-	}
-
-	g_array_unref(arr_sections);
-
-	return 0;
-}
-
-static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
-		GError **error) {
-	for (gint i = 0; i < arr_document_page->len; i++) {
-		PdfDocumentPage *pdf_document_page = NULL;
-		gint rc = 0;
-
-		pdf_document_page = g_ptr_array_index(arr_document_page, i);
-
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_work,
-				pdf_document_page, error);
-		if (rc) {
-			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
-
-			return (rc == -1) ? -1 : 1;
-		}
-
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store,
-				pdf_document_page, error);
-		if (rc) {
-			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
-
-			return (rc == -1) ? -1 : 2;
-		}
-	}
-
-	return 0;
-}
-#endif // VIEWER
 
 /* Kann nicht scheitern (kein Rückgabewert/GError**, im Unterschied zu
  * seiten_anbindung()) - Seiten werden hier immer entweder gelöscht oder
@@ -996,7 +926,7 @@ static void seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page) {
 	}
 
 	if (page_deleted) {
-		seiten_refresh_layouts(pv->zond->arr_pv);
+		seiten_refresh_layouts(pv->session->arr_pv);
 
 		gtk_tree_selection_unselect_all(
 				gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)));
@@ -1024,8 +954,8 @@ static void seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page) {
 		 * bestehende Anbindung geöffnet wurde; cb_seiten_ausschneiden() ruft
 		 * seiten_anbindung() dagegen gar nicht auf, dort ist dieser Fall
 		 * für den aufrufenden pv also durchaus real erreichbar. */
-		for (gint p = (gint) pv->zond->arr_pv->len - 1; p >= 0; p--) {
-			PdfViewer *pv_test = g_ptr_array_index(pv->zond->arr_pv, p);
+		for (gint p = (gint) pv->session->arr_pv->len - 1; p >= 0; p--) {
+			PdfViewer *pv_test = g_ptr_array_index(pv->session->arr_pv, p);
 
 			if (pv_test->arr_pages->len == 0)
 				viewer_schliessen(pv_test);
@@ -1051,25 +981,21 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-#ifndef VIEWER
-	//Abfrage, ob Anbindung mit Seite verknüpft
-	rc = seiten_anbindung(pv, arr_document_page, &error);
+	//Host fragen, ob die Seiten gelöscht werden dürfen (Anbindungen)
+	rc = pdf_viewer_session_pages_deleting(pv->session, pv,
+			arr_document_page, &error);
 	if (rc) {
-		if (rc == -1) {
-			display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
-			g_error_free(error);
-		} else if (rc == 1)
-			display_message(pv->vf, "Seiten enthalten Anbindungen - \n"
-					"Löschen nicht zulässig", NULL);
-		else if (rc == 2)
-			display_message(pv->vf, "Gespeichertes Projekt: Seiten enthalten Anbindungen"
-					"Zunächst Projekt speichern", NULL);
+		if (rc == -1)
+			display_message(pv->vf, "Fehler Seiten Löschen\n\n",
+					error->message, NULL);
+		else
+			display_message(pv->vf, error->message, NULL);
+		g_error_free(error);
 
 		g_ptr_array_unref(arr_document_page);
 
 		return;
 	}
-#endif // VIEWER
 
 	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
@@ -1195,7 +1121,7 @@ static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 
 	GtkWidget *button_clipboard = gtk_dialog_get_widget_for_response(
 			GTK_DIALOG(dialog), 2);
-	if (!pv->zond->pv_clip)
+	if (!pv->session->pv_clip)
 		gtk_widget_set_sensitive(button_clipboard, FALSE);
 
 	GtkWidget *button_datei = gtk_dialog_get_widget_for_response(
@@ -1309,7 +1235,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			return;
 		}
 
-		doc_merge = sond_file_part_pdf_open_document(pv->zond->ctx,
+		doc_merge = sond_file_part_pdf_open_document(pv->session->ctx,
 				SOND_FILE_PART_PDF(sfp), TRUE, &error);
 		if (!doc_merge) {
 			display_message(pv->vf, "Datei einfügen\n\n"
@@ -1321,18 +1247,18 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			return;
 		}
 	} else if (ret == 2)
-		doc_merge = pdf_keep_document(pv->zond->ctx, pv->zond->pv_clip); //Clipboard
+		doc_merge = pdf_keep_document(pv->session->ctx, pv->session->pv_clip); //Clipboard
 
-	fz_try(pv->zond->ctx)
-		count = pdf_count_pages(pv->zond->ctx, doc_merge);
-	fz_catch( pv->zond->ctx) {
+	fz_try(pv->session->ctx)
+		count = pdf_count_pages(pv->session->ctx, doc_merge);
+	fz_catch( pv->session->ctx) {
 		gchar* err_message = NULL;
 
-		pdf_drop_document(pv->zond->ctx, doc_merge);
+		pdf_drop_document(pv->session->ctx, doc_merge);
 		if (ret == 1)
 			g_object_unref(sfp);
 
-		err_message = g_strdup_printf("%s\n%s", __func__, fz_caught_message(pv->zond->ctx));
+		err_message = g_strdup_printf("%s\n%s", __func__, fz_caught_message(pv->session->ctx));
 		display_message(pv->vf, "Einfügen nicht möglich\n\n", err_message, NULL);
 		g_free(err_message);
 
@@ -1346,7 +1272,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//page_doc dieser Seite ist hinterher page_doc+count
 	rc = zond_pdf_document_insert_pages(viewer_page->dd->zpdfd_part->zond_pdf_document,
 			page_doc, viewer_page->dd->zpdfd_part, doc_merge, &error);
-	pdf_drop_document(pv->zond->ctx, doc_merge);
+	pdf_drop_document(pv->session->ctx, doc_merge);
 	if (ret == 1)
 		g_object_unref(sfp);
 	if (rc) {
@@ -1374,7 +1300,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	viewer_foreach(pv, viewer_page->pdf_document_page,
 			seiten_einfuegen_foreach, &data_insert); //seiten_einfügen_foreach gibt nie Fehler zurück
 
-	seiten_refresh_layouts(pv->zond->arr_pv);
+	seiten_refresh_layouts(pv->session->arr_pv);
 
 	//erste eingefügte Seite!
 	entry.pdf_document_page =
@@ -1390,13 +1316,13 @@ seiten_create_document(PdfViewer *pv, GArray *arr_page_pv, GError **error) {
 	pdf_document *doc_dest = NULL;
 	gint rc = 0;
 
-	fz_try( pv->zond->ctx )
-		doc_dest = pdf_create_document(pv->zond->ctx);
-fz_catch	( pv->zond->ctx ) {
+	fz_try( pv->session->ctx )
+		doc_dest = pdf_create_document(pv->session->ctx);
+fz_catch	( pv->session->ctx ) {
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("MUPDF"),
-					fz_caught(pv->zond->ctx), "%s\n%s", __func__,
-					fz_caught_message(pv->zond->ctx));
+					fz_caught(pv->session->ctx), "%s\n%s", __func__,
+					fz_caught_message(pv->session->ctx));
 
 		return NULL;
 	}
@@ -1411,13 +1337,13 @@ fz_catch	( pv->zond->ctx ) {
 
 		//gelöschte (versteckte) Annotationen sollen nicht in die Zwischenablage
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
-		rc = pdf_copy_page(pv->zond->ctx,
+		rc = pdf_copy_page(pv->session->ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
 				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1,
 				FALSE, error);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
-			pdf_drop_document(pv->zond->ctx, doc_dest);
+			pdf_drop_document(pv->session->ctx, doc_dest);
 
 			return NULL;
 		}
@@ -1428,11 +1354,11 @@ fz_catch	( pv->zond->ctx ) {
 
 static gint seiten_set_clipboard(PdfViewer *pv, GArray *arr_page_pv,
 		GError **error) {
-	pdf_drop_document(pv->zond->ctx, pv->zond->pv_clip);
-	pv->zond->pv_clip = NULL;
+	pdf_drop_document(pv->session->ctx, pv->session->pv_clip);
+	pv->session->pv_clip = NULL;
 
-	pv->zond->pv_clip = seiten_create_document(pv, arr_page_pv, error);
-	if (!pv->zond->pv_clip)
+	pv->session->pv_clip = seiten_create_document(pv, arr_page_pv, error);
+	if (!pv->session->pv_clip)
 		return -1;
 
 	return 0;

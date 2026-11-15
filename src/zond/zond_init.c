@@ -41,6 +41,8 @@
 
 #include "zond_init.h"
 #include "zond_pdf_document.h"
+#include "viewer_host.h"
+#include "40viewer/viewer_session.h"
 
 #include "20allgemein/project.h"
 
@@ -266,8 +268,9 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
     init_schema(zond);
 
-	//benötigte Arrays erzeugen
-	zond->arr_pv = g_ptr_array_new();
+	//Viewer-Sitzung: gemeinsamer Zustand aller Viewer, zond als Host
+	zond->viewer_session = pdf_viewer_session_new(zond->ctx, zond->settings);
+	viewer_host_connect(zond, zond->viewer_session);
 
 	zond->app = GTK_APPLICATION(app);
 
@@ -309,14 +312,12 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
 void zond_cleanup(Projekt* zond) {
 	// aufräumen
-	if (zond->pv_clip)
-		pdf_drop_document(zond->ctx, zond->pv_clip);
+	g_object_unref(zond->viewer_session); //gibt die Zwischenablage frei, vor ctx
 
 	gtk_widget_destroy(zond->popover);
 	gtk_widget_destroy(zond->app_window);
 
 	fz_drop_context(zond->ctx);
-	g_ptr_array_unref(zond->arr_pv);
 	g_free(zond->exe_dir);
 	g_object_unref(zond->settings);
 	g_ptr_array_unref(SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files);

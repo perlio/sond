@@ -201,9 +201,9 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 	gint rc = 0;
 	GError* error = NULL;
 
-	Projekt **zond = (Projekt**) user_data;
+	PdfViewerSession **session = (PdfViewerSession**) user_data;
 
-	PdfViewer *pv = viewer_init(*zond);
+	PdfViewer *pv = viewer_init(*session);
 	if (!pv)
 		return;
 
@@ -229,9 +229,9 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 static void activate_app(GtkApplication *app, gpointer user_data) {
 	PdfViewer* pdfv = NULL;
 
-	Projekt **zond = (Projekt**) user_data;
+	PdfViewerSession **session = (PdfViewerSession**) user_data;
 
-	pdfv = viewer_init(*zond);
+	pdfv = viewer_init(*session);
 	if (!pdfv)
 		return;
 
@@ -242,13 +242,17 @@ static void activate_app(GtkApplication *app, gpointer user_data) {
 	return;
 }
 
-static void init_schema(Projekt* zond) {
+static GSettings* init_schema(void) {
     GSettingsSchemaSource *source;
     GSettingsSchema *schema;
+    GSettings *settings = NULL;
     GError *error = NULL;
+    gchar* exe_dir = NULL;
     gchar* path_to_schema_source = NULL;
 
-    path_to_schema_source = g_build_filename(zond->exe_dir, "../share/glib-2.0/schemas", NULL);
+    exe_dir = get_exe_dir();
+    path_to_schema_source = g_build_filename(exe_dir, "../share/glib-2.0/schemas", NULL);
+    g_free(exe_dir);
 
     // Schema-Source aus lokalem Verzeichnis erstellen
     source = g_settings_schema_source_new_from_directory(
@@ -262,7 +266,7 @@ static void init_schema(Projekt* zond) {
     if (error) {
         LOG_ERROR("Fehler beim Laden der Schemas: %s", error->message);
         g_error_free(error);
-        return;
+        return NULL;
     }
 
     // Schema lookup
@@ -275,56 +279,52 @@ static void init_schema(Projekt* zond) {
 
     if (!schema) {
         LOG_ERROR("Schema nicht gefunden!");
-        return;
+        return NULL;
     }
 
 	//GSettings
-	zond->settings = g_settings_new_full(schema, NULL, NULL);
+	settings = g_settings_new_full(schema, NULL, NULL);
 	g_settings_schema_unref(schema);
 
-	if (!zond->settings)
+	if (!settings)
 		LOG_ERROR("Settings konnten nicht erzeugt werden");
 
-	return;
+	return settings;
 }
 
-static void
-init(GtkApplication *app, Projekt *zond) {
-	zond->arr_pv = g_ptr_array_new();
-	zond->exe_dir = get_exe_dir();
-	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!zond->ctx)
-		LOG_ERROR("fz_context konnte nicht initialisiert werden");
+static PdfViewerSession*
+init(GtkApplication *app) {
+	fz_context *ctx = NULL;
 
-	init_schema(zond);
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx)
+		LOG_ERROR("fz_context konnte nicht initialisiert werden");
 
 	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
 			g_ptr_array_new( );
 
-	return;
+	return pdf_viewer_session_new(ctx, init_schema());
 }
 
 static void startup_app(GtkApplication *app, gpointer user_data) {
-	Projekt **zond = (Projekt**) user_data;
+	PdfViewerSession **session = (PdfViewerSession**) user_data;
 
-	*zond = g_malloc0(sizeof(Projekt));
-
-	init(app, *zond);
+	*session = init(app);
 
 	return;
 }
 
 gint main(gint argc, gchar **argv) {
-	Projekt *zond = NULL;
+	PdfViewerSession *session = NULL;
 	GtkApplication *app = NULL;
 
 	//ApplicationApp erzeugen
 	app = gtk_application_new("de.perlio.zondPV", G_APPLICATION_HANDLES_OPEN);
 
 	//und starten
-	g_signal_connect(app, "startup", G_CALLBACK (startup_app), &zond);
-	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
-	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
+	g_signal_connect(app, "startup", G_CALLBACK (startup_app), &session);
+	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &session);
+	g_signal_connect(app, "open", G_CALLBACK (open_app), &session);
 
 	logging_init("zond_viewer");
 	install_crash_handler();

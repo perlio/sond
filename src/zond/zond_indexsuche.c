@@ -208,9 +208,9 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                             "Fehler beim Öffnen\n\n",
                             error ? error->message : "?", NULL);
                     g_clear_error(&error);
-                } else if (has_pos && term && zond->arr_pv->len > 0) {
-                    PdfViewer *pv = g_ptr_array_index(zond->arr_pv,
-                            zond->arr_pv->len - 1);
+                } else if (has_pos && term && zond->viewer_session->arr_pv->len > 0) {
+                    PdfViewer *pv = g_ptr_array_index(zond->viewer_session->arr_pv,
+                            zond->viewer_session->arr_pv->len - 1);
                     viewer_highlight_at_char_pos(pv, page_nr_akt,
                             char_pos_in_page, term);
                 }

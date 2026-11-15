@@ -21,7 +21,7 @@
 
 typedef struct _Pdf_Viewer PdfViewer;
 
-PdfViewer* viewer_init(Projekt*);
+PdfViewer* viewer_init(PdfViewerSession*);
 void viewer_ui_recreate_tree_thumb(PdfViewer*);
 
 #endif // VIEWER_UI_H_INCLUDED

@@ -13,6 +13,8 @@
 #include <gio/gio.h>
 
 #include "../anbindung.h"
+#include "../zond_error.h"
+#include "viewer_session.h"
 
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkEntry GtkEntry;
@@ -62,32 +64,6 @@ typedef struct _Pdf_Punkt {
 	gdouble delta_y;
 } PdfPunkt;
 
-#ifdef VIEWER
-typedef struct _Projekt {
-    gchar        *base_dir;
-    gchar        *exe_dir;
-    fz_context   *ctx;
-    GPtrArray    *arr_pv;
-    pdf_document *pv_clip;
-    GSettings* settings;
-} Projekt;
-
-#define ZOND_ERROR zond_error_quark()
-GQuark zond_error_quark(void);
-
-enum ZondError
-{
-	ZOND_ERROR_IO,
-	ZOND_ERROR_JSON_NO_OBJECT,
-	ZOND_ERROR_VTAG_NOT_FOUND,
-	ZOND_ERROR_CURL,
-	ZOND_ERROR_ZIP,
-	NUM_ZOND_ERROR
-};
-
-#else
-#include "../zond_init.h"
-#endif
 
 //Laufende, in Zeitscheiben (g_idle) abgearbeitete Suche über mehrere Seiten
 typedef struct _Text_Search_Run {
@@ -111,7 +87,7 @@ typedef struct _Text_Occ {
 } TextOcc;
 
 typedef struct _Pdf_Viewer {
-	Projekt *zond;
+	PdfViewerSession *session;
 
 	GtkWidget *vf;
 	GdkWindow *gdk_window;

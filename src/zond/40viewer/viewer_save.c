@@ -25,12 +25,6 @@
 
 #include "viewer.h"
 
-#ifndef VIEWER
-#include <sqlite3.h>
-#include "../dbase_zond.h"
-#include "../zond_dbase.h"
-#endif
-
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 #include <mupdf/pdf.h>
@@ -48,8 +42,6 @@
 
 #include "../anbindung.h"
 
-#include "../20allgemein/project.h"
-#include "../20allgemein/ziele.h"
 
 #include "document.h"
 #include "stand_alone.h"
@@ -58,7 +50,7 @@
 #include "viewer_render.h"
 #include "viewer_annot.h"
 
-static gboolean viewer_entry_in_dd(JournalEntry* entry,
+gboolean viewer_entry_in_dd(JournalEntry* entry,
 		ZPDFDPart* zpdfd_part) {
 	if (entry->pdf_document_page->page_akt >= zpdfd_part->first_page->page_akt &&
 			entry->pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt) {
@@ -125,303 +117,13 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 	return FALSE;
 }
 
-/* Vor dem physischen Speichern (viewer_do_save_dd()) den FTS-Index für
- * diese Datei auf den nach dem Speichern gültigen Stand bringen:
- * - Seiten mit einem JOURNAL_TYPE_OCR-Eintrag: Inhalt ändert sich (neue
- *   versteckte Textebene) - nur diese eine Seite verwerfen, kein
- *   pauschales Verwerfen der ganzen Datei. Zusätzlich eine eventuell
- *   bestehende coverage-Abdeckung invalidieren.
- * - Seiten mit einem JOURNAL_TYPE_PAGES_INSERTED-Eintrag: neuer, noch nie
- *   geprüfter Seiteninhalt - kein clear_page nötig, aber ebenfalls eine
- *   eventuell bestehende coverage-Abdeckung invalidieren (s.u.).
- * - Seiten, die gelöscht werden (pdfp->deleted): ebenfalls verwerfen.
- * - Überlebende Seiten, deren Nummer sich durch anderswo gelöschte/
- *   eingefügte Seiten verschiebt: in chunks/pages umnummerieren (Inhalt
- *   bleibt erhalten). Wiederverwendet dieselbe, für Anbindungen bereits
- *   bewährte Korrektur wie dbase_zond_update_section_dbase() - eine
- *   einzelne Seite ist dafür einfach eine entartete Anbindung
- *   {seite,0}-{seite,EOP} ("ganze Seite").
- * Muss VOR viewer_do_save_dd() laufen (genau wie dbase_zond_update_
- * sections()), weil die dort ablaufende Kompaktierung (pdfp->deleted/
- * inserted-Flags werden gelöscht/page_akt neu gesetzt) genau das ist,
- * was anbindung_korrigieren() auswertet - danach sind die Flags weg. */
-#ifndef VIEWER
-static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd,
-		SondIndexCtx *index_ctx) {
-	gchar *filename = NULL;
-	GArray *arr_journal = NULL;
-	GArray *pages = NULL;
-	GError *error = NULL;
-	GArray *old_nrs = NULL;
-	GArray *new_nrs = NULL;
-
-	if (!index_ctx)
-		return;
-
-	filename = sond_file_part_get_filepart(
-			SOND_FILE_PART(zond_pdf_document_get_sfp_pdf(
-					dd->zpdfd_part->zond_pdf_document)));
-
-	/* OCR: Inhalt der betroffenen Seite ändert sich - verwerfen, UND
-	 * (nur hier, nicht bei reinem Löschen/Umnumerieren weiter unten - dort
-	 * ändert sich der Inhalt überlebender Seiten nicht) eine eventuell
-	 * bestehende coverage-Abdeckung dieser Datei (oder eines Vorfahre-
-	 * Verzeichnisses) invalidieren, weil clear_page() gerade Chunks ohne
-	 * Ersatz entfernt hat - ohne Invalidierung würde eine spätere
-	 * Abdeckungs-Prüfung fälschlich "vollständig indiziert" melden.
-	 *
-	 * PAGES_INSERTED: hier kommt neuer, noch nie geprüfter Seiteninhalt
-	 * hinzu - kein clear_page nötig (dafür gibt es ja noch keinen
-	 * Index-Eintrag), aber dieselbe coverage-Invalidierung wie bei OCR:
-	 * eine bestehende Abdeckungs-Aussage ("alles hier ist mindestens
-	 * Modus M") wird durch die neue, ungeprüfte Seite ebenso verletzt. */
-	{
-		GArray *inserted_pages = g_array_new(FALSE, FALSE, sizeof(gint));
-
-		arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-		for (guint u = 0; u < arr_journal->len; u++) {
-			JournalEntry entry = g_array_index(arr_journal, JournalEntry, u);
-
-			if (entry.type != JOURNAL_TYPE_OCR &&
-					entry.type != JOURNAL_TYPE_PAGES_INSERTED)
-				continue;
-			if (!viewer_entry_in_dd(&entry, dd->zpdfd_part))
-				continue;
-
-			if (entry.type == JOURNAL_TYPE_OCR) {
-				if (!sond_index_ctx_clear_page(index_ctx, filename,
-						entry.pdf_document_page->page_akt, &error)) {
-					LOG_WARN("%s\n", error->message);
-					g_clear_error(&error);
-				}
-
-				if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
-						pdfv->zond->project_dir, &error)) {
-					LOG_WARN("%s\n", error->message);
-					g_clear_error(&error);
-				}
-			} else { /* JOURNAL_TYPE_PAGES_INSERTED - Sammeln, s.u.: einmal
-			          * für die ganze Datei behandeln, nicht pro Eintrag,
-			          * damit bei mehreren Einfüge-Vorgängen keine bereits
-			          * "geretteten" Seiten fälschlich wieder mit erfasst
-			          * werden. */
-				gint first = entry.pdf_document_page->page_akt;
-				gint count = entry.pages_inserted.count;
-
-				for (gint p = first; p < first + count; p++)
-					g_array_append_val(inserted_pages, p);
-			}
-		}
-
-		if (inserted_pages->len > 0) {
-			/* Vor dem Verwerfen eines eventuell bestehenden Datei-Eintrags
-			 * erst den Seiten-Fortschritt der ÜBRIGEN (weder gelöschten
-			 * noch neu eingefügten) Seiten retten. ACHTUNG: nicht einfach
-			 * "0..Seitenzahl minus eingefügte", weil gelöschte Seiten als
-			 * stabile "Karteileichen" im Seiten-Array stehen bleiben (keine
-			 * Kompaktierung mehr) - die rohe Seitenzahl zählt sie mit. */
-			GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
-					dd->zpdfd_part->zond_pdf_document);
-			GArray *pages_to_write = g_array_new(FALSE, FALSE, sizeof(gint));
-
-			for (guint i = 0; i < arr_pages->len; i++) {
-				PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
-				gint page_nr = (gint) i;
-				gboolean is_new = FALSE;
-
-				if (!pdfp || pdfp->deleted)
-					continue;
-
-				for (guint u = 0; u < inserted_pages->len; u++) {
-					if (g_array_index(inserted_pages, gint, u) == page_nr) {
-						is_new = TRUE;
-						break;
-					}
-				}
-				if (is_new)
-					continue;
-
-				g_array_append_val(pages_to_write, page_nr);
-			}
-
-			if (!sond_index_ctx_coverage_expand_to_pages(index_ctx, filename,
-					(gint const*) pages_to_write->data, pages_to_write->len,
-					&error)) {
-				LOG_WARN("%s\n", error->message);
-				g_clear_error(&error);
-			}
-			g_array_unref(pages_to_write);
-
-			if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
-					pdfv->zond->project_dir, &error)) {
-				LOG_WARN("%s\n", error->message);
-				g_clear_error(&error);
-			}
-		}
-
-		g_array_unref(inserted_pages);
-	}
-
-	/* Gelöschte Seiten verwerfen, überlebende ggf. umnummerieren - über
-	 * ALLE aktuell im Index geführten Seiten dieser Datei (nicht nur den
-	 * Bereich dieses dd), da anbindung_korrigieren() ohnehin nur Seiten
-	 * berücksichtigt, die tatsächlich betroffen sind. */
-	pages = sond_index_ctx_get_pages_for_file(index_ctx, filename);
-	old_nrs = g_array_new(FALSE, FALSE, sizeof(gint));
-	new_nrs = g_array_new(FALSE, FALSE, sizeof(gint));
-
-	for (guint u = 0; u < pages->len; u++) {
-		gint page_nr = g_array_index(pages, gint, u);
-		PdfDocumentPage *pdfp = NULL;
-
-		if (page_nr < 0) /* Nicht-PDF-Konvention (page_nr == -1) betrifft hier nicht */
-			continue;
-
-		/* Verteidigung gegen g_ptr_array_index() ohne Bounds-Check:
-		 * sollte der Index eine Seitenzahl kennen, die es (mehr) gar
-		 * nicht gibt, verwerfen statt out-of-bounds zuzugreifen. */
-		if (page_nr >= zond_pdf_document_get_number_of_pages(
-				dd->zpdfd_part->zond_pdf_document)) {
-			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
-				LOG_WARN("%s\n", error->message);
-				g_clear_error(&error);
-			}
-			continue;
-		}
-
-		pdfp = zond_pdf_document_get_pdf_document_page(
-				dd->zpdfd_part->zond_pdf_document, page_nr);
-
-		if (!pdfp || pdfp->deleted) {
-			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
-				LOG_WARN("%s\n", error->message);
-				g_clear_error(&error);
-			}
-			continue;
-		}
-
-		{
-			Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
-
-			anbindung_korrigieren(dd->zpdfd_part, &anbindung);
-
-			if (anbindung.von.seite != page_nr) {
-				g_array_append_val(old_nrs, page_nr);
-				g_array_append_val(new_nrs, anbindung.von.seite);
-			}
-		}
-	}
-
-	if (old_nrs->len > 0) {
-		if (!sond_index_ctx_renumber_pages(index_ctx, filename,
-				(gint const*) old_nrs->data, (gint const*) new_nrs->data,
-				old_nrs->len, &error)) {
-			LOG_WARN("%s\n", error->message);
-			g_clear_error(&error);
-		}
-	}
-
-	/* Nach dem Renumerieren prüfen, ob jetzt ALLE aktuell existierenden
-	 * (nicht gelöschten) Seiten der Datei individuell indiziert sind
-	 * (keine Lücke mehr, z.B. weil gerade die letzte, bisher nicht
-	 * indizierte Seite gelöscht wurde) - falls ja, zur Datei-Ebene
-	 * kollabieren (Mindestmodus-Prinzip wie bei coverage_try_collapse),
-	 * statt die pages-Tabelle dauerhaft fein-granular stehen zu lassen.
-	 * ACHTUNG: zond_pdf_document_get_number_of_pages() ist NICHT die
-	 * aktuelle Seitenzahl - gelöschte Seiten bleiben als stabile
-	 * "Karteileichen" im Seiten-Array stehen (keine Kompaktierung mehr),
-	 * deshalb hier direkt über das Array gehen und pdfp->deleted prüfen. */
-	{
-		GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
-				dd->zpdfd_part->zond_pdf_document);
-		GArray *pages_now = sond_index_ctx_get_pages_for_file(index_ctx, filename);
-		g_autofree gboolean *seen = g_new0(gboolean, arr_pages->len ? arr_pages->len : 1);
-		gboolean complete = TRUE;
-		gint min_mode = G_MAXINT;
-		gint n_live = 0;
-
-		for (guint i = 0; i < arr_pages->len; i++) {
-			PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
-
-			if (pdfp && !pdfp->deleted)
-				n_live++;
-		}
-
-		/* file_pagecount (coalescing-unabhängige Gesamtseitenzahl, s.
-		 * sond_index.h) auf den aktuellen Stand bringen - unabhängig
-		 * davon, ob unten überhaupt (wieder) auf Datei-Ebene kollabiert
-		 * werden kann. Sonst bliebe nach Seiten-Einfügen/-Löschen eine
-		 * veraltete Zahl stehen, die z.B. sond_index_ctx_delete_index()
-		 * beim Rekonstruieren der übrigen Seiten fälschlich zugrunde
-		 * legen würde. */
-		if (!sond_index_ctx_set_page_count(index_ctx, filename, n_live, &error)) {
-			LOG_WARN("%s\n", error->message);
-			g_clear_error(&error);
-		}
-
-		for (guint u = 0; u < pages_now->len && complete; u++) {
-			gint page_nr = g_array_index(pages_now, gint, u);
-			gint mode;
-
-			if (page_nr < 0 || (guint) page_nr >= arr_pages->len) {
-				complete = FALSE;
-				break;
-			}
-			seen[page_nr] = TRUE;
-
-			mode = sond_index_ctx_get_page_ocr_mode(index_ctx, filename, page_nr);
-			if (mode < 0) {
-				complete = FALSE;
-				break;
-			}
-			if (mode < min_mode)
-				min_mode = mode;
-		}
-
-		if (n_live == 0 || pages_now->len != (guint) n_live)
-			complete = FALSE;
-
-		if (complete) {
-			for (guint i = 0; i < arr_pages->len; i++) {
-				PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
-
-				if (pdfp && !pdfp->deleted && !seen[i]) {
-					complete = FALSE;
-					break;
-				}
-			}
-		}
-
-		if (complete) {
-			if (!sond_index_ctx_coverage_mark(index_ctx, filename, min_mode, &error)) {
-				LOG_WARN("%s\n", error->message);
-				g_clear_error(&error);
-			} else if (pdfv->zond->project_dir) {
-				if (!sond_index_ctx_coverage_try_collapse(index_ctx, filename,
-						pdfv->zond->project_dir, &error)) {
-					LOG_WARN("%s\n", error->message);
-					g_clear_error(&error);
-				}
-			}
-		}
-		g_array_unref(pages_now);
-	}
-
-	g_array_unref(old_nrs);
-	g_array_unref(new_nrs);
-	g_array_unref(pages);
-	g_free(filename);
-
-	return;
-}
-#endif //VIEWER
 
 static void  viewer_reset_dirty_dds(PdfViewer* pdfv) {
-	for (guint i = 0; i < pdfv->zond->arr_pv->len; i++) {
+	for (guint i = 0; i < pdfv->session->arr_pv->len; i++) {
 		PdfViewer* pdfv_test = NULL;
 		DisplayedDocument* dd = NULL;
 
-		pdfv_test = g_ptr_array_index(pdfv->zond->arr_pv, i);
+		pdfv_test = g_ptr_array_index(pdfv->session->arr_pv, i);
 		dd = pdfv_test->dd;
 
 		do {
@@ -800,119 +502,6 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	return 0;
 }
 
-#ifndef VIEWER
-/* Sections müssen für main und work UNABHÄNGIG gelesen und neu berechnet
- * werden (nicht: einmal berechnen, in beide schreiben) - store und work
- * können für dieselbe Zeile unterschiedliche Ausgangswerte haben, da work
- * laufend fortgeschrieben, store aber nur bei project_save() komplett
- * nachgezogen wird. Läuft innerhalb der Transaktion von dbase_zond_begin(). */
-static gint viewer_save_update_section_schema(sqlite3 *db, gchar const *schema,
-		DisplayedDocument *dd, GError **error) {
-	gint rc = 0;
-	gchar *sql = NULL;
-	sqlite3_stmt *stmt = NULL;
-	SondFilePartPDF *sfp_pdf = NULL;
-	gchar *filepart = NULL;
-	g_autoptr(GArray) arr_sections = NULL;
-
-	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document);
-	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
-
-	sql = g_strdup_printf("SELECT ID, section FROM %s.knoten WHERE file_part=?1;",
-			schema);
-	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-	g_free(sql);
-	if (rc != SQLITE_OK) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
-					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
-		g_free(filepart);
-		return -1;
-	}
-	sqlite3_bind_text(stmt, 1, filepart, -1, SQLITE_TRANSIENT);
-	g_free(filepart);
-
-	arr_sections = g_array_new(FALSE, FALSE, sizeof(Section));
-	g_array_set_clear_func(arr_sections, (GDestroyNotify) section_free);
-
-	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-		Section section = { 0 };
-
-		section.ID = sqlite3_column_int(stmt, 0);
-		section.section = g_strdup((gchar const*) sqlite3_column_text(stmt, 1));
-
-		//wenn section == NULL, dann brauch es nicht gespeichert zu werden,
-		//ist ja die ganze PDF-Datei - keine Anpassung nötig
-		if (section.section)
-			g_array_append_val(arr_sections, section);
-	}
-	sqlite3_finalize(stmt);
-
-	if (rc != SQLITE_DONE) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
-					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
-		return -1;
-	}
-
-	for (guint i = 0; i < arr_sections->len; i++) {
-		Section section = g_array_index(arr_sections, Section, i);
-		Anbindung anbindung_int = { 0 };
-		gchar *section_new = NULL;
-		gchar *sql_update = NULL;
-		sqlite3_stmt *stmt_update = NULL;
-
-		anbindung_parse_file_section(section.section, &anbindung_int);
-		anbindung_aktualisieren(dd->zpdfd_part->zond_pdf_document, &anbindung_int);
-		// Recalculate changes that will be removed during save
-		anbindung_korrigieren(dd->zpdfd_part, &anbindung_int);
-		anbindung_build_file_section(anbindung_int, &section_new);
-
-		sql_update = g_strdup_printf("UPDATE %s.knoten SET section=?2 WHERE ID=?1;",
-				schema);
-		rc = sqlite3_prepare_v2(db, sql_update, -1, &stmt_update, NULL);
-		g_free(sql_update);
-		if (rc != SQLITE_OK) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
-						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
-			g_free(section_new);
-			return -1;
-		}
-
-		sqlite3_bind_int(stmt_update, 1, section.ID);
-		sqlite3_bind_text(stmt_update, 2, section_new, -1, SQLITE_TRANSIENT);
-		g_free(section_new);
-
-		rc = sqlite3_step(stmt_update);
-		sqlite3_finalize(stmt_update);
-		if (rc != SQLITE_DONE) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
-						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static gint viewer_save_update_sections(DBaseZond* dbase_zond,
-		DisplayedDocument* dd, GError** error) {
-	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-	gint rc = 0;
-
-	rc = viewer_save_update_section_schema(db, "main", dd, error);
-	if (rc)
-		return -1;
-
-	rc = viewer_save_update_section_schema(db, "work", dd, error);
-	if (rc)
-		return -1;
-
-	return 0;
-}
-#endif //VIEWER
 
 gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	DisplayedDocument *dd = NULL;
@@ -921,12 +510,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	if (!dd)
 		return 0;
 
-#ifndef VIEWER
-	gboolean changed = FALSE;
-
-	//Projekt-Zustand (geändert oder nicht) zwischenspeichern
-	changed = pdfv->zond->dbase_zond->changed;
-#endif //VIEWER
+	pdf_viewer_session_save_started(pdfv->session, pdfv);
 
 	//Alle Dds, die im Viewer angezeigt werden, durchgehen
 	do {
@@ -945,57 +529,14 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		if (!doc)
 			return -1;
 
-#ifndef VIEWER
-		SondIndexCtx index_tx = { 0 };
-		gboolean index_tx_active = FALSE;
-
-		//Index-DB als Schema idx anhängen (vor der Transaktion): ihre
-		//Änderungen liegen dann im selben Commit wie store/work und werden
-		//mit zurückgerollt, wenn das Speichern scheitert
-		if (pdfv->zond->wctx && pdfv->zond->wctx->index_ctx) {
-			rc = dbase_zond_attach_index(pdfv->zond->dbase_zond,
-					pdfv->zond->wctx->index_ctx->db_path, error);
-			if (rc) {
-				g_prefix_error(error, "%s\n", __func__);
-				pdf_drop_document(ctx, doc);
-
-				return rc;
-			}
-			dbase_zond_index_ctx(pdfv->zond->dbase_zond, &index_tx,
-					pdfv->zond->wctx->index_ctx);
-			index_tx_active = TRUE;
-		}
-
-		rc = dbase_zond_begin(pdfv->zond->dbase_zond, error);
+		//Host vorbereiten lassen (z.B. Datenbank-Transaktion, Anbindungen)
+		rc = pdf_viewer_session_save_prepare(pdfv->session, pdfv, dd, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 			pdf_drop_document(ctx, doc);
-			if (index_tx_active)
-				dbase_zond_detach_index(pdfv->zond->dbase_zond);
-
-			return rc;
-		}
-
-		//FTS-Index für diese Datei auf den nach dem Speichern gültigen
-		//Stand bringen (Seiten verwerfen/umnummerieren) - muss vor dem
-		//physischen Speichern laufen, s. Kommentar an der Funktion.
-		viewer_update_index_for_save(pdfv, dd,
-				index_tx_active ? &index_tx : NULL);
-
-		//Anbindungen in db anpassen
-		rc = viewer_save_update_sections(pdfv->zond->dbase_zond, dd, error);
-		if (rc)
-		{
-			g_prefix_error(error, "%s\n", __func__);
-			pdf_drop_document(ctx, doc);
-
-			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
-			if (index_tx_active)
-				dbase_zond_detach_index(pdfv->zond->dbase_zond);
 
 			return -1;
 		}
-#endif //VIEWER
 
 		/* doc wird ab hier NICHT mehr selbst gedroppt: viewer_do_save_dd()
 		 * hat das - auf jedem seiner Rückkehrpfade, egal ob Erfolg oder
@@ -1006,45 +547,36 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		rc = viewer_do_save_dd(pdfv, dd, ctx, doc, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
-#ifndef VIEWER
-			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
-			if (index_tx_active)
-				dbase_zond_detach_index(pdfv->zond->dbase_zond);
-#endif //VIEWER
+			pdf_viewer_session_save_finished(pdfv->session, pdfv, dd, FALSE,
+					error);
 
 			return -1;
 		}
 
-#ifndef VIEWER
-		rc = dbase_zond_commit(pdfv->zond->dbase_zond, error);
-		if (index_tx_active)
-			dbase_zond_detach_index(pdfv->zond->dbase_zond);
+		rc = pdf_viewer_session_save_finished(pdfv->session, pdfv, dd, TRUE,
+				error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 
 			return -1;
 		}
-#endif //VIEWER
 	} while ((dd = dd->next));
 
-#ifndef VIEWER
-		//ggf. zurücksetzen
-		if (!changed) project_reset_changed(pdfv->zond, FALSE);
-#endif //VIEWER
+	pdf_viewer_session_save_done(pdfv->session, pdfv);
 
 	/* dirty-Status aller dd's alle offenen pvs einmalig aus dem (jetzt
 	 * bereinigten) Journal neu herleiten. viewer_reset_dirty_dds() geht
-	 * dafür intern ohnehin schon über pdfv->zond->arr_pv, also über ALLE
+	 * dafür intern ohnehin schon über pdfv->session->arr_pv, also über ALLE
 	 * offenen pvs - das Ergebnis hängt gar nicht vom übergebenen pdfv ab.
 	 * Ein einziger Aufruf genügt daher (vorher wurde hier dieselbe,
 	 * für alle pvs identische Arbeit pro offenem pv redundant wiederholt). */
 	viewer_reset_dirty_dds(pdfv);
 
 	//Bei allen sauberen pvs Speichern insensitiv
-	for (gint i = 0; i < pdfv->zond->arr_pv->len; i++) {
+	for (gint i = 0; i < pdfv->session->arr_pv->len; i++) {
 		PdfViewer *pdfv_test = NULL;
 
-		pdfv_test = g_ptr_array_index(pdfv->zond->arr_pv, i);
+		pdfv_test = g_ptr_array_index(pdfv->session->arr_pv, i);
 
 		if (!viewer_has_dirty_dd(pdfv_test))
 			gtk_widget_set_sensitive(pdfv_test->button_speichern, FALSE);
