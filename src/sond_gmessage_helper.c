@@ -123,9 +123,10 @@ static gboolean replace_part_content_safe(GMimeObject *part,
         GMimeStream *stream = g_mime_stream_mem_new_with_buffer(
             data, len);
 
-        GMimeContentEncoding encoding = g_mime_part_get_content_encoding(GMIME_PART(part));
-
-        GMimeDataWrapper *content = g_mime_data_wrapper_new_with_stream(stream, encoding);
+        //data sind rohe (dekodierte) Bytes: Wrapper-Encoding DEFAULT, das
+        //Transfer-Encoding des Parts (Header) wendet gmime beim Schreiben an
+        GMimeDataWrapper *content = g_mime_data_wrapper_new_with_stream(stream,
+                GMIME_CONTENT_ENCODING_DEFAULT);
         g_mime_part_set_content(GMIME_PART(part), content);
 
         g_object_unref(content);

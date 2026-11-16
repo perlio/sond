@@ -832,11 +832,13 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		if (!processed)
 			return FALSE;
 
-		GMimeContentEncoding enc = g_mime_part_get_content_encoding(part);
+		//processed sind rohe (dekodierte) Bytes: Wrapper-Encoding DEFAULT, das
+		//Transfer-Encoding des Parts wendet gmime beim Schreiben an
 		GMimeStream* new_stream = g_mime_stream_mem_new_with_buffer(
 				(const gchar*)processed, proc_size);
 		g_free(processed);
-		GMimeDataWrapper* new_wrapper = g_mime_data_wrapper_new_with_stream(new_stream, enc);
+		GMimeDataWrapper* new_wrapper = g_mime_data_wrapper_new_with_stream(new_stream,
+				GMIME_CONTENT_ENCODING_DEFAULT);
 		g_mime_part_set_content(part, new_wrapper);
 		g_object_unref(new_wrapper);
 		g_object_unref(new_stream);

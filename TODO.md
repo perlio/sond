@@ -310,6 +310,14 @@ Status: beobachten
  Watchers allein (300 Durchläufe, Stopp während des Scans) lief sauber. Ungeklärt, ob
  der Watcher beteiligt war. Tritt es wieder auf: vollständige Stack-Frames sichern und
  prüfen, ob es auch bei einem Projekt außerhalb von SeaDrive (ohne Watcher) passiert.
+
+ Zweite Beobachtung (16.11.2026): SIGSEGV in sqlite3_close der Store-Datenbank
+ (project_close -> project_clear_dbase_zond -> zond_dbase_finalize), Projekt auf einem
+ SMB-Share (nicht SeaDrive, also kein Watcher). Es war das erste Projekt, das in dieser
+ Sitzung geöffnet wurde, davor war ein anderes Projekt geschlossen worden. Nicht
+ reproduzierbar. Gemeinsam mit dem ersten Fall: Store liegt auf einem Netzlaufwerk.
+ Beim nächsten Auftreten festhalten: Netzlaufwerk ja/nein, wievieltes Schließen in der
+ Sitzung, Modulname der obersten Frames (sqlite-DLL?), vorher ZIP-/Mail-Aktionen.
 ```
 
 ## Ideen

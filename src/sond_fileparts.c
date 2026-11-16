@@ -2020,6 +2020,13 @@ gint sond_file_part_zip_decrypt_entries(SondFilePart *sfp_zip_base,
 				src, error);
 
 		zip_source_free(src);
+
+		//gecachten Datei-Handle vor dem Ersetzen der Datei schließen: unter
+		//Windows bliebe sonst der Name nach dem Löschen belegt und das
+		//Umbenennen scheiterte mit "Zugriff verweigert"
+		//(s. Kommentar in sond_file_part_zip_mod_zip_file())
+		sond_file_part_zip_invalidate_dir_index(sfp_zip);
+
 		if (!bytes_out) {
 			g_ptr_array_unref(done);
 
@@ -2034,9 +2041,6 @@ gint sond_file_part_zip_decrypt_entries(SondFilePart *sfp_zip_base,
 			return -1;
 		}
 	}
-
-	//s. Kommentar in sond_file_part_zip_mod_zip_file()
-	sond_file_part_zip_invalidate_dir_index(sfp_zip);
 
 	//Die Einträge sind jetzt lesbar: Platzhalter durch Elemente mit echtem Typ
 	//ersetzen (Typerkennung am Inhalt)
