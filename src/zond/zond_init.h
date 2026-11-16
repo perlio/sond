@@ -120,6 +120,9 @@ typedef struct _ZondApp {
 
 	GtkApplication *app;
 
+	//Verzeichnis des zuletzt geschlossenen Projekts (Startordner des Öffnen-Dialogs)
+	gchar *last_project_dir;
+
 	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
 	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
 	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt

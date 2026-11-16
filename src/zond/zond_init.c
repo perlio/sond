@@ -312,6 +312,8 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
 void zond_cleanup(Projekt* zond) {
 	// aufräumen
+	zond_project_reset(zond);
+	g_free(zond->app.last_project_dir);
 	g_object_unref(zond->app.viewer_session); //gibt die Zwischenablage frei, vor ctx
 
 	gtk_widget_destroy(zond->win.popover);

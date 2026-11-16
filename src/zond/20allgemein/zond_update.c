@@ -623,7 +623,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 			"Starte Installer und schließe Programm");
 
 	//Projekt schliessen
-	if (zond->proj.dbase_zond) {
+	if (zond_project_is_open(zond)) {
 		gint rc = 0;
 
 		argv[3] = g_strdup(

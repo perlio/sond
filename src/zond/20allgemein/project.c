@@ -121,7 +121,7 @@ static gboolean project_ctl_tick(gpointer data) {
 	gchar *mode = NULL;
 	guint source_alt = zond->proj.ctl_source;
 
-	if (!zond->proj.dbase_zond || zond->proj.ctl_in_tick)
+	if (!zond_project_is_open(zond) || zond->proj.ctl_in_tick)
 		return G_SOURCE_CONTINUE;
 	zond->proj.ctl_in_tick = TRUE;
 
@@ -615,6 +615,38 @@ static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
 	return;
 }
 
+gboolean zond_project_is_open(Projekt *zond) {
+	return zond->proj.dbase_zond != NULL;
+}
+
+SondIndexCtx* zond_project_index_ctx(Projekt *zond) {
+	if (!zond || !zond->proj.wctx)
+		return NULL;
+
+	return zond->proj.wctx->index_ctx;
+}
+
+void zond_project_reset(Projekt *zond) {
+	//Eingangsangaben erst nach dem Leeren des Dateibaums, der sie abfragt
+	sond_eingang_cache_free(zond->proj.eingang_cache);
+	zond->proj.eingang_cache = NULL;
+
+	if (zond->proj.dbase_zond)
+		project_clear_dbase_zond(&zond->proj.dbase_zond);
+
+	if (zond->proj.wctx) {
+		sond_process_file_destroy_wctx(zond->proj.wctx);
+		zond->proj.wctx = NULL;
+	}
+
+	g_free(zond->proj.project_name);
+	g_free(zond->proj.project_dir);
+	zond->proj.project_name = NULL;
+	zond->proj.project_dir = NULL;
+
+	return;
+}
+
 // ============================================================================
 // Project Save Functions
 // ============================================================================
@@ -654,7 +686,7 @@ gboolean project_timeout_autosave(gpointer data) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) data;
 
-	if (zond->proj.dbase_zond) {
+	if (zond_project_is_open(zond)) {
 		gint rc = project_save(zond, &error);
 		if (rc) {
 			display_message(zond->win.app_window,
@@ -679,7 +711,7 @@ gboolean project_timeout_autosave(gpointer data) {
 gint project_close(Projekt *zond, GError **error) {
 	GError *error_remove = NULL;
 
-	if (!zond->proj.dbase_zond)
+	if (!zond_project_is_open(zond))
 		return 0;
 
 	if (!zond->app.viewer_session || !zond->win.app_window)
@@ -800,7 +832,10 @@ gint project_close(Projekt *zond, GError **error) {
 	// Clear project setting
 	g_settings_set_string(zond->app.settings, "project", "");
 
-	sond_process_file_destroy_wctx(zond->proj.wctx);
+	//Verzeichnis merken (Startordner des Öffnen-Dialogs), dann Zustand freigeben
+	g_free(zond->app.last_project_dir);
+	zond->app.last_project_dir = g_strdup(zond->proj.project_dir);
+	zond_project_reset(zond);
 
 	return 0;
 }
@@ -878,20 +913,7 @@ static void project_open_cleanup(Projekt* zond) {
 	// Clear filesystem root (safe to call even if not set)
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), NULL, NULL);
 
-	// Eingangsangaben (erst nach dem Leeren des Dateibaums, der sie abfragt)
-	sond_eingang_cache_free(zond->proj.eingang_cache);
-	zond->proj.eingang_cache = NULL;
-
-	// Close databases if they were opened
-	if (zond->proj.dbase_zond) {
-		project_clear_dbase_zond(&zond->proj.dbase_zond);
-	}
-
-	// Free allocated strings and clear pointers
-	g_free(zond->proj.project_name);
-	g_free(zond->proj.project_dir);
-	zond->proj.project_name = NULL;
-	zond->proj.project_dir = NULL;
+	zond_project_reset(zond);
 }
 
 /* Pfad zu einer GGUF-Modelldatei ermitteln: konfigurierter GSettings-Wert
@@ -1228,7 +1250,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 static gint project_confirm_switch(Projekt *zond) {
 	gint rc = 0;
 
-	if (!zond->proj.dbase_zond)
+	if (!zond_project_is_open(zond))
 		return 0;
 
 	rc = abfrage_frage(zond->win.app_window, zond->proj.project_name,
@@ -1381,8 +1403,13 @@ gint project_load(Projekt* zond, GError** error) {
 	 * günstigerer Startpunkt für den Dateiauswahldialog als das zufällige
 	 * aktuelle Arbeitsverzeichnis (s. ausführlichen Kommentar an
 	 * filename_oeffnen(), misc.c). */
-	if (zond->proj.project_dir)
-		start_dir = g_path_get_dirname(zond->proj.project_dir);
+	{
+		gchar const *dir_ref = zond->proj.project_dir ?
+				zond->proj.project_dir : zond->app.last_project_dir;
+
+		if (dir_ref)
+			start_dir = g_path_get_dirname(dir_ref);
+	}
 
 	gchar *abs_path = filename_oeffnen(GTK_WINDOW(zond->win.app_window), start_dir);
 	g_free(start_dir);

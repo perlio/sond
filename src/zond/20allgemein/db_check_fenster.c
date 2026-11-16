@@ -1912,7 +1912,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	GtkWidget *b_standard = NULL;
 	GtkWidget *b_ausfuehren = NULL;
 
-	if (!zond->proj.dbase_zond)
+	if (!zond_project_is_open(zond))
 		return NULL;
 
 	if (g_fenster) {
@@ -2079,7 +2079,7 @@ static gboolean hat_aktive_maengel(Projekt *zond) {
 	GError *error = NULL;
 	gboolean aktiv = FALSE;
 
-	if (!zond->proj.dbase_zond)
+	if (!zond_project_is_open(zond))
 		return FALSE;
 
 	if (db_regeln_pruefen(zond->proj.dbase_zond->zond_dbase_work, FALSE, NULL,

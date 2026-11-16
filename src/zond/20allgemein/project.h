@@ -13,12 +13,22 @@ typedef struct _SondIndexCtx SondIndexCtx;
 
 typedef void *gpointer;
 typedef int gint;
+typedef int gboolean;
 typedef char gchar;
 
 /* Intervall des automatischen Speicherns (Projekt öffnen und Menü) */
 #define AUTOSAVE_INTERVAL_SECONDS (5 * 60)
 
 // Project state management
+gboolean zond_project_is_open(Projekt*);
+
+/* Index-Kontext des offenen Projekts, NULL wenn keines offen oder kein Index */
+SondIndexCtx* zond_project_index_ctx(Projekt*);
+
+/* Gibt den Projektzustand (Datenbank, Index-Kontext, Eingangs-Cache, Namen)
+ * frei und setzt ihn zurück; mehrfach aufrufbar. */
+void zond_project_reset(Projekt*);
+
 void project_reset_changed(Projekt*, gboolean);
 void project_set_widgets_sensitive(Projekt*, gboolean);
 gboolean project_timeout_autosave(gpointer);

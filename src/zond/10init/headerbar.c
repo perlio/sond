@@ -588,7 +588,7 @@ static void do_index_loeschen_gesamt(Projekt *zond) {
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+	if (!zond_project_index_ctx(zond)) {
 		display_message(zond->win.app_window, "Kein Index vorhanden", NULL);
 		return;
 	}
@@ -737,7 +737,7 @@ void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
 		return;
 	}
 
-	if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+	if (!zond_project_index_ctx(zond)) {
 		display_message(zond->win.app_window, "Kein Index vorhanden", NULL);
 		return;
 	}
@@ -894,7 +894,7 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (zond_baum_aktuell(zond) == KEIN_BAUM || !zond->proj.dbase_zond)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM || !zond_project_is_open(zond))
 		return;
 	if (!sond_treeview_get_cursor(zond->trees.treeview[zond_baum_aktuell(zond)], &iter))
 		return;
@@ -1107,7 +1107,7 @@ static void cb_app_autosave(GSimpleAction *a, GVariant *p, gpointer d) {
 	g_variant_unref(state);
 	g_simple_action_set_state(a, g_variant_new_boolean(active));
 	g_settings_set_boolean(zond->app.settings, "autosave", active);
-	if (!zond->proj.dbase_zond) return;
+	if (!zond_project_is_open(zond)) return;
 	if (active)
 		g_timeout_add_seconds(AUTOSAVE_INTERVAL_SECONDS, project_timeout_autosave, zond);
 	else if (!g_source_remove_by_user_data(zond))

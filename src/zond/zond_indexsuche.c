@@ -1081,7 +1081,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     GtkWidget *check_whole_word = NULL;
     gint       response   = 0;
 
-    if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+    if (!zond_project_index_ctx(zond)) {
         display_message(zond->win.app_window,
                 "Kein Index vorhanden.\n"
                 "Bitte zuerst Dateien indizieren.", NULL);

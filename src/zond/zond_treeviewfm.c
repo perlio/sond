@@ -2084,9 +2084,7 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 static SondIndexCtx* zond_treeviewfm_get_index_ctx_cb(gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 
-	if (!zond || !zond->proj.wctx) return NULL;
-
-	return zond->proj.wctx->index_ctx;
+	return zond_project_index_ctx(zond);
 }
 
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
