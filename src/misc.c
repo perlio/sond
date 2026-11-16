@@ -39,7 +39,7 @@
 
 #include "sond_log_and_error.h"
 
-/* add_string() ist nach sond_string_util.c/h ausgelagert (s. dort). */
+/* add_string() steht in sond_string_util.h. */
 
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
  *   parent-window kann NULL sein, dann Warnung

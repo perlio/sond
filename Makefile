@@ -34,7 +34,7 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(SRC_DIRS)/zond/zond_installer.c, \
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
-	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/gtk3/sond_treeview.c $(SRC_DIRS)/gtk3/sond_treeviewfm.c \
+	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/gtk3/sond_treeview.c $(SRC_DIRS)/gtk3/sond_treeviewfm.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
@@ -57,7 +57,7 @@ endif
 ifneq (,$(findstring $(MAKECMDGOALS), viewer))
 SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c \
-	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_renderer.c\
+	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_viewer.c $(SRC_DIRS)/sond_renderer.c\
 	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/anbindung.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
@@ -73,7 +73,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_a
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c \
-	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_string_util.c \
+	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_mime.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c $(SRC_DIRS)/sond_zond_schema.c \
 	$(SRC_DIRS)/sond_akte_name.c
 CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
@@ -95,7 +95,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(SRC_DIRS)/sond_fileparts.c \
 	$(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_pdf_helper.c \
-	$(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_string_util.c $(SRC_DIRS)/sond_tmpfiles.c
+	$(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb gmime-3.0 libmagic libxml-2.0 libzip)
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb libmagic libxml-2.0 sqlite3 libcurl tesseract libzip gmime-3.0 mupdf zlib)
 ifneq ($(CONFIG), Debug_Linux)
