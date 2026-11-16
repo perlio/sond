@@ -97,7 +97,5 @@ InfoWindow* info_window_open(GtkWidget*, gint*, const gchar*);
 
 GtkWidget* show_html_window(fz_context*, fz_buffer*, const char*);
 
-void show_pixmap(fz_context*, fz_pixmap*);
-
 
 #endif // MISC_H_INCLUDED

@@ -22,8 +22,6 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "misc.h"
-
 typedef int gint;
 typedef char gchar;
 typedef void* gpointer;
