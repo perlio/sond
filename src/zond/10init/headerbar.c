@@ -68,7 +68,7 @@ static void activate_baum_action(Projekt *zond, const gchar *action_name) {
 	if (zond_baum_aktuell(zond) == KEIN_BAUM)
 		return;
 	GActionGroup *ag = gtk_widget_get_action_group(
-			GTK_WIDGET(zond->treeview[zond_baum_aktuell(zond)]), "stv");
+			GTK_WIDGET(zond->trees.treeview[zond_baum_aktuell(zond)]), "stv");
 	if (ag && g_action_group_has_action(ag, action_name))
 		g_action_group_activate_action(ag, action_name, NULL);
 }
@@ -81,7 +81,7 @@ static void cb_app_projekt_neu(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (project_new(zond, &error)) {
-		display_message(zond->app_window, "Fehler beim Anlegen des Projekts\n", error->message, NULL);
+		display_message(zond->win.app_window, "Fehler beim Anlegen des Projekts\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -90,7 +90,7 @@ static void cb_app_projekt_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (project_load(zond, &error)) {
-		display_message(zond->app_window, "Fehler beim Laden des Projekts\n\n", error->message, NULL);
+		display_message(zond->win.app_window, "Fehler beim Laden des Projekts\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -99,7 +99,7 @@ static void cb_app_projekt_schliessen(GSimpleAction *a, GVariant *p, gpointer d)
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (project_close(zond, &error) == -1) {
-		display_message(zond->app_window, "Fehler beim Schließen des Projekts\n", error->message, NULL);
+		display_message(zond->win.app_window, "Fehler beim Schließen des Projekts\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -108,7 +108,7 @@ static void cb_app_projekt_speichern(GSimpleAction *a, GVariant *p, gpointer d) 
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (project_save(zond, &error)) {
-		display_message(zond->app_window, "Fehler beim Speichern des Projekts\n", error->message, NULL);
+		display_message(zond->win.app_window, "Fehler beim Speichern des Projekts\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -116,7 +116,7 @@ static void cb_app_projekt_speichern(GSimpleAction *a, GVariant *p, gpointer d) 
 static void cb_app_beenden(GSimpleAction *a, GVariant *p, gpointer d) {
 	gboolean ret = FALSE;
 	Projekt *zond = (Projekt*) d;
-	g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);
+	g_signal_emit_by_name(zond->win.app_window, "delete-event", NULL, &ret);
 }
 
 static void cb_win_export(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -125,7 +125,7 @@ static void cb_win_export(GSimpleAction *a, GVariant *p, gpointer d) {
 	if (export_activate(zond, &error)) {
 		//Abbruch des Passwortdialogs: es wurde nichts geschrieben
 		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-			display_message(zond->app_window, "Export fehlgeschlagen\n", error->message, NULL);
+			display_message(zond->win.app_window, "Export fehlgeschlagen\n", error->message, NULL);
 		g_error_free(error);
 	}
 }
@@ -223,15 +223,15 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 		gint ocr_mode) {
 	InfoWindow *info_window = NULL;
 
-	zond->wctx->ocr_mode = ocr_mode;
+	zond->proj.wctx->ocr_mode = ocr_mode;
 
 	/* Noch nicht geladene SeaDrive-Dateien, die der Lauf liest (nicht die schon
 	 * indizierten), vorab laden; Abbruch oder Fehlschlag: nicht indizieren. */
 	{
-		GPtrArray *roots = sond_process_fileparts_roots_to_read(zond->wctx,
+		GPtrArray *roots = sond_process_fileparts_roots_to_read(zond->proj.wctx,
 				ht_index);
 		gchar const *root_dir = sond_treeviewfm_get_root(
-				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+				SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
 		GPtrArray *pfade = g_ptr_array_new_with_free_func(g_free);
 		gboolean loaded = TRUE;
 
@@ -239,7 +239,7 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 			g_ptr_array_add(pfade, g_strconcat(root_dir, "/",
 					(gchar const*) g_ptr_array_index(roots, i), NULL));
 		if (pfade->len > 0)
-			loaded = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+			loaded = sond_seadrive_load_sync(GTK_WINDOW(zond->win.app_window), pfade);
 		g_ptr_array_unref(pfade);
 		g_ptr_array_unref(roots);
 
@@ -250,14 +250,14 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 		}
 	}
 
-	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
+	info_window = info_window_open(zond->win.app_window, &zond->proj.wctx->cancel,
 			"Index erstellen");
-	zond->wctx->log_func_data = (gpointer) info_window;
-	zond->wctx->cancel = 0;
+	zond->proj.wctx->log_func_data = (gpointer) info_window;
+	zond->proj.wctx->cancel = 0;
 	struct _ThreadDataIndex *td = g_new0(struct _ThreadDataIndex, 1);
-	td->treeviewfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	td->treeviewfm = SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]);
 	td->ht_index = ht_index;
-	td->wctx = zond->wctx;
+	td->wctx = zond->proj.wctx;
 	info_window_set_message(info_window, "Indizierung wird gestartet");
 	GThread *thread = g_thread_new("ocr-doc", do_index_thread, td);
 	if (!thread) {
@@ -289,7 +289,7 @@ static gboolean zond_index_lauf(Projekt *zond, GHashTable *ht_index,
 	g_free(td);
 	info_window_close(info_window);
 	/* zeigt sonst auf das freigegebene Info-Fenster */
-	zond->wctx->log_func_data = NULL;
+	zond->proj.wctx->log_func_data = NULL;
 	return TRUE;
 }
 
@@ -397,7 +397,7 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 	}
 
 	while (ok) {
-		GPtrArray *items = index_locked_items(zond->wctx, ignored);
+		GPtrArray *items = index_locked_items(zond->proj.wctx, ignored);
 		GPtrArray *decrypted = NULL;
 		GPtrArray *skipped = NULL;
 		gboolean aborted = FALSE;
@@ -410,7 +410,7 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 		}
 
 		text = index_locked_text(items);
-		if (abfrage_frage(zond->app_window, "Passwortgeschützte Dateien", text,
+		if (abfrage_frage(zond->win.app_window, "Passwortgeschützte Dateien", text,
 				NULL) != GTK_RESPONSE_YES) {
 			declined = TRUE;
 			g_ptr_array_unref(items);
@@ -419,7 +419,7 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 		}
 
 		sond_treeviewfm_decrypt_fileparts(
-				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), items, &decrypted,
+				SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), items, &decrypted,
 				&skipped, &aborted);
 
 		//alles, was nicht entsperrt wurde, in diesem Zyklus nicht erneut melden
@@ -464,16 +464,16 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 		g_hash_table_iter_init(&it, ignored);
 		while (g_hash_table_iter_next(&it, &key, NULL))
 			g_hash_table_add(remaining, g_strdup((gchar const*) key));
-		for (guint i = 0; zond->wctx->locked && i < zond->wctx->locked->len; i++)
+		for (guint i = 0; zond->proj.wctx->locked && i < zond->proj.wctx->locked->len; i++)
 			g_hash_table_add(remaining, g_strdup(((SondLockedItem*)
-					g_ptr_array_index(zond->wctx->locked, i))->filepart));
+					g_ptr_array_index(zond->proj.wctx->locked, i))->filepart));
 
 		if (g_hash_table_size(remaining) > 0) {
 			g_autofree gchar *msg = g_strdup_printf("%u Datei(en) sind weiterhin "
 					"passwortgeschützt und nicht indiziert.",
 					g_hash_table_size(remaining));
 
-			display_message(zond->app_window, "Index erstellen\n\n", msg, NULL);
+			display_message(zond->win.app_window, "Index erstellen\n\n", msg, NULL);
 		}
 		g_hash_table_destroy(remaining);
 	}
@@ -485,7 +485,7 @@ static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
 
 
 gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
-	gint ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
+	gint ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->win.app_window));
 
 	if (ocr_mode == -1) {
 		g_hash_table_destroy(ht_index);
@@ -509,17 +509,17 @@ static void do_index_erstellen_gesamt(Projekt *zond) {
 	GHashTable *ht_index = NULL;
 	gint ocr_mode = 0;
 
-	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
+	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->win.app_window));
 	if (ocr_mode == -1)
 		return;
 
-	wait_cursor_set(zond->app_window);
+	wait_cursor_set(zond->win.app_window);
 	ht_index = zond_treeviewfm_get_fileparts(
-			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE,
+			ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), FALSE, FALSE,
 			ocr_mode != SOND_OCR_MODE_FORCE, &error);
-	wait_cursor_reset(zond->app_window);
+	wait_cursor_reset(zond->win.app_window);
 	if (!ht_index) {
-		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
+		display_message(zond->win.app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
 		g_error_free(error);
 		return;
@@ -538,27 +538,27 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 	GHashTable *ht_index = NULL;
 
 	if (baum == KEIN_BAUM) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
 		return;
 	}
 
-	wait_cursor_set(zond->app_window);
+	wait_cursor_set(zond->win.app_window);
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
+				ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), TRUE, TRUE, FALSE,
 				&error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
-	wait_cursor_reset(zond->app_window);
+				ZOND_TREEVIEW(zond->trees.treeview[baum]), TRUE, &error);
+	wait_cursor_reset(zond->win.app_window);
 	if (!ht_index) {
-		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+		display_message(zond->win.app_window, "Fehler beim Ermitteln der Auswahl:\n",
 				error ? error->message : "?", NULL);
 		g_clear_error(&error);
 		return;
 	}
 	if (g_hash_table_size(ht_index) == 0) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
 		g_hash_table_destroy(ht_index);
 		return;
 	}
@@ -581,28 +581,28 @@ static void cb_app_index_erstellen(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void zond_index_loeschen_redraw(Projekt *zond) {
 	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
-		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[baum]));
+		gtk_widget_queue_draw(GTK_WIDGET(zond->trees.treeview[baum]));
 }
 
 static void do_index_loeschen_gesamt(Projekt *zond) {
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (!zond->wctx || !zond->wctx->index_ctx) {
-		display_message(zond->app_window, "Kein Index vorhanden", NULL);
+	if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+		display_message(zond->win.app_window, "Kein Index vorhanden", NULL);
 		return;
 	}
 
-	rc = abfrage_frage(zond->app_window, "Index löschen",
+	rc = abfrage_frage(zond->win.app_window, "Index löschen",
 			"Gesamten Index (alle Dateien) unwiderruflich löschen?", NULL);
 	if (rc != GTK_RESPONSE_YES)
 		return;
 
-	wait_cursor_set(zond->app_window);
-	rc = sond_index_ctx_delete_all(zond->wctx->index_ctx, &error);
-	wait_cursor_reset(zond->app_window);
+	wait_cursor_set(zond->win.app_window);
+	rc = sond_index_ctx_delete_all(zond->proj.wctx->index_ctx, &error);
+	wait_cursor_reset(zond->win.app_window);
 	if (!rc) {
-		display_message(zond->app_window, "Fehler beim Löschen des Index:\n",
+		display_message(zond->win.app_window, "Fehler beim Löschen des Index:\n",
 				error->message, NULL);
 		g_error_free(error);
 		return;
@@ -622,7 +622,7 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 	gpointer value = NULL;
 	gint rc = 0;
 
-	rc = abfrage_frage(zond->app_window, "Index löschen",
+	rc = abfrage_frage(zond->win.app_window, "Index löschen",
 			"Index für die ausgewählten Punkte unwiderruflich löschen?",
 			NULL);
 	if (rc != GTK_RESPONSE_YES) {
@@ -634,8 +634,8 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 	 * Statement); jede einzelne ist für sich schon atomar (Savepoint in
 	 * sond_index_ctx_delete_index()), ein Fehler bei einer Datei betrifft
 	 * die anderen also nicht. */
-	wait_cursor_set(zond->app_window);
-	gboolean in_tx = (sqlite3_exec(zond->wctx->index_ctx->db, "BEGIN;",
+	wait_cursor_set(zond->win.app_window);
+	gboolean in_tx = (sqlite3_exec(zond->proj.wctx->index_ctx->db, "BEGIN;",
 			NULL, NULL, NULL) == SQLITE_OK);
 
 	g_hash_table_iter_init(&iter, ht_index);
@@ -648,14 +648,14 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		 * löschen, Anhänge bleiben */
 		if (range && range->gmessage_message) {
 			GPtrArray *parts = sond_index_ctx_gmessage_message_parts(
-					zond->wctx->index_ctx, file_part_raw, NULL);
+					zond->proj.wctx->index_ctx, file_part_raw, NULL);
 
 			for (guint i = 0; i < parts->len; i++) {
 				GError *error = NULL;
 
-				if (!sond_index_ctx_delete_index(zond->wctx->index_ctx,
+				if (!sond_index_ctx_delete_index(zond->proj.wctx->index_ctx,
 						g_ptr_array_index(parts, i), -1, -1,
-						zond->project_dir, &error)) {
+						zond->proj.project_dir, &error)) {
 					LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
 							(gchar const*) g_ptr_array_index(parts, i),
 							error ? error->message : "?");
@@ -694,7 +694,7 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		 * coverage_invalidate() mit entfernt. */
 		if (range && range->pdf_pagetree_only) {
 			gint n_pages = sond_index_ctx_get_page_count(
-					zond->wctx->index_ctx, file_part);
+					zond->proj.wctx->index_ctx, file_part);
 
 			von = 0;
 			bis = (n_pages > 0) ? n_pages - 1 : G_MAXINT;
@@ -706,8 +706,8 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 			if (range && !range->pdf_pagetree_only && range->von >= 0)
 				sond_page_range_get(range, r, &von, &bis);
 
-			if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
-					von, bis, zond->project_dir, &error)) {
+			if (!sond_index_ctx_delete_index(zond->proj.wctx->index_ctx, file_part,
+					von, bis, zond->proj.project_dir, &error)) {
 				LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
 						file_part, error ? error->message : "?");
 				g_clear_error(&error);
@@ -718,8 +718,8 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 	}
 
 	if (in_tx)
-		sqlite3_exec(zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
-	wait_cursor_reset(zond->app_window);
+		sqlite3_exec(zond->proj.wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+	wait_cursor_reset(zond->win.app_window);
 
 	g_hash_table_destroy(ht_index);
 	zond_index_loeschen_redraw(zond);
@@ -733,32 +733,32 @@ void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
 	GHashTable *ht_index = NULL;
 
 	if (baum == KEIN_BAUM) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
 		return;
 	}
 
-	if (!zond->wctx || !zond->wctx->index_ctx) {
-		display_message(zond->app_window, "Kein Index vorhanden", NULL);
+	if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+		display_message(zond->win.app_window, "Kein Index vorhanden", NULL);
 		return;
 	}
 
-	wait_cursor_set(zond->app_window);
+	wait_cursor_set(zond->win.app_window);
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
+				ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), TRUE, TRUE, FALSE,
 				&error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
-	wait_cursor_reset(zond->app_window);
+				ZOND_TREEVIEW(zond->trees.treeview[baum]), TRUE, &error);
+	wait_cursor_reset(zond->win.app_window);
 	if (!ht_index) {
-		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+		display_message(zond->win.app_window, "Fehler beim Ermitteln der Auswahl:\n",
 				error ? error->message : "?", NULL);
 		g_clear_error(&error);
 		return;
 	}
 	if (g_hash_table_size(ht_index) == 0) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
 		g_hash_table_destroy(ht_index);
 		return;
 	}
@@ -783,7 +783,7 @@ static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_dateisuche(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 
-	sond_treeviewfm_search_activate(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+	sond_treeviewfm_search_activate(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
 }
 
 static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -813,19 +813,19 @@ static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d)
 
 static void cb_win_seadrive_pin_all(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
 			STVFM_PIN_STATE_PINNED);
 }
 
 static void cb_win_seadrive_unspec_all(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
 			STVFM_PIN_STATE_UNSPECIFIED);
 }
 
 static void cb_win_seadrive_unpin_all(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
 			STVFM_PIN_STATE_UNPINNED);
 }
 
@@ -838,15 +838,15 @@ static void seadrive_pin_auswahl(Projekt *zond, guint pin_state) {
 	Baum baum = zond_baum_aktuell(zond);
 
 	if (baum == KEIN_BAUM) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
 		return;
 	}
 	if (baum == BAUM_FS)
 		sond_treeviewfm_seadrive_pin_selection(
-				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), pin_state);
+				SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), pin_state);
 	else
 		zond_treeview_seadrive_apply_to_selection(
-				ZOND_TREEVIEW(zond->treeview[baum]), pin_state);
+				ZOND_TREEVIEW(zond->trees.treeview[baum]), pin_state);
 }
 
 static void cb_win_seadrive_pin_sel(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -894,9 +894,9 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (zond_baum_aktuell(zond) == KEIN_BAUM || !zond->dbase_zond)
+	if (zond_baum_aktuell(zond) == KEIN_BAUM || !zond->proj.dbase_zond)
 		return;
-	if (!sond_treeview_get_cursor(zond->treeview[zond_baum_aktuell(zond)], &iter))
+	if (!sond_treeview_get_cursor(zond->trees.treeview[zond_baum_aktuell(zond)], &iter))
 		return;
 
 	if (zond_baum_aktuell(zond) == BAUM_FS) {
@@ -904,14 +904,14 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 		SondTVFMItemType type = 0;
 
 		gtk_tree_model_get(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])),
 				&iter, 0, &stvfm_item, -1);
 		if (!stvfm_item)
 			return;
 
 		type = sond_tvfm_item_get_item_type(stvfm_item);
 		if (type == SOND_TVFM_ITEM_TYPE_DIR)
-			display_message(zond->app_window,
+			display_message(zond->win.app_window,
 					"Für Verzeichnisse nicht verfügbar", NULL);
 		else {
 			g_autofree gchar *file_part = sond_file_part_get_filepart(
@@ -933,14 +933,14 @@ static void cb_win_verwendung(GSimpleAction *a, GVariant *p, gpointer d) {
 		if (!node_id)
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)])),
+							GTK_TREE_VIEW(zond->trees.treeview[zond_baum_aktuell(zond)])),
 					&iter, 2, &node_id, -1);
 
 		rc = verwendung_anzeigen(zond, node_id, NULL, NULL, &error);
 	}
 
 	if (rc) {
-		display_message(zond->app_window,
+		display_message(zond->win.app_window,
 				"Herkunft und Verwendung nicht verfügbar\n\n", error->message,
 				NULL);
 		g_error_free(error);
@@ -953,7 +953,7 @@ static void cb_win_oeffnen_mit(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_win_suchen(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	gtk_popover_popup(GTK_POPOVER(zond->popover));
+	gtk_popover_popup(GTK_POPOVER(zond->win.popover));
 }
 
 static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -973,18 +973,18 @@ static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_alle_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
-	zond_treeview_expand_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
+	zond_treeview_expand_all(GTK_TREE_VIEW(zond->trees.treeview[zond_baum_aktuell(zond)]));
 }
 
 static void cb_win_zweig_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	GtkTreePath *path = NULL;
 	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]),
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->trees.treeview[zond_baum_aktuell(zond)]),
 			&path, NULL);
 	if (path) {
 		zond_treeview_expand_row_rekursiv(
-				GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]), path);
+				GTK_TREE_VIEW(zond->trees.treeview[zond_baum_aktuell(zond)]), path);
 		gtk_tree_path_free(path);
 	}
 }
@@ -992,14 +992,14 @@ static void cb_win_zweig_erweitern(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_win_reduzieren(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	if (zond_baum_aktuell(zond) == KEIN_BAUM) return;
-	gtk_tree_view_collapse_all(GTK_TREE_VIEW(zond->treeview[zond_baum_aktuell(zond)]));
+	gtk_tree_view_collapse_all(GTK_TREE_VIEW(zond->trees.treeview[zond_baum_aktuell(zond)]));
 }
 
 static void cb_win_refresh(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	GError *error = NULL;
 	if (project_load_trees(zond, &error) == -1) {
-		display_message(zond->app_window, "Fehler refresh\n\n",
+		display_message(zond->win.app_window, "Fehler refresh\n\n",
 				error->message, NULL);
 		g_error_free(error);
 	}
@@ -1013,7 +1013,7 @@ static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (test(zond, &error)) {
-		display_message(zond->app_window, "Test:\n\n",
+		display_message(zond->win.app_window, "Test:\n\n",
 				error ? error->message : NULL, NULL);
 		g_clear_error(&error);
 	}
@@ -1044,7 +1044,7 @@ static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 	if (rc == -1) {
 		//Abbruch des Passwortdialogs ist kein Fehler
 		if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-			display_message(zond->app_window, "XJustiz-Import fehlgeschlagen\n\n",
+			display_message(zond->win.app_window, "XJustiz-Import fehlgeschlagen\n\n",
 					error ? error->message : NULL, NULL);
 		g_clear_error(&error);
 		return;
@@ -1066,7 +1066,7 @@ static void cb_win_xjustiz_import_common(Projekt *zond, gboolean child) {
 						(gchar const*) g_ptr_array_index(arr_nicht_gefunden, i));
 		}
 
-		display_message(zond->app_window, text->str, NULL);
+		display_message(zond->win.app_window, text->str, NULL);
 		g_string_free(text, TRUE);
 	}
 
@@ -1088,15 +1088,15 @@ static void cb_win_xjustiz_import_up(GSimpleAction *a, GVariant *p, gpointer d) 
 static void cb_app_zoom(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	gchar *text = g_strdup_printf("%.0f",
-			g_settings_get_double(zond->settings, "zoom"));
-	abfrage_frage(zond->app_window, "Zoom:", "Faktor eingeben", &text);
+			g_settings_get_double(zond->app.settings, "zoom"));
+	abfrage_frage(zond->win.app_window, "Zoom:", "Faktor eingeben", &text);
 	if (!g_strcmp0(text, "")) { g_free(text); return; }
 	guint zoom = 0;
 	if (string_to_guint(text, &zoom) == 0
 			&& zoom >= ZOOM_MIN && zoom <= ZOOM_MAX)
-		g_settings_set_double(zond->settings, "zoom", (gdouble) zoom);
+		g_settings_set_double(zond->app.settings, "zoom", (gdouble) zoom);
 	else
-		display_message(zond->app_window, "Eingabe nicht gültig", NULL);
+		display_message(zond->win.app_window, "Eingabe nicht gültig", NULL);
 	g_free(text);
 }
 
@@ -1106,12 +1106,12 @@ static void cb_app_autosave(GSimpleAction *a, GVariant *p, gpointer d) {
 	gboolean active = !g_variant_get_boolean(state);
 	g_variant_unref(state);
 	g_simple_action_set_state(a, g_variant_new_boolean(active));
-	g_settings_set_boolean(zond->settings, "autosave", active);
-	if (!zond->dbase_zond) return;
+	g_settings_set_boolean(zond->app.settings, "autosave", active);
+	if (!zond->proj.dbase_zond) return;
 	if (active)
 		g_timeout_add_seconds(AUTOSAVE_INTERVAL_SECONDS, project_timeout_autosave, zond);
 	else if (!g_source_remove_by_user_data(zond))
-		display_message(zond->app_window,
+		display_message(zond->win.app_window,
 				"autosave-Timeout konnte nicht entfernt werden", NULL);
 }
 
@@ -1121,7 +1121,7 @@ static void cb_app_autosave(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_app_ueber(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	display_message(zond->app_window,
+	display_message(zond->win.app_window,
 			"Version: " ZOND_VERSION_STR, NULL);
 }
 
@@ -1129,16 +1129,16 @@ static void cb_app_update(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	GError *error = NULL;
 	gint cancel = 0;
-	InfoWindow *info_window = info_window_open(zond->app_window, &cancel,
+	InfoWindow *info_window = info_window_open(zond->win.app_window, &cancel,
 			"Zond Updater");
 	gint rc = zond_update(zond, info_window, &error);
 	info_window_kill(info_window);
 	if (rc == -1) {
-		display_message(zond->app_window, "Update fehlgeschlagen\n\n",
+		display_message(zond->win.app_window, "Update fehlgeschlagen\n\n",
 				error->message, NULL);
 		g_error_free(error);
 	} else if (rc == 1)
-		display_message(zond->app_window, "Aktuelle Version installiert", NULL);
+		display_message(zond->win.app_window, "Aktuelle Version installiert", NULL);
 }
 
 /* ============================================================================
@@ -1147,8 +1147,8 @@ static void cb_app_update(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
 	Projekt *zond = (Projekt*) data;
-	GtkWidget *swindow_fs   = g_object_get_data(G_OBJECT(zond->hpaned), "swindow-fs");
-	GtkWidget *swindow_ausw = g_object_get_data(G_OBJECT(zond->hpaned), "swindow-auswertung");
+	GtkWidget *swindow_fs   = g_object_get_data(G_OBJECT(zond->win.hpaned), "swindow-fs");
+	GtkWidget *swindow_ausw = g_object_get_data(G_OBJECT(zond->win.hpaned), "swindow-auswertung");
 
 	if (gtk_toggle_button_get_active(button)) {
 		/* FS-Modus: FS-Tree zeigen, Auswertungs-Tree verstecken */
@@ -1166,7 +1166,7 @@ static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
  * ========================================================================== */
 
 static void init_app_actions(Projekt *zond) {
-	GtkApplication *app = zond->app;
+	GtkApplication *app = zond->app.app;
 
 #define APP_ACT(name, cb) \
 	do { \
@@ -1188,7 +1188,7 @@ static void init_app_actions(Projekt *zond) {
 	APP_ACT("update",             cb_app_update);
 	APP_ACT("zoom",               cb_app_zoom);
 
-	{ gboolean init = g_settings_get_boolean(zond->settings, "autosave");
+	{ gboolean init = g_settings_get_boolean(zond->app.settings, "autosave");
 	  GSimpleAction *a = g_simple_action_new_stateful("autosave", NULL,
 			g_variant_new_boolean(init));
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_autosave), zond);
@@ -1206,7 +1206,7 @@ static void init_app_actions(Projekt *zond) {
  * ========================================================================== */
 
 static void init_win_actions(Projekt *zond) {
-	GtkApplication *app = zond->app;
+	GtkApplication *app = zond->app.app;
 	GSimpleActionGroup *ag = g_simple_action_group_new();
 
 #define WIN_ACT(name, cb) \
@@ -1242,14 +1242,14 @@ static void init_win_actions(Projekt *zond) {
 	{ GSimpleAction *a = g_simple_action_new("projekt-speichern", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_speichern), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.speichern = a; }
+	  zond->win.menu.speichern = a; }
 
 	{ GSimpleAction *a = g_simple_action_new("projekt-schliessen", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_schliessen), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.schliessen = a; }
+	  zond->win.menu.schliessen = a; }
 
-	{ gboolean init = g_settings_get_boolean(zond->settings, "autosave");
+	{ gboolean init = g_settings_get_boolean(zond->app.settings, "autosave");
 	  GSimpleAction *a = g_simple_action_new_stateful("autosave", NULL,
 			g_variant_new_boolean(init));
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_autosave), zond);
@@ -1259,7 +1259,7 @@ static void init_win_actions(Projekt *zond) {
 	{ GSimpleAction *a = g_simple_action_new("export-odt", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_export), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.export_odt = a; }
+	  zond->win.menu.export_odt = a; }
 
 	WIN_ACT("einf-ge",       cb_win_einf_ge);
 	WIN_ACT("einf-up",       cb_win_einf_up);
@@ -1295,24 +1295,24 @@ static void init_win_actions(Projekt *zond) {
 	{ GSimpleAction *a = g_simple_action_new("test", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_test), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.extras = a; }
+	  zond->win.menu.extras = a; }
 
 	{ GSimpleAction *a = g_simple_action_new("db-pruefen", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_db_pruefen), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.db_pruefen = a; }
+	  zond->win.menu.db_pruefen = a; }
 
 	WIN_ACT("xjustiz-import-ge", cb_win_xjustiz_import_ge);
 	WIN_ACT("xjustiz-import-up", cb_win_xjustiz_import_up);
 
-	zond->menu.struktur = G_SIMPLE_ACTION(
+	zond->win.menu.struktur = G_SIMPLE_ACTION(
 			g_action_map_lookup_action(G_ACTION_MAP(ag), "einf-ge"));
-	zond->menu.ansicht = G_SIMPLE_ACTION(
+	zond->win.menu.ansicht = G_SIMPLE_ACTION(
 			g_action_map_lookup_action(G_ACTION_MAP(ag), "alle-erweitern"));
 
 #undef WIN_ACT
 
-	gtk_widget_insert_action_group(zond->app_window, "win",
+	gtk_widget_insert_action_group(zond->win.app_window, "win",
 			G_ACTION_GROUP(ag));
 	g_object_unref(ag);
 
@@ -1476,8 +1476,8 @@ static GMenuModel* build_menu(Projekt *zond) {
 	GMenu *sub_icon = g_menu_new();
 	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
 		gchar *action = g_strdup_printf("win.icon-%d", i);
-		GMenuItem *item = g_menu_item_new(zond->icon[i].display_name, action);
-		GIcon *icon = g_themed_icon_new(zond->icon[i].icon_name);
+		GMenuItem *item = g_menu_item_new(zond->app.icon[i].display_name, action);
+		GIcon *icon = g_themed_icon_new(zond->app.icon[i].icon_name);
 		g_menu_item_set_icon(item, icon);
 		g_object_unref(icon);
 		g_menu_append_item(sub_icon, item);
@@ -1549,12 +1549,12 @@ void init_headerbar(Projekt *zond) {
 			":minimize,maximize,close");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
 
-	gtk_window_set_titlebar(GTK_WINDOW(zond->app_window), headerbar);
+	gtk_window_set_titlebar(GTK_WINDOW(zond->win.app_window), headerbar);
 
-	zond->fs_button = gtk_toggle_button_new_with_label("FS");
-	g_signal_connect(zond->fs_button, "toggled",
+	zond->win.fs_button = gtk_toggle_button_new_with_label("FS");
+	g_signal_connect(zond->win.fs_button, "toggled",
 			G_CALLBACK(cb_button_mode_toggled), zond);
-	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), zond->fs_button);
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), zond->win.fs_button);
 
 	init_app_actions(zond);
 	init_win_actions(zond);
@@ -1568,23 +1568,23 @@ void init_headerbar(Projekt *zond) {
 	g_object_unref(model);
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), menubar);
 
-	g_simple_action_set_enabled(zond->menu.speichern,      FALSE);
-	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
-	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);
-	g_simple_action_set_enabled(zond->menu.db_pruefen,     FALSE);
+	g_simple_action_set_enabled(zond->win.menu.speichern,      FALSE);
+	g_simple_action_set_enabled(zond->win.menu.schliessen,     FALSE);
+	g_simple_action_set_enabled(zond->win.menu.export_odt,     FALSE);
+	g_simple_action_set_enabled(zond->win.menu.db_pruefen,     FALSE);
 	headerbar_set_seadrive_sensitive(zond, FALSE);
 
 #ifdef _WIN32
 	GtkWidget *label_seadrive = gtk_label_new("");
 	gtk_widget_show(label_seadrive);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(headerbar), label_seadrive);
-	g_object_set_data(G_OBJECT(zond->app_window), "seadrive-label",
+	g_object_set_data(G_OBJECT(zond->win.app_window), "seadrive-label",
 			label_seadrive);
 #endif
 }
 
 void headerbar_set_seadrive_sensitive(Projekt *zond, gboolean sensitive) {
-	GActionGroup *ag = gtk_widget_get_action_group(zond->app_window, "win");
+	GActionGroup *ag = gtk_widget_get_action_group(zond->win.app_window, "win");
 	const gchar *names[] = { "sd-pin-all", "sd-unspec-all", "sd-unpin-all",
 			"sd-pin-sel", "sd-unspec-sel", "sd-unpin-sel" };
 

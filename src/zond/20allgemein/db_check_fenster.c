@@ -364,7 +364,7 @@ static gchar* nr_bezeichnung(ZondDBase *work, gint64 id) {
 
 //Wird der Knoten im geladenen Baum angezeigt? Leer bei Wurzeln, Dateien und unbekannten Knoten
 static gchar const* im_baum_text(Fenster *f, gint64 id) {
-	gint typ = knoten_typ(f->zond->dbase_zond->zond_dbase_work, id);
+	gint typ = knoten_typ(f->zond->proj.dbase_zond->zond_dbase_work, id);
 
 	if (id <= 0 || typ <= 0)
 		return "";
@@ -375,7 +375,7 @@ static gchar const* im_baum_text(Fenster *f, gint64 id) {
 			Baum baum = (k == 0) ? BAUM_INHALT : BAUM_AUSWERTUNG;
 			GtkTreeIter *iter = zond_tree_store_get_iter_by_node_id(
 					ZOND_TREE_STORE(gtk_tree_view_get_model(
-							GTK_TREE_VIEW(f->zond->treeview[baum]))), (gint) id);
+							GTK_TREE_VIEW(f->zond->trees.treeview[baum]))), (gint) id);
 
 			if (iter) {
 				gtk_tree_iter_free(iter);
@@ -595,7 +595,7 @@ static void aufklappzeile_anfuegen(Fenster *f, GtkTreeIter *eltern, gchar const 
 //Feld, das auf einen anderen Knoten zeigt; existiert er, lässt es sich aufklappen
 static void nachbar_anfuegen(Fenster *f, GtkTreeIter *eltern, gchar const *name,
 		gint64 id, gchar const *leer, gint64 sprung, gint64 besitzer) {
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	g_autofree gchar *fehler = feld_fehler(f, besitzer, name);
 	g_autofree gchar *wert = NULL;
 
@@ -648,7 +648,7 @@ static GArray* ids_abfragen(ZondDBase *work, gchar const *sql, gint64 p1, gint64
 //seine Verbindungen zu anderen Knoten ein; Symbol und Text stehen in der Hauptzeile
 static void datensatz_anfuegen(Fenster *f, GtkTreeIter *eltern, gint64 id,
 		gint64 sprung) {
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	sqlite3_stmt *stmt = NULL;
 	gint type = -1;
 	gint64 parent = 0;
@@ -777,7 +777,7 @@ static void nachbar_fuellen(Fenster *f, GtkTreeIter *iter) {
 
 //Füllt die Kinderzeile beim ersten Aufklappen: ein aufklappbarer Eintrag je Kind
 static void kinder_fuellen(Fenster *f, GtkTreeIter *iter) {
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	gint64 id = 0;
 	g_autoptr(GArray) kinder = NULL;
 	guint grenze = 0;
@@ -840,7 +840,7 @@ static gboolean gehoert_zu(DbMangel const *m, DbMangel const *erster) {
 
 //Legt die Zeile eines Knotens an: Beschreibung = alle seine Fehler, darunter die Felder
 static void knoten_anfuegen(Fenster *f, GtkTreeIter *iter_a, DbMangel *erster) {
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	GtkTreeIter iter_k = { 0 };
 	g_autofree gchar *kt = NULL;
 	g_autofree gchar *kt_text = NULL;
@@ -907,7 +907,7 @@ static gint cmp_mangel_sort(gconstpointer pa, gconstpointer pb, gpointer data) {
 	Fenster *f = data;
 	DbMangel const *a = *(DbMangel* const*) pa;
 	DbMangel const *b = *(DbMangel* const*) pb;
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	gint c = 0;
 
 	if ((a->knoten_id <= 0) != (b->knoten_id <= 0))
@@ -1035,14 +1035,14 @@ static void summe_anzeigen(Fenster *f) {
 static void fenster_pruefen_mit(Fenster *f, GHashTable *fehlend) {
 	GError *error = NULL;
 
-	if (!f->zond->dbase_zond) {
+	if (!f->zond->proj.dbase_zond) {
 		gtk_widget_destroy(f->fenster);
 
 		return;
 	}
 
-	if (db_regeln_pruefen(f->zond->dbase_zond->zond_dbase_work, TRUE,
-			fehlend, f->zond->project_dir, &f->erg, &error)) {
+	if (db_regeln_pruefen(f->zond->proj.dbase_zond->zond_dbase_work, TRUE,
+			fehlend, f->zond->proj.project_dir, &f->erg, &error)) {
 		display_message(f->fenster, "Prüfung fehlgeschlagen:\n\n",
 				error->message, NULL);
 		g_clear_error(&error);
@@ -1187,7 +1187,7 @@ static void datei_pruefung_starten(Fenster *f) {
 	DateiPruefung *d = NULL;
 	GTask *task = NULL;
 
-	if (!f->zond->project_dir || !sond_exists(f->zond->project_dir)) {
+	if (!f->zond->proj.project_dir || !sond_exists(f->zond->proj.project_dir)) {
 		display_message(f->fenster, "Das Projektverzeichnis ist nicht erreichbar "
 				"(Laufwerk verbunden?). Die Dateien werden nicht geprüft.", NULL);
 		fenster_pruefen_mit(f, NULL);
@@ -1196,7 +1196,7 @@ static void datei_pruefung_starten(Fenster *f) {
 	}
 
 	d = g_new0(DateiPruefung, 1);
-	d->pfade = db_regeln_dateipfade(f->zond->dbase_zond->zond_dbase_work, &error);
+	d->pfade = db_regeln_dateipfade(f->zond->proj.dbase_zond->zond_dbase_work, &error);
 	if (!d->pfade) {
 		display_message(f->fenster, "Prüfung fehlgeschlagen:\n\n", error->message,
 				NULL);
@@ -1205,7 +1205,7 @@ static void datei_pruefung_starten(Fenster *f) {
 
 		return;
 	}
-	d->projekt_dir = g_strdup(f->zond->project_dir);
+	d->projekt_dir = g_strdup(f->zond->proj.project_dir);
 	d->fehlend = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
 	if (!d->pfade->len) {
@@ -1232,7 +1232,7 @@ static void datei_pruefung_starten(Fenster *f) {
 }
 
 static void fenster_pruefen(Fenster *f) {
-	if (!f->zond->dbase_zond) {
+	if (!f->zond->proj.dbase_zond) {
 		gtk_widget_destroy(f->fenster);
 
 		return;
@@ -1312,7 +1312,7 @@ static gboolean cb_tooltip(GtkWidget *tv, gint x, gint y, gboolean keyboard,
 		return FALSE;
 	}
 	if (zeile == ZEILE_MANGEL && idx == 2 && m) { //was für diese Art gilt
-		gint g = gruppe_von(((Fenster*) data)->zond->dbase_zond->zond_dbase_work, m);
+		gint g = gruppe_von(((Fenster*) data)->zond->proj.dbase_zond->zond_dbase_work, m);
 
 		if (g >= 0 && g < (gint) G_N_ELEMENTS(gruppen))
 			text = g_strdup(gruppen[g].gilt);
@@ -1453,7 +1453,7 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 	gint zahlen[DB_NUM_AKT];
 	gint gesamt = 0;
 
-	if (!f->zond->dbase_zond)
+	if (!f->zond->proj.dbase_zond)
 		return;
 
 	zaehle_aktionen(f, zahlen);
@@ -1478,7 +1478,7 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 				"Einträge rücken nach. Nichts wird gelöscht, worauf noch etwas von "
 				"außerhalb verweist. Die Dateien auf der Festplatte bleiben "
 				"erhalten.");
-	if (!f->zond->dbase_zond->sicherung_gemacht)
+	if (!f->zond->proj.dbase_zond->sicherung_gemacht)
 		g_string_append(frage, "\n\nVorher wird eine Sicherungskopie der "
 				"Projektdatei angelegt.");
 
@@ -1494,7 +1494,7 @@ static void cb_ausfuehren(GtkButton *button, gpointer data) {
 		return;
 	}
 
-	if (db_regeln_ausfuehren(f->zond->dbase_zond->zond_dbase_work,
+	if (db_regeln_ausfuehren(f->zond->proj.dbase_zond->zond_dbase_work,
 			f->erg.maengel, &ae, &error)) {
 		display_message(f->fenster, "Ausführen fehlgeschlagen "
 				"(zurückgerollt):\n\n", error->message, NULL);
@@ -1562,20 +1562,20 @@ static gboolean springe_versuch(Fenster *f, gint64 id) {
 	/* Anbindungen stehen im Baum unter der Nummer ihres Ziels (Datei/Abschnitt),
 	 * Links als Kopfzeile mit der Nummer des Links unter der Nummer ihres Ziels
 	 * (diese Kopfzeile liegt in dem Baum, in dem der Link steht). */
-	if (!zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
+	if (!zond_dbase_get_type_and_link(zond->proj.dbase_zond->zond_dbase_work,
 			(gint) id, &type, &link, &error) && link > 0) {
 		if (type == 2) {
 			//die Datei liegt in der Datenbank im Dateibaum; im Baum steht sie dort, wo die Anbindung steht
-			zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work, (gint) id,
+			zond_dbase_get_tree_root(zond->proj.dbase_zond->zond_dbase_work, (gint) id,
 					&root_anker, NULL);
 			id = link;
 		} else if (type == 4) {
 			gint root_link = 0;
 			gint root_ziel = 0;
 
-			if (!zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work,
+			if (!zond_dbase_get_tree_root(zond->proj.dbase_zond->zond_dbase_work,
 					(gint) id, &root_link, NULL)
-					&& !zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work,
+					&& !zond_dbase_get_tree_root(zond->proj.dbase_zond->zond_dbase_work,
 							link, &root_ziel, NULL)
 					&& (root_link == 1 || root_link == 2)
 					&& (root_ziel == 1 || root_ziel == 2)) {
@@ -1583,16 +1583,16 @@ static gboolean springe_versuch(Fenster *f, gint64 id) {
 				Baum b_link = (root_link == 1) ? BAUM_INHALT : BAUM_AUSWERTUNG;
 				GtkTreeIter *iter_link = zond_tree_store_get_iter_link(
 						ZOND_TREE_STORE(gtk_tree_view_get_model(
-								GTK_TREE_VIEW(zond->treeview[b_ziel]))), link,
+								GTK_TREE_VIEW(zond->trees.treeview[b_ziel]))), link,
 						(gint) id);
 
 				if (iter_link) {
-					sond_treeview_expand_to_row(zond->treeview[b_link], iter_link);
-					sond_treeview_set_cursor(zond->treeview[b_link], iter_link);
+					sond_treeview_expand_to_row(zond->trees.treeview[b_link], iter_link);
+					sond_treeview_set_cursor(zond->trees.treeview[b_link], iter_link);
 					gtk_tree_iter_free(iter_link);
 
-					gtk_window_present(GTK_WINDOW(zond->app_window));
-					gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[b_link]));
+					gtk_window_present(GTK_WINDOW(zond->win.app_window));
+					gtk_widget_grab_focus(GTK_WIDGET(zond->trees.treeview[b_link]));
 
 					return TRUE;
 				}
@@ -1604,7 +1604,7 @@ static gboolean springe_versuch(Fenster *f, gint64 id) {
 
 	if (root_anker == 1 || root_anker == 2)
 		root = root_anker;
-	else if (zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work, (gint) id,
+	else if (zond_dbase_get_tree_root(zond->proj.dbase_zond->zond_dbase_work, (gint) id,
 			&root, &error)) {
 		g_clear_error(&error);
 
@@ -1620,25 +1620,25 @@ static gboolean springe_versuch(Fenster *f, gint64 id) {
 			continue;
 		iter = zond_tree_store_get_iter_by_node_id(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(zond->treeview[b]))), (gint) id);
+						GTK_TREE_VIEW(zond->trees.treeview[b]))), (gint) id);
 		baum = b;
 	}
 	if (!iter)
 		return FALSE;
 
-	sond_treeview_expand_to_row(zond->treeview[baum], iter);
-	sond_treeview_set_cursor(zond->treeview[baum], iter);
+	sond_treeview_expand_to_row(zond->trees.treeview[baum], iter);
+	sond_treeview_set_cursor(zond->trees.treeview[baum], iter);
 	gtk_tree_iter_free(iter);
 
-	gtk_window_present(GTK_WINDOW(zond->app_window));
-	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[baum]));
+	gtk_window_present(GTK_WINDOW(zond->win.app_window));
+	gtk_widget_grab_focus(GTK_WIDGET(zond->trees.treeview[baum]));
 
 	return TRUE;
 }
 
 //Springt zum Knoten, sonst zum nächsten übergeordneten, der im Baum steht
 static void springe_zu(Fenster *f, gint64 id) {
-	ZondDBase *work = f->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *work = f->zond->proj.dbase_zond->zond_dbase_work;
 	gint64 cur = id;
 
 	if (springe_versuch(f, id))
@@ -1679,7 +1679,7 @@ static void cb_row_activated(GtkTreeView *tv, GtkTreePath *path,
 	gint64 id = 0;
 	gint zeile = 0;
 
-	if (!f->zond->dbase_zond || !gtk_tree_model_get_iter(model, &iter, path))
+	if (!f->zond->proj.dbase_zond || !gtk_tree_model_get_iter(model, &iter, path))
 		return;
 
 	gtk_tree_model_get(model, &iter, SP_KNOTEN, &id, SP_ZEILE, &zeile, -1);
@@ -1912,7 +1912,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	GtkWidget *b_standard = NULL;
 	GtkWidget *b_ausfuehren = NULL;
 
-	if (!zond->dbase_zond)
+	if (!zond->proj.dbase_zond)
 		return NULL;
 
 	if (g_fenster) {
@@ -1931,7 +1931,7 @@ static Fenster* fenster_erzeugen(Projekt *zond, gboolean vor_laden) {
 	f->fenster = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(f->fenster), "Datenbank prüfen");
 	gtk_window_set_transient_for(GTK_WINDOW(f->fenster),
-			GTK_WINDOW(zond->app_window));
+			GTK_WINDOW(zond->win.app_window));
 	{
 		/* Das Hauptfenster liegt in der linken Bildschirmhälfte (zond_init.c);
 		 * dieses Fenster daneben, damit beide sichtbar sind. */
@@ -2079,11 +2079,11 @@ static gboolean hat_aktive_maengel(Projekt *zond) {
 	GError *error = NULL;
 	gboolean aktiv = FALSE;
 
-	if (!zond->dbase_zond)
+	if (!zond->proj.dbase_zond)
 		return FALSE;
 
-	if (db_regeln_pruefen(zond->dbase_zond->zond_dbase_work, FALSE, NULL,
-			zond->project_dir, &erg,
+	if (db_regeln_pruefen(zond->proj.dbase_zond->zond_dbase_work, FALSE, NULL,
+			zond->proj.project_dir, &erg,
 			&error)) {
 		LOG_WARN("%s: %s", __func__, error->message);
 		g_clear_error(&error);

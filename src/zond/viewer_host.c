@@ -96,7 +96,7 @@ static gint viewer_host_anbindung(Projekt *zond, GPtrArray *arr_document_page,
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
-		rc = viewer_host_anbindung_int(zond->dbase_zond->zond_dbase_work,
+		rc = viewer_host_anbindung_int(zond->proj.dbase_zond->zond_dbase_work,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
@@ -104,7 +104,7 @@ static gint viewer_host_anbindung(Projekt *zond, GPtrArray *arr_document_page,
 			return (rc == -1) ? -1 : 1;
 		}
 
-		rc = viewer_host_anbindung_int(zond->dbase_zond->zond_dbase_store,
+		rc = viewer_host_anbindung_int(zond->proj.dbase_zond->zond_dbase_store,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
@@ -298,7 +298,7 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 				}
 
 				if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
-						zond->project_dir, &error)) {
+						zond->proj.project_dir, &error)) {
 					LOG_WARN("%s\n", error->message);
 					g_clear_error(&error);
 				}
@@ -355,7 +355,7 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 			g_array_unref(pages_to_write);
 
 			if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
-					zond->project_dir, &error)) {
+					zond->proj.project_dir, &error)) {
 				LOG_WARN("%s\n", error->message);
 				g_clear_error(&error);
 			}
@@ -498,9 +498,9 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 			if (!sond_index_ctx_coverage_mark(index_ctx, filename, min_mode, &error)) {
 				LOG_WARN("%s\n", error->message);
 				g_clear_error(&error);
-			} else if (zond->project_dir) {
+			} else if (zond->proj.project_dir) {
 				if (!sond_index_ctx_coverage_try_collapse(index_ctx, filename,
-						zond->project_dir, &error)) {
+						zond->proj.project_dir, &error)) {
 					LOG_WARN("%s\n", error->message);
 					g_clear_error(&error);
 				}
@@ -532,7 +532,7 @@ static gint viewer_host_cb_anbindung_requested(PdfViewerSession *session,
 	if (rc)
 		return -1;
 
-	gtk_window_present(GTK_WINDOW(host->zond->app_window));
+	gtk_window_present(GTK_WINDOW(host->zond->win.app_window));
 
 	return 0;
 }
@@ -571,7 +571,7 @@ static void viewer_host_cb_save_started(PdfViewerSession *session,
 	ViewerHost *host = data;
 
 	//Projekt-Zustand (geändert oder nicht) zwischenspeichern
-	host->changed = host->zond->dbase_zond->changed;
+	host->changed = host->zond->proj.dbase_zond->changed;
 
 	return;
 }
@@ -587,24 +587,24 @@ static gint viewer_host_cb_save_prepare(PdfViewerSession *session,
 	//Index-DB als Schema idx anhängen (vor der Transaktion): ihre
 	//Änderungen liegen dann im selben Commit wie store/work und werden
 	//mit zurückgerollt, wenn das Speichern scheitert
-	if (zond->wctx && zond->wctx->index_ctx) {
-		rc = dbase_zond_attach_index(zond->dbase_zond,
-				zond->wctx->index_ctx->db_path, error);
+	if (zond->proj.wctx && zond->proj.wctx->index_ctx) {
+		rc = dbase_zond_attach_index(zond->proj.dbase_zond,
+				zond->proj.wctx->index_ctx->db_path, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 
 			return -1;
 		}
-		dbase_zond_index_ctx(zond->dbase_zond, &host->index_tx,
-				zond->wctx->index_ctx);
+		dbase_zond_index_ctx(zond->proj.dbase_zond, &host->index_tx,
+				zond->proj.wctx->index_ctx);
 		host->index_tx_active = TRUE;
 	}
 
-	rc = dbase_zond_begin(zond->dbase_zond, error);
+	rc = dbase_zond_begin(zond->proj.dbase_zond, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 		if (host->index_tx_active)
-			dbase_zond_detach_index(zond->dbase_zond);
+			dbase_zond_detach_index(zond->proj.dbase_zond);
 
 		return -1;
 	}
@@ -616,13 +616,13 @@ static gint viewer_host_cb_save_prepare(PdfViewerSession *session,
 			host->index_tx_active ? &host->index_tx : NULL);
 
 	//Anbindungen in db anpassen
-	rc = viewer_host_update_sections(zond->dbase_zond, dd, error);
+	rc = viewer_host_update_sections(zond->proj.dbase_zond, dd, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 
-		dbase_zond_rollback(zond->dbase_zond, error);
+		dbase_zond_rollback(zond->proj.dbase_zond, error);
 		if (host->index_tx_active)
-			dbase_zond_detach_index(zond->dbase_zond);
+			dbase_zond_detach_index(zond->proj.dbase_zond);
 
 		return -1;
 	}
@@ -638,16 +638,16 @@ static gint viewer_host_cb_save_finished(PdfViewerSession *session,
 	gint rc = 0;
 
 	if (!ok) {
-		dbase_zond_rollback(zond->dbase_zond, error);
+		dbase_zond_rollback(zond->proj.dbase_zond, error);
 		if (host->index_tx_active)
-			dbase_zond_detach_index(zond->dbase_zond);
+			dbase_zond_detach_index(zond->proj.dbase_zond);
 
 		return 0;
 	}
 
-	rc = dbase_zond_commit(zond->dbase_zond, error);
+	rc = dbase_zond_commit(zond->proj.dbase_zond, error);
 	if (host->index_tx_active)
-		dbase_zond_detach_index(zond->dbase_zond);
+		dbase_zond_detach_index(zond->proj.dbase_zond);
 
 	return rc ? -1 : 0;
 }

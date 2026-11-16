@@ -45,10 +45,10 @@ static gboolean export_dateien_laden(Projekt *zond, GPtrArray *eintraege) {
 	GPtrArray *pfade = NULL;
 	gboolean ok = TRUE;
 
-	if (!zond->treeview[BAUM_FS])
+	if (!zond->trees.treeview[BAUM_FS])
 		return TRUE;
 
-	stvfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	stvfm = SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]);
 	root = sond_treeviewfm_get_root(stvfm);
 	if (!root)
 		return TRUE;
@@ -77,7 +77,7 @@ static gboolean export_dateien_laden(Projekt *zond, GPtrArray *eintraege) {
 	}
 
 	if (pfade->len > 0)
-		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->win.app_window), pfade);
 
 	g_ptr_array_unref(pfade);
 	g_hash_table_destroy(ht);
@@ -120,8 +120,8 @@ gint export_activate(Projekt *zond, GError **error) {
 		endung = ".odt";
 
 	vorschlag = g_strdup_printf("%s%s",
-			zond->project_name ? zond->project_name : "Export", endung);
-	filename = filename_speichern(GTK_WINDOW(zond->app_window), "Datei wählen",
+			zond->proj.project_name ? zond->proj.project_name : "Export", endung);
+	filename = filename_speichern(GTK_WINDOW(zond->win.app_window), "Datei wählen",
 			vorschlag);
 	g_free(vorschlag);
 	if (!filename)

@@ -41,8 +41,8 @@ SondPromptResult zond_password_dialog(gchar const *what, gboolean wrong,
 	if (g_application_get_default())
 		parent = gtk_application_get_active_window(
 				GTK_APPLICATION(g_application_get_default()));
-	if (!parent && zond && zond->app_window)
-		parent = GTK_WINDOW(zond->app_window);
+	if (!parent && zond && zond->win.app_window)
+		parent = GTK_WINDOW(zond->win.app_window);
 
 	dialog = gtk_dialog_new_with_buttons("Passwort", parent,
 			GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);

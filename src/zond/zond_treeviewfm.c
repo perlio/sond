@@ -90,16 +90,16 @@ G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM
 //Index-DB als Schema idx anhängen; VOR dbase_zond_begin(). Ohne Index-Kontext
 //ist nichts zu tun.
 static gint index_tx_begin(ZondTreeviewFMPrivate *priv, GError **error) {
-	if (!priv->zond->wctx || !priv->zond->wctx->index_ctx
+	if (!priv->zond->proj.wctx || !priv->zond->proj.wctx->index_ctx
 			|| priv->index_tx_active)
 		return 0;
 
-	if (dbase_zond_attach_index(priv->zond->dbase_zond,
-			priv->zond->wctx->index_ctx->db_path, error))
+	if (dbase_zond_attach_index(priv->zond->proj.dbase_zond,
+			priv->zond->proj.wctx->index_ctx->db_path, error))
 		return -1;
 
-	dbase_zond_index_ctx(priv->zond->dbase_zond, &priv->index_tx,
-			priv->zond->wctx->index_ctx);
+	dbase_zond_index_ctx(priv->zond->proj.dbase_zond, &priv->index_tx,
+			priv->zond->proj.wctx->index_ctx);
 	priv->index_tx_active = TRUE;
 
 	return 0;
@@ -110,7 +110,7 @@ static void index_tx_end(ZondTreeviewFMPrivate *priv) {
 	if (!priv->index_tx_active)
 		return;
 
-	dbase_zond_detach_index(priv->zond->dbase_zond);
+	dbase_zond_detach_index(priv->zond->proj.dbase_zond);
 	priv->index_tx_active = FALSE;
 
 	return;
@@ -123,7 +123,7 @@ static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
 
 //Transaktion verwerfen (Fehlerweg von before_delete/before_move)
 static void tx_abort(ZondTreeviewFMPrivate *priv) {
-	dbase_zond_rollback(priv->zond->dbase_zond, NULL);
+	dbase_zond_rollback(priv->zond->proj.dbase_zond, NULL);
 	index_tx_end(priv);
 
 	return;
@@ -141,7 +141,7 @@ static void set_idx_error(GError **error, gchar const *func,
 
 //Löschen gesperrt: Eintrag steht noch in der Speicher-Datenbank
 static void show_still_in_store(ZondTreeviewFMPrivate *priv) {
-	display_message(priv->zond->app_window,
+	display_message(priv->zond->win.app_window,
 			"Die zu löschende Datei bzw. der Abschnitt ist "
 			"noch in der Speicher-Datenbank vorhanden.\n"
 			"Bitte zuerst das Projekt speichern, "
@@ -186,7 +186,7 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 
 		//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
 		rc = zond_dbase_test_path_section(
-				priv->zond->dbase_zond->zond_dbase_work, filepart,
+				priv->zond->proj.dbase_zond->zond_dbase_work, filepart,
 				section, TRUE, error);
 		if (rc == -1)
 			return -1;
@@ -308,14 +308,14 @@ static void structure_pending_clear(ZondTreeviewFMPrivate *priv) {
 /* Nach erfolgreicher Aktion: Struktur der vorgemerkten PDFs/Mails neu in
  * die Index-DB einlesen (Anhang-Adressen bzw. Mimeparts) */
 static void structure_refresh(ZondTreeviewFMPrivate *priv) {
-	if (!priv->pending_structure || !priv->zond->wctx ||
-			!priv->zond->wctx->index_ctx)
+	if (!priv->pending_structure || !priv->zond->proj.wctx ||
+			!priv->zond->proj.wctx->index_ctx)
 		return;
 
 	for (guint i = 0; i < priv->pending_structure->len; i++) {
 		GError *error = NULL;
 
-		if (sond_process_file_record_structure(priv->zond->wctx->index_ctx,
+		if (sond_process_file_record_structure(priv->zond->proj.wctx->index_ctx,
 				g_ptr_array_index(priv->pending_structure, i), &error)) {
 			LOG_WARN("%s: %s", __func__, error ? error->message : "?");
 			g_clear_error(&error);
@@ -396,7 +396,7 @@ static gint emb_sibling_apply(ZondTreeviewFMPrivate *priv, GError **error) {
 				g_ptr_array_index(priv->pending_sibling_new, i), NULL);
 		GError *idx_err = NULL;
 
-		if (dbase_zond_update_path(priv->zond->dbase_zond, path_old, path_new,
+		if (dbase_zond_update_path(priv->zond->proj.dbase_zond, path_old, path_new,
 				error))
 			return -1;
 
@@ -480,14 +480,14 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		g_autofree gchar *path_prefix = g_strconcat(path,
 				is_container_root ? "//" : "/", NULL);
 
-		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_test_path(priv->zond->proj.dbase_zond->zond_dbase_work,
 				path_prefix, error);
 		if (rc == -1)
 			return -1;
 		else if (rc == 1)
 			return 1;
 
-		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_store,
+		rc = zond_dbase_test_path(priv->zond->proj.dbase_zond->zond_dbase_store,
 				path_prefix, error);
 		if (rc == -1)
 			return -1;
@@ -497,14 +497,14 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			return 1;
 		}
 	} else {
-		rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_test_path_section(priv->zond->proj.dbase_zond->zond_dbase_work,
 				path, section, FALSE, error);
 		if (rc == -1)
 			return -1;
 		else if (rc == 1)
 			return 1;
 
-		rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_store,
+		rc = zond_dbase_test_path_section(priv->zond->proj.dbase_zond->zond_dbase_store,
 				path, section, FALSE, error);
 		if (rc == -1)
 			return -1;
@@ -533,11 +533,11 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
 	*ctx = GINT_TO_POINTER(
 			(dual ? 1 : 0) |
-			(priv->zond->dbase_zond->changed ? 2 : 0));
+			(priv->zond->proj.dbase_zond->changed ? 2 : 0));
 
 	rc = dual ?
-			dbase_zond_begin(priv->zond->dbase_zond, error) :
-			zond_dbase_begin(priv->zond->dbase_zond->zond_dbase_work, error);
+			dbase_zond_begin(priv->zond->proj.dbase_zond, error) :
+			zond_dbase_begin(priv->zond->proj.dbase_zond->zond_dbase_work, error);
 	if (rc) {
 		index_tx_end(priv);
 		return -1;
@@ -572,7 +572,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (from_gmessage) {
 		gint rc = 0;
 
-		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
+		rc = dbase_zond_update_gmessage_index(priv->zond->proj.dbase_zond,
 				prefix, index_from, FALSE, error);
 		if (!rc && !section) //Index-DB ebenso
 			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
@@ -593,7 +593,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	/* Die (nicht mehr angebundene, s. Sperre oben) FILE_PART-Zeile zum Pfad
 	 * in work und store mitlöschen, sonst bleibt sie als Müll stehen */
 	if (!section && !from_gmessage &&
-			dbase_zond_remove_filepart(priv->zond->dbase_zond, path, error)) {
+			dbase_zond_remove_filepart(priv->zond->proj.dbase_zond, path, error)) {
 		emb_sibling_pending_clear(priv);
 		tx_abort(priv);
 		return -1;
@@ -606,7 +606,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	 * "Lückenfüller") - s. Kommentar bei pending_delete_path. Bewusst erst
 	 * hier (nach allen obigen Fehler-return-Pfaden, bei denen kein "after"
 	 * emittiert wird) gesetzt, damit nichts hängen bleibt. */
-	if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section) {
+	if (priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx && !section) {
 		g_free(priv->pending_delete_path);
 		priv->pending_delete_path = g_strdup(path);
 	}
@@ -653,7 +653,7 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
-	if (!ztvfm_priv->zond->wctx || !ztvfm_priv->zond->wctx->index_ctx)
+	if (!ztvfm_priv->zond->proj.wctx || !ztvfm_priv->zond->proj.wctx->index_ctx)
 		return 0;
 
 	prefix_new = get_path_from_stvfm_item(stvfm_item_parent);
@@ -673,8 +673,8 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
-	if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
-			prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
+	if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->proj.wctx->index_ctx,
+			prefix_new, ztvfm_priv->zond->proj.project_dir, &idx_err)) {
 		LOG_WARN("%s: sond_index_ctx_coverage_invalidate('%s'): %s", __func__,
 				prefix_new, idx_err ? idx_err->message : "?");
 		g_clear_error(&idx_err);
@@ -751,13 +751,13 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
 	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
-	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->dbase_zond->changed ? 2 : 0));
+	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->proj.dbase_zond->changed ? 2 : 0));
 
 	/* Index-DB als Schema idx anhängen (vor der Transaktion) */
 	if (index_tx_begin(ztvfm_priv, error))
 		return -1;
 
-	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
+	rc = dbase_zond_begin(ztvfm_priv->zond->proj.dbase_zond, error);
 	if (rc) {
 		index_tx_end(ztvfm_priv);
 		return -1;
@@ -780,7 +780,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * sonst aufgelöst und müsste neu zusammengefasst werden. */
 		if (!rename_in_gmessage && index_to != -1 &&
 				!sond_index_ctx_coverage_invalidate(index_tx(ztvfm_priv),
-				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
+				prefix_new, ztvfm_priv->zond->proj.project_dir, &idx_err)) {
 			tx_abort(ztvfm_priv);
 			set_idx_error(error, __func__,
 					"sond_index_ctx_coverage_invalidate", &idx_err);
@@ -800,7 +800,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
 		//-> umbenennen
 	rc = rename_in_gmessage ? 0 :
-			dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
+			dbase_zond_update_path(ztvfm_priv->zond->proj.dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
 		tx_abort(ztvfm_priv); //Fehler von update_path bleibt erhalten
 		return -1;
@@ -814,7 +814,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		prefix_gmessage = g_strndup(prefix_old, strlen(prefix_old) -
 				strlen(strrchr(prefix_old, '/') + 1));
 
-		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
+		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->proj.dbase_zond,
 				prefix_gmessage, index_from, FALSE, error);
 		if (!rc) //Index-DB ebenso
 			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
@@ -836,7 +836,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		prefix_gmessage = g_strndup(prefix_new, strlen(prefix_new) - strlen(strrchr(prefix_new, '/') + 1));
 
 		//indizes ab index_to +1
-		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
+		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->proj.dbase_zond,
 				prefix_gmessage, index_to, TRUE, error);
 		if (!rc) //Index-DB ebenso
 			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
@@ -851,7 +851,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		//index_to als basename hinzufügen
 		prefix_gmessage = add_string(prefix_gmessage, g_strdup_printf("%u", index_to));
 
-		rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_new,
+		rc = dbase_zond_update_path(ztvfm_priv->zond->proj.dbase_zond, prefix_new,
 				prefix_gmessage, error);
 
 		/* Index-DB: Platzhalter "alpha" (s. rename_file() oben) auf den
@@ -900,9 +900,9 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	g_free(ztvfm_priv->pending_move_path_old);
 	g_free(ztvfm_priv->pending_move_path_new);
 	ztvfm_priv->pending_move_path_old = g_strconcat(
-			ztvfm_priv->zond->project_dir, "/", prefix_old, NULL);
+			ztvfm_priv->zond->proj.project_dir, "/", prefix_old, NULL);
 	ztvfm_priv->pending_move_path_new = g_strconcat(
-			ztvfm_priv->zond->project_dir, "/", prefix_new, NULL);
+			ztvfm_priv->zond->proj.project_dir, "/", prefix_new, NULL);
 	ztvfm_priv->pending_move_is_physical =
 			!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
 			!sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
@@ -935,12 +935,12 @@ static void write_commit_failure_report(Projekt *zond, gchar const *path_old,
 	GError *error_report = NULL;
 	FILE *fp = NULL;
 
-	if (!zond->project_dir)
+	if (!zond->proj.project_dir)
 		return;
 
 	now = g_date_time_new_now_local();
 	timestamp = g_date_time_format(now, "%Y%m%d_%H%M%S");
-	filename = g_strdup_printf("%s/ZOND_FEHLER_%s.txt", zond->project_dir,
+	filename = g_strdup_printf("%s/ZOND_FEHLER_%s.txt", zond->proj.project_dir,
 			timestamp);
 
 	fp = sond_fopen(filename, "w", &error_report);
@@ -1008,7 +1008,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 
 			if (!sond_index_ctx_coverage_try_collapse(
 					index_tx(priv), priv->pending_delete_path,
-					priv->zond->project_dir, &collapse_error)) {
+					priv->zond->proj.project_dir, &collapse_error)) {
 				LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s",
 						__func__, priv->pending_delete_path,
 						collapse_error ? collapse_error->message : "?");
@@ -1017,7 +1017,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		}
 
 		if (dual_write) {
-			rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
+			rc = dbase_zond_commit(priv->zond->proj.dbase_zond, &error_int);
 			if (rc) {
 				gboolean reverted = FALSE;
 				GError *error_revert = NULL;
@@ -1034,7 +1034,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 							priv->pending_move_path_old, &error_revert);
 
 				if (reverted) {
-					display_message(priv->zond->app_window,
+					display_message(priv->zond->win.app_window,
 							"Speichern der Verschiebung/Umbenennung ist "
 							"fehlgeschlagen und wurde rückgängig gemacht:\n\n",
 							error_int->message, "\n\nBitte erneut versuchen.",
@@ -1062,7 +1062,7 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 						error_int->message,
 						error_revert ? error_revert->message : NULL);
 
-				display_message(priv->zond->app_window,
+				display_message(priv->zond->win.app_window,
 						"Kritischer Fehler beim Speichern einer "
 						"Verschiebung/Umbenennung. Projekt und Datenbank "
 						"können inkonsistent sein. Details wurden in eine "
@@ -1086,10 +1086,10 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 				exit(EXIT_FAILURE);
 			}
 		} else {
-			rc = zond_dbase_commit(priv->zond->dbase_zond->zond_dbase_work, &error_int);
+			rc = zond_dbase_commit(priv->zond->proj.dbase_zond->zond_dbase_work, &error_int);
 			if (rc) {
 				index_tx_end(priv);
-				display_message(priv->zond->app_window,
+				display_message(priv->zond->win.app_window,
 						"Fehler beim Speichern:\n\n", error_int->message, NULL);
 				g_clear_error(&error_int);
 
@@ -1107,9 +1107,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 	}
 	else {
 		if (dual_write)
-			dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
+			dbase_zond_rollback(priv->zond->proj.dbase_zond, &error_int);
 		else
-			zond_dbase_rollback(priv->zond->dbase_zond->zond_dbase_work, &error_int);
+			zond_dbase_rollback(priv->zond->proj.dbase_zond->zond_dbase_work, &error_int);
 
 		index_tx_end(priv);
 		g_clear_error(&error_int);
@@ -1143,7 +1143,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-		rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), &ID_section, error);
 		if (rc)
 			return -1;
@@ -1156,7 +1156,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		}
 
 		rc = zond_dbase_update_node_text(
-				ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID_section,
+				ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID_section,
 				new_text, error);
 		if (rc)
 			return -1;
@@ -1164,7 +1164,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		//Text in treeview anpassen
 		iter_tree = zond_tree_store_get_iter_by_node_id(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]))),
+						GTK_TREE_VIEW(ztvfm_priv->zond->trees.treeview[BAUM_INHALT]))),
 				ID_section);
 
 		if (iter_tree) {
@@ -1197,9 +1197,9 @@ static void zond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 			ztvfm);
 
 	if (!gtk_toggle_button_get_active(
-			GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button)))
+			GTK_TOGGLE_BUTTON(ztvfm_priv->zond->win.fs_button)))
 		gtk_toggle_button_set_active(
-				GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button), TRUE);
+				GTK_TOGGLE_BUTTON(ztvfm_priv->zond->win.fs_button), TRUE);
 
 	SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->results_row_activated(
 			treeview, tree_path, col, data);
@@ -1228,7 +1228,7 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 		if (section)
 			anbindung_parse_file_section(section, &anbindung);
 
-		if (ztvfm_priv->zond->state & GDK_CONTROL_MASK) {
+		if (ztvfm_priv->zond->win.state & GDK_CONTROL_MASK) {
 			g_autoptr(SondTVFMItem) stvfm_item_parent = NULL;
 			GtkTreeIter iter_parent = { 0 };
 			GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(
@@ -1249,12 +1249,12 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 		}
 
 		dd = document_new_displayed_document(sfp_pdf, &anbindung_ges, &anbindung,
-				(ztvfm_priv->zond->state & GDK_MOD1_MASK), &pdf_pos, error);
+				(ztvfm_priv->zond->win.state & GDK_MOD1_MASK), &pdf_pos, error);
 		if (!dd)
 			return -1;
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				dd, &pdf_pos, (ztvfm_priv->zond->state & GDK_SHIFT_MASK), error);
+				dd, &pdf_pos, (ztvfm_priv->zond->win.state & GDK_SHIFT_MASK), error);
 		if (rc)
 			return -1;
 	}
@@ -1285,7 +1285,7 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	filepart = sond_file_part_get_filepart(
 			sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 			filepart, section, &ID, error);
 	g_free(filepart);
 	if (rc)
@@ -1295,7 +1295,7 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	 * angebunden, wurde die Löschung bereits in
 	 * zond_treeviewfm_before_delete verhindert - diese Funktion hier wird
 	 * für einen angebundenen Abschnitt also nie erreicht. */
-	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
+	rc = zond_dbase_remove_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID, error);
 	if (rc)
 		return -1;
 
@@ -1329,7 +1329,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 			filepart, section, &ID, error);
 	if (rc)
 		return -1;
@@ -1341,7 +1341,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		return -1;
 	}
 
-	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, &child, error);
+	rc = zond_dbase_get_first_child(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID, &child, error);
 	if (rc)
 		return -1;
 
@@ -1357,7 +1357,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		gint rc = 0;
 		gint younger_sibling_id = 0;
 
-		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, child,
+		rc = zond_dbase_get_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, child,
 				NULL, NULL, NULL, &section_child, NULL, NULL, NULL, error);
 		if (rc)
 			return -1;
@@ -1367,10 +1367,10 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 						sfp, section_child);
 		g_free(section_child);
 		sond_tvfm_item_set_icon_name(stvfm_item_child,
-				ztvfm_priv->zond->icon[ICON_ANBINDUNG].icon_name);
+				ztvfm_priv->zond->app.icon[ICON_ANBINDUNG].icon_name);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);
 
-		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 				child, &younger_sibling_id, error);
 		if (rc)
 			return -1;
@@ -1412,7 +1412,7 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 	filepart = sond_file_part_get_filepart(
 			sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 			filepart, section, &ID, error);
 	g_free(filepart);
 	if (rc)
@@ -1425,7 +1425,7 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 		*text = anbindung_to_human_readable(&anbindung);
 	}
 	else {
-		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
 				ID, NULL, NULL, NULL, NULL, NULL, text, NULL, error);
 		if (rc)
 			return -1;
@@ -1489,9 +1489,9 @@ static gint zond_treeviewfm_readdir_rek(SondTreeviewFM *stvfm,
 		ZondTreeviewFMPrivate *priv =
 				zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(stvfm));
 
-		if (priv->zond->wctx && priv->zond->wctx->index_ctx) {
+		if (priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx) {
 			SondIndexStatus status = sond_index_ctx_get_dir_status(
-					priv->zond->wctx->index_ctx, rel_dir);
+					priv->zond->proj.wctx->index_ctx, rel_dir);
 
 			if (status == SOND_INDEX_STATUS_FULL)
 				return 0; /* ganzer Ast abgedeckt - nichts zu tun */
@@ -1833,10 +1833,10 @@ static gint zond_treeviewfm_get_eingang(SondTreeviewFM *stvfm,
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
-	if (!ztvfm_priv->zond || !ztvfm_priv->zond->eingang_cache)
+	if (!ztvfm_priv->zond || !ztvfm_priv->zond->proj.eingang_cache)
 		return -1;
 
-	return sond_eingang_cache_lookup(ztvfm_priv->zond->eingang_cache, rel_path,
+	return sond_eingang_cache_lookup(ztvfm_priv->zond->proj.eingang_cache, rel_path,
 			is_dir);
 }
 
@@ -1919,10 +1919,10 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 
 	Projekt *zond = (Projekt*) data;
 
-	if (!sond_treeview_get_cursor(zond->treeview[BAUM_FS], &iter))
+	if (!sond_treeview_get_cursor(zond->trees.treeview[BAUM_FS], &iter))
 		return;
 
-	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(zond->treeview[BAUM_FS]), &iter);
+	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]), &iter);
 	if (!stvfm_item) //Dummy-Zeile
 		return;
 
@@ -1935,11 +1935,11 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
-	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work, filepart, section, &ID, &error);
+	rc = zond_dbase_get_section(zond->proj.dbase_zond->zond_dbase_work, filepart, section, &ID, &error);
 	g_free(filepart);
 	g_object_unref(stvfm_item); //section ist damit nicht mehr gültig
 	if (rc) {
-		display_message(zond->app_window, "Zur Anbindung springen nicht möglich\n\n",
+		display_message(zond->win.app_window, "Zur Anbindung springen nicht möglich\n\n",
 				error->message, NULL);
 		g_error_free(error);
 
@@ -2002,15 +2002,15 @@ static void zond_treeviewfm_action_eingang_neu(GSimpleAction *a, GVariant *p,
 	guint n_zettel = 0;
 	gchar *text = NULL;
 
-	if (!zond->eingang_cache) {
-		display_message(zond->app_window, "Eingänge neu einlesen\n\n",
+	if (!zond->proj.eingang_cache) {
+		display_message(zond->win.app_window, "Eingänge neu einlesen\n\n",
 				"Für dieses Projekt sind keine Eingangsangaben verfügbar.", NULL);
 
 		return;
 	}
 
-	if (sond_eingang_cache_reload(zond->eingang_cache, &n_zettel, &error)) {
-		display_message(zond->app_window,
+	if (sond_eingang_cache_reload(zond->proj.eingang_cache, &n_zettel, &error)) {
+		display_message(zond->win.app_window,
 				"Eingänge neu einlesen fehlgeschlagen\n\n", error->message,
 				NULL);
 		g_error_free(error);
@@ -2018,10 +2018,10 @@ static void zond_treeviewfm_action_eingang_neu(GSimpleAction *a, GVariant *p,
 		return;
 	}
 
-	sond_treeviewfm_eingang_refresh(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+	sond_treeviewfm_eingang_refresh(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
 
 	text = g_strdup_printf("%u neue(r) Zettel eingelesen.", n_zettel);
-	display_message(zond->app_window, "Eingänge neu einlesen\n\n", text, NULL);
+	display_message(zond->win.app_window, "Eingänge neu einlesen\n\n", text, NULL);
 	g_free(text);
 
 	return;
@@ -2084,9 +2084,9 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 static SondIndexCtx* zond_treeviewfm_get_index_ctx_cb(gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 
-	if (!zond || !zond->wctx) return NULL;
+	if (!zond || !zond->proj.wctx) return NULL;
 
-	return zond->wctx->index_ctx;
+	return zond->proj.wctx->index_ctx;
 }
 
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {

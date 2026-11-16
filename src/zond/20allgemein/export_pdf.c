@@ -173,7 +173,7 @@ static gint export_pdf_einheiten_setzen(ExportPdfSatz *satz,
 
 gint export_pdf_schreiben(Projekt *zond, GPtrArray *eintraege,
 		const ExportOptionen *opt, const gchar *filename, GError **error) {
-	fz_context *ctx = zond->ctx;
+	fz_context *ctx = zond->app.ctx;
 	pdf_document *dest = NULL;
 	ExportDokumentCtx *dctx = NULL;
 	ExportPdfSatz *satz = NULL;

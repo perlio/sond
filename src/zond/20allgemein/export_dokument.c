@@ -98,7 +98,7 @@ void export_dokument_ctx_free(ExportDokumentCtx *dctx) {
 		if (q->zpdfd)
 			g_object_unref(q->zpdfd);
 		else if (q->doc)
-			pdf_drop_document(dctx->zond->ctx, q->doc);
+			pdf_drop_document(dctx->zond->app.ctx, q->doc);
 		if (q->sfp)
 			g_object_unref(q->sfp);
 	}
@@ -169,7 +169,7 @@ static Quelle* quelle_holen(ExportDokumentCtx *dctx, const gchar *datei) {
 		}
 	}
 
-	q->doc = sond_file_part_pdf_open_document(dctx->zond->ctx,
+	q->doc = sond_file_part_pdf_open_document(dctx->zond->app.ctx,
 			SOND_FILE_PART_PDF(q->sfp), TRUE, &error);
 	if (!q->doc) {
 		q->hinweis = hinweis_nicht_geoeffnet(datei, error);
@@ -343,9 +343,9 @@ static void export_pdf_einheiten(ExportDokumentCtx *dctx, pdf_document *doc,
 	GError *error = NULL;
 	gint rc = 0;
 	//ein im Viewer offenes Dokument wird mit seinem eigenen Kontext gelesen
-	fz_context *ctx = zpdfd ? zond_pdf_document_get_ctx(zpdfd) : dctx->zond->ctx;
+	fz_context *ctx = zpdfd ? zond_pdf_document_get_ctx(zpdfd) : dctx->zond->app.ctx;
 
-	rc = export_dokument_bereich(dctx->zond->ctx, doc, zpdfd, e, &b, &hinweis,
+	rc = export_dokument_bereich(dctx->zond->app.ctx, doc, zpdfd, e, &b, &hinweis,
 			&error);
 	if (rc == -1) {
 		g_ptr_array_add(einheiten, einheit_text(EXPORT_EINHEIT_HINWEIS,

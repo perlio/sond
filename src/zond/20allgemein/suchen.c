@@ -50,22 +50,22 @@ static gint suchen_kopieren_knoten(Projekt *zond, gint node_id,
 	gint rc = 0;
 	gint node_id_new = 0;
 
-	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, error);
+	rc = zond_dbase_begin(zond->proj.dbase_zond->zond_dbase_work, error);
 	if (rc)
 		return -1;
 
-	rc = zond_treeview_walk_tree(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+	rc = zond_treeview_walk_tree(ZOND_TREEVIEW(zond->trees.treeview[BAUM_AUSWERTUNG]),
 	FALSE, node_id, iter, *child, iter_new, *anchor_id, &node_id_new,
 			zond_treeview_copy_node_to_baum_auswertung, error);
 	if (rc)
-		ERROR_ROLLBACK_Z(zond->dbase_zond->zond_dbase_work)
+		ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
 
-	rc = zond_dbase_commit(zond->dbase_zond->zond_dbase_work, error);
+	rc = zond_dbase_commit(zond->proj.dbase_zond->zond_dbase_work, error);
 	if (rc)
-		ERROR_ROLLBACK_Z(zond->dbase_zond->zond_dbase_work)
+		ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
 
-	sond_treeview_expand_row(zond->treeview[BAUM_AUSWERTUNG], iter_new);
-	sond_treeview_set_cursor(zond->treeview[BAUM_AUSWERTUNG], iter_new);
+	sond_treeview_expand_row(zond->trees.treeview[BAUM_AUSWERTUNG], iter_new);
+	sond_treeview_set_cursor(zond->trees.treeview[BAUM_AUSWERTUNG], iter_new);
 
 	*anchor_id = node_id_new;
 	*child = FALSE;
@@ -91,7 +91,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	selected = gtk_tree_selection_get_selected_rows(
 			gtk_tree_view_get_selection(treeview), &model);
 	if (!selected) {
-		display_message(zond->app_window,
+		display_message(zond->win.app_window,
 				"Kopieren nicht möglich - keine Punkte ausgewählt", NULL);
 
 		return;
@@ -103,10 +103,10 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	 * nicht zu sehen. */
 	if (zond_baum_aktuell(zond) != BAUM_AUSWERTUNG
 			|| !gtk_tree_selection_count_selected_rows(
-					zond->selection[BAUM_AUSWERTUNG])
+					zond->trees.selection[BAUM_AUSWERTUNG])
 			|| gtk_toggle_button_get_active(
-					GTK_TOGGLE_BUTTON(zond->fs_button))) {
-		display_message(zond->app_window,
+					GTK_TOGGLE_BUTTON(zond->win.fs_button))) {
+		display_message(zond->win.app_window,
 				"Treffer können nur in BAUM_AUSWERTUNG kopiert werden - "
 						"bitte dort einen Zielpunkt markieren", NULL);
 		goto end;
@@ -115,7 +115,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	rc = zond_treeview_get_anchor(zond, BAUM_AUSWERTUNG, &child, NULL,
 			&iter_anchor, &anchor_id, &in_link, &error);
 	if (rc) {
-		display_message(zond->app_window,
+		display_message(zond->win.app_window,
 				"Fehler beim Abfragen des Ankerpunkts in BAUM_AUSWERTUNG -\n\n"
 						"Bei Aufruf zond_treeview_get_anchor:\n",
 				error->message, NULL);
@@ -124,7 +124,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	}
 
 	if (in_link) {
-		display_message(zond->app_window, "Einfügen in Link nicht zulässig",
+		display_message(zond->win.app_window, "Einfügen in Link nicht zulässig",
 				NULL);
 		goto end;
 	}
@@ -144,7 +144,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 		rc = suchen_kopieren_knoten(zond, node_id, &iter_anchor, &anchor_id,
 				&child, &iter_new, &error);
 		if (rc) {
-			display_message(zond->app_window,
+			display_message(zond->win.app_window,
 					"Fehler in Suchen/Kopieren in Auswertung -\n\n"
 							"Bei Aufruf suchen_kopieren_knoten:\n",
 					error->message, NULL);
@@ -157,7 +157,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	}
 
 	if (!kopiert)
-		display_message(zond->app_window, "Keiner der ausgewählten Punkte "
+		display_message(zond->win.app_window, "Keiner der ausgewählten Punkte "
 				"kann kopiert werden (Datei-, Section- und Link-Zeilen sind "
 				"keine Knoten)", NULL);
 
@@ -170,8 +170,8 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 /* Springt im Baum "baum" (BAUM_INHALT oder BAUM_AUSWERTUNG - node_id ist
  * immer eine "knoten"-Tabellen-ID aus suchen_db(), BAUM_FS kennt solche IDs
  * nicht und ist daher kein gültiges Ziel, s.u.) zum Knoten "node_id".
- * BAUM_AUSWERTUNG teilt sich die Fläche mit BAUM_FS (zond->hpaned, s.
- * app_window.c) und wird über zond->fs_button eingeblendet; BAUM_INHALT ist
+ * BAUM_AUSWERTUNG teilt sich die Fläche mit BAUM_FS (zond->win.hpaned, s.
+ * app_window.c) und wird über zond->win.fs_button eingeblendet; BAUM_INHALT ist
  * immer sichtbar. Analoges Umschalten schon vorhanden in
  * zond_treeview_jump_to_iter() (zond_treeview.c) bzw. spiegelbildlich in
  * app_window.c (cb_jump_button_clicked). node_id==0 hat kein Sprungziel.
@@ -191,12 +191,12 @@ void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 	if (!iter || (baum != BAUM_INHALT && baum != BAUM_AUSWERTUNG))
 		return;
 
-	//BAUM_AUSWERTUNG teilt sich die Fläche mit BAUM_FS (zond->hpaned) - ggf.
+	//BAUM_AUSWERTUNG teilt sich die Fläche mit BAUM_FS (zond->win.hpaned) - ggf.
 	//umschalten; BAUM_INHALT ist immer sichtbar, BAUM_FS an dieser Stelle
 	//durch den obigen Guard bereits ausgeschlossen.
 	if (baum == BAUM_AUSWERTUNG
-			&& gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
+			&& gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->win.fs_button)))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->win.fs_button), FALSE);
 
 	/* Manuelles unselect_all ist nötig, obwohl cb_treeview_focus_in()
 	 * (app_window.c) genau das eigentlich schon erledigt: gtk_widget_grab_
@@ -209,12 +209,12 @@ void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 	 * oben), als Sprungherkunft aber sehr wohl in Frage kommen (sonst bliebe
 	 * dessen Markierung stehen, wenn man aus BAUM_FS nach BAUM_INHALT
 	 * springt). */
-	gtk_tree_selection_unselect_all(zond->selection[BAUM_FS]);
-	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
-	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
+	gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_FS]);
+	gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_INHALT]);
+	gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_AUSWERTUNG]);
 
-	sond_treeview_expand_to_row(zond->treeview[baum], iter);
-	sond_treeview_set_cursor(zond->treeview[baum], iter);
+	sond_treeview_expand_to_row(zond->trees.treeview[baum], iter);
+	sond_treeview_set_cursor(zond->trees.treeview[baum], iter);
 
 	/* Label/Textview erzwungen aktualisieren: verläßt sich nicht darauf,
 	 * daß grab_focus() in sond_treeview_set_cursor() zuverlässig ein
@@ -225,7 +225,7 @@ void suchen_springe_zu_iter(Projekt *zond, gint baum, GtkTreeIter *iter) {
 	 * Callback-Interna) und bricht bei bereits aktuellem Knoten selbst ab -
 	 * ein Aufruf schadet also auch dann nicht, wenn "cursor-changed"
 	 * zufällig schon verbunden ist und den Callback ohnehin ausgelöst hat. */
-	zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->treeview[baum]), zond);
+	zond_treeview_cursor_changed(ZOND_TREEVIEW(zond->trees.treeview[baum]), zond);
 
 	return;
 }
@@ -250,7 +250,7 @@ void suchen_springe_zu_knoten(Projekt *zond, gint baum, gint node_id) {
 	}
 
 	iter = zond_tree_store_get_iter_by_node_id(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]))),
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[baum]))),
 			node_id);
 	if (!iter) {
 		g_warning("suchen_springe_zu_knoten: Knoten (node_id=%d) nicht "
@@ -291,17 +291,17 @@ void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
 	if (!file_part || !*file_part)
 		return;
 
-	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), TRUE);
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->win.fs_button)))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->win.fs_button), TRUE);
 
-	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
-	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
+	gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_INHALT]);
+	gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_AUSWERTUNG]);
 
 	rc = zond_treeviewfm_set_cursor_on_section(
-			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
+			ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), file_part, section,
 			&error);
 	if (rc) {
-		display_message(zond->app_window,
+		display_message(zond->win.app_window,
 				"Fehler beim Springen zu BAUM_FS -\n\n"
 						"Bei Aufruf zond_treeviewfm_set_cursor_on_section:\n",
 				error->message, NULL);
@@ -313,7 +313,7 @@ void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
 
 #define ERROR_SQL(x) { g_set_error(error, g_quark_from_static_string("SQLITE3"), rc, \
                        "Bei Aufruf " x ":\n%s", \
-                       sqlite3_errmsg(zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ) ); \
+                       sqlite3_errmsg(zond_dbase_get_dbase( zond->proj.dbase_zond->zond_dbase_work ) ) ); \
                        return -1; }
 
 static gint suchen_db(Projekt *zond, const gchar *text, GArray *arr_treffer,
@@ -324,7 +324,7 @@ static gint suchen_db(Projekt *zond, const gchar *text, GArray *arr_treffer,
 
 	rc =
 			sqlite3_prepare_v2(
-					zond_dbase_get_dbase(zond->dbase_zond->zond_dbase_work),
+					zond_dbase_get_dbase(zond->proj.dbase_zond->zond_dbase_work),
 					"SELECT 0, ID FROM knoten WHERE LOWER(file_part) LIKE LOWER(?1) "
 							"UNION "
 							"SELECT 1, ID FROM knoten WHERE LOWER(node_text) LIKE LOWER(?1) "
@@ -387,7 +387,7 @@ static gint suchen_gruppieren(Projekt *zond, GArray *arr_treffer,
 		if (node.node_id <= BAUM_AUSWERTUNG)
 			continue;
 
-		rc = zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_type_and_link(zond->proj.dbase_zond->zond_dbase_work,
 				node.node_id, &type, NULL, error);
 		if (rc)
 			break;
@@ -500,7 +500,7 @@ static void suchen_ergebnisfenster(Projekt *zond, gchar const *titel,
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_default_size(GTK_WINDOW(window), 1000, 450);
 	gtk_window_set_transient_for(GTK_WINDOW(window),
-			GTK_WINDOW(zond->app_window));
+			GTK_WINDOW(zond->win.app_window));
 
 	headerbar = gtk_header_bar_new();
 	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar),
@@ -560,7 +560,7 @@ gint suchen_treeviews(Projekt *zond, const gchar *text, GError **error) {
 		return -1;
 
 	if (!arr_ursprung->len) {
-		display_message(zond->app_window, "Keine Treffer", NULL);
+		display_message(zond->win.app_window, "Keine Treffer", NULL);
 		goto end;
 	}
 

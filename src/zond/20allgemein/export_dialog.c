@@ -78,7 +78,7 @@ gboolean export_dialog_run(Projekt *zond, Baum baum, ExportOptionen *opt) {
 
 	anzahl = export_selection_anzahl_markiert(zond, baum);
 
-	dialog = gtk_dialog_new_with_buttons("Export", GTK_WINDOW(zond->app_window),
+	dialog = gtk_dialog_new_with_buttons("Export", GTK_WINDOW(zond->win.app_window),
 			GTK_DIALOG_MODAL, "_Abbrechen", GTK_RESPONSE_CANCEL, "_Exportieren",
 			GTK_RESPONSE_OK, NULL);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);

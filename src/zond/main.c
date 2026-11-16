@@ -58,7 +58,7 @@ static void cb_startup(GApplication *app, gpointer user_data) {
 static void cb_activate(GApplication *app, gpointer user_data) {
     Projekt *zond = (Projekt*) user_data;
 
-	gtk_window_present(GTK_WINDOW(zond->app_window));
+	gtk_window_present(GTK_WINDOW(zond->win.app_window));
 
 	return;
 }
@@ -85,10 +85,10 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
 	rc = project_open(zond, uri_unesc + 8, FALSE, &error);
 	g_free(uri_unesc);
 
-	gtk_window_present(GTK_WINDOW(zond->app_window));
+	gtk_window_present(GTK_WINDOW(zond->win.app_window));
 
 	if (rc == -1) {
-		display_message(zond->app_window, "Fehler - Projekt kann nicht geöffnet werden\n\n",
+		display_message(zond->win.app_window, "Fehler - Projekt kann nicht geöffnet werden\n\n",
 				error->message, NULL);
 		g_error_free(error);
 	}

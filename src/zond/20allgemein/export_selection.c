@@ -66,7 +66,7 @@ gint export_selection_anzahl_markiert(Projekt *zond, Baum baum) {
 	if (baum != BAUM_INHALT && baum != BAUM_AUSWERTUNG)
 		return 0;
 
-	return gtk_tree_selection_count_selected_rows(zond->selection[baum]);
+	return gtk_tree_selection_count_selected_rows(zond->trees.selection[baum]);
 }
 
 /* Datei und Seitenbereich eines Knotens. Eine Copy trägt die Anbindung
@@ -78,7 +78,7 @@ static gint export_get_anbindung(ExportCtx *ctx, gint node_id,
 	gint link = 0;
 	gchar *file_part = NULL;
 	gchar *section = NULL;
-	ZondDBase *dbase = ctx->zond->dbase_zond->zond_dbase_work;
+	ZondDBase *dbase = ctx->zond->proj.dbase_zond->zond_dbase_work;
 
 	rc = zond_dbase_get_node(dbase, node_id, &type, &link, &file_part, &section,
 			NULL, NULL, NULL, error);
@@ -164,7 +164,7 @@ static gint export_visit(ExportCtx *ctx, GtkTreeIter *iter, gint ebene,
 		e->pfad = export_get_pfad(ctx, iter);
 
 	if (ctx->opt->text) {
-		rc = zond_dbase_get_text(ctx->zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_text(ctx->zond->proj.dbase_zond->zond_dbase_work,
 				node_id, &e->notiz, error);
 		if (rc) {
 			export_eintrag_free(e);
@@ -229,7 +229,7 @@ GPtrArray* export_selection_build(Projekt *zond, Baum baum,
 	ctx.zond = zond;
 	ctx.baum = baum;
 	ctx.opt = opt;
-	ctx.model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]));
+	ctx.model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[baum]));
 	ctx.eintraege = g_ptr_array_new_with_free_func(export_eintrag_free);
 
 	if (opt->ganzer_baum) {
@@ -245,7 +245,7 @@ GPtrArray* export_selection_build(Projekt *zond, Baum baum,
 			} while (gtk_tree_model_iter_next(ctx.model, &iter));
 		}
 	} else {
-		selected = gtk_tree_selection_get_selected_rows(zond->selection[baum],
+		selected = gtk_tree_selection_get_selected_rows(zond->trees.selection[baum],
 				NULL);
 		if (!selected) {
 			g_set_error(error, SOND_ERROR, 0, "Keine Punkte markiert");

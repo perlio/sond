@@ -106,7 +106,7 @@ static void verwendung_fenster_free(gpointer data) {
 }
 
 static ZondDBase* verwendung_db(Verwendung *v) {
-	return v->zond->dbase_zond->zond_dbase_work;
+	return v->zond->proj.dbase_zond->zond_dbase_work;
 }
 
 //Erste Zeile von text, auf 120 Zeichen gekürzt
@@ -1219,7 +1219,7 @@ static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 			|| target_baum == BAUM_AUSWERTUNG)) {
 		GtkTreeIter *iter_link = zond_tree_store_get_iter_link(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(zond->treeview[target_baum]))),
+						GTK_TREE_VIEW(zond->trees.treeview[target_baum]))),
 				target_id, link_id);
 
 		if (iter_link) {
@@ -1229,7 +1229,7 @@ static void cb_verwendung_row_activated(GtkTreeView *tree_view,
 			if (abstieg)
 				verwendung_abstieg(
 						gtk_tree_view_get_model(
-								GTK_TREE_VIEW(zond->treeview[baum])),
+								GTK_TREE_VIEW(zond->trees.treeview[baum])),
 						iter_link, abstieg);
 			g_free(abstieg);
 
@@ -1390,7 +1390,7 @@ gint verwendung_anzeigen(Projekt *zond, gint node_id, gchar const *file_part,
 	gtk_window_set_title(GTK_WINDOW(f->window), "Herkunft und Verwendung");
 	gtk_window_set_default_size(GTK_WINDOW(f->window), 1000, 450);
 	gtk_window_set_transient_for(GTK_WINDOW(f->window),
-			GTK_WINDOW(zond->app_window));
+			GTK_WINDOW(zond->win.app_window));
 	g_object_set_data_full(G_OBJECT(f->window), "verwendung", f,
 			verwendung_fenster_free);
 

@@ -108,7 +108,7 @@
  gint rc = 0;
 
  file_root = g_file_new_for_path( root );
- info_window = info_window_open( zond->app_window, "Untersuchung auf InlineImages" );
+ info_window = info_window_open( zond->win.app_window, "Untersuchung auf InlineImages" );
  rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
  info_window_close( info_window );
  if ( rc == -1 ) ERROR_S

@@ -918,7 +918,7 @@ static gboolean xjustiz_ist_pruefvermerk(Projekt *zond, XJustizDatei *d,
 	}
 
 	data = g_bytes_get_data(bytes, &len);
-	segs = sond_text_extract_pdf(zond->ctx, data, len, NULL, NULL, 0, 0, NULL,
+	segs = sond_text_extract_pdf(zond->app.ctx, data, len, NULL, NULL, 0, 0, NULL,
 			NULL);
 	g_bytes_unref(bytes);
 
@@ -1009,9 +1009,9 @@ static gboolean xjustiz_dateien_laden(Projekt *zond, SondFilePart *sfp_xml,
 	GPtrArray *pfade = NULL;
 	gboolean ok = TRUE;
 
-	if (!zond->treeview[BAUM_FS])
+	if (!zond->trees.treeview[BAUM_FS])
 		return TRUE;
-	root_dir = sond_treeviewfm_get_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+	root_dir = sond_treeviewfm_get_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
 	if (!root_dir)
 		return TRUE;
 
@@ -1037,7 +1037,7 @@ static gboolean xjustiz_dateien_laden(Projekt *zond, SondFilePart *sfp_xml,
 	}
 
 	if (pfade->len > 0)
-		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->app_window), pfade);
+		ok = sond_seadrive_load_sync(GTK_WINDOW(zond->win.app_window), pfade);
 	g_ptr_array_unref(pfade);
 
 	return ok;
@@ -1086,7 +1086,7 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
 	filepart = sond_file_part_get_filepart(sfp_pdf);
 	g_object_unref(sfp_pdf);
 
-	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_section(zond->proj.dbase_zond->zond_dbase_work,
 			filepart, NULL, &ID_file_part, &local_error);
 	if (rc) {
 		g_free(filepart);
@@ -1108,7 +1108,7 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
 	} else {
 		//schon in zond_dbase - ggf. schon angebunden?
 		rc = zond_dbase_find_baum_inhalt_file(
-				zond->dbase_zond->zond_dbase_work, ID_file_part,
+				zond->proj.dbase_zond->zond_dbase_work, ID_file_part,
 				&baum_inhalt_file, NULL, NULL, &local_error);
 		if (rc) {
 			g_free(filepart);
@@ -1127,7 +1127,7 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
 		//nach einem früheren Import, dessen Anbindungen gelöscht wurden):
 		//der Name wird nur beim ersten Anlegen gesetzt - auf die aktuelle
 		//Benennung (inkl. Blattzahl) aktualisieren
-		rc = zond_dbase_update_node_text(zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_update_node_text(zond->proj.dbase_zond->zond_dbase_work,
 				ID_file_part, d->anzeigename, &local_error);
 		if (rc) {
 			g_free(filepart);
@@ -1141,7 +1141,7 @@ static void xjustiz_insert_datei(Projekt *zond, XJustizDatei *d,
 	//Anker-Knoten: bewußt ohne node_text/icon_name, s. Erklärung an
 	//zond_treeview_leaf_anbinden() (zond_treeview.c)
 	new_node_id = zond_dbase_insert_node(
-			zond->dbase_zond->zond_dbase_work, anchor_id, child,
+			zond->proj.dbase_zond->zond_dbase_work, anchor_id, child,
 			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, ID_file_part, NULL, NULL,
 			NULL, NULL, NULL, &local_error);
 	if (new_node_id == -1) {
@@ -1185,9 +1185,9 @@ static gint xjustiz_insert_node(Projekt *zond, XJustizNode *node,
 	gboolean inner_child;
 	guint i;
 
-	struktur_id = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
+	struktur_id = zond_dbase_insert_node(zond->proj.dbase_zond->zond_dbase_work,
 			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
-			zond->icon[ICON_ORDNER].icon_name, node->label, NULL, error);
+			zond->app.icon[ICON_ORDNER].icon_name, node->label, NULL, error);
 	if (struktur_id == -1)
 		return -1;
 
@@ -1207,9 +1207,9 @@ static gint xjustiz_insert_node(Projekt *zond, XJustizNode *node,
 			if (!opt->luecken_anzeigen)
 				continue;
 			gint luecke_id = zond_dbase_insert_node(
-					zond->dbase_zond->zond_dbase_work, inner_anchor,
+					zond->proj.dbase_zond->zond_dbase_work, inner_anchor,
 					inner_child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
-					zond->icon[ICON_WICHTIG].icon_name, d->anzeigename, NULL,
+					zond->app.icon[ICON_WICHTIG].icon_name, d->anzeigename, NULL,
 					error);
 
 			if (luecke_id == -1)
@@ -1462,7 +1462,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 
 	nicht_gefunden = g_ptr_array_new_with_free_func(g_free);
 
-	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, error);
+	rc = zond_dbase_begin(zond->proj.dbase_zond->zond_dbase_work, error);
 	if (rc) {
 		g_free(struktur_label);
 		g_free(dir_prefix);
@@ -1477,12 +1477,12 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	 * komplette Akte/Teilakte/Dokument-Hierarchie der Nachricht rekursiv
 	 * nachgebildet (xjustiz_insert_node(), je ein Strukturpunkt pro akte/
 	 * teilakte mit Inhalt, Dokumente als deren unmittelbare Kinder). */
-	struktur_id = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
+	struktur_id = zond_dbase_insert_node(zond->proj.dbase_zond->zond_dbase_work,
 			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
-			zond->icon[ICON_ORDNER].icon_name, struktur_label, NULL, error);
+			zond->app.icon[ICON_ORDNER].icon_name, struktur_label, NULL, error);
 	g_free(struktur_label);
 	if (struktur_id == -1) {
-		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, error);
+		zond_dbase_rollback(zond->proj.dbase_zond->zond_dbase_work, error);
 		g_free(dir_prefix);
 		g_ptr_array_unref(nicht_gefunden);
 		g_ptr_array_unref(arr_top);
@@ -1508,7 +1508,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 				sfp_parent_xml, dir_prefix, n_angebunden, n_vorhanden,
 				nicht_gefunden, &sub_struktur_id, error);
 		if (rc) {
-			zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, NULL);
+			zond_dbase_rollback(zond->proj.dbase_zond->zond_dbase_work, NULL);
 			g_free(dir_prefix);
 			g_ptr_array_unref(nicht_gefunden);
 			g_ptr_array_unref(arr_top);
@@ -1524,7 +1524,7 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	g_object_unref(sfp_xml);
 	g_ptr_array_unref(arr_top);
 
-	rc = zond_dbase_commit(zond->dbase_zond->zond_dbase_work, error);
+	rc = zond_dbase_commit(zond->proj.dbase_zond->zond_dbase_work, error);
 	if (rc) {
 		g_ptr_array_unref(nicht_gefunden);
 		return -1;

@@ -109,7 +109,8 @@ struct _Menu {
 
 typedef struct _Menu Menu;
 
-typedef struct _Projekt {
+/* Anwendung: lebt, solange zond läuft */
+typedef struct _ZondApp {
 	gchar* exe_dir;
 
 	fz_context *ctx;
@@ -117,10 +118,24 @@ typedef struct _Projekt {
 
 	GSettings *settings;
 
+	GtkApplication *app;
+
+	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
+	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
+	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt
+	 * beim ersten "Chat"-Aufruf (siehe zond_chat.c) und in zond_cleanup()
+	 * wieder freigegeben. NULL, solange noch nicht benutzt. */
+	SondChatCtx *chat_ctx;
+
+	Icon icon[NUMBER_OF_ICONS];
+} ZondApp;
+
+/* Projektzustand: gilt für das geöffnete Projekt (dbase_zond == NULL: keines) */
+typedef struct _ZondProject {
 	gchar *project_dir;
 	gchar *project_name;
 
-	GtkApplication *app;
+	DBaseZond *dbase_zond;
 
 	SondProcessFileCtx *wctx;
 
@@ -130,22 +145,31 @@ typedef struct _Projekt {
 	 * (dann zeigt der Dateibaum keine Eingangsangaben). */
 	SondEingangCache *eingang_cache;
 
-	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
-	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
-	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt
-	 * beim ersten "Chat"-Aufruf (siehe zond_chat.c) und in zond_cleanup()
-	 * wieder freigegeben. NULL, solange noch nicht benutzt. */
-	SondChatCtx *chat_ctx;
+	//Schreibschutz und Verständigung mit sond_client (s. sond_zond_ctl.h)
+	gboolean readonly; //Projekt schreibgeschützt: es wird nicht in die Projektdatei gespeichert
+	guint ctl_source; //Takt, der die Steuerdateien auswertet (0 = keiner)
+	gpointer ctl_data; //Benutzerdaten des Takts (Zeiger auf das Projekt)
+	gboolean ctl_in_tick;
+	gboolean ro_hinweis_gezeigt;
+} ZondProject;
 
-	guint state; //Modifier Mask
-	Icon icon[NUMBER_OF_ICONS];
-
+/* Hauptfenster */
+typedef struct _ZondWindow {
 	GtkWidget *app_window;
 	GtkLabel *label_status;
 	GtkWidget *label_project;
 	GtkWidget *popover;
 
 	GtkWidget *hpaned;
+	GtkWidget *fs_button;
+
+	Menu menu;
+
+	guint state; //Modifier Mask
+} ZondWindow;
+
+/* Bäume und Notizfeld */
+typedef struct _ZondTrees {
 	//Baum - Modell, Ansicht mit Selection
 	SondTreeview *treeview[3];
 	GtkTreeSelection *selection[3];
@@ -160,18 +184,13 @@ typedef struct _Projekt {
 	GtkWidget *textview_pin_button;
 	GtkWidget *textview_jump_button;
 	gint node_id_textview;
+} ZondTrees;
 
-	DBaseZond *dbase_zond;
-
-	//Schreibschutz und Verständigung mit sond_client (s. sond_zond_ctl.h)
-	gboolean readonly; //Projekt schreibgeschützt: es wird nicht in die Projektdatei gespeichert
-	guint ctl_source; //Takt, der die Steuerdateien auswertet (0 = keiner)
-	gpointer ctl_data; //Benutzerdaten des Takts (Zeiger auf das Projekt)
-	gboolean ctl_in_tick;
-	gboolean ro_hinweis_gezeigt;
-
-	Menu menu;
-	GtkWidget *fs_button;
+typedef struct _Projekt {
+	ZondApp app;
+	ZondProject proj;
+	ZondWindow win;
+	ZondTrees trees;
 } Projekt;
 
 void zond_init(GtkApplication *app, Projekt *zond);

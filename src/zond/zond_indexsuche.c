@@ -97,9 +97,9 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
     /* Nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts öffnen).
      * filename ist projektrelativ, bei Containern ist der Teil vor dem
      * ersten "//" die reale Datei. */
-    if (filename && zond->treeview[BAUM_FS]) {
+    if (filename && zond->trees.treeview[BAUM_FS]) {
         gchar const *root_dir = sond_treeviewfm_get_root(
-                SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+                SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
         gchar const *sep = strstr(filename, "//");
         g_autofree gchar *rel = sep ? g_strndup(filename, sep - filename) :
                 g_strdup(filename);
@@ -107,7 +107,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 g_strconcat(root_dir, "/", rel, NULL) : NULL;
 
         if (full_path && !sond_seadrive_load_file_sync(
-                GTK_WINDOW(zond->app_window), full_path)) {
+                GTK_WINDOW(zond->win.app_window), full_path)) {
             g_free(filename);
 
             return;
@@ -117,7 +117,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
     /* SondFilePart direkt aus dem file_part-String aufbauen statt über
      * einen Tree-Walk in BAUM_FS (sond_treeviewfm_file_part_visible()):
      * der brauchte ein sichtbares BAUM_FS und schaltete dafür
-     * zond->fs_button ein.
+     * zond->win.fs_button ein.
      * sond_file_part_from_filepart() baut dieselbe Objekt-Kette direkt aus
      * dem String auf; sond_file_part_create() darin prüft zuerst
      * sond_file_part_is_open() (globale Registry), liefert also bei
@@ -136,7 +136,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 &error);
 
         if (!sfp) {
-            display_message(zond->app_window,
+            display_message(zond->win.app_window,
                     "Fehler\n\n",
                     error ? error->message : "?", NULL);
             g_clear_error(&error);
@@ -178,7 +178,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             		if (page_nr_akt >= 0 && (guint) page_nr_akt < arr_pages->len)
             			pdfp = g_ptr_array_index(arr_pages, page_nr_akt);
             		if (pdfp && pdfp->deleted) {
-            			display_message(zond->app_window,
+            			display_message(zond->win.app_window,
             					"Seite gelöscht\n\n",
             					"Die Seite mit dem Suchtreffer ist im "
             					"geöffneten, noch nicht gespeicherten "
@@ -193,7 +193,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp), NULL, NULL,
                 		FALSE, NULL, &error);
                 if (!dd) {
-                	display_message(zond->app_window, "DisplayedDocument "
+                	display_message(zond->win.app_window, "DisplayedDocument "
                 			"konnte nicht erstellt werden:\n",
                 			error ? error->message : "?", NULL);
                 	g_clear_error(&error);
@@ -202,15 +202,15 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 }
 
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
-                        dd, &pos_pdf, (zond->state & GDK_SHIFT_MASK), &error);
+                        dd, &pos_pdf, (zond->win.state & GDK_SHIFT_MASK), &error);
                 if (rc) {
-                    display_message(zond->app_window,
+                    display_message(zond->win.app_window,
                             "Fehler beim Öffnen\n\n",
                             error ? error->message : "?", NULL);
                     g_clear_error(&error);
-                } else if (has_pos && term && zond->viewer_session->arr_pv->len > 0) {
-                    PdfViewer *pv = g_ptr_array_index(zond->viewer_session->arr_pv,
-                            zond->viewer_session->arr_pv->len - 1);
+                } else if (has_pos && term && zond->app.viewer_session->arr_pv->len > 0) {
+                    PdfViewer *pv = g_ptr_array_index(zond->app.viewer_session->arr_pv,
+                            zond->app.viewer_session->arr_pv->len - 1);
                     viewer_highlight_at_char_pos(pv, page_nr_akt,
                             char_pos_in_page, term);
                 }
@@ -218,7 +218,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 /* Nicht-PDF → sond_renderer mit Highlighting */
                 GBytes *bytes = sond_file_part_get_bytes(sfp, &error);
                 if (!bytes) {
-                    display_message(zond->app_window,
+                    display_message(zond->win.app_window,
                             "Fehler beim Lesen der Datei\n\n",
                             error ? error->message : "?", NULL);
                     g_clear_error(&error);
@@ -227,7 +227,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                             NULL, term, char_pos_in_page, &error);
                     g_bytes_unref(bytes);
                     if (rc) {
-                        display_message(zond->app_window,
+                        display_message(zond->win.app_window,
                                 "Fehler beim Öffnen\n\n",
                                 error ? error->message : "?", NULL);
                         g_clear_error(&error);
@@ -370,7 +370,7 @@ static gboolean
 check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         gint *out_missing, gint *out_total, gboolean *out_total_known,
         gint *out_indexed, GError **error) {
-    SondIndexCtx *index_ctx = zond->wctx->index_ctx;
+    SondIndexCtx *index_ctx = zond->proj.wctx->index_ctx;
     gchar        *fp        = sond_file_part_get_filepart(sfp);
     gint          missing   = 0;
     gint          total     = 1;
@@ -655,7 +655,7 @@ static gint
 scan_coverage_gaps_fs(Projekt *zond, SondTreeviewFM *stvfm,
         gchar const *rel_dir, GPtrArray *gaps, GHashTable *ht_owner,
         GError **error) {
-    SondIndexCtx *index_ctx = zond->wctx->index_ctx;
+    SondIndexCtx *index_ctx = zond->proj.wctx->index_ctx;
     gchar const  *root      = sond_treeviewfm_get_root(stvfm);
     gchar        *path_dir  = NULL;
     SondDir      *dir       = NULL;
@@ -808,7 +808,7 @@ ask_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
 
     dialog = gtk_dialog_new_with_buttons(
             "Auswahl nicht vollständig indiziert",
-            GTK_WINDOW(zond->app_window),
+            GTK_WINDOW(zond->win.app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
             "Jetzt nachindizieren", GTK_RESPONSE_YES,
             "Trotzdem suchen",      GTK_RESPONSE_NO,
@@ -915,9 +915,9 @@ handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
                 GError *error_expand = NULL;
 
                 if (zond_treeviewfm_item_get_fileparts_readdir(
-                        SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+                        SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
                         gap->dir_path, ht_reindex, FALSE, &error_expand)) {
-                    display_message(zond->app_window,
+                    display_message(zond->win.app_window,
                             "Fehler beim Aufschlüsseln von \"", gap->dir_path,
                             "\":\n", error_expand ? error_expand->message : "?",
                             NULL);
@@ -1081,8 +1081,8 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     GtkWidget *check_whole_word = NULL;
     gint       response   = 0;
 
-    if (!zond->wctx || !zond->wctx->index_ctx) {
-        display_message(zond->app_window,
+    if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+        display_message(zond->win.app_window,
                 "Kein Index vorhanden.\n"
                 "Bitte zuerst Dateien indizieren.", NULL);
         return;
@@ -1092,9 +1092,9 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
         GPtrArray *gaps = NULL;
         gboolean cont = FALSE;
 
-        wait_cursor_set(zond->app_window);
+        wait_cursor_set(zond->win.app_window);
         gaps = check_coverage(zond, ht_coverage);
-        wait_cursor_reset(zond->app_window);
+        wait_cursor_reset(zond->win.app_window);
         cont = handle_coverage_gaps(zond, gaps);
         g_ptr_array_unref(gaps);
         if (!cont)
@@ -1104,7 +1104,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     /* --- Eingabe-Dialog --- */
     dialog = gtk_dialog_new_with_buttons(
             "Index durchsuchen",
-            GTK_WINDOW(zond->app_window),
+            GTK_WINDOW(zond->win.app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
             "Suchen",    GTK_RESPONSE_OK,
             "Abbrechen", GTK_RESPONSE_CANCEL,
@@ -1167,13 +1167,13 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
              * Seitenbereiche (die Anbindung des ausgewählten Punkts). Der
              * Filter läuft in der Suche, bevor Ausschnitte entstehen. */
             SelFilter *sel = ht_filter ?
-                    sel_filter_new(zond->wctx->index_ctx, ht_filter) : NULL;
+                    sel_filter_new(zond->proj.wctx->index_ctx, ht_filter) : NULL;
             gboolean   truncated = FALSE;
 
             wait_cursor_set(dialog); // Sanduhr, solange die (synchrone) Suche läuft
 
             hits = sond_index_search(
-                    zond->wctx->index_ctx,
+                    zond->proj.wctx->index_ctx,
                     term,
                     (ctx && *ctx) ? ctx : NULL,
                     whole_word,
@@ -1184,7 +1184,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
 
             if (!hits) {
                 gtk_widget_destroy(dialog);
-                display_message(zond->app_window,
+                display_message(zond->win.app_window,
                         "Fehler bei der Indexsuche:\n\n",
                         error ? error->message : "?", NULL);
                 g_clear_error(&error);
@@ -1194,7 +1194,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
             if (hits->len == 0) {
                 gtk_widget_destroy(dialog);
                 g_ptr_array_unref(hits);
-                display_message(zond->app_window,
+                display_message(zond->win.app_window,
                         "Keine Treffer gefunden.", NULL);
                 return;
             }
@@ -1217,7 +1217,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
                             term, ZOND_INDEXSUCHE_MAX_HITS) :
                     g_strdup_printf("Index-Suche: \u201e%s\u201c", term);
             GtkWidget *rv = sond_result_view_new(
-                    GTK_WINDOW(zond->app_window),
+                    GTK_WINDOW(zond->win.app_window),
                     titel,
                     cols,
                     G_CALLBACK(zond_indexsuche_row_activated),
@@ -1301,14 +1301,14 @@ zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
     ht_owner = g_hash_table_new_full(NULL, NULL, g_object_unref, NULL);
     gaps = g_ptr_array_new_with_free_func(sond_index_coverage_gap_free);
 
-    wait_cursor_set(zond->app_window);
-    if (scan_coverage_gaps_fs(zond, SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+    wait_cursor_set(zond->win.app_window);
+    if (scan_coverage_gaps_fs(zond, SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
             NULL, gaps, ht_owner, &error)) {
         g_warning("zond_indexsuche_activate: Abdeckungs-Check unvollständig: %s",
                 error ? error->message : "?");
         g_clear_error(&error);
     }
-    wait_cursor_reset(zond->app_window);
+    wait_cursor_reset(zond->win.app_window);
 
     cont = handle_coverage_gaps(zond, gaps);
 
@@ -1339,26 +1339,26 @@ zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum) {
     GHashTable *ht_fileparts = NULL;
 
     if (baum == KEIN_BAUM) {
-        display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+        display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
         return;
     }
 
     if (baum == BAUM_FS)
         ht_fileparts = zond_treeviewfm_get_fileparts(
-                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, FALSE, FALSE,
+                ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), TRUE, FALSE, FALSE,
                 &error);
     else
         ht_fileparts = zond_treeview_get_selected_fileparts(
-                ZOND_TREEVIEW(zond->treeview[baum]), FALSE, &error);
+                ZOND_TREEVIEW(zond->trees.treeview[baum]), FALSE, &error);
 
     if (!ht_fileparts) {
-        display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+        display_message(zond->win.app_window, "Fehler beim Ermitteln der Auswahl:\n",
                 error ? error->message : "?", NULL);
         g_clear_error(&error);
         return;
     }
     if (g_hash_table_size(ht_fileparts) == 0) {
-        display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+        display_message(zond->win.app_window, "Keine Punkte ausgewählt", NULL);
         g_hash_table_destroy(ht_fileparts);
         return;
     }

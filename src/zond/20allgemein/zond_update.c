@@ -561,7 +561,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 
 	title = g_strconcat("Aktuellere Version vorhanden (", vtag, ")", NULL);
 
-	rc = abfrage_frage(zond->app_window, title,
+	rc = abfrage_frage(zond->win.app_window, title,
 			"Herunterladen und installieren?",
 			NULL);
 	g_free(title);
@@ -623,11 +623,11 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 			"Starte Installer und schließe Programm");
 
 	//Projekt schliessen
-	if (zond->dbase_zond) {
+	if (zond->proj.dbase_zond) {
 		gint rc = 0;
 
 		argv[3] = g_strdup(
-				zond_dbase_get_path(zond->dbase_zond->zond_dbase_store));
+				zond_dbase_get_path(zond->proj.dbase_zond->zond_dbase_store));
 
 		rc = project_close(zond, error);
 		if (rc) {
@@ -681,7 +681,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		return -1;
 
 			//Projekt schließen und zond beenden
-	g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);
+	g_signal_emit_by_name(zond->win.app_window, "delete-event", NULL, &ret);
 
 	return 0;
 }

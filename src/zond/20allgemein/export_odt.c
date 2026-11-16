@@ -276,8 +276,8 @@ static void odt_content(GString *c, Projekt *zond, GPtrArray *eintraege,
 			"<office:document-content" ODT_NAMESPACES ">\n"
 			"<office:body><office:text>\n");
 
-	if (zond->project_name && *zond->project_name)
-		odt_absatz(c, "Title", zond->project_name);
+	if (zond->proj.project_name && *zond->proj.project_name)
+		odt_absatz(c, "Title", zond->proj.project_name);
 
 	for (guint i = 0; i < eintraege->len; i++) {
 		ExportEintrag *e = g_ptr_array_index(eintraege, i);

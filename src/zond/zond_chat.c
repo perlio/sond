@@ -94,7 +94,7 @@ static void
 zond_chat_show_hits(Projekt *zond, GPtrArray *hits) {
     gchar const *cols[] = { "Datei", "Seite", "Fundstelle", "", "", NULL };
     GtkWidget *rv = sond_result_view_new(
-            GTK_WINDOW(zond->app_window),
+            GTK_WINDOW(zond->win.app_window),
             "Chat: Fundstellen",
             cols,
             G_CALLBACK(zond_indexsuche_row_activated),
@@ -158,7 +158,7 @@ zond_chat_show_answer(Projekt *zond, gchar const *question, gchar const *answer)
     title = g_strdup_printf("Chat: „%s“", question);
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), title);
-    gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(zond->app_window));
+    gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(zond->win.app_window));
     gtk_window_set_default_size(GTK_WINDOW(window), 500, 400);
     g_free(title);
 
@@ -195,14 +195,14 @@ zond_chat_do(Projekt *zond) {
     GtkTextBuffer *buffer   = NULL;
     gint       response     = 0;
 
-    if (!zond->wctx || !zond->wctx->index_ctx) {
-        display_message(zond->app_window,
+    if (!zond->proj.wctx || !zond->proj.wctx->index_ctx) {
+        display_message(zond->win.app_window,
                 "Kein Index vorhanden.\n"
                 "Bitte zuerst Dateien indizieren.", NULL);
         return;
     }
 
-    if (!sond_index_ctx_has_embeddings(zond->wctx->index_ctx)) {
+    if (!sond_index_ctx_has_embeddings(zond->proj.wctx->index_ctx)) {
         /* Nur zur Diagnose erneut ermitteln, welcher Pfad beim Öffnen des
          * Projekts (project_open(), project.c) tatsächlich versucht wurde -
          * der eigentliche Fehlergrund (Datei fehlt? falsches Format? zu
@@ -212,7 +212,7 @@ zond_chat_do(Projekt *zond) {
         gchar *embedding_model_path = resolve_model_path(zond,
                 "embedding-model-path", "Qwen3-Embedding-0.6B-Q8_0.gguf");
 
-        display_message(zond->app_window,
+        display_message(zond->win.app_window,
                 "Kein Embedding-Modell geladen.\n\n"
                 "Für die Chat-Funktion wird ein lokales Embedding-Modell "
                 "benötigt. Geprüfter Pfad:\n",
@@ -230,16 +230,16 @@ zond_chat_do(Projekt *zond) {
     /* Chat-Modell lazy anlegen (bleibt für die Laufzeit der Anwendung
      * bestehen - Neuladen bei jeder Frage wäre bei mehreren GB Modellgröße
      * viel zu langsam). */
-    if (!zond->chat_ctx) {
+    if (!zond->app.chat_ctx) {
         gchar  *chat_model_path = resolve_model_path(zond, "chat-model-path",
                 "Qwen3-8B-Q4_K_M.gguf");
         GError *error = NULL;
 
-        zond->chat_ctx = sond_chat_ctx_new(chat_model_path, 0, &error);
+        zond->app.chat_ctx = sond_chat_ctx_new(chat_model_path, 0, &error);
         g_free(chat_model_path);
 
-        if (!zond->chat_ctx) {
-            display_message(zond->app_window,
+        if (!zond->app.chat_ctx) {
+            display_message(zond->win.app_window,
                     "Chat-Modell konnte nicht geladen werden:\n\n",
                     error ? error->message : "?",
                     "\n\nBitte prüfen, ob die Datei unter der Einstellung "
@@ -255,7 +255,7 @@ zond_chat_do(Projekt *zond) {
      * Suchbegriff sind) --- */
     dialog = gtk_dialog_new_with_buttons(
             "Chat mit dem Index",
-            GTK_WINDOW(zond->app_window),
+            GTK_WINDOW(zond->win.app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
             "Fragen",    GTK_RESPONSE_OK,
             "Abbrechen", GTK_RESPONSE_CANCEL,
@@ -307,11 +307,11 @@ zond_chat_do(Projekt *zond) {
             gint        cancel         = 0;
             GThread    *thread         = NULL;
 
-            td->index_ctx = zond->wctx->index_ctx;
-            td->chat_ctx  = zond->chat_ctx;
+            td->index_ctx = zond->proj.wctx->index_ctx;
+            td->chat_ctx  = zond->app.chat_ctx;
             td->question  = question; /* Ownership geht an td */
 
-            info_window = info_window_open(zond->app_window, &cancel,
+            info_window = info_window_open(zond->win.app_window, &cancel,
                     "Antwort wird erzeugt");
             info_window_set_message(info_window,
                     "Suche relevante Textstellen und erzeuge Antwort "
@@ -320,7 +320,7 @@ zond_chat_do(Projekt *zond) {
             thread = g_thread_new("sond-chat", do_chat_thread, td);
             if (!thread) {
                 info_window_close(info_window);
-                display_message(zond->app_window,
+                display_message(zond->win.app_window,
                         "Fehler\n\n", "Thread konnte nicht erzeugt werden", NULL);
                 g_free(td->question);
                 g_free(td);
@@ -341,11 +341,11 @@ zond_chat_do(Projekt *zond) {
             info_window_close(info_window);
 
             if (!td->hits) {
-                display_message(zond->app_window,
+                display_message(zond->win.app_window,
                         "Fehler bei der semantischen Suche:\n\n",
                         td->error ? td->error->message : "?", NULL);
             } else if (!td->answer) {
-                display_message(zond->app_window,
+                display_message(zond->win.app_window,
                         "Fehler bei der Antwortgenerierung:\n\n",
                         td->error ? td->error->message : "?", NULL);
             } else {

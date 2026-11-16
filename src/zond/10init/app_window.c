@@ -71,7 +71,7 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 	rc = project_close(zond, &error);
 
 	if (rc == -1) {
-		show_error_message(zond->app_window,
+		show_error_message(zond->win.app_window,
 				"Fehler beim Schließen des Projekts -\n\n"
 				"Bei Aufruf projekt_schliessen:\n",
 				error->message);
@@ -82,15 +82,15 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 	}
 
 	g_application_quit(G_APPLICATION(
-			gtk_window_get_application(GTK_WINDOW(zond->app_window))));
+			gtk_window_get_application(GTK_WINDOW(zond->win.app_window))));
 
 	return TRUE;
 }
 
 static gboolean cb_button_event(GtkWidget *app_window, GdkEvent *event,
 		gpointer data) {
-	((Projekt*) data)->state = event->button.state;
-	((Projekt*) data)->viewer_session->state = event->button.state;
+	((Projekt*) data)->win.state = event->button.state;
+	((Projekt*) data)->app.viewer_session->state = event->button.state;
 	return FALSE;
 }
 
@@ -108,13 +108,13 @@ static void cb_text_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
 	gtk_text_buffer_get_bounds(buffer, &start, &end);
 	text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
 
-	rc = zond_dbase_update_text(zond->dbase_zond->zond_dbase_work,
-			(zond->node_id_textview) ? zond->node_id_textview : zond->node_id_act,
+	rc = zond_dbase_update_text(zond->proj.dbase_zond->zond_dbase_work,
+			(zond->trees.node_id_textview) ? zond->trees.node_id_textview : zond->trees.node_id_act,
 					text, &error);
 	g_free(text);
 
 	if (rc) {
-		show_error_message(zond->app_window,
+		show_error_message(zond->win.app_window,
 				"Fehler beim Speichern des Textes:\n\n"
 				"Bei Aufruf zond_dbase_update_text:\n",
 				error->message);
@@ -126,7 +126,7 @@ static gboolean cb_textview_focus_in(GtkWidget *textview, GdkEvent *event,
 		gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 
-	zond->text_buffer_changed_signal = g_signal_connect(
+	zond->trees.text_buffer_changed_signal = g_signal_connect(
 			gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)),
 			"changed",
 			G_CALLBACK(cb_text_buffer_changed),
@@ -139,15 +139,15 @@ static gboolean cb_textview_focus_out(GtkWidget *textview, GdkEvent *event,
 		gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 
-	if (zond->text_buffer_changed_signal) {
+	if (zond->trees.text_buffer_changed_signal) {
 		g_signal_handler_disconnect(
 				gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)),
-				zond->text_buffer_changed_signal);
-		zond->text_buffer_changed_signal = 0;
+				zond->trees.text_buffer_changed_signal);
+		zond->trees.text_buffer_changed_signal = 0;
 	}
 
-	if (zond->baum_zuletzt != KEIN_BAUM)
-		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[zond->baum_zuletzt]));
+	if (zond->trees.baum_zuletzt != KEIN_BAUM)
+		gtk_widget_queue_draw(GTK_WIDGET(zond->trees.treeview[zond->trees.baum_zuletzt]));
 
 	return FALSE;
 }
@@ -155,12 +155,12 @@ static gboolean cb_textview_focus_out(GtkWidget *textview, GdkEvent *event,
 static void cb_pin_button_toggled(GtkToggleButton* toggle, gpointer user_data) {
 	Projekt* zond = (Projekt*) user_data;
 
-	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
-		if (zond->baum_zuletzt == BAUM_FS)
-			gtk_widget_set_sensitive(zond->textview, FALSE);
-		zond->node_id_textview = zond->node_id_act;
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->trees.textview_pin_button))) {
+		if (zond->trees.baum_zuletzt == BAUM_FS)
+			gtk_widget_set_sensitive(zond->trees.textview, FALSE);
+		zond->trees.node_id_textview = zond->trees.node_id_act;
 
-		gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+		gtk_widget_set_sensitive(zond->trees.textview_jump_button, FALSE);
 
 		zond_treeview_load_textview(zond);
 	}
@@ -170,18 +170,18 @@ static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 	GtkTreeIter *iter = NULL;
 
-	if (!zond->node_id_textview)
+	if (!zond->trees.node_id_textview)
 		return;
 
 	iter = zond_tree_store_get_iter_by_node_id(
 			ZOND_TREE_STORE(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))),
-			zond->node_id_textview);
+					GTK_TREE_VIEW(zond->trees.treeview[BAUM_AUSWERTUNG]))),
+			zond->trees.node_id_textview);
 	if (!iter)
 		iter = zond_tree_store_get_iter_by_node_id(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))),
-				zond->node_id_textview);
+						GTK_TREE_VIEW(zond->trees.treeview[BAUM_INHALT]))),
+				zond->trees.node_id_textview);
 
 	if (!iter)
 		return;
@@ -190,13 +190,13 @@ static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
 			zond_tree_store_get_tree_store(iter));
 
 	if (baum_target == BAUM_AUSWERTUNG &&
-			gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
+			gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->win.fs_button)))
 		gtk_toggle_button_set_active(
-				GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
+				GTK_TOGGLE_BUTTON(zond->win.fs_button), FALSE);
 
-	sond_treeview_expand_to_row(zond->treeview[baum_target], iter);
-	sond_treeview_set_cursor(zond->treeview[baum_target], iter);
-	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[baum_target]));
+	sond_treeview_expand_to_row(zond->trees.treeview[baum_target], iter);
+	sond_treeview_set_cursor(zond->trees.treeview[baum_target], iter);
+	gtk_widget_grab_focus(GTK_WIDGET(zond->trees.treeview[baum_target]));
 	gtk_tree_iter_free(iter);
 }
 
@@ -207,21 +207,21 @@ static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
 Baum zond_baum_aktuell(Projekt *zond) {
 	GtkWidget *focus = NULL;
 
-	if (!zond->app_window)
+	if (!zond->win.app_window)
 		return KEIN_BAUM;
 
 	//GtkWindow behält sein Fokus-Widget, auch wenn ein anderes Fenster aktiv ist
-	focus = gtk_window_get_focus(GTK_WINDOW(zond->app_window));
+	focus = gtk_window_get_focus(GTK_WINDOW(zond->win.app_window));
 	if (!focus)
 		return KEIN_BAUM;
 
 	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
-		if (focus == GTK_WIDGET(zond->treeview[baum]))
+		if (focus == GTK_WIDGET(zond->trees.treeview[baum]))
 			return baum;
 
 	//Menü-Popover (GTK4-Menüleiste) hält den Fokus - gemeint ist der Baum davor
 	if (gtk_widget_get_ancestor(focus, GTK_TYPE_POPOVER_MENU))
-		return zond->baum_zuletzt;
+		return zond->trees.baum_zuletzt;
 
 	return KEIN_BAUM;
 }
@@ -231,12 +231,12 @@ static gboolean cb_treeview_focus_out(GtkWidget *treeview, GdkEvent *event,
 	Projekt *zond = (Projekt*) user_data;
 	Baum baum = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
 
-	if (zond->cursor_changed_signal) {
-		g_signal_handler_disconnect(treeview, zond->cursor_changed_signal);
-		zond->cursor_changed_signal = 0;
+	if (zond->trees.cursor_changed_signal) {
+		g_signal_handler_disconnect(treeview, zond->trees.cursor_changed_signal);
+		zond->trees.cursor_changed_signal = 0;
 	}
 
-	g_object_set(sond_treeview_get_cell_renderer_text(zond->treeview[baum]),
+	g_object_set(sond_treeview_get_cell_renderer_text(zond->trees.treeview[baum]),
 			"editable", FALSE, NULL);
 
 	return FALSE;
@@ -247,8 +247,8 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 	Projekt *zond = (Projekt*) user_data;
 	Baum baum = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
 
-	if (baum != BAUM_FS && !zond->cursor_changed_signal) {
-		zond->cursor_changed_signal =
+	if (baum != BAUM_FS && !zond->trees.cursor_changed_signal) {
+		zond->trees.cursor_changed_signal =
 				g_signal_connect(treeview, "cursor-changed",
 						G_CALLBACK(zond_treeview_cursor_changed), zond);
 
@@ -256,28 +256,28 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 	}
 
 	if (baum == BAUM_FS &&
-			!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button)))
-		gtk_widget_set_sensitive(zond->textview, FALSE);
+			!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->trees.textview_pin_button)))
+		gtk_widget_set_sensitive(zond->trees.textview, FALSE);
 
 	//Wechsel von einem anderen Baum: nur ein Baum trägt eine Markierung
-	if (baum != zond->baum_zuletzt) {
+	if (baum != zond->trees.baum_zuletzt) {
 		GtkTreePath *path = NULL;
 
-		if (zond->baum_zuletzt != KEIN_BAUM)
+		if (zond->trees.baum_zuletzt != KEIN_BAUM)
 			gtk_tree_selection_unselect_all(
-					zond->selection[zond->baum_zuletzt]);
+					zond->trees.selection[zond->trees.baum_zuletzt]);
 
 		gtk_tree_view_get_cursor(GTK_TREE_VIEW(treeview), &path, NULL);
 		if (path) {
-			gtk_tree_selection_select_path(zond->selection[baum], path);
+			gtk_tree_selection_select_path(zond->trees.selection[baum], path);
 			gtk_tree_path_free(path);
 		}
 	}
 
-	zond->baum_zuletzt = baum;
+	zond->trees.baum_zuletzt = baum;
 
 	g_object_set(
-			sond_treeview_get_cell_renderer_text(zond->treeview[baum]),
+			sond_treeview_get_cell_renderer_text(zond->trees.treeview[baum]),
 			"editable", TRUE, NULL);
 
 	return FALSE;
@@ -301,9 +301,9 @@ static gboolean cb_treeview_key_press(GtkEventControllerKey *ctrl,
 	if (!c || !g_unichar_isprint(c) || g_unichar_isspace(c))
 		return FALSE;
 
-	gtk_popover_popup(GTK_POPOVER(zond->popover));
+	gtk_popover_popup(GTK_POPOVER(zond->win.popover));
 
-	entry = g_object_get_data(G_OBJECT(zond->popover), "entry");
+	entry = g_object_get_data(G_OBJECT(zond->win.popover), "entry");
 	g_unichar_to_utf8(c, zeichen);
 	gtk_entry_set_text(GTK_ENTRY(entry), zeichen);
 	gtk_entry_grab_focus_without_selecting(GTK_ENTRY(entry));
@@ -333,14 +333,14 @@ static void cb_entry_search(GtkWidget *entry, gpointer data) {
 	g_free(search_text);
 
 	if (rc) {
-		show_error_message(zond->app_window,
+		show_error_message(zond->win.app_window,
 				"Fehler bei der Suche -\n\n"
 				"Bei Aufruf suchen_treeviews:\n",
 				error->message);
 		g_error_free(error);
 	}
 
-	gtk_popover_popdown(GTK_POPOVER(zond->popover));
+	gtk_popover_popdown(GTK_POPOVER(zond->win.popover));
 }
 
 /* =============================================================================
@@ -348,31 +348,31 @@ static void cb_entry_search(GtkWidget *entry, gpointer data) {
  * ========================================================================== */
 
 static void init_treeviews(Projekt *zond) {
-	zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new(zond));
-	zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(
+	zond->trees.treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new(zond));
+	zond->trees.treeview[BAUM_INHALT] = SOND_TREEVIEW(
 			zond_treeview_new(zond, (gint) BAUM_INHALT));
-	zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(
+	zond->trees.treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(
 			zond_treeview_new(zond, (gint) BAUM_AUSWERTUNG));
 
-	gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_INHALT]), FALSE);
-	gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), FALSE);
+	gtk_widget_set_hexpand(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]), FALSE);
+	gtk_widget_set_hexpand(GTK_WIDGET(zond->trees.treeview[BAUM_AUSWERTUNG]), FALSE);
 
 	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++) {
-		zond->selection[baum] = gtk_tree_view_get_selection(
-				GTK_TREE_VIEW(zond->treeview[baum]));
+		zond->trees.selection[baum] = gtk_tree_view_get_selection(
+				GTK_TREE_VIEW(zond->trees.treeview[baum]));
 
-		g_signal_connect(zond->treeview[baum], "focus-in-event",
+		g_signal_connect(zond->trees.treeview[baum], "focus-in-event",
 				G_CALLBACK(cb_treeview_focus_in), zond);
-		g_signal_connect(zond->treeview[baum], "focus-out-event",
+		g_signal_connect(zond->trees.treeview[baum], "focus-out-event",
 				G_CALLBACK(cb_treeview_focus_out), zond);
 
 		GtkEventController *key_ctrl =
-				gtk_event_controller_key_new(GTK_WIDGET(zond->treeview[baum]));
+				gtk_event_controller_key_new(GTK_WIDGET(zond->trees.treeview[baum]));
 		g_signal_connect(key_ctrl, "key-pressed",
 				G_CALLBACK(cb_treeview_key_press), zond);
 		gtk_event_controller_set_propagation_phase(key_ctrl, GTK_PHASE_BUBBLE);
 
-		g_object_set_data(G_OBJECT(zond->treeview[baum]),
+		g_object_set_data(G_OBJECT(zond->trees.treeview[baum]),
 				"key-controller", key_ctrl);
 	}
 }
@@ -389,11 +389,11 @@ static GtkWidget* create_scrolled_window(GtkWidget *child) {
 static void init_search_popover(Projekt *zond) {
 	GtkWidget *entry_search = NULL;
 
-	zond->popover = gtk_popover_new(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
+	zond->win.popover = gtk_popover_new(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]));
 	entry_search = gtk_entry_new();
 	gtk_widget_show(entry_search);
-	gtk_container_add(GTK_CONTAINER(zond->popover), entry_search);
-	g_object_set_data(G_OBJECT(zond->popover), "entry", entry_search);
+	gtk_container_add(GTK_CONTAINER(zond->win.popover), entry_search);
+	g_object_set_data(G_OBJECT(zond->win.popover), "entry", entry_search);
 
 	g_signal_connect(entry_search, "activate",
 			G_CALLBACK(cb_entry_search), zond);
@@ -418,35 +418,35 @@ static void init_treeview_layout(Projekt *zond) {
 	GtkWidget *vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_set_position(GTK_PANED(vpaned), PANED_TREES_HEIGHT);
 	gtk_box_pack_start(GTK_BOX(
-			gtk_bin_get_child(GTK_BIN(zond->app_window))),
+			gtk_bin_get_child(GTK_BIN(zond->win.app_window))),
 			vpaned, TRUE, TRUE, 0);
 
 	/* --- hpaned_outer: FS-Tree | (INHALT + AUSWERTUNG) --- */
-	zond->hpaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_paned_set_position(GTK_PANED(zond->hpaned), PANED_LEFT_WIDTH);
-	gtk_paned_pack1(GTK_PANED(vpaned), zond->hpaned, TRUE, TRUE);
+	zond->win.hpaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_paned_set_position(GTK_PANED(zond->win.hpaned), PANED_LEFT_WIDTH);
+	gtk_paned_pack1(GTK_PANED(vpaned), zond->win.hpaned, TRUE, TRUE);
 
 	/* swindow_baum_fs — pack1 von hpaned_outer, im FS-Modus sichtbar */
 	GtkWidget *swindow_baum_fs = create_scrolled_window(
-			GTK_WIDGET(zond->treeview[BAUM_FS]));
-	gtk_paned_pack1(GTK_PANED(zond->hpaned), swindow_baum_fs, FALSE, TRUE);
-	g_object_set_data(G_OBJECT(zond->hpaned), "swindow-fs", swindow_baum_fs);
+			GTK_WIDGET(zond->trees.treeview[BAUM_FS]));
+	gtk_paned_pack1(GTK_PANED(zond->win.hpaned), swindow_baum_fs, FALSE, TRUE);
+	g_object_set_data(G_OBJECT(zond->win.hpaned), "swindow-fs", swindow_baum_fs);
 
 	/* --- hpaned_inner: INHALT | AUSWERTUNG --- */
 	GtkWidget *hpaned_inner = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	/* keine explizite Position — GTK teilt bei resize=TRUE automatisch auf */
-	gtk_paned_pack2(GTK_PANED(zond->hpaned), hpaned_inner, TRUE, TRUE);
+	gtk_paned_pack2(GTK_PANED(zond->win.hpaned), hpaned_inner, TRUE, TRUE);
 
 	/* swindow_baum_inhalt — immer sichtbar, resize=TRUE */
 	GtkWidget *swindow_baum_inhalt = create_scrolled_window(
-			GTK_WIDGET(zond->treeview[BAUM_INHALT]));
+			GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]));
 	gtk_paned_pack1(GTK_PANED(hpaned_inner), swindow_baum_inhalt, TRUE, TRUE);
 
 	/* swindow_baum_auswertung — im Normal-Modus sichtbar, resize=TRUE */
 	GtkWidget *swindow_baum_ausw = create_scrolled_window(
-			GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
+			GTK_WIDGET(zond->trees.treeview[BAUM_AUSWERTUNG]));
 	gtk_paned_pack2(GTK_PANED(hpaned_inner), swindow_baum_ausw, TRUE, TRUE);
-	g_object_set_data(G_OBJECT(zond->hpaned), "swindow-auswertung", swindow_baum_ausw);
+	g_object_set_data(G_OBJECT(zond->win.hpaned), "swindow-auswertung", swindow_baum_ausw);
 
 	/* Anfangszustand: Normal-Modus — FS versteckt, AUSWERTUNG sichtbar */
 	gtk_widget_hide(swindow_baum_fs);
@@ -459,32 +459,32 @@ static void init_treeview_layout(Projekt *zond) {
 	gtk_box_pack_start(GTK_BOX(hbox_textview), vbox_textview_buttons,
 			FALSE, FALSE, 0);
 
-	zond->textview_pin_button = gtk_toggle_button_new();
-	gtk_button_set_image(GTK_BUTTON(zond->textview_pin_button),
+	zond->trees.textview_pin_button = gtk_toggle_button_new();
+	gtk_button_set_image(GTK_BUTTON(zond->trees.textview_pin_button),
 			gtk_image_new_from_icon_name("media-record",
 					GTK_ICON_SIZE_SMALL_TOOLBAR));
-	gtk_button_set_relief(GTK_BUTTON(zond->textview_pin_button),
+	gtk_button_set_relief(GTK_BUTTON(zond->trees.textview_pin_button),
 			GTK_RELIEF_NONE);
-	gtk_widget_set_tooltip_text(zond->textview_pin_button,
+	gtk_widget_set_tooltip_text(zond->trees.textview_pin_button,
 			"Pin Textfenster");
-	g_signal_connect(zond->textview_pin_button, "toggled",
+	g_signal_connect(zond->trees.textview_pin_button, "toggled",
 			G_CALLBACK(cb_pin_button_toggled), zond);
 	gtk_box_pack_start(GTK_BOX(vbox_textview_buttons),
-			zond->textview_pin_button, FALSE, FALSE, 0);
+			zond->trees.textview_pin_button, FALSE, FALSE, 0);
 
-	zond->textview_jump_button = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(zond->textview_jump_button),
+	zond->trees.textview_jump_button = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(zond->trees.textview_jump_button),
 			gtk_image_new_from_icon_name("go-jump",
 					GTK_ICON_SIZE_SMALL_TOOLBAR));
-	gtk_button_set_relief(GTK_BUTTON(zond->textview_jump_button),
+	gtk_button_set_relief(GTK_BUTTON(zond->trees.textview_jump_button),
 			GTK_RELIEF_NONE);
-	gtk_widget_set_tooltip_text(zond->textview_jump_button,
+	gtk_widget_set_tooltip_text(zond->trees.textview_jump_button,
 			"Zur angepinnten Row springen");
-	g_signal_connect(zond->textview_jump_button, "clicked",
+	g_signal_connect(zond->trees.textview_jump_button, "clicked",
 			G_CALLBACK(cb_jump_button_clicked), zond);
 	gtk_box_pack_start(GTK_BOX(vbox_textview_buttons),
-			zond->textview_jump_button, FALSE, FALSE, 0);
-	gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+			zond->trees.textview_jump_button, FALSE, FALSE, 0);
+	gtk_widget_set_sensitive(zond->trees.textview_jump_button, FALSE);
 
 	GtkWidget *swindow_textview = create_scrolled_window(NULL);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
@@ -492,36 +492,36 @@ static void init_treeview_layout(Projekt *zond) {
 	gtk_box_pack_start(GTK_BOX(hbox_textview), swindow_textview,
 			TRUE, TRUE, 0);
 
-	zond->textview = gtk_text_view_new();
-	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(zond->textview), GTK_WRAP_WORD);
-	gtk_text_view_set_accepts_tab(GTK_TEXT_VIEW(zond->textview), FALSE);
+	zond->trees.textview = gtk_text_view_new();
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(zond->trees.textview), GTK_WRAP_WORD);
+	gtk_text_view_set_accepts_tab(GTK_TEXT_VIEW(zond->trees.textview), FALSE);
 
-	g_object_bind_property(zond->textview, "sensitive",
-	        zond->textview_pin_button, "sensitive",
+	g_object_bind_property(zond->trees.textview, "sensitive",
+	        zond->trees.textview_pin_button, "sensitive",
 	        G_BINDING_SYNC_CREATE);
 
-	g_signal_connect(zond->textview, "focus-in-event",
+	g_signal_connect(zond->trees.textview, "focus-in-event",
 			G_CALLBACK(cb_textview_focus_in), zond);
-	g_signal_connect(zond->textview, "focus-out-event",
+	g_signal_connect(zond->trees.textview, "focus-out-event",
 			G_CALLBACK(cb_textview_focus_out), zond);
 
 	GtkTextIter text_iter = { 0 };
 	gtk_text_buffer_get_end_iter(
-			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)),
+			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->trees.textview)),
 			&text_iter);
 	gtk_text_buffer_create_mark(
-			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)),
+			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->trees.textview)),
 			"ende-text", &text_iter, FALSE);
 
 	gtk_container_add(GTK_CONTAINER(swindow_textview),
-			GTK_WIDGET(zond->textview));
+			GTK_WIDGET(zond->trees.textview));
 }
 
 static void init_statusbar(Projekt *zond, GtkWidget *vbox) {
-	zond->label_status = GTK_LABEL(gtk_label_new(""));
-	gtk_label_set_ellipsize(zond->label_status, PANGO_ELLIPSIZE_END);
-	gtk_label_set_xalign(zond->label_status, 0.02);
-	gtk_box_pack_end(GTK_BOX(vbox), GTK_WIDGET(zond->label_status),
+	zond->win.label_status = GTK_LABEL(gtk_label_new(""));
+	gtk_label_set_ellipsize(zond->win.label_status, PANGO_ELLIPSIZE_END);
+	gtk_label_set_xalign(zond->win.label_status, 0.02);
+	gtk_box_pack_end(GTK_BOX(vbox), GTK_WIDGET(zond->win.label_status),
 			FALSE, FALSE, 0);
 }
 
@@ -559,59 +559,59 @@ static void cb_seadrive_status_app_window(SondTreeviewFM *stvfm,
 static void cb_seadrive_status_redraw_other_trees(SondTreeviewFM *stvfm,
 		guint pending_down, guint pending_up, gpointer user_data) {
 	Projekt *zond = user_data;
-	if (zond->treeview[BAUM_INHALT])
-		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
-	if (zond->treeview[BAUM_AUSWERTUNG])
-		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
+	if (zond->trees.treeview[BAUM_INHALT])
+		gtk_widget_queue_draw(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]));
+	if (zond->trees.treeview[BAUM_AUSWERTUNG])
+		gtk_widget_queue_draw(GTK_WIDGET(zond->trees.treeview[BAUM_AUSWERTUNG]));
 }
 #endif
 
 void init_app_window(Projekt *zond) {
 	GtkWidget *vbox = NULL;
 
-	zond->baum_zuletzt = KEIN_BAUM;
+	zond->trees.baum_zuletzt = KEIN_BAUM;
 
-	zond->app_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_default_size(GTK_WINDOW(zond->app_window),
+	zond->win.app_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_default_size(GTK_WINDOW(zond->win.app_window),
 			APP_WINDOW_DEFAULT_WIDTH, APP_WINDOW_DEFAULT_HEIGHT);
 
 	init_headerbar(zond);
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(zond->app_window), vbox);
+	gtk_container_add(GTK_CONTAINER(zond->win.app_window), vbox);
 
 	init_treeviews(zond);
 
 #ifdef _WIN32
 	{
 		GtkWidget *label_seadrive = g_object_get_data(
-				G_OBJECT(zond->app_window), "seadrive-label");
+				G_OBJECT(zond->win.app_window), "seadrive-label");
 		if (label_seadrive)
 			g_signal_connect(
-					zond->treeview[BAUM_FS], "seadrive-status",
+					zond->trees.treeview[BAUM_FS], "seadrive-status",
 					G_CALLBACK(cb_seadrive_status_app_window),
 					label_seadrive);
 
 		g_signal_connect(
-				zond->treeview[BAUM_FS], "seadrive-status",
+				zond->trees.treeview[BAUM_FS], "seadrive-status",
 				G_CALLBACK(cb_seadrive_status_redraw_other_trees), zond);
 	}
 #endif
 
 	init_treeview_layout(zond);
 
-	g_signal_connect(zond->app_window, "button-press-event",
+	g_signal_connect(zond->win.app_window, "button-press-event",
 			G_CALLBACK(cb_button_event), zond);
-	g_signal_connect(zond->app_window, "button-release-event",
+	g_signal_connect(zond->win.app_window, "button-release-event",
 			G_CALLBACK(cb_button_event), zond);
 
 	init_search_popover(zond);
 	init_statusbar(zond, vbox);
 
-	g_signal_connect(zond->app_window, "delete-event",
+	g_signal_connect(zond->win.app_window, "delete-event",
 			G_CALLBACK(cb_delete_event), zond);
 
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), FALSE);
+	gtk_widget_set_sensitive(GTK_WIDGET(zond->trees.textview), FALSE);
 	gtk_text_buffer_set_text(
-			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)), "", -1);
+			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->trees.textview)), "", -1);
 }

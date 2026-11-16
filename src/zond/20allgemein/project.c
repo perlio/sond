@@ -62,9 +62,9 @@
  * @param changed TRUE if project has unsaved changes, FALSE otherwise
  */
 void project_reset_changed(Projekt *zond, gboolean changed) {
-	zond->dbase_zond->changed = changed;
-	g_simple_action_set_enabled(zond->menu.speichern, changed);
-	g_settings_set_boolean(zond->settings, "speichern", changed);
+	zond->proj.dbase_zond->changed = changed;
+	g_simple_action_set_enabled(zond->win.menu.speichern, changed);
+	g_settings_set_boolean(zond->app.settings, "speichern", changed);
 
 	return;
 }
@@ -82,15 +82,15 @@ typedef struct {
 } CtlHinweis;
 
 static gchar* project_ctl_path(Projekt *zond) {
-	return g_build_filename(zond->project_dir, zond->project_name, NULL);
+	return g_build_filename(zond->proj.project_dir, zond->proj.project_name, NULL);
 }
 
 static void project_set_title(Projekt *zond) {
-	gchar *title = g_strdup_printf("%s%s", zond->project_name,
-			zond->readonly ? " [schreibgeschützt]" : "");
+	gchar *title = g_strdup_printf("%s%s", zond->proj.project_name,
+			zond->proj.readonly ? " [schreibgeschützt]" : "");
 
 	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))),
+			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window))),
 			title);
 	g_free(title);
 }
@@ -99,8 +99,8 @@ static void project_set_title(Projekt *zond) {
 static gboolean project_hinweis_idle(gpointer data) {
 	CtlHinweis *h = data;
 
-	if (h->zond->dbase_zond)
-		display_message(h->zond->app_window, "Hinweis\n\n", h->text, NULL);
+	if (h->zond->proj.dbase_zond)
+		display_message(h->zond->win.app_window, "Hinweis\n\n", h->text, NULL);
 	g_free(h->text);
 	g_free(h);
 
@@ -119,11 +119,11 @@ static gboolean project_ctl_tick(gpointer data) {
 	Projekt *zond = *(Projekt**) data;
 	gchar *path = NULL;
 	gchar *mode = NULL;
-	guint source_alt = zond->ctl_source;
+	guint source_alt = zond->proj.ctl_source;
 
-	if (!zond->dbase_zond || zond->ctl_in_tick)
+	if (!zond->proj.dbase_zond || zond->proj.ctl_in_tick)
 		return G_SOURCE_CONTINUE;
-	zond->ctl_in_tick = TRUE;
+	zond->proj.ctl_in_tick = TRUE;
 
 	path = project_ctl_path(zond);
 	mode = sond_zond_ctl_get_mode(path);
@@ -132,12 +132,12 @@ static gboolean project_ctl_tick(gpointer data) {
 		gboolean will_ro = (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 ||
 				g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0);
 
-		if (will_ro && !zond->readonly) {
+		if (will_ro && !zond->proj.readonly) {
 			gboolean ok = TRUE;
 
 			//vor dem Schreibschutz speichern ("lost": nicht, die Berechtigung fehlt)
 			if (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 &&
-					zond->dbase_zond->changed) {
+					zond->proj.dbase_zond->changed) {
 				GError *error = NULL;
 
 				if (project_save(zond, &error)) {
@@ -149,8 +149,8 @@ static gboolean project_ctl_tick(gpointer data) {
 			}
 
 			if (ok) {
-				zond->readonly = TRUE;
-				zond->ro_hinweis_gezeigt = FALSE;
+				zond->proj.readonly = TRUE;
+				zond->proj.ro_hinweis_gezeigt = FALSE;
 				project_set_title(zond);
 				if (g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0)
 					project_hinweis(zond, "Die Schreibberechtigung für dieses "
@@ -162,14 +162,14 @@ static gboolean project_ctl_tick(gpointer data) {
 							"anderen Rechner abgegeben. Das Projekt ist "
 							"gespeichert und jetzt schreibgeschützt.");
 			}
-		} else if (!will_ro && zond->readonly) {
-			if (!zond->dbase_zond->changed) {
+		} else if (!will_ro && zond->proj.readonly) {
+			if (!zond->proj.dbase_zond->changed) {
 				//wieder Schreibberechtigung: neu aus der Projektdatei laden
 				GError *error = NULL;
 
-				zond->ctl_in_tick = FALSE;
+				zond->proj.ctl_in_tick = FALSE;
 				if (project_open(zond, path, FALSE, &error) == -1) {
-					display_message(zond->app_window, "Fehler - Projekt kann nicht "
+					display_message(zond->win.app_window, "Fehler - Projekt kann nicht "
 							"neu geöffnet werden\n\n",
 							error ? error->message : "?", NULL);
 					g_clear_error(&error);
@@ -178,10 +178,10 @@ static gboolean project_ctl_tick(gpointer data) {
 				g_free(path);
 
 				//project_open hat den Takt ersetzt (neue Kennung) oder beendet
-				return (zond->ctl_source == source_alt) ?
+				return (zond->proj.ctl_source == source_alt) ?
 						G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
-			} else if (!zond->ro_hinweis_gezeigt) {
-				zond->ro_hinweis_gezeigt = TRUE;
+			} else if (!zond->proj.ro_hinweis_gezeigt) {
+				zond->proj.ro_hinweis_gezeigt = TRUE;
 				project_hinweis(zond, "Die Schreibberechtigung liegt wieder bei "
 						"diesem Rechner. Das Projekt enthält aber Änderungen, die "
 						"nicht gespeichert werden können. Bitte das Projekt "
@@ -190,12 +190,12 @@ static gboolean project_ctl_tick(gpointer data) {
 		}
 	}
 
-	sond_zond_ctl_write_state(path, zond->readonly ? SOND_ZOND_MODE_RO :
-			SOND_ZOND_MODE_RW, zond->dbase_zond->changed);
+	sond_zond_ctl_write_state(path, zond->proj.readonly ? SOND_ZOND_MODE_RO :
+			SOND_ZOND_MODE_RW, zond->proj.dbase_zond->changed);
 
 	g_free(mode);
 	g_free(path);
-	zond->ctl_in_tick = FALSE;
+	zond->proj.ctl_in_tick = FALSE;
 
 	return G_SOURCE_CONTINUE;
 }
@@ -206,20 +206,20 @@ static void project_ctl_start(Projekt *zond) {
 	gchar *mode = sond_zond_ctl_get_mode(path);
 	Projekt **ref = g_new0(Projekt*, 1);
 
-	zond->readonly = (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 ||
+	zond->proj.readonly = (g_strcmp0(mode, SOND_ZOND_MODE_RO) == 0 ||
 			g_strcmp0(mode, SOND_ZOND_MODE_LOST) == 0);
-	zond->ro_hinweis_gezeigt = FALSE;
+	zond->proj.ro_hinweis_gezeigt = FALSE;
 	project_set_title(zond);
-	sond_zond_ctl_write_state(path, zond->readonly ? SOND_ZOND_MODE_RO :
+	sond_zond_ctl_write_state(path, zond->proj.readonly ? SOND_ZOND_MODE_RO :
 			SOND_ZOND_MODE_RW, FALSE);
 
 	*ref = zond;
-	zond->ctl_data = ref;
-	zond->ctl_in_tick = FALSE;
-	zond->ctl_source = g_timeout_add_seconds(CTL_INTERVAL_SECONDS,
+	zond->proj.ctl_data = ref;
+	zond->proj.ctl_in_tick = FALSE;
+	zond->proj.ctl_source = g_timeout_add_seconds(CTL_INTERVAL_SECONDS,
 			project_ctl_tick, ref);
 
-	if (zond->readonly)
+	if (zond->proj.readonly)
 		project_hinweis(zond, "Dieses Projekt wurde schreibgeschützt geöffnet "
 				"(keine Schreibberechtigung). Änderungen werden nicht "
 				"gespeichert.");
@@ -230,20 +230,20 @@ static void project_ctl_start(Projekt *zond) {
 
 //Beim Schließen: Takt beenden, Zustand entfernen
 static void project_ctl_stop(Projekt *zond) {
-	if (zond->ctl_source) {
-		g_source_remove(zond->ctl_source);
-		zond->ctl_source = 0;
+	if (zond->proj.ctl_source) {
+		g_source_remove(zond->proj.ctl_source);
+		zond->proj.ctl_source = 0;
 	}
-	g_free(zond->ctl_data); //Takt ist beendet; ein laufender Aufruf braucht ihn nicht mehr
-	zond->ctl_data = NULL;
+	g_free(zond->proj.ctl_data); //Takt ist beendet; ein laufender Aufruf braucht ihn nicht mehr
+	zond->proj.ctl_data = NULL;
 
-	if (zond->project_dir && zond->project_name) {
+	if (zond->proj.project_dir && zond->proj.project_name) {
 		gchar *path = project_ctl_path(zond);
 
 		sond_zond_ctl_clear_state(path);
 		g_free(path);
 	}
-	zond->readonly = FALSE;
+	zond->proj.readonly = FALSE;
 }
 
 /**
@@ -254,8 +254,8 @@ static void project_set_changed(gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 	project_reset_changed(zond, TRUE);
 
-	if (zond->readonly && !zond->ro_hinweis_gezeigt) {
-		zond->ro_hinweis_gezeigt = TRUE;
+	if (zond->proj.readonly && !zond->proj.ro_hinweis_gezeigt) {
+		zond->proj.ro_hinweis_gezeigt = TRUE;
 		project_hinweis(zond, "Dieses Projekt ist schreibgeschützt: Änderungen "
 				"werden nicht gespeichert und gehen beim Schließen verloren.");
 	}
@@ -271,20 +271,20 @@ static void project_set_changed(gpointer user_data) {
 void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 	gboolean seadrive_active;
 
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_FS]), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_INHALT]), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), active);
+	gtk_widget_set_sensitive(GTK_WIDGET(zond->trees.treeview[BAUM_FS]), active);
+	gtk_widget_set_sensitive(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]), active);
+	gtk_widget_set_sensitive(GTK_WIDGET(zond->trees.treeview[BAUM_AUSWERTUNG]), active);
 
-	g_simple_action_set_enabled(zond->menu.schliessen,  active);
-	g_simple_action_set_enabled(zond->menu.export_odt,  active);
-	g_simple_action_set_enabled(zond->menu.struktur,    active);
-	g_simple_action_set_enabled(zond->menu.ansicht,     active);
-	gtk_widget_set_sensitive(zond->fs_button,           active);
-	g_simple_action_set_enabled(zond->menu.extras,      active);
-	g_simple_action_set_enabled(zond->menu.db_pruefen,  active);
+	g_simple_action_set_enabled(zond->win.menu.schliessen,  active);
+	g_simple_action_set_enabled(zond->win.menu.export_odt,  active);
+	g_simple_action_set_enabled(zond->win.menu.struktur,    active);
+	g_simple_action_set_enabled(zond->win.menu.ansicht,     active);
+	gtk_widget_set_sensitive(zond->win.fs_button,           active);
+	g_simple_action_set_enabled(zond->win.menu.extras,      active);
+	g_simple_action_set_enabled(zond->win.menu.db_pruefen,  active);
 
 	if (!active)
-		g_simple_action_set_enabled(zond->menu.speichern, FALSE);
+		g_simple_action_set_enabled(zond->win.menu.speichern, FALSE);
 
 	/* SeaDrive-Menüpunkte (Haupt- und Kontextmenüs) nur anwählbar, wenn ein
 	 * Projekt offen UND dessen Wurzel (BAUM_FS) tatsächlich ein SeaDrive-
@@ -293,13 +293,13 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 	 * Zeitpunkt bereits aktuell gesetzt. Ohne SeaDrive-Projekt sollen die
 	 * Punkte ausgegraut statt nur wirkungslos sein. */
 	seadrive_active = active &&
-			sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+			sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]));
 	sond_treeviewfm_seadrive_set_contextmenu_sensitive(
-			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), seadrive_active);
+			SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), seadrive_active);
 	zond_treeview_seadrive_set_contextmenu_sensitive(
-			ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), seadrive_active);
+			ZOND_TREEVIEW(zond->trees.treeview[BAUM_INHALT]), seadrive_active);
 	zond_treeview_seadrive_set_contextmenu_sensitive(
-			ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), seadrive_active);
+			ZOND_TREEVIEW(zond->trees.treeview[BAUM_AUSWERTUNG]), seadrive_active);
 	headerbar_set_seadrive_sensitive(zond, seadrive_active);
 
 	return;
@@ -319,10 +319,10 @@ static gint project_restart_store(ZondDBase *zond_dbase, gpointer data,
 	gchar *errmsg = NULL;
 	gint rc = 0;
 
-	zond->dbase_zond->index_attached = FALSE;
+	zond->proj.dbase_zond->index_attached = FALSE;
 
 	sql = sqlite3_mprintf("ATTACH DATABASE %Q AS work;",
-			zond_dbase_get_path(zond->dbase_zond->zond_dbase_work));
+			zond_dbase_get_path(zond->proj.dbase_zond->zond_dbase_work));
 	rc = sqlite3_exec(zond_dbase_get_dbase(zond_dbase), sql, NULL, NULL,
 			&errmsg);
 	sqlite3_free(sql);
@@ -466,8 +466,8 @@ static gint project_arbeitskopie_pruefen(Projekt *zond, gchar const *path,
 			"nicht gespeicherten Änderungen (Projekt nicht richtig geschlossen "
 			"oder in einem anderen Zond geöffnet).\n\nWiederherstellen? Bei "
 			"\"Nein\" wird sie als Datei \"%s.recovery_...\" aufbewahrt.",
-			zond->project_name, zond->project_name);
-	res = abfrage_frage(zond->app_window, "Wiederherstellen", text, NULL);
+			zond->proj.project_name, zond->proj.project_name);
+	res = abfrage_frage(zond->win.app_window, "Wiederherstellen", text, NULL);
 
 	if (res == GTK_RESPONSE_YES) {
 		if (!project_arbeitskopie_uebernehmen(path, path_tmp, error)) {
@@ -481,7 +481,7 @@ static gint project_arbeitskopie_pruefen(Projekt *zond, gchar const *path,
 
 			return -1;
 		}
-		display_message(zond->app_window, "Arbeitskopie gesichert als\n",
+		display_message(zond->win.app_window, "Arbeitskopie gesichert als\n",
 				path_neu, NULL);
 	} else
 		return 1;
@@ -503,7 +503,7 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	g_autofree gchar* path = NULL;
 	gchar *path_tmp = NULL;
 
-	path = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
+	path = g_strdup_printf("%s/%s", zond->proj.project_dir, zond->proj.project_name);
 
 	/* Bewußt NICHT mehr neben der Projektdatei (die auf einem Cloud-Sync-
 	 * Laufwerk liegen kann) - s. Kommentar bei project_get_local_tmp_path(). */
@@ -591,12 +591,12 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	zond_dbase_set_restart_func(zond_dbase_store, project_restart_store, zond);
 	zond_dbase_set_restart_func(zond_dbase_work, project_restart_work, zond);
 
-	zond->dbase_zond = g_malloc0(sizeof(DBaseZond));
+	zond->proj.dbase_zond = g_malloc0(sizeof(DBaseZond));
 
-	zond->dbase_zond->zond_dbase_store = zond_dbase_store;
-	zond->dbase_zond->zond_dbase_work = zond_dbase_work;
+	zond->proj.dbase_zond->zond_dbase_store = zond_dbase_store;
+	zond->proj.dbase_zond->zond_dbase_work = zond_dbase_work;
 
-	zond->dbase_zond->changed = FALSE;
+	zond->proj.dbase_zond->changed = FALSE;
 
 	return 0;
 }
@@ -628,15 +628,15 @@ static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
 gint project_save(Projekt *zond, GError **error) {
 	gint rc = 0;
 
-	if (!(zond->dbase_zond) || !(zond->dbase_zond->changed))
+	if (!(zond->proj.dbase_zond) || !(zond->proj.dbase_zond->changed))
 		return 0;
 
 	//Schreibschutz (keine Schreibberechtigung): nie in die Projektdatei schreiben
-	if (zond->readonly)
+	if (zond->proj.readonly)
 		return 0;
 
-	rc = zond_dbase_backup(zond->dbase_zond->zond_dbase_work,
-			zond->dbase_zond->zond_dbase_store, error);
+	rc = zond_dbase_backup(zond->proj.dbase_zond->zond_dbase_work,
+			zond->proj.dbase_zond->zond_dbase_store, error);
 	if (rc)
 		return -1;
 
@@ -654,10 +654,10 @@ gboolean project_timeout_autosave(gpointer data) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) data;
 
-	if (zond->dbase_zond) {
+	if (zond->proj.dbase_zond) {
 		gint rc = project_save(zond, &error);
 		if (rc) {
-			display_message(zond->app_window,
+			display_message(zond->win.app_window,
 					"Automatisches Speichern fehlgeschlagen\n\n", error->message, NULL);
 			g_error_free(error);
 		}
@@ -679,15 +679,15 @@ gboolean project_timeout_autosave(gpointer data) {
 gint project_close(Projekt *zond, GError **error) {
 	GError *error_remove = NULL;
 
-	if (!zond->dbase_zond)
+	if (!zond->proj.dbase_zond)
 		return 0;
 
-	if (!zond->viewer_session || !zond->app_window)
+	if (!zond->app.viewer_session || !zond->win.app_window)
 		return 0;
 
 	// Ask to save if there are unsaved changes (schreibgeschützt: nichts zu speichern)
-	if (zond->dbase_zond->changed && !zond->readonly) {
-		gint rc = abfrage_frage(zond->app_window, "Datei schließen",
+	if (zond->proj.dbase_zond->changed && !zond->proj.readonly) {
+		gint rc = abfrage_frage(zond->win.app_window, "Datei schließen",
 				"Änderungen aktuelles Projekt speichern?", NULL);
 
 		if (rc == GTK_RESPONSE_YES) {
@@ -704,7 +704,7 @@ gint project_close(Projekt *zond, GError **error) {
 				g_autofree gchar *msg_save_failed = g_strdup_printf(
 						"Speichern fehlgeschlagen: %s",
 						(error && *error) ? (*error)->message : "unbekannter Fehler");
-				gint rc_trotzdem = abfrage_frage(zond->app_window,
+				gint rc_trotzdem = abfrage_frage(zond->win.app_window,
 						msg_save_failed,
 						"Projekt trotzdem ohne Speichern schließen?", NULL);
 
@@ -726,9 +726,9 @@ gint project_close(Projekt *zond, GError **error) {
 	db_check_fenster_schliessen();
 
 	// Close all viewer windows
-	for (gint i = 0; i < zond->viewer_session->arr_pv->len; i++)
+	for (gint i = 0; i < zond->app.viewer_session->arr_pv->len; i++)
 		viewer_save_and_close(
-				g_ptr_array_index(zond->viewer_session->arr_pv, i));
+				g_ptr_array_index(zond->app.viewer_session->arr_pv, i));
 
 	// Gemerkte Passwörter vergessen und überschreiben
 	sond_password_clear();
@@ -737,56 +737,56 @@ gint project_close(Projekt *zond, GError **error) {
 	project_set_widgets_sensitive(zond, FALSE);
 
 	// Clear text view
-	GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview));
+	GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->trees.textview));
 	gtk_text_buffer_set_text(buffer, "", -1);
 
 	// Pin-Button zurücksetzen
-	if (zond->textview_pin_button)
+	if (zond->trees.textview_pin_button)
 		gtk_toggle_button_set_active(
-				GTK_TOGGLE_BUTTON(zond->textview_pin_button), FALSE);
+				GTK_TOGGLE_BUTTON(zond->trees.textview_pin_button), FALSE);
 
-	zond->node_id_act = 0;
+	zond->trees.node_id_act = 0;
 
 	project_reset_changed(zond, FALSE);
 
 	// Clear treeviews
 	zond_tree_store_clear(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))));
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_INHALT]))));
 	zond_tree_store_clear(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))));
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_AUSWERTUNG]))));
 
 	// Must be before project_clear_dbase_zond because it triggers callbacks
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->win.fs_button), FALSE);
 
 	/* Bewußt NICHT mehr neben der Projektdatei - s. Kommentar bei
 	 * project_get_local_tmp_path(). Derselbe volle Projektpfad wie in
 	 * project_create_dbase_zond() liefert deterministisch denselben
 	 * lokalen Pfad zurück. */
-	gchar *project_path_full = g_strdup_printf("%s/%s", zond->project_dir,
-			zond->project_name);
+	gchar *project_path_full = g_strdup_printf("%s/%s", zond->proj.project_dir,
+			zond->proj.project_name);
 	gchar *working_copy = project_get_local_tmp_path(project_path_full,
 			&error_remove);
 	g_free(project_path_full);
 
-	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
-	sond_eingang_cache_free(zond->eingang_cache);
-	zond->eingang_cache = NULL;
-	project_clear_dbase_zond(&(zond->dbase_zond));
+	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), NULL, NULL);
+	sond_eingang_cache_free(zond->proj.eingang_cache);
+	zond->proj.eingang_cache = NULL;
+	project_clear_dbase_zond(&(zond->proj.dbase_zond));
 
 	// Disable autosave if active
-	if (g_settings_get_boolean(zond->settings, "autosave")) {
+	if (g_settings_get_boolean(zond->app.settings, "autosave")) {
 		if (!g_source_remove_by_user_data(zond))
-			display_message(zond->app_window,
+			display_message(zond->win.app_window,
 					"autosave-Timeout konnte nicht entfernt werdern", NULL);
 	}
 
 	// Remove temporary database
 	if (!working_copy) {
-		display_message(zond->app_window, "Fehler beim Ermitteln des Pfads "
+		display_message(zond->win.app_window, "Fehler beim Ermitteln des Pfads "
 				"der temporären Datenbank: ", error_remove->message, NULL);
 		g_error_free(error_remove);
 	} else if (!sond_remove(working_copy, &error_remove)) {
-		display_message(zond->app_window, "Fehler beim Löschen der "
+		display_message(zond->win.app_window, "Fehler beim Löschen der "
 				"temporären Datenbank: ", error_remove->message, NULL);
 		g_error_free(error_remove);
 	}
@@ -795,12 +795,12 @@ gint project_close(Projekt *zond, GError **error) {
 
 	// Clear window title
 	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))), "");
+			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window))), "");
 
 	// Clear project setting
-	g_settings_set_string(zond->settings, "project", "");
+	g_settings_set_string(zond->app.settings, "project", "");
 
-	sond_process_file_destroy_wctx(zond->wctx);
+	sond_process_file_destroy_wctx(zond->proj.wctx);
 
 	return 0;
 }
@@ -819,31 +819,31 @@ gint project_load_trees(Projekt *zond, GError **error) {
 	gint rc = 0;
 	GtkTreeIter iter = { 0 };
 
-	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error);
+	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->trees.treeview[BAUM_INHALT]), error);
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
 	}
 
-	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error);
+	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->trees.treeview[BAUM_AUSWERTUNG]), error);
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
 	}
 
 	g_object_set(
-			sond_treeview_get_cell_renderer_text(zond->treeview[BAUM_AUSWERTUNG]),
+			sond_treeview_get_cell_renderer_text(zond->trees.treeview[BAUM_AUSWERTUNG]),
 			"editable", FALSE, NULL);
 	g_object_set(
-			sond_treeview_get_cell_renderer_text(zond->treeview[BAUM_INHALT]),
+			sond_treeview_get_cell_renderer_text(zond->trees.treeview[BAUM_INHALT]),
 			"editable", TRUE, NULL);
 
-	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
+	gtk_widget_grab_focus(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]));
 
 	if (gtk_tree_model_get_iter_first(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG])), &iter)) {
-		sond_treeview_set_cursor(zond->treeview[BAUM_AUSWERTUNG], &iter);
-		gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
+			gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_AUSWERTUNG])), &iter)) {
+		sond_treeview_set_cursor(zond->trees.treeview[BAUM_AUSWERTUNG], &iter);
+		gtk_tree_selection_unselect_all(zond->trees.selection[BAUM_AUSWERTUNG]);
 	}
 
 	return 0;
@@ -871,27 +871,27 @@ gint project_load_trees(Projekt *zond, GError **error) {
 static void project_open_cleanup(Projekt* zond) {
 	// Baumansichten immer leeren (auch bei nur teilweise geladenen Bäumen)
 	zond_tree_store_clear(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))));
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_INHALT]))));
 	zond_tree_store_clear(
-			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))));
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_AUSWERTUNG]))));
 
 	// Clear filesystem root (safe to call even if not set)
-	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
+	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), NULL, NULL);
 
 	// Eingangsangaben (erst nach dem Leeren des Dateibaums, der sie abfragt)
-	sond_eingang_cache_free(zond->eingang_cache);
-	zond->eingang_cache = NULL;
+	sond_eingang_cache_free(zond->proj.eingang_cache);
+	zond->proj.eingang_cache = NULL;
 
 	// Close databases if they were opened
-	if (zond->dbase_zond) {
-		project_clear_dbase_zond(&zond->dbase_zond);
+	if (zond->proj.dbase_zond) {
+		project_clear_dbase_zond(&zond->proj.dbase_zond);
 	}
 
 	// Free allocated strings and clear pointers
-	g_free(zond->project_name);
-	g_free(zond->project_dir);
-	zond->project_name = NULL;
-	zond->project_dir = NULL;
+	g_free(zond->proj.project_name);
+	g_free(zond->proj.project_dir);
+	zond->proj.project_name = NULL;
+	zond->proj.project_dir = NULL;
 }
 
 /* Pfad zu einer GGUF-Modelldatei ermitteln: konfigurierter GSettings-Wert
@@ -902,13 +902,13 @@ static void project_open_cleanup(Projekt* zond) {
  * "project"-Schlüssel. */
 gchar* resolve_model_path(Projekt* zond, gchar const* settings_key,
 		gchar const* default_filename) {
-	gchar *configured = g_settings_get_string(zond->settings, settings_key);
+	gchar *configured = g_settings_get_string(zond->app.settings, settings_key);
 
 	if (configured && *configured)
 		return configured;
 
 	g_free(configured);
-	return g_build_filename(zond->exe_dir, "../models", default_filename, NULL);
+	return g_build_filename(zond->app.exe_dir, "../models", default_filename, NULL);
 }
 
 gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
@@ -948,12 +948,12 @@ gint project_sicherungskopie(Projekt *zond, gchar **path_bak, GError **error) {
 	if (path_bak)
 		*path_bak = NULL;
 
-	if (zond->dbase_zond->sicherung_gemacht)
+	if (zond->proj.dbase_zond->sicherung_gemacht)
 		return 0;
 
 	jetzt = g_date_time_new_now_local();
 	zeit = g_date_time_format(jetzt, "%Y%m%d-%H%M%S");
-	path_src = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
+	path_src = g_strdup_printf("%s/%s", zond->proj.project_dir, zond->proj.project_name);
 	path_neu = g_strdup_printf("%s.vor-reparatur-%s", path_src, zeit);
 
 	if (!sond_copy(path_src, path_neu, FALSE, error)) {
@@ -962,7 +962,7 @@ gint project_sicherungskopie(Projekt *zond, gchar **path_bak, GError **error) {
 		return -1;
 	}
 
-	zond->dbase_zond->sicherung_gemacht = TRUE;
+	zond->proj.dbase_zond->sicherung_gemacht = TRUE;
 	if (path_bak)
 		*path_bak = path_neu;
 	else
@@ -992,10 +992,10 @@ static void project_eingang_cache_open(Projekt *zond, const gchar *project_path)
 	path_cache = g_strconcat(path_tmp, ".eingang.db", NULL);
 	g_free(path_tmp);
 
-	zond->eingang_cache = sond_eingang_cache_open(path_cache,
-			zond->project_dir, &error);
+	zond->proj.eingang_cache = sond_eingang_cache_open(path_cache,
+			zond->proj.project_dir, &error);
 	g_free(path_cache);
-	if (!zond->eingang_cache) {
+	if (!zond->proj.eingang_cache) {
 		LOG_WARN("%s: Eingangsangaben nicht verfügbar: %s", __func__,
 				error ? error->message : "?");
 		g_clear_error(&error);
@@ -1003,7 +1003,7 @@ static void project_eingang_cache_open(Projekt *zond, const gchar *project_path)
 		return;
 	}
 
-	if (sond_eingang_cache_reload(zond->eingang_cache, NULL, &error)) {
+	if (sond_eingang_cache_reload(zond->proj.eingang_cache, NULL, &error)) {
 		LOG_WARN("%s: Zettel nicht vollständig eingelesen: %s", __func__,
 				error ? error->message : "?");
 		g_clear_error(&error);
@@ -1035,10 +1035,10 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	}
 
 	// Extract project name and directory from path
-	zond->project_name = g_path_get_basename(abs_path);
-	zond->project_dir = g_strndup(abs_path,
-			strlen(abs_path) - strlen(zond->project_name) -
-			(((strlen(abs_path) - strlen(zond->project_name)) > 1) ? 1 : 0));
+	zond->proj.project_name = g_path_get_basename(abs_path);
+	zond->proj.project_dir = g_strndup(abs_path,
+			strlen(abs_path) - strlen(zond->proj.project_name) -
+			(((strlen(abs_path) - strlen(zond->proj.project_name)) > 1) ? 1 : 0));
 	// Ensure that if dir is root, '/' remains
 
 #ifdef _WIN32
@@ -1051,7 +1051,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 					error_hydrate ? error_hydrate->message : "?");
 			g_clear_error(&error_hydrate);
 			g_set_error(error, SOND_FILE_ERROR_CLOUD, 0,
-					"%s - Download gescheitert", zond->project_name);
+					"%s - Download gescheitert", zond->proj.project_name);
 			project_open_cleanup(zond);
 
 			return -1;
@@ -1095,8 +1095,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	}
 
 	// Set filesystem root
-	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-			zond->project_dir, error);
+	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
+			zond->proj.project_dir, error);
 	if (rc) {
 		project_open_cleanup(zond);
 		return -1;
@@ -1139,13 +1139,13 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	 * beim letzten Schließen kein Checkpoint durchlief) - für ein neues
 	 * Projekt (Datei existiert noch nicht) liefert sond_seadrive_needs_
 	 * hydration() dabei einfach FALSE, kein Sonderfall nötig. */
-	if (sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]))) {
+	if (sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]))) {
 		static const gchar *index_db_suffixes[] = { "", "-wal", "-shm" };
 		guint i;
 
 		for (i = 0; i < G_N_ELEMENTS(index_db_suffixes); i++) {
 			gchar *full_path = g_strdup_printf("%s/.sond_index.db%s",
-					zond->project_dir, index_db_suffixes[i]);
+					zond->proj.project_dir, index_db_suffixes[i]);
 
 			if (sond_seadrive_needs_hydration(full_path)) {
 				GError *error_hydrate = NULL;
@@ -1173,16 +1173,16 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	}
 #endif
 
-	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
+	gchar* datadir = g_build_filename(zond->app.exe_dir, "../share/tessdata", NULL);
 	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
-	zond->wctx = sond_process_file_create_wctx(
+	zond->proj.wctx = sond_process_file_create_wctx(
 			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
 			NULL, datadir, 4, ".sond_index.db", embedding_model_path,
-			zond->project_dir, error);
+			zond->proj.project_dir, error);
 	g_free(datadir);
 	g_free(embedding_model_path);
-	if (!zond->wctx) {
+	if (!zond->proj.wctx) {
 		project_open_cleanup(zond);
 
 		return -1;
@@ -1193,17 +1193,17 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 
 	// Set window title
 	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))),
-			zond->project_name);
+			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window))),
+			zond->proj.project_name);
 
 	// Save project path to settings
-	g_settings_set_string(zond->settings, "project", abs_path);
+	g_settings_set_string(zond->app.settings, "project", abs_path);
 
 	//nach einer Reparatur vor dem Laden ist die Arbeitskopie nicht gespeichert
 	project_reset_changed(zond, repariert);
 
 	// Enable autosave if configured
-	if (g_settings_get_boolean(zond->settings, "autosave"))
+	if (g_settings_get_boolean(zond->app.settings, "autosave"))
 		g_timeout_add_seconds(AUTOSAVE_INTERVAL_SECONDS, project_timeout_autosave, zond);
 
 	//Schreibschutz laut sond_client übernehmen, Zustand veröffentlichen
@@ -1228,10 +1228,10 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 static gint project_confirm_switch(Projekt *zond) {
 	gint rc = 0;
 
-	if (!zond->dbase_zond)
+	if (!zond->proj.dbase_zond)
 		return 0;
 
-	rc = abfrage_frage(zond->app_window, zond->project_name,
+	rc = abfrage_frage(zond->win.app_window, zond->proj.project_name,
 			"Projekt schließen?", NULL);
 	if (rc != GTK_RESPONSE_YES)
 		return 1;  // Cancel
@@ -1254,7 +1254,7 @@ static gint project_confirm_switch(Projekt *zond) {
  * hinabsteigen (Aufklappen eines Knotens lädt dessen Kinder wie gewohnt
  * per "row-expanded"-Signal, s. sond_treeviewfm.c) - unabhängig von der
  * Selektion im Dateiverzeichnis des Hauptfensters. sond_treeviewfm_set_root()
- * wird mit demselben zond->project_dir wie beim Hauptfenster-Baum
+ * wird mit demselben zond->proj.project_dir wie beim Hauptfenster-Baum
  * aufgerufen - der klassenweite path_root (s. DESIGNFEHLER-Kommentar in
  * sond_fileparts.h) bleibt dadurch unverändert derselbe, nur der neue
  * Dialog-Baum bekommt seine eigene, frisch geladene Wurzelebene.
@@ -1281,7 +1281,7 @@ SondFilePart* filepart_oeffnen(Projekt *zond, GtkWidget *extra,
 
 	ztvfm = zond_treeviewfm_new(zond);
 
-	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(ztvfm), zond->project_dir,
+	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(ztvfm), zond->proj.project_dir,
 			error);
 	if (rc) {
 		gtk_widget_destroy(GTK_WIDGET(ztvfm));
@@ -1294,7 +1294,7 @@ SondFilePart* filepart_oeffnen(Projekt *zond, GtkWidget *extra,
 	}
 
 	dialog = gtk_dialog_new_with_buttons("Datei auswählen",
-			GTK_WINDOW(zond->app_window),
+			GTK_WINDOW(zond->win.app_window),
 			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
 			"Öffnen", GTK_RESPONSE_OK,
 			"Abbrechen", GTK_RESPONSE_CANCEL,
@@ -1381,10 +1381,10 @@ gint project_load(Projekt* zond, GError** error) {
 	 * günstigerer Startpunkt für den Dateiauswahldialog als das zufällige
 	 * aktuelle Arbeitsverzeichnis (s. ausführlichen Kommentar an
 	 * filename_oeffnen(), misc.c). */
-	if (zond->project_dir)
-		start_dir = g_path_get_dirname(zond->project_dir);
+	if (zond->proj.project_dir)
+		start_dir = g_path_get_dirname(zond->proj.project_dir);
 
-	gchar *abs_path = filename_oeffnen(GTK_WINDOW(zond->app_window), start_dir);
+	gchar *abs_path = filename_oeffnen(GTK_WINDOW(zond->win.app_window), start_dir);
 	g_free(start_dir);
 	if (!abs_path)
 		return 0;
@@ -1407,7 +1407,7 @@ gint project_new(Projekt* zond, GError** error) {
 	if (rc)
 		return 0;
 
-	gchar *abs_path = filename_speichern(GTK_WINDOW(zond->app_window),
+	gchar *abs_path = filename_speichern(GTK_WINDOW(zond->win.app_window),
 			"Projekt anlegen", ".ZND");
 	if (!abs_path)
 		return 0;

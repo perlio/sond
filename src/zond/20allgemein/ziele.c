@@ -54,7 +54,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 		Anbindung anbindung_y = { 0 };
 		gchar *section = NULL;
 
-		rc = zond_dbase_get_younger_sibling(zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_younger_sibling(zond->proj.dbase_zond->zond_dbase_work,
 				node_id, &younger_sibling, error);
 		if (rc)
 			return -1;
@@ -62,7 +62,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 		if (younger_sibling == 0)
 			break;
 
-		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
+		rc = zond_dbase_get_node(zond->proj.dbase_zond->zond_dbase_work,
 				younger_sibling, NULL, NULL, NULL, &section, NULL, NULL, NULL,
 				error);
 		if (rc)
@@ -85,7 +85,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 			GtkTreeIter iter_new = { 0 };
 
 			rc = zond_dbase_verschieben_knoten(
-					zond->dbase_zond->zond_dbase_work, younger_sibling,
+					zond->proj.dbase_zond->zond_dbase_work, younger_sibling,
 					anchor_id, child, error);
 			if (rc)
 				return -1;
@@ -105,7 +105,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 
 				zond_tree_store_move_node(&iter_younger_sibling,
 						ZOND_TREE_STORE(
-								gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )),
+								gtk_tree_view_get_model( GTK_TREE_VIEW(zond->trees.treeview[BAUM_INHALT]) )),
 						&iter_anchor, child, &iter_new);
 				iter_anchor = iter_new;
 			}
@@ -128,7 +128,7 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 	gint baum_inhalt_file = 0;
 
 	//Gucken, ob Anbindung im Baum-Inhalt aufscheint
-	rc = zond_dbase_find_baum_inhalt_file(zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_find_baum_inhalt_file(zond->proj.dbase_zond->zond_dbase_work,
 			id_inserted, &baum_inhalt_file, NULL, NULL, error);
 	if (rc)
 		return -1;
@@ -138,7 +138,7 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 		//eingefügtes ziel in Baum
 		iter = zond_tree_store_get_iter_by_node_id(
 				ZOND_TREE_STORE(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))),
+						GTK_TREE_VIEW(zond->trees.treeview[BAUM_INHALT]))),
 				anchor_id);
 		if (!iter) {
 			if (error)
@@ -152,12 +152,12 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 		zond_tree_store_insert(iter, child, &iter_inserted);
 		gtk_tree_iter_free(iter);
 		zond_tree_store_set(&iter_inserted,
-				zond->icon[ICON_ANBINDUNG].icon_name, node_text, id_inserted);
+				zond->app.icon[ICON_ANBINDUNG].icon_name, node_text, id_inserted);
 
-		sond_treeview_expand_row(zond->treeview[BAUM_INHALT], &iter_inserted);
-		sond_treeview_set_cursor_on_text_cell(zond->treeview[BAUM_INHALT],
+		sond_treeview_expand_row(zond->trees.treeview[BAUM_INHALT], &iter_inserted);
+		sond_treeview_set_cursor_on_text_cell(zond->trees.treeview[BAUM_INHALT],
 				&iter_inserted);
-		gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
+		gtk_widget_grab_focus(GTK_WIDGET(zond->trees.treeview[BAUM_INHALT]));
 	}
 
 	rc = zond_anbindung_verschieben_kinder(zond, id_inserted,
@@ -181,18 +181,18 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 	gboolean opened = FALSE;
 
 	//Eltern sichtbar?
-	rc = zond_dbase_get_parent(zond->dbase_zond->zond_dbase_work, node_inserted,
+	rc = zond_dbase_get_parent(zond->proj.dbase_zond->zond_dbase_work, node_inserted,
 			&parent_id, error);
 	if (rc)
 		return -1;
 
-	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, parent_id, NULL,
+	rc = zond_dbase_get_node(zond->proj.dbase_zond->zond_dbase_work, parent_id, NULL,
 			NULL, &file_part_parent, &section_parent, NULL, NULL, NULL, error);
 	if (rc)
 		return -1;
 
 	rc = zond_treeviewfm_section_visible(
-			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part_parent,
+			ZOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]), file_part_parent,
 			section_parent, open, &visible, &iter, &children, &opened, error);
 	g_free(file_part_parent);
 	g_free(section_parent);
@@ -210,7 +210,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 			gtk_tree_store_insert(
 					GTK_TREE_STORE(
-							gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+							gtk_tree_view_get_model( GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]) )),
 					&iter_inserted, &iter, 0);
 		}
 		//else: brauch kein dummy einfügen; ist ja schon
@@ -219,12 +219,12 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		if (open) {
 			GtkTreeIter iter_new = { 0 };
 
-			sond_treeview_expand_row(zond->treeview[BAUM_FS], &iter);
+			sond_treeview_expand_row(zond->trees.treeview[BAUM_FS], &iter);
 			gtk_tree_model_iter_children(
 					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_new,
+							GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])), &iter_new,
 					&iter);
-			sond_treeview_set_cursor(zond->treeview[BAUM_FS], &iter_new);
+			sond_treeview_set_cursor(zond->trees.treeview[BAUM_FS], &iter_new);
 		}
 	}
 	else { //wenn Knoten geöffnet ist (also jedenfalls ein Kind hat
@@ -235,7 +235,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		gchar* section = NULL;
 
 		gtk_tree_model_iter_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])),
 				&iter_test, &iter); //iter_test ist erstes Kind
 
 		//erstmal Stelle finden, wo stvfm_item eingefügt wird
@@ -246,7 +246,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_test,
+							GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])), &iter_test,
 					0, &stvfm_item, -1);
 			if (!stvfm_item) {
 				if (error)
@@ -278,7 +278,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				pos++;
 				if (!gtk_tree_model_iter_next(
 						gtk_tree_view_get_model(
-								GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+								GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])),
 						&iter_test))
 					break;
 			}
@@ -302,19 +302,19 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 		anbindung_build_file_section(anbindung, &section);
 		stvfm_item_child =
-				sond_tvfm_item_create(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+				sond_tvfm_item_create(SOND_TREEVIEWFM(zond->trees.treeview[BAUM_FS]),
 						SOND_FILE_PART(sfp_pdf), section);
 		g_free(section);
 		sond_tvfm_item_set_icon_name(stvfm_item_child, "anbindung");
 
 		gtk_tree_store_insert(
 				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]) )),
 				&iter_new, &iter, pos);
 
 		gtk_tree_store_set(
 				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]) )),
 				&iter_new, 0, G_OBJECT(stvfm_item_child), -1);
 		g_object_unref(stvfm_item_child);
 
@@ -322,7 +322,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		iter_test = iter_new;
 
 		while (gtk_tree_model_iter_next(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])),
 				&iter_test)) {
 			Anbindung anbindung_test = { 0 };
 			SondTVFMItem *stvfm_item = NULL;
@@ -330,7 +330,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_test,
+							GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])), &iter_test,
 					0, &stvfm_item, -1);
 			if (!stvfm_item) {
 				if (error)
@@ -357,15 +357,15 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			if (anbindung_1_eltern_von_2(anbindung, anbindung_test)) {
 				gtk_tree_store_remove(
 						GTK_TREE_STORE(
-								gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+								gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]) )),
 						&iter_test);
 
 				//Wenn noch kein dummy eingefügt wurde...
 				if (!gtk_tree_model_iter_has_child(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_new))
+						gtk_tree_view_get_model(GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])), &iter_new))
 					gtk_tree_store_insert( //dummy einfügen
 							GTK_TREE_STORE(
-									gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+									gtk_tree_view_get_model( GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]) )),
 							&iter_test, &iter_new, -1);
 				iter_test = iter_new; //wieder auf den neuen Knoten setzen
 			} else if (anbindung_1_vor_2(anbindung, anbindung_test))
@@ -382,12 +382,12 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 		if (open) {//heißt: Datei ist nicht angebunden im BAUM_INHALT
 			GtkTreePath *path = NULL;
-			sond_treeview_set_cursor(zond->treeview[BAUM_FS], &iter_new);
+			sond_treeview_set_cursor(zond->trees.treeview[BAUM_FS], &iter_new);
 			path = gtk_tree_model_get_path(gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+							GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS])),
 					&iter_new);
 			gtk_tree_view_expand_row(
-					GTK_TREE_VIEW(zond->treeview[BAUM_FS]), path, FALSE);
+					GTK_TREE_VIEW(zond->trees.treeview[BAUM_FS]), path, FALSE);
 			gtk_tree_path_free(path);
 		}
 	}
@@ -518,7 +518,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	gint anchor_id_dbase = 0;
 	gchar *file_section = NULL;
 
-	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_section(zond->proj.dbase_zond->zond_dbase_work,
 			file_part, NULL, &pdf_root, error);
 	if (rc)
 		return -1;
@@ -533,7 +533,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	}
 
 	//jetzt vergleichen,
-	rc = ziele_abfragen_anker_rek(zond->dbase_zond->zond_dbase_work, anbindung,
+	rc = ziele_abfragen_anker_rek(zond->proj.dbase_zond->zond_dbase_work, anbindung,
 			pdf_root, &anchor_id_dbase, child, error);
 	if (rc)
 		return -1;
@@ -546,9 +546,9 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	//file_section zusammensetzen
 	anbindung_build_file_section(anbindung, &file_section);
 
-	node_id_new = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
+	node_id_new = zond_dbase_insert_node(zond->proj.dbase_zond->zond_dbase_work,
 			anchor_id_dbase, *child, ZOND_DBASE_TYPE_FILE_PART, 0, file_part,
-			file_section, zond->icon[ICON_ANBINDUNG].icon_name, *node_text,
+			file_section, zond->app.icon[ICON_ANBINDUNG].icon_name, *node_text,
 			NULL, error);
 	g_free(file_section);
 	if (node_id_new == -1)
