@@ -37,7 +37,6 @@
 #include "sond_tmpfiles.h"
 #include "sond_mime.h"
 #include "sond_password.h"
-#include "sond_string_util.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -668,36 +667,24 @@ GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart* sfp) {
 }
 
 gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
-	GList* list = NULL;
-	SondFilePart* sfp_parent = NULL;
+	SondFilePart* parent = NULL;
+	gchar const* path = NULL;
+	gchar* prefix = NULL;
 	gchar* filepart = NULL;
-	GList* ptr_elem = NULL;
 
 	g_return_val_if_fail(sfp, NULL);
 
-	list = g_list_append(list, sfp);
+	path = sond_file_part_get_path(sfp);
+	parent = sond_file_part_get_parent(sfp);
+	if (!parent)
+		return g_strdup(path);
 
-	//erstmal sfps sammeln und Reihenfolge richtig machen
-	while((sfp_parent = sond_file_part_get_parent(sfp))) {
-		list = g_list_prepend(list, sfp_parent);
+	prefix = sond_file_part_get_filepart(parent);
+	if (!prefix)
+		return g_strdup(path);
 
-		sfp = sfp_parent;
-	}
-
-	//dann filepart zusammensetzen
-	ptr_elem = list;
-	do {
-		SondFilePart* sfp_list = NULL;
-
-		sfp_list = SOND_FILE_PART(ptr_elem->data);
-
-		if (filepart) filepart = add_string(filepart, g_strdup("//"));
-		filepart = add_string(filepart, g_strdup(sond_file_part_get_path(sfp_list)));
-
-		ptr_elem = ptr_elem->next;
-	} while (ptr_elem);
-
-	g_list_free(list);
+	filepart = g_strconcat(prefix, "//", path ? path : "", NULL);
+	g_free(prefix);
 
 	return filepart;
 }
@@ -1355,8 +1342,12 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, gboolean read_only,
 		}
 		ext = mime_to_extension(mime);
 		g_free(mime);
-		if (ext)
-			name = add_string(name, g_strdup(ext));
+		if (ext) {
+			gchar* name_ext = g_strconcat(name, ext, NULL);
+
+			g_free(name);
+			name = name_ext;
+		}
 	}
 
 	filename = sond_tmp_new_path(name, error);

@@ -3,8 +3,6 @@
 
 #include <mupdf/fitz.h>
 
-#include "sond_string_util.h"
-
 #ifdef __WIN32
 typedef void* GPid;
 #elif defined __linux__
@@ -27,6 +25,10 @@ typedef struct _GPtrArray GPtrArray;
 typedef struct _GFile GFile;
 typedef struct _GError GError;
 typedef struct _GtkDialog GtkDialog;
+
+/* Hängt add_string an old_string an und gibt BEIDE Argumente frei (old_string
+ * darf NULL sein). */
+gchar* add_string(gchar*, gchar*);
 
 gint my_dialog_run(GtkDialog*);
 
