@@ -3,6 +3,7 @@
 #include "viewer.h"
 #include "document.h"
 #include "../zond_pdf_document.h"
+#include "viewer_annot.h"
 
 #include "../anbindung.h"
 
@@ -130,4 +131,123 @@ document_new_displayed_document(SondFilePartPDF* sfp_pdf,
 		*pdf_pos = pdf_pos_int;
 
 	return dd;
+}
+
+/* Gehört der Journal-Eintrag zum Ausschnitt (Abschnitt) zpdfd_part? */
+gboolean document_entry_in_dd(JournalEntry* entry,
+		ZPDFDPart* zpdfd_part) {
+	if (entry->pdf_document_page->page_akt >= zpdfd_part->first_page->page_akt &&
+			entry->pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt) {
+		Annot* annot = NULL;
+
+		if (entry->type == JOURNAL_TYPE_PAGES_INSERTED ||
+				entry->type == JOURNAL_TYPE_PAGE_DELETED ||
+				entry->type == JOURNAL_TYPE_ROTATE ||
+				entry->type == JOURNAL_TYPE_OCR) return TRUE;
+
+		/* Sind ja nur Annots übrig. Für die Randseiten-Zuordnung zählt die
+		 * Position, die die Annotation zum Zeitpunkt dieses Journal-
+		 * Eintrags tatsächlich hatte: bei CREATED/CHANGED ist das der
+		 * aktuelle/neue Zustand (annot_after; annot_before ist bei CREATED
+		 * gar nicht gesetzt). Bei DELETED gibt es keinen "nachher"-Zustand
+		 * mehr (annot_after bleibt {0}) - maßgeblich ist hier annot_before,
+		 * der letzte bekannte Zustand vor dem Löschen. */
+		annot = (entry->type == JOURNAL_TYPE_ANNOT_DELETED) ?
+				&entry->annot_changed.annot_before :
+				&entry->annot_changed.annot_after;
+
+		{
+			gboolean is_first = FALSE;
+			gboolean is_last = FALSE;
+			gfloat y0 = 0.0;
+			gfloat y1 = 0.0;
+
+			is_first = (entry->pdf_document_page->page_akt ==
+					zpdfd_part->first_page->page_akt);
+			is_last = (entry->pdf_document_page->page_akt ==
+					zpdfd_part->last_page->page_akt);
+
+			//Seite mittendrin (weder erste noch letzte) - immer vollständig im dd
+			if (!is_first && !is_last)
+				return TRUE;
+
+			/* Obere Grenze nur relevant, wenn diese Seite die erste ist,
+			 * untere Grenze nur, wenn sie die letzte ist - eine Seite, die
+			 * BEIDES ist (einseitiger Ausschnitt, oben UND unten
+			 * beschnitten), bekommt beide Grenzen; eine Seite, die nur eine
+			 * der beiden Rollen hat, nur die jeweils passende (auf der
+			 * anderen Seite ist der dd nicht begrenzt, der Inhalt geht auf
+			 * Nachbarseiten weiter). Vorher wurde bei is_first&&is_last
+			 * (einseitiger Ausschnitt) wegen der if/else-if-Reihenfolge nur
+			 * die obere Grenze angewandt, last_index komplett ignoriert. */
+			y0 = (is_first && zpdfd_part->first_index > 0) ?
+					(gfloat) zpdfd_part->first_index : 0.0;
+			y1 = (is_last && zpdfd_part->last_index != EOP) ?
+					(gfloat) zpdfd_part->last_index :
+					entry->pdf_document_page->rect.y1;
+
+			if (y0 == 0.0 && y1 == entry->pdf_document_page->rect.y1)
+				return TRUE; //keine Beschneidung auf dieser Seite
+
+			{
+				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, y0, y1};
+
+				if (viewer_annot_is_in_rect(annot, rect))
+					return 1;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
+/* Ist mindestens ein angezeigter Abschnitt des Viewers geändert? */
+gboolean document_has_dirty(PdfViewer* pv) {
+	DisplayedDocument* dd = NULL;
+
+	dd = pv->dd;
+	do {
+		if (dd->zpdfd_part->dirty)
+			return TRUE;
+	} while ((dd = dd->next));
+
+	return FALSE;
+}
+
+/* dirty-Status aller Abschnitte aller offenen Viewer neu aus dem Journal
+ * herleiten. */
+void document_reset_dirty(PdfViewer* pdfv) {
+	for (guint i = 0; i < pdfv->session->arr_pv->len; i++) {
+		PdfViewer* pdfv_test = NULL;
+		DisplayedDocument* dd = NULL;
+
+		pdfv_test = g_ptr_array_index(pdfv->session->arr_pv, i);
+		dd = pdfv_test->dd;
+
+		do {
+			GArray* arr_journal = NULL;
+			gboolean in_dd = FALSE;
+
+			arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
+
+			for (guint u = 0; u < arr_journal->len; u++) {
+				JournalEntry entry = { 0 };
+
+				entry = g_array_index(arr_journal, JournalEntry, u);
+
+				in_dd = document_entry_in_dd(&entry, dd->zpdfd_part);
+				if (in_dd)
+					break;
+			}
+
+			if (!in_dd)
+				dd->zpdfd_part->dirty = FALSE;
+			else
+				dd->zpdfd_part->dirty = TRUE;
+
+			dd = dd->next;
+		} while (dd);
+	}
+
+	return;
 }

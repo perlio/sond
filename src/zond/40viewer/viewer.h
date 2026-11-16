@@ -188,36 +188,19 @@ ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
 
 void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
-/* Ob mindestens eines der im Viewer angezeigten DisplayedDocuments
- * ungespeicherte Änderungen (zpdfd_part->dirty) hat - steuert die
- * Sensitivität von button_speichern. Von viewer.c (viewer_display_document())
- * und viewer_save.c (viewer_save_dirty_dds()) benutzt. */
-gboolean viewer_has_dirty_dd(PdfViewer*);
-
 void viewer_schliessen(PdfViewer*);
 
 /* viewer_save_dirty_dds()/viewer_save_and_close(): siehe viewer_save.h */
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
-gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
-		PdfPunkt *pdf_punkt);
-
 /* viewer_handle_text_search()/viewer_highlight_at_char_pos(): siehe
  * viewer_search.h */
 
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
 
-void viewer_set_cursor(PdfViewer *pv, gint rc, ViewerPageNew *viewer_page,
-		PdfDocumentPageAnnot *pdf_document_page_annot, PdfPunkt pdf_punkt);
-
 void viewer_foreach(PdfViewer*, PdfDocumentPage*,
 		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),
 		gpointer);
-
-void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event);
-
-gint viewer_handle_button_press(PdfViewer* pv,
-		GdkEvent *event, GError** error);
 
 #endif // VIEWER_H_INCLUDED

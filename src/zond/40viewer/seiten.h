@@ -4,8 +4,16 @@
 typedef struct _GtkMenuItem GtkMenuItem;
 
 typedef void *gpointer;
+typedef struct _GPtrArray GPtrArray;
+typedef struct _Pdf_Viewer PdfViewer;
+typedef char gchar;
+typedef int gboolean;
+typedef int gint;
 
-void cb_pv_seiten_ocr(GtkMenuItem*, gpointer);
+/* Fragt die Seiten ab (Dialog); NULL bei Abbruch. winkel: nur beim Drehen.
+ * Liefert PdfDocumentPage* (Freigabe mit g_ptr_array_unref). */
+GPtrArray* seiten_abfrage_seiten(PdfViewer*, const gchar *title, gint *winkel,
+		gboolean);
 
 void cb_pv_seiten_loeschen(GtkMenuItem*, gpointer);
 

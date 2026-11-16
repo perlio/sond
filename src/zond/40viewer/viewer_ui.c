@@ -29,9 +29,11 @@
 
 #include "document.h"
 #include "seiten.h"
+#include "viewer_ocr.h"
 #include "viewer.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_mouse.h"
 #include "viewer_annot.h"
 #include "viewer_save.h"
 #include "viewer_search.h"

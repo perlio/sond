@@ -287,7 +287,7 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 			if (entry.type != JOURNAL_TYPE_OCR &&
 					entry.type != JOURNAL_TYPE_PAGES_INSERTED)
 				continue;
-			if (!viewer_entry_in_dd(&entry, dd->zpdfd_part))
+			if (!document_entry_in_dd(&entry, dd->zpdfd_part))
 				continue;
 
 			if (entry.type == JOURNAL_TYPE_OCR) {

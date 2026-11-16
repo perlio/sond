@@ -41,10 +41,10 @@
 
 
 #include "document.h"
-#include "stand_alone.h"
 #include "seiten.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_mouse.h"
 #include "viewer_annot.h"
 
 //Position des aktuellen Treffers neben dem Such-Entry; wrapped: Suche ist am

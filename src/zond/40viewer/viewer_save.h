@@ -19,14 +19,9 @@
 #ifndef VIEWER_SAVE_H_INCLUDED
 #define VIEWER_SAVE_H_INCLUDED
 
-#include "../zond_pdf_document.h"
-
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _GError GError;
 typedef int gint;
-
-/* Gehört der Journal-Eintrag zum Ausschnitt (Abschnitt) zpdfd_part? */
-gboolean viewer_entry_in_dd(JournalEntry*, ZPDFDPart*);
 
 /* Alle "schmutzigen" (dirty) DisplayedDocuments des Viewers speichern -
  * Journal (Annots/Rotation/OCR/Seiten) je Dokument in eine Arbeitskopie

@@ -3,6 +3,7 @@
 
 typedef int gint;
 typedef char gchar;
+typedef int gboolean;
 
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef struct _ZPDFD_Part ZPDFDPart;
@@ -17,7 +18,18 @@ typedef struct _Displayed_Document {
 	DisplayedDocument* next;
 } DisplayedDocument;
 
+typedef struct _Journal_Entry JournalEntry;
+
 void document_free_displayed_documents(DisplayedDocument*);
+
+/* Gehört der Journal-Eintrag zum Abschnitt zpdfd_part? */
+gboolean document_entry_in_dd(JournalEntry*, ZPDFDPart*);
+
+/* Ist mindestens ein angezeigter Abschnitt des Viewers geändert? */
+gboolean document_has_dirty(PdfViewer*);
+
+/* dirty-Status aller Abschnitte aller offenen Viewer aus dem Journal. */
+void document_reset_dirty(PdfViewer*);
 
 DisplayedDocument*
 document_new_displayed_document(SondFilePartPDF* sfp_pdf,
