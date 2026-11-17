@@ -27,6 +27,9 @@
 #include "../../sond_client/sond_client.h"
 #include "../../seadrive/sond_seadrive_core.h"
 #include "../../tvfm/sond_tvfm_status.h"
+#include "../../tvfm/sond_tvfm_index_sync.h"
+#include "../../tvfm/sond_tvfm_unlock.h"
+#include "../sond_password_dialog.h"
 #include "../../sond_index.h"
 
 typedef struct {
@@ -41,6 +44,10 @@ typedef struct {
     SondAkteLease *lease;      /* gehört dem Akten-Modul */
     gint64 akte_id;            /* 0 = unbekannt */
     gchar *job_token;          /* Kennung des laufenden Jobs, NULL = keiner */
+    guint job_modus;           /* gewählter OCR-Modus (Auswahl im Dialog), für den Nachlauf */
+    GHashTable *uebersprungen; /* Fileparts, die der Nutzer nicht entsperren wollte/konnte */
+    GPtrArray *nachlauf_dateien; /* entsperrte Dateien, für die ein Nachlauf noch aussteht (g_free) */
+    guint nachlauf_timer;
     GtkWidget *btn_abbruch;    /* Job abbrechen */
     GtkWidget *job_label;      /* Fortschritt des Index-Jobs */
     GtkWidget *dialog;         /* offener Dialog "Index-Job" (schwach) */
@@ -74,6 +81,13 @@ static void dok_free(gpointer data) {
         g_object_remove_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
     sond_index_ctx_free(d->index_ctx);
     g_free(d->job_token);
+    if (d->nachlauf_timer)
+        g_source_remove(d->nachlauf_timer);
+    if (d->nachlauf_dateien)
+        g_ptr_array_unref(d->nachlauf_dateien);
+    if (d->uebersprungen)
+        g_hash_table_destroy(d->uebersprungen);
+    sond_password_clear(); //Passwörter nur für die Dauer dieses Fensters
     g_free(d->index_pfad);
     g_free(d->lib_dir);
     g_free(d->lib_name);
@@ -88,6 +102,10 @@ static void meldung(GtkWindow *parent, const gchar *titel, const gchar *text) {
     gtk_alert_dialog_show(dialog, parent);
     g_object_unref(dialog);
 }
+
+//weiter unten
+static gboolean schreibberechtigung_holen(DokData *d, GError **error);
+static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d);
 
 /* Index-DB für das Index-Symbol der Dateien: die synchronisierte Datei, nur lesend. */
 static SondIndexCtx* index_ctx_von(gpointer data) {
@@ -374,6 +392,8 @@ static void ganz_abgleichen(DokData *d) {
 /*  Auswahl für einen Index-Job an den Server                          */
 /* ------------------------------------------------------------------ */
 
+static void gesperrte_nachbearbeiten(DokData *d, OcrStatus *status);
+
 /* Der Job ist zu Ende (oder verschwunden): die Schreibberechtigung zurückholen, die
  * ihm übergeben wurde */
 static void job_beendet(DokData *d, OcrStatus *status) {
@@ -411,6 +431,10 @@ static void job_beendet(DokData *d, OcrStatus *status) {
 
     if (d->tree)
         sond_treeviewfm_refresh_status(SOND_TREEVIEWFM(d->tree));
+
+    //passwortgeschützte Teile hat der Server übersprungen: entsperren und nachindizieren
+    if (status && status->locked && status->locked->len > 0 && !status->cancelled)
+        gesperrte_nachbearbeiten(d, status);
 }
 
 /* Fortschritt des Jobs auf dem Server (alle 3 Sekunden, solange er läuft) */
@@ -489,13 +513,19 @@ static void on_abbruch_clicked(GtkButton *knopf, gpointer user_data) {
     g_clear_error(&error);
 }
 
-/* Übergibt die Schreibberechtigung an den Job und startet ihn. Voraussetzungen: dieses
- * Gerät hält sie, zond hat gespeichert und liest nur noch, alles ist hochgeladen. */
-static void job_senden(IndexDlg *dlg) {
-    DokData *d = dlg->d;
+typedef enum {
+    JOB_GESTARTET,
+    JOB_FEHLER,      //Meldung wurde gezeigt
+    JOB_WARTEN       //noch nicht alles hochgeladen (nur mit auf_upload_warten)
+} JobStart;
+
+/* Übergibt die Schreibberechtigung an den Job und startet ihn für die Dateien und Verzeichnisse
+ * (Pfade relativ zum Projektverzeichnis; GPtrArray von gchar*). Voraussetzungen: dieses Gerät hält
+ * sie, zond hat gespeichert und liest nur noch, alles ist hochgeladen (auf_upload_warten: sonst
+ * JOB_WARTEN ohne Meldung, der Aufrufer versucht es später erneut). */
+static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verzeichnisse_arr,
+        guint modus, gboolean neu, gboolean auf_upload_warten) {
     GError *error = NULL;
-    guint modus = gtk_drop_down_get_selected(GTK_DROP_DOWN(dlg->auswahl_modus));
-    gboolean neu = gtk_check_button_get_active(GTK_CHECK_BUTTON(dlg->neu_check));
     gchar **dateien = NULL;
     gchar **verzeichnisse = NULL;
     gchar *token = NULL;
@@ -506,7 +536,7 @@ static void job_senden(IndexDlg *dlg) {
     if (d->job_token) {
         meldung(GTK_WINDOW(d->window), "Index-Job", "Es läuft bereits ein Index-Job.");
 
-        return;
+        return JOB_FEHLER;
     }
 
     if (!d->lease || d->akte_id <= 0 || !sond_akte_lease_may_write(d->lease, d->akte_id)) {
@@ -515,7 +545,7 @@ static void job_senden(IndexDlg *dlg) {
                 "Dafür brauchen Sie die Schreibberechtigung der Akte. Sie erhalten sie, "
                 "wenn Sie im Akten-Fenster zond starten (bzw. die Akte bearbeiten).");
 
-        return;
+        return JOB_FEHLER;
     }
 
     if (!sond_akte_lease_zond_settle(d->lease, d->akte_id, 8000)) {
@@ -524,19 +554,29 @@ static void job_senden(IndexDlg *dlg) {
                 "schreibgeschützt werden. Bitte zond schließen (dabei speichern) und "
                 "dann erneut senden.");
 
-        return;
+        return JOB_FEHLER;
     }
 
     offen = sond_akte_lease_unsynced(d->lease, d->akte_id);
     if (offen > 0) {
-        gchar *text = g_strdup_printf("Es sind noch %d Dateien nicht hochgeladen. Der "
+        gchar *text = NULL;
+
+        if (auf_upload_warten) {
+            text = g_strdup_printf("Warte auf den Upload der entsperrten Dateien "
+                    "(%d offen) ...", offen);
+            gtk_label_set_text(GTK_LABEL(d->job_label), text);
+            g_free(text);
+
+            return JOB_WARTEN;
+        }
+
+        text = g_strdup_printf("Es sind noch %d Dateien nicht hochgeladen. Der "
                 "Server sieht Änderungen erst, wenn sie hochgeladen sind. Bitte warten, "
                 "bis die Anzeige \"alles synchron\" zeigt.", offen);
-
         meldung(GTK_WINDOW(d->window), "Noch nicht alles hochgeladen", text);
         g_free(text);
 
-        return;
+        return JOB_FEHLER;
     }
 
     token = job_token_neu();
@@ -549,22 +589,22 @@ static void job_senden(IndexDlg *dlg) {
         g_clear_error(&error);
         g_free(token);
 
-        return;
+        return JOB_FEHLER;
     }
 
-    dateien = g_new0(gchar*, dlg->dateien->len + 1);
-    verzeichnisse = g_new0(gchar*, dlg->verzeichnisse->len + 1);
-    for (guint i = 0; i < dlg->dateien->len; i++)
-        dateien[i] = g_ptr_array_index(dlg->dateien, i);
-    for (guint i = 0; i < dlg->verzeichnisse->len; i++)
-        verzeichnisse[i] = g_ptr_array_index(dlg->verzeichnisse, i);
+    dateien = g_new0(gchar*, dateien_arr->len + 1);
+    verzeichnisse = g_new0(gchar*, verzeichnisse_arr->len + 1);
+    for (guint i = 0; i < dateien_arr->len; i++)
+        dateien[i] = g_ptr_array_index(dateien_arr, i);
+    for (guint i = 0; i < verzeichnisse_arr->len; i++)
+        verzeichnisse[i] = g_ptr_array_index(verzeichnisse_arr, i);
 
     ok = sond_client_ocr_start_job_ex(d->client, d->lib_name, neu,
             modus == 0 ? SOND_CLIENT_OCR_NONE :
             modus == 2 ? SOND_CLIENT_OCR_FORCE : SOND_CLIENT_OCR_CHECK,
             (const gchar * const*) dateien, (const gchar * const*) verzeichnisse, token,
             &error);
-    g_free(dateien);   //die Strings gehören dem Dialog
+    g_free(dateien);   //die Strings gehören den Arrays
     g_free(verzeichnisse);
 
     if (!ok) {
@@ -578,7 +618,7 @@ static void job_senden(IndexDlg *dlg) {
         g_clear_error(&error);
         g_free(token);
 
-        return;
+        return JOB_FEHLER;
     }
 
     d->job_token = token;
@@ -587,6 +627,209 @@ static void job_senden(IndexDlg *dlg) {
     gtk_widget_set_visible(d->btn_abbruch, TRUE);
     if (!d->job_timer)
         d->job_timer = g_timeout_add_seconds(3, job_pruefen, d);
+
+    return JOB_GESTARTET;
+}
+
+static void job_senden(IndexDlg *dlg) {
+    DokData *d = dlg->d;
+    guint modus = gtk_drop_down_get_selected(GTK_DROP_DOWN(dlg->auswahl_modus));
+    gboolean neu = gtk_check_button_get_active(GTK_CHECK_BUTTON(dlg->neu_check));
+
+    //neuer Auftrag des Nutzers: was er früher nicht entsperren wollte, darf wieder gefragt werden
+    if (d->uebersprungen)
+        g_hash_table_remove_all(d->uebersprungen);
+    d->job_modus = modus;
+
+    job_starten(d, dlg->dateien, dlg->verzeichnisse, modus, neu, FALSE);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Passwortgeschützte Teile: entsperren und nachindizieren            */
+/* ------------------------------------------------------------------ */
+
+static gboolean nachlauf_tick(gpointer data) {
+    DokData *d = data;
+    GPtrArray *keine = g_ptr_array_new_with_free_func(g_free);
+    JobStart ergebnis = JOB_FEHLER;
+
+    if (!d->nachlauf_dateien) {
+        g_ptr_array_unref(keine);
+        d->nachlauf_timer = 0;
+
+        return G_SOURCE_REMOVE;
+    }
+    if (d->job_token) {
+        g_ptr_array_unref(keine);
+
+        return G_SOURCE_CONTINUE; //ein anderer Job läuft noch
+    }
+
+    //gezielt nur die entsperrten Dateien, die Änderungszeit ist neu, sie werden verarbeitet
+    ergebnis = job_starten(d, d->nachlauf_dateien, keine, d->job_modus, FALSE, TRUE);
+    g_ptr_array_unref(keine);
+
+    if (ergebnis == JOB_WARTEN)
+        return G_SOURCE_CONTINUE;
+
+    g_clear_pointer(&d->nachlauf_dateien, g_ptr_array_unref);
+    d->nachlauf_timer = 0;
+
+    return G_SOURCE_REMOVE;
+}
+
+typedef struct {
+    DokData *d;
+    GPtrArray *items; //SondLockedItem* (Kopien)
+} LockedCtx;
+
+static void locked_item_free(gpointer p) {
+    SondLockedItem *item = p;
+
+    g_free(item->filepart);
+    g_free(item);
+}
+
+static void locked_ctx_free(LockedCtx *ctx) {
+    g_ptr_array_unref(ctx->items);
+    g_free(ctx);
+}
+
+//Die Datei im Dateisystem zu einem Filepart ("a.zip//x.pdf" -> "a.zip")
+static gchar* datei_von_filepart(const gchar *filepart) {
+    const gchar *sep = g_strstr_len(filepart, -1, "//");
+
+    return sep ? g_strndup(filepart, (gsize) (sep - filepart)) : g_strdup(filepart);
+}
+
+static void on_gesperrt_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpointer user_data) {
+    LockedCtx *ctx = user_data;
+    DokData *d = ctx->d;
+    GError *error = NULL;
+    gint knopf = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(quelle), ergebnis, &error);
+
+    g_clear_error(&error);
+
+    if (knopf == 0 && d->window) {
+        SondUnlockHooks hooks;
+        SondUnlockResult res;
+        GString *text = g_string_new(NULL);
+
+        if (!schreibberechtigung_holen(d, &error)) {
+            meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", error->message);
+            g_clear_error(&error);
+            g_string_free(text, TRUE);
+            locked_ctx_free(ctx);
+
+            return;
+        }
+
+        unlock_hooks_init(&hooks, d);
+        sond_tvfm_unlock_locked_items(ctx->items, &hooks, &res);
+
+        //nicht entsperrt: in diesem Zyklus nicht noch einmal fragen
+        for (guint i = 0; i < res.skipped_fps->len; i++)
+            g_hash_table_add(d->uebersprungen,
+                    g_strdup(g_ptr_array_index(res.skipped_fps, i)));
+
+        if (res.done > 0) {
+            if (!d->nachlauf_dateien)
+                d->nachlauf_dateien = g_ptr_array_new_with_free_func(g_free);
+            for (guint i = 0; i < res.decrypted->len; i++) {
+                gchar *datei = datei_von_filepart(g_ptr_array_index(res.decrypted, i));
+                gboolean bekannt = FALSE;
+
+                for (guint k = 0; k < d->nachlauf_dateien->len; k++)
+                    bekannt |= !g_strcmp0(g_ptr_array_index(d->nachlauf_dateien, k), datei);
+                if (bekannt)
+                    g_free(datei);
+                else
+                    g_ptr_array_add(d->nachlauf_dateien, datei);
+            }
+        }
+
+        g_string_append_printf(text, "%u Datei(en) entsperrt", res.done);
+        if (res.skipped)
+            g_string_append_printf(text, ", %u übersprungen", res.skipped);
+        if (res.aborted)
+            g_string_append(text, "\n\nAbgebrochen.");
+        else if (res.done > 0)
+            g_string_append(text, "\n\nSobald der Upload fertig ist, werden die entsperrten "
+                    "Dateien erneut an den Server übergeben.");
+        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", text->str);
+        g_string_free(text, TRUE);
+        sond_tvfm_unlock_result_clear(&res);
+
+        if (d->tree)
+            sond_treeviewfm_refresh_status(SOND_TREEVIEWFM(d->tree));
+
+        if (d->nachlauf_dateien && d->nachlauf_dateien->len > 0 && !d->nachlauf_timer)
+            d->nachlauf_timer = g_timeout_add_seconds(3, nachlauf_tick, d);
+    }
+
+    locked_ctx_free(ctx);
+}
+
+/* Der Server hat Teile wegen Passwortschutzes übersprungen. Der Nutzer entscheidet, ob der
+ * Schutz entfernt wird (dann Passwortabfrage, Nachlauf nur für diese Dateien). Was schon einmal
+ * nicht entsperrt wurde, wird nicht erneut angeboten. */
+static void gesperrte_nachbearbeiten(DokData *d, OcrStatus *status) {
+    LockedCtx *ctx = NULL;
+    GString *liste = NULL;
+    GtkAlertDialog *frage = NULL;
+    const char *knoepfe[] = { "Entsperren und nachindizieren", "Später", NULL };
+    guint n = 0;
+
+    if (!d->uebersprungen)
+        d->uebersprungen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+    ctx = g_new0(LockedCtx, 1);
+    ctx->d = d;
+    ctx->items = g_ptr_array_new_with_free_func(locked_item_free);
+
+    for (guint i = 0; i < status->locked->len; i++) {
+        OcrLockedPart *teil = g_ptr_array_index(status->locked, i);
+        SondLockedItem *item = NULL;
+
+        if (g_hash_table_contains(d->uebersprungen, teil->filepart))
+            continue;
+        item = g_new0(SondLockedItem, 1);
+        item->filepart = g_strdup(teil->filepart);
+        item->kind = teil->is_pdf ? SOND_LOCKED_PDF : SOND_LOCKED_ZIP_ENTRY;
+        g_ptr_array_add(ctx->items, item);
+    }
+
+    n = ctx->items->len;
+    if (n == 0) {
+        locked_ctx_free(ctx);
+
+        return;
+    }
+
+    liste = g_string_new(NULL);
+    for (guint i = 0; i < MIN(n, 8); i++)
+        g_string_append_printf(liste, "\n%s",
+                ((SondLockedItem*) g_ptr_array_index(ctx->items, i))->filepart);
+    if (n > 8)
+        g_string_append_printf(liste, "\n... und %u weitere", n - 8);
+
+    frage = gtk_alert_dialog_new("%u passwortgeschützte Datei(en) wurden übersprungen", n);
+    {
+        gchar *detail = g_strdup_printf("Der Index kann nur Dateien ohne Passwortschutz lesen. "
+                "Der Passwortschutz wird dafür dauerhaft entfernt: die Dateien werden dabei "
+                "verändert, eine Sicherung gibt es nicht. Danach werden sie gezielt noch "
+                "einmal an den Server übergeben.\n\nBetroffen:%s", liste->str);
+
+        gtk_alert_dialog_set_detail(frage, detail);
+        g_free(detail);
+    }
+    g_string_free(liste, TRUE);
+    gtk_alert_dialog_set_buttons(frage, knoepfe);
+    gtk_alert_dialog_set_default_button(frage, 1);
+    gtk_alert_dialog_set_cancel_button(frage, 1);
+    gtk_alert_dialog_set_modal(frage, TRUE);
+    gtk_alert_dialog_choose(frage, GTK_WINDOW(d->window), NULL, on_gesperrt_bestaetigt, ctx);
+    g_object_unref(frage);
 }
 
 static void on_indexdlg_senden(GtkButton *button, gpointer user_data) {
@@ -729,6 +972,373 @@ static void on_index_aktion(GSimpleAction *aktion, GVariant *parameter, gpointer
     index_dialog_zeigen(user_data);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Änderungen im Baum: Schreibberechtigung und Index                  */
+/* ------------------------------------------------------------------ */
+
+#define SERVER_KURZ_TIMEOUT 5
+
+/* Löschen, Verschieben und Umbenennen verlangen die Schreibberechtigung der Akte (der Index
+ * ist eine gemeinsame Datei). Fehlt sie, versucht der Client sie zu holen wie beim Start
+ * von zond; sonst bleibt der Baum in diesem Punkt nur lesend. */
+static gboolean schreibberechtigung_holen(DokData *d, GError **error) {
+    SondLeaseInfo info = { 0 };
+    SondLeaseResult res = SOND_LEASE_ERROR;
+    GError *lease_error = NULL;
+    guint alt = 0;
+    gboolean ok = FALSE;
+
+    if (d->job_token) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                "Ein Index-Job läuft. Solange er läuft, sind keine Änderungen möglich.");
+
+        return FALSE;
+    }
+
+    if (!d->lease || d->akte_id <= 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                "Die Akte ist dem Client nicht bekannt; Änderungen sind nur mit der "
+                "Schreibberechtigung der Akte möglich.");
+
+        return FALSE;
+    }
+
+    if (sond_akte_lease_may_write(d->lease, d->akte_id))
+        return TRUE;
+
+    alt = sond_client_set_io_timeout(d->client, SERVER_KURZ_TIMEOUT);
+    res = sond_akte_lease_acquire(d->lease, d->akte_id, &info, &lease_error);
+    sond_client_set_io_timeout(d->client, alt);
+
+    if (res == SOND_LEASE_OK) {
+        sond_akte_lease_set_name(d->lease, d->akte_id, d->lib_name);
+        ok = TRUE;
+    } else if (res == SOND_LEASE_DENIED) {
+        if (info.by_job)
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                    "Für diese Akte läuft ein Index-Job auf dem Server. Änderungen sind "
+                    "erst danach möglich.");
+        else
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                    "Die Akte ist von %s auf %s ausgecheckt. Änderungen sind nur mit der "
+                    "Schreibberechtigung möglich.", info.user ? info.user : "?",
+                    info.device_name ? info.device_name : "?");
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "Die Schreibberechtigung konnte nicht geholt werden (Server nicht "
+                "erreichbar). Änderungen sind nur mit ihr möglich.");
+    }
+
+    g_clear_error(&lease_error);
+    sond_akte_lease_info_clear(&info);
+
+    return ok;
+}
+
+//Index-DB zum Schreiben öffnen; NULL, wenn es noch keinen Index gibt
+static SondIndexCtx* index_schreibend_oeffnen(DokData *d) {
+    GError *error = NULL;
+    SondIndexCtx *ctx = NULL;
+
+    if (!g_file_test(d->index_pfad, G_FILE_TEST_EXISTS))
+        return NULL;
+
+    ctx = sond_index_ctx_new(d->index_pfad, NULL, 0, 0, &error);
+    if (!ctx)
+        g_warning("Index-DB nicht zu öffnen, Index wird nicht nachgeführt: %s",
+                error ? error->message : "?");
+    g_clear_error(&error);
+
+    return ctx;
+}
+
+/* Was nach einer erfolgreichen Dateioperation im Index nachzuführen ist */
+typedef struct {
+    gchar *alt;       //projektrelativer Pfad vorher
+    gchar *neu;       //nachher (NULL beim Löschen)
+} IdxOp;
+
+static void idxop_free(IdxOp *op) {
+    if (!op)
+        return;
+    g_free(op->alt);
+    g_free(op->neu);
+    g_free(op);
+}
+
+//Projektrelativer Zielpfad parent/base; FALSE, wenn das Ziel nicht im Dateisystem liegt
+static gboolean ziel_pfad(SondTVFMItem *parent, const gchar *base, gchar **neu) {
+    const gchar *eltern = NULL;
+
+    if (!parent || sond_tvfm_item_get_sond_file_part(parent))
+        return FALSE;
+
+    eltern = sond_tvfm_item_get_path_or_section(parent);
+    *neu = eltern ? g_strconcat(eltern, "/", base, NULL) : g_strdup(base);
+
+    return TRUE;
+}
+
+static void melde_fehler(GError **error, GError *quelle) {
+    if (error && !*error && quelle)
+        *error = g_error_copy(quelle);
+}
+
+static gint on_before_delete(SondTreeviewFM *tree, SondTVFMItem *item, gpointer error_p,
+        gpointer ctx_p, gpointer user_data) {
+    DokData *d = user_data;
+    GError **error = error_p;
+    gpointer *ctx = ctx_p;
+    gchar *rel = NULL;
+    IdxOp *op = NULL;
+
+    (void) tree;
+
+    if (!sond_tvfm_item_fs_path(item, &rel, NULL))
+        return 0; //Inhalt eines Containers: hier nicht unterstützt
+
+    if (!schreibberechtigung_holen(d, error)) {
+        g_free(rel);
+
+        return -1;
+    }
+
+    op = g_new0(IdxOp, 1);
+    op->alt = rel;
+    *ctx = op;
+
+    return 0;
+}
+
+static gint on_before_move(SondTreeviewFM *tree, SondTVFMItem *item, SondTVFMItem *parent,
+        const gchar *base, gint index, gpointer error_p, gpointer ctx_p, gpointer user_data) {
+    DokData *d = user_data;
+    GError **error = error_p;
+    gpointer *ctx = ctx_p;
+    gchar *alt = NULL;
+    gchar *neu = NULL;
+    IdxOp *op = NULL;
+    SondIndexCtx *idx = NULL;
+
+    (void) tree;
+
+    if (!sond_tvfm_item_fs_path(item, &alt, NULL) || !ziel_pfad(parent, base, &neu)) {
+        g_free(alt);
+
+        return 0; //nicht im Dateisystem: hier nicht unterstützt
+    }
+
+    if (!schreibberechtigung_holen(d, error)) {
+        g_free(alt);
+        g_free(neu);
+
+        return -1;
+    }
+
+    //eine abdeckende Aussage am Ziel auflösen (außer beim Umbenennen an Ort und Stelle);
+    //schadet nicht, wenn die Dateioperation danach scheitert
+    if (index != -1 && (idx = index_schreibend_oeffnen(d))) {
+        GError *idx_error = NULL;
+
+        if (!sond_tvfm_index_sync_prepare_insert(idx, neu,
+                sond_treeviewfm_get_root(SOND_TREEVIEWFM(d->tree)), &idx_error))
+            g_warning("Index: Abdeckung am Ziel nicht aufgelöst: %s",
+                    idx_error ? idx_error->message : "?");
+        g_clear_error(&idx_error);
+        sond_index_ctx_free(idx);
+    }
+
+    op = g_new0(IdxOp, 1);
+    op->alt = alt;
+    op->neu = neu;
+    *ctx = op;
+
+    return 0;
+}
+
+static gint on_before_insert(SondTreeviewFM *tree, SondTVFMItem *item, SondTVFMItem *parent,
+        const gchar *base, gint index, gpointer error_p, gpointer user_data) {
+    DokData *d = user_data;
+    GError **error = error_p;
+    gchar *neu = NULL;
+    SondIndexCtx *idx = NULL;
+
+    (void) tree;
+    (void) item;
+    (void) index;
+
+    if (!ziel_pfad(parent, base, &neu))
+        return 0;
+
+    if (!schreibberechtigung_holen(d, error)) {
+        g_free(neu);
+
+        return -1;
+    }
+
+    //am Ziel entsteht neuer Inhalt: eine abdeckende Aussage auflösen
+    if ((idx = index_schreibend_oeffnen(d))) {
+        GError *idx_error = NULL;
+
+        if (!sond_tvfm_index_sync_prepare_insert(idx, neu,
+                sond_treeviewfm_get_root(SOND_TREEVIEWFM(d->tree)), &idx_error))
+            g_warning("Index: Abdeckung am Ziel nicht aufgelöst: %s",
+                    idx_error ? idx_error->message : "?");
+        g_clear_error(&idx_error);
+        sond_index_ctx_free(idx);
+    }
+    g_free(neu);
+
+    return 0;
+}
+
+static void on_after(SondTreeviewFM *tree, gboolean erfolg, gpointer ctx, gpointer user_data) {
+    DokData *d = user_data;
+    IdxOp *op = ctx;
+    SondIndexCtx *idx = NULL;
+    GError *error = NULL;
+
+    (void) tree;
+
+    if (op && erfolg && (idx = index_schreibend_oeffnen(d))) {
+        gboolean ok = op->neu ?
+                sond_tvfm_index_sync_moved(idx, op->alt, op->neu, &error) :
+                sond_tvfm_index_sync_deleted(idx, op->alt, &error);
+
+        if (!ok)
+            g_warning("Index nicht nachgeführt (%s): %s", op->alt,
+                    error ? error->message : "?");
+        g_clear_error(&error);
+        sond_index_ctx_free(idx);
+    }
+
+    idxop_free(op);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Dauerhaft entsperren                                               */
+/* ------------------------------------------------------------------ */
+
+static void unlock_report(gchar const *meldung_text, gpointer data) {
+    DokData *d = data;
+
+    meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", meldung_text);
+}
+
+static void unlock_refresh(SondFilePart *sfp, gpointer data) {
+    DokData *d = data;
+
+    if (d->tree)
+        sond_treeviewfm_refresh_file_part(SOND_TREEVIEWFM(d->tree), sfp);
+}
+
+static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d) {
+    memset(hooks, 0, sizeof(SondUnlockHooks));
+    hooks->refresh = unlock_refresh;
+    hooks->report = unlock_report;
+    hooks->data = d;
+}
+
+typedef struct {
+    DokData *d;
+    SondUnlockJobs jobs;
+} UnlockCtx;
+
+static void unlock_ctx_free(UnlockCtx *ctx) {
+    sond_tvfm_unlock_jobs_clear(&ctx->jobs);
+    g_free(ctx);
+}
+
+static void on_unlock_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpointer user_data) {
+    UnlockCtx *ctx = user_data;
+    DokData *d = ctx->d;
+    GError *error = NULL;
+    gint knopf = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(quelle), ergebnis, &error);
+
+    g_clear_error(&error);
+    if (knopf == 0 && d->window) {
+        SondUnlockHooks hooks;
+        SondUnlockResult res;
+        GString *text = g_string_new(NULL);
+
+        unlock_hooks_init(&hooks, d);
+        sond_tvfm_unlock_run(&ctx->jobs, &hooks, &res);
+
+        g_string_append_printf(text, "%u Datei(en) entsperrt", res.done);
+        if (res.skipped)
+            g_string_append_printf(text, ", %u übersprungen", res.skipped);
+        if (res.aborted)
+            g_string_append(text, "\n\nAbgebrochen.");
+        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", text->str);
+        g_string_free(text, TRUE);
+        sond_tvfm_unlock_result_clear(&res);
+
+        if (d->tree)
+            sond_treeviewfm_refresh_status(SOND_TREEVIEWFM(d->tree));
+    }
+
+    unlock_ctx_free(ctx);
+}
+
+/* Entfernt den Passwortschutz der markierten ZIP-Einträge und PDFs. Die Dateien werden dabei
+ * verändert, dafür ist die Schreibberechtigung der Akte nötig. */
+static void on_entsperren_aktion(GSimpleAction *aktion, GVariant *parameter, gpointer user_data) {
+    DokData *d = user_data;
+    GError *error = NULL;
+    GPtrArray *items = NULL;
+    UnlockCtx *ctx = NULL;
+    SondUnlockHooks hooks;
+    guint n_total = 0;
+    gchar *busy_text = NULL;
+    SondUnlockPrepare bereit = SOND_UNLOCK_NOTHING;
+
+    (void) aktion;
+    (void) parameter;
+
+    if (!schreibberechtigung_holen(d, &error)) {
+        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", error->message);
+        g_clear_error(&error);
+
+        return;
+    }
+
+    ctx = g_new0(UnlockCtx, 1);
+    ctx->d = d;
+    sond_tvfm_unlock_jobs_init(&ctx->jobs);
+
+    items = sond_treeview_get_selected_items(SOND_TREEVIEW(d->tree));
+    for (guint i = 0; i < items->len; i++)
+        sond_tvfm_unlock_collect_item(&ctx->jobs, g_ptr_array_index(items, i));
+    g_ptr_array_unref(items);
+
+    unlock_hooks_init(&hooks, d);
+    bereit = sond_tvfm_unlock_prepare(&ctx->jobs, &hooks, &n_total, &busy_text);
+
+    if (bereit == SOND_UNLOCK_READY) {
+        GtkAlertDialog *frage = gtk_alert_dialog_new(
+                "Der Passwortschutz von %u Datei(en) wird dauerhaft entfernt.", n_total);
+        const char *knoepfe[] = { "Fortfahren", "Abbrechen", NULL };
+
+        gtk_alert_dialog_set_detail(frage, "Die Dateien werden dabei verändert, eine "
+                "Sicherung gibt es nicht.");
+        gtk_alert_dialog_set_buttons(frage, knoepfe);
+        gtk_alert_dialog_set_default_button(frage, 1);
+        gtk_alert_dialog_set_cancel_button(frage, 1);
+        gtk_alert_dialog_set_modal(frage, TRUE);
+        gtk_alert_dialog_choose(frage, GTK_WINDOW(d->window), NULL, on_unlock_bestaetigt, ctx);
+        g_object_unref(frage);
+
+        return; //ctx gehört nun dem Dialog
+    }
+
+    meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren",
+            bereit == SOND_UNLOCK_NOTHING ? "Die Auswahl enthält keine passwortgeschützten "
+                    "Dateien." : bereit == SOND_UNLOCK_BUSY ? busy_text :
+                    "Die Datei wird noch geladen. Bitte danach erneut versuchen.");
+    g_free(busy_text);
+    unlock_ctx_free(ctx);
+}
+
 void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
         guint lfd_nr, guint year, const gchar *bezeichnung, gint64 akte_id) {
     GError *error = NULL;
@@ -746,6 +1356,8 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
 
         return;
     }
+
+    sond_client_password_dialog_init();
 
     d = g_new0(DokData, 1);
     d->client = g_object_ref(client);
@@ -853,10 +1465,17 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     g_object_add_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
     g_signal_connect(d->tree, "seadrive-status", G_CALLBACK(on_seadrive_status), d);
 
+    //Löschen, Verschieben, Umbenennen, Kopieren: Schreibberechtigung holen, Index nachführen
+    g_signal_connect(d->tree, "before-delete", G_CALLBACK(on_before_delete), d);
+    g_signal_connect(d->tree, "before-move", G_CALLBACK(on_before_move), d);
+    g_signal_connect(d->tree, "before-insert", G_CALLBACK(on_before_insert), d);
+    g_signal_connect(d->tree, "after", G_CALLBACK(on_after), d);
+
     //Kontextmenü: Auswahl zum Indizieren senden
     {
         static const GActionEntry aktionen[] = {
-            { "index-senden", on_index_aktion, NULL, NULL, NULL }
+            { "index-senden", on_index_aktion, NULL, NULL, NULL },
+            { "entsperren", on_entsperren_aktion, NULL, NULL, NULL }
         };
         SondTreeview *basis = SOND_TREEVIEW(d->tree);
 
@@ -864,6 +1483,8 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
                 G_N_ELEMENTS(aktionen), d);
         g_menu_append(sond_treeview_get_menu(basis),
                 "Zum Indizieren an den Server senden ...", "tv.index-senden");
+        g_menu_append(sond_treeview_get_menu(basis), "Dauerhaft entsperren ...",
+                "tv.entsperren");
     }
 
     //Index-Symbole: Index-DB lesen und bei Änderungen neu öffnen

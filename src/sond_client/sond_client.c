@@ -1865,21 +1865,6 @@ gboolean sond_client_ocr_start_job_ex(SondClient *client,
 }
 
 /**
- * sond_client_ocr_start_job:
- *
- * Startet OCR-Job für die ganze Library (bisheriges Verhalten)
- */
-gboolean sond_client_ocr_start_job(SondClient *client,
-                                   const gchar *library_name,
-                                   gboolean force_reprocess,
-                                   GError **error) {
-    return sond_client_ocr_start_job_ex(client, library_name, force_reprocess,
-                                        force_reprocess ? SOND_CLIENT_OCR_FORCE :
-                                                          SOND_CLIENT_OCR_CHECK,
-                                        NULL, NULL, NULL, error);
-}
-
-/**
  * sond_client_ocr_cancel_job:
  *
  * Fordert den Abbruch des laufenden OCR-/Index-Jobs an
@@ -1930,6 +1915,13 @@ gboolean sond_client_ocr_cancel_job(SondClient *client,
     }
 
     return TRUE;
+}
+
+static void ocr_locked_part_free(gpointer p) {
+    OcrLockedPart *part = p;
+
+    g_free(part->filepart);
+    g_free(part);
 }
 
 /**
@@ -2031,6 +2023,25 @@ OcrStatus* sond_client_ocr_get_status(SondClient *client,
     if (json_object_has_member(obj, "error"))
         status->error_message = g_strdup(json_object_get_string_member(obj, "error"));
 
+    if (json_object_has_member(obj, "locked") &&
+            JSON_NODE_HOLDS_ARRAY(json_object_get_member(obj, "locked"))) {
+        JsonArray *arr = json_object_get_array_member(obj, "locked");
+
+        status->locked = g_ptr_array_new_with_free_func(ocr_locked_part_free);
+        for (guint i = 0; i < json_array_get_length(arr); i++) {
+            JsonObject *o = json_array_get_object_element(arr, i);
+            OcrLockedPart *part = NULL;
+
+            if (!o || !json_object_has_member(o, "filepart"))
+                continue;
+            part = g_new0(OcrLockedPart, 1);
+            part->filepart = g_strdup(json_object_get_string_member(o, "filepart"));
+            part->is_pdf = json_object_has_member(o, "kind") &&
+                    !g_strcmp0(json_object_get_string_member(o, "kind"), "pdf");
+            g_ptr_array_add(status->locked, part);
+        }
+    }
+
     if (json_object_has_member(obj, "start_time")) {
         const gchar *start_str = json_object_get_string_member(obj, "start_time");
         status->start_time = g_date_time_new_from_iso8601(start_str, NULL);
@@ -2059,6 +2070,8 @@ void sond_client_ocr_status_free(OcrStatus *status) {
     g_free(status->current_file);
     g_free(status->job_token);
     g_free(status->error_message);
+    if (status->locked)
+        g_ptr_array_unref(status->locked);
 
     if (status->start_time) {
         g_date_time_unref(status->start_time);

@@ -135,6 +135,13 @@ static OcrJobInfo* ocr_job_info_new(const gchar *repo_id,
     return info;
 }
 
+static void sond_locked_item_free_server(gpointer p) {
+    SondLockedItem *item = p;
+
+    g_free(item->filepart);
+    g_free(item);
+}
+
 /**
  * ocr_job_info_free:
  *
@@ -153,6 +160,8 @@ static void ocr_job_info_free(OcrJobInfo *info) {
         g_ptr_array_unref(info->sel_dirs);
     g_free(info->job_token);
     g_free(info->error_message);
+    if (info->locked)
+        g_ptr_array_unref(info->locked);
 
     if (info->start_time) {
         g_date_time_unref(info->start_time);
@@ -952,6 +961,25 @@ static void handle_ocr_status(SoupServer *soup_server,
     if (job_info->error_message) {
         json_builder_set_member_name(builder, "error");
         json_builder_add_string_value(builder, job_info->error_message);
+    }
+
+    /* Teile, die wegen eines Passwortschutzes übersprungen wurden: der Client entsperrt sie
+     * (die Passwörter bleiben dort) und startet einen Nachlauf nur für diese Dateien */
+    if (job_info->locked && job_info->locked->len > 0) {
+        json_builder_set_member_name(builder, "locked");
+        json_builder_begin_array(builder);
+        for (guint i = 0; i < job_info->locked->len; i++) {
+            SondLockedItem *item = g_ptr_array_index(job_info->locked, i);
+
+            json_builder_begin_object(builder);
+            json_builder_set_member_name(builder, "filepart");
+            json_builder_add_string_value(builder, item->filepart);
+            json_builder_set_member_name(builder, "kind");
+            json_builder_add_string_value(builder,
+                    item->kind == SOND_LOCKED_PDF ? "pdf" : "zip_entry");
+            json_builder_end_object(builder);
+        }
+        json_builder_end_array(builder);
     }
 
     json_builder_set_member_name(builder, "total_files");
@@ -2053,6 +2081,24 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             }
             g_clear_error(&upload_err);
         }
+    }
+
+    /* Übersprungene, passwortgeschützte Teile für den Client festhalten */
+    if (wctx.locked && wctx.locked->len > 0) {
+        g_mutex_lock(&job_info->mutex);
+        if (!job_info->locked)
+            job_info->locked = g_ptr_array_new_with_free_func(sond_locked_item_free_server);
+        for (guint i = 0; i < wctx.locked->len; i++) {
+            SondLockedItem *src = g_ptr_array_index(wctx.locked, i);
+            SondLockedItem *copy = g_new0(SondLockedItem, 1);
+
+            copy->filepart = g_strdup(src->filepart);
+            copy->kind = src->kind;
+            g_ptr_array_add(job_info->locked, copy);
+        }
+        g_mutex_unlock(&job_info->mutex);
+        ocr_log_add_message(log_entry, "%u passwortgeschützte Teile übersprungen",
+                wctx.locked->len);
     }
 
     /* Ordner zusammenfassen (Auflistung über Seafile statt Dateisystem) */

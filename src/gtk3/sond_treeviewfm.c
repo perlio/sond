@@ -39,6 +39,7 @@
 #include "../seadrive/sond_seadrive_gtk3.h"
 #include "../sond_icon_util.h"
 #include "../tvfm/sond_tvfm_status.h"
+#include "../tvfm/sond_tvfm_unlock.h"
 #include "../sond_eingang_zettel.h"
 #include "sond_treeviewfm_private.h"
 
@@ -2886,105 +2887,9 @@ static void sond_treeviewfm_action_paste_up(GSimpleAction *a, GVariant *p,
 
 /* ------------------------------------------------------------------------
  * Dauerhaft entsperren: den Passwortschutz von ZIP-Einträgen und PDFs der
- * Auswahl entfernen (die Dateien werden dabei verändert)
+ * Auswahl entfernen (die Dateien werden dabei verändert). Die Arbeit selbst
+ * liegt in tvfm/sond_tvfm_unlock.c, hier nur die Anbindung an diesen Baum.
  * ---------------------------------------------------------------------- */
-typedef struct {
-	SondFilePart *zip; //Ref
-	GPtrArray *paths;  //Pfade der verschlüsselten Einträge im Archiv (g_free)
-} SFMZipJob;
-
-typedef struct {
-	GPtrArray *zips; //SFMZipJob*
-	GPtrArray *pdfs; //SondFilePart* (Ref), PDF mit Passwort
-} SFMDecryptJobs;
-
-static void zip_job_free(gpointer p) {
-	SFMZipJob *job = (SFMZipJob*) p;
-
-	g_object_unref(job->zip);
-	g_ptr_array_unref(job->paths);
-	g_free(job);
-}
-
-static SFMZipJob* decrypt_zip_job(SFMDecryptJobs *jobs, SondFilePart *zip) {
-	SFMZipJob *job = NULL;
-
-	for (guint i = 0; i < jobs->zips->len; i++) {
-		job = g_ptr_array_index(jobs->zips, i);
-		if (job->zip == zip)
-			return job;
-	}
-
-	job = g_new0(SFMZipJob, 1);
-	job->zip = g_object_ref(zip);
-	job->paths = g_ptr_array_new_with_free_func(g_free);
-	g_ptr_array_add(jobs->zips, job);
-
-	return job;
-}
-
-static void decrypt_job_add_path(SFMZipJob *job, gchar const *path) {
-	for (guint i = 0; i < job->paths->len; i++)
-		if (!g_strcmp0(g_ptr_array_index(job->paths, i), path))
-			return;
-
-	g_ptr_array_add(job->paths, g_strdup(path));
-}
-
-//Pfade der verschlüsselten Einträge unter prefix (NULL = ganzes Archiv) dazu
-static void decrypt_job_add_locked(SFMDecryptJobs *jobs, SondFilePart *zip,
-		gchar const *prefix) {
-	GPtrArray *arr = sond_file_part_zip_locked_entries(zip, prefix);
-
-	if (arr->len) {
-		SFMZipJob *job = decrypt_zip_job(jobs, zip);
-
-		for (guint i = 0; i < arr->len; i++)
-			decrypt_job_add_path(job, g_ptr_array_index(arr, i));
-	}
-	g_ptr_array_unref(arr);
-}
-
-static gint sond_treeviewfm_collect_decrypt_foreach(SondTreeview *stv,
-		GtkTreeIter *iter, gpointer data, GError **error) {
-	SFMDecryptJobs *jobs = (SFMDecryptJobs*) data;
-	g_autoptr(SondTVFMItem) stvfm_item = NULL; //eigene Ref bis zum Funktionsende
-	SondTVFMItemPrivate *item_priv = NULL;
-	SondFilePart *sfp = NULL;
-
-	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stv), iter);
-	if (!stvfm_item)
-		return 0;
-	item_priv = sond_tvfm_item_get_priv(stvfm_item);
-
-	sfp = item_priv->sond_file_part;
-	if (!sfp)
-		return 0; //Dateisystem-Verzeichnis, nichts zu entsperren
-
-	if (!item_priv->path_or_section) {
-		SondFilePart *parent = sond_file_part_get_parent(sfp);
-
-		//selbst ein verschlüsselter Eintrag eines ZIP-Archivs
-		if (parent && SOND_IS_FILE_PART_ZIP(parent) &&
-				sond_file_part_zip_entry_is_encrypted(parent,
-						sond_file_part_get_path(sfp)))
-			decrypt_job_add_path(decrypt_zip_job(jobs, parent),
-					sond_file_part_get_path(sfp));
-
-		//ein ZIP-Archiv als Ganzes: alle verschlüsselten Einträge
-		if (SOND_IS_FILE_PART_ZIP(sfp))
-			decrypt_job_add_locked(jobs, sfp, NULL);
-
-		//eine PDF mit Passwort
-		if (SOND_IS_FILE_PART_PDF(sfp) &&
-				sond_file_part_get_lock_content(sfp) != SOND_LOCK_NONE)
-			g_ptr_array_add(jobs->pdfs, g_object_ref(sfp));
-	}
-	else if (SOND_IS_FILE_PART_ZIP(sfp))
-		decrypt_job_add_locked(jobs, sfp, item_priv->path_or_section);
-
-	return 0;
-}
 
 //lokal verfügbar (SeaDrive-Platzhalter werden mit Fortschrittsfenster geladen); FALSE: Abbruch oder Download gescheitert
 static gboolean decrypt_ensure_local(SondTreeviewFM *stvfm, SondFilePart *sfp) {
@@ -3010,194 +2915,54 @@ static gboolean decrypt_ensure_local(SondTreeviewFM *stvfm, SondFilePart *sfp) {
 	return TRUE;
 }
 
-//Ergebnis einer Entsperr-Aktion
-typedef struct {
-	guint done;
-	guint skipped;
-	gboolean aborted;
-	GPtrArray *decrypted;   //Fileparts der entsperrten Dateien (g_free)
-	GPtrArray *skipped_fps; //Fileparts der übersprungenen Dateien (g_free)
-} SFMDecryptResult;
-
-static void decrypt_result_init(SFMDecryptResult *res) {
-	memset(res, 0, sizeof(SFMDecryptResult));
-	res->decrypted = g_ptr_array_new_with_free_func(g_free);
-	res->skipped_fps = g_ptr_array_new_with_free_func(g_free);
+static gboolean unlock_hook_ensure_local(SondFilePart *sfp, gpointer data) {
+	return decrypt_ensure_local(SOND_TREEVIEWFM(data), sfp);
 }
 
-static void decrypt_result_clear(SFMDecryptResult *res) {
-	g_ptr_array_unref(res->decrypted);
-	g_ptr_array_unref(res->skipped_fps);
+static void unlock_hook_refresh(SondFilePart *sfp, gpointer data) {
+	sond_treeviewfm_refresh_file_part(SOND_TREEVIEWFM(data), sfp);
 }
 
-static void decrypt_result_add(GPtrArray *arr, gchar const *fp) {
-	for (guint i = 0; i < arr->len; i++)
-		if (!g_strcmp0(g_ptr_array_index(arr, i), fp))
-			return;
-
-	g_ptr_array_add(arr, g_strdup(fp));
+static void unlock_hook_report(gchar const *message, gpointer data) {
+	display_message(SOND_GET_TOPLEVEL(data), "Dauerhaft entsperren\n\n", message, NULL);
 }
 
-//Fehlschlag eines Entsperrversuchs: TRUE = weiter (übersprungen), FALSE =
-//Aktion beenden (Abbruch oder Fehler)
-static gboolean decrypt_handle_failure(SondTreeviewFM *stvfm, GError *error,
-		gchar const *fp, SFMDecryptResult *res) {
-	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-		if (sond_password_last_result() == SOND_PROMPT_CANCEL) {
-			res->aborted = TRUE;
+static gboolean unlock_hook_busy(SondFilePart *sfp, gpointer data) {
+	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(data);
 
-			return FALSE;
-		}
-		res->skipped++;
-		if (fp)
-			decrypt_result_add(res->skipped_fps, fp);
-
-		return TRUE; //übersprungen
-	}
-
-	display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
-			error ? error->message : "Fehler", NULL);
-	res->aborted = TRUE;
-
-	return FALSE;
+	return klass->file_part_busy && klass->file_part_busy(sfp);
 }
 
-/* Führt die gesammelten Entsperr-Arbeiten aus, als Aktion (Überspringen/Alle
- * überspringen/Abbrechen): Einträge in ZIP-Archiven (Passwörter sicherstellen,
- * je Archiv einmal schreiben), danach PDFs mit Passwort - auch die aus
- * entschlüsselten ZIP-Einträgen entstandenen. */
-static void decrypt_run(SondTreeviewFM *stvfm, SFMDecryptJobs *jobs,
-		SFMDecryptResult *res) {
-	sond_password_action_begin(TRUE);
+static void unlock_hooks_init(SondUnlockHooks *hooks, SondTreeviewFM *stvfm) {
+	hooks->ensure_local = unlock_hook_ensure_local;
+	hooks->refresh = unlock_hook_refresh;
+	hooks->report = unlock_hook_report;
+	hooks->busy = unlock_hook_busy;
+	hooks->data = stvfm;
+}
 
-	for (guint i = 0; i < jobs->zips->len && !res->aborted; i++) {
-		SFMZipJob *job = g_ptr_array_index(jobs->zips, i);
-		GPtrArray *ok_paths = g_ptr_array_new_with_free_func(g_free);
-		GPtrArray *new_sfps = NULL;
-		g_autofree gchar *archive_fp = sond_file_part_get_filepart(job->zip);
+static gint sond_treeviewfm_collect_decrypt_foreach(SondTreeview *stv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	g_autoptr(SondTVFMItem) stvfm_item = NULL; //eigene Ref bis zum Funktionsende
 
-		for (guint k = 0; k < job->paths->len && !res->aborted; k++) {
-			gchar const *path = g_ptr_array_index(job->paths, k);
-			g_autofree gchar *entry_fp = g_strconcat(archive_fp, "//", path, NULL);
-			GError *error_probe = NULL;
+	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stv), iter);
+	if (stvfm_item)
+		sond_tvfm_unlock_collect_item((SondUnlockJobs*) data, stvfm_item);
 
-			if (sond_file_part_zip_probe_entry(job->zip, path, &error_probe))
-				g_ptr_array_add(ok_paths, g_strdup(path));
-			else
-				decrypt_handle_failure(stvfm, error_probe, entry_fp, res);
-			g_clear_error(&error_probe);
-		}
-
-		if (!res->aborted && ok_paths->len) {
-			GError *error_dec = NULL;
-
-			if (sond_file_part_zip_decrypt_entries(job->zip, ok_paths, &new_sfps,
-					&error_dec)) {
-				decrypt_handle_failure(stvfm, error_dec, NULL, res);
-				g_clear_error(&error_dec);
-			}
-			else {
-				res->done += ok_paths->len;
-
-				for (guint k = 0; k < ok_paths->len; k++) {
-					g_autofree gchar *entry_fp = g_strconcat(archive_fp, "//",
-							(gchar const*) g_ptr_array_index(ok_paths, k), NULL);
-
-					decrypt_result_add(res->decrypted, entry_fp);
-				}
-
-				for (guint k = 0; new_sfps && k < new_sfps->len; k++) {
-					SondFilePart *sfp_new = g_ptr_array_index(new_sfps, k);
-
-					sond_treeviewfm_refresh_file_part(stvfm, sfp_new);
-					if (SOND_IS_FILE_PART_PDF(sfp_new) &&
-							sond_file_part_get_lock_content(sfp_new) !=
-									SOND_LOCK_NONE)
-						g_ptr_array_add(jobs->pdfs, g_object_ref(sfp_new));
-				}
-			}
-		}
-
-		if (new_sfps)
-			g_ptr_array_unref(new_sfps);
-		g_ptr_array_unref(ok_paths);
-	}
-
-	for (guint i = 0; i < jobs->pdfs->len && !res->aborted; i++) {
-		SondFilePart *sfp = g_ptr_array_index(jobs->pdfs, i);
-		g_autofree gchar *fp = sond_file_part_get_filepart(sfp);
-		GError *error_pdf = NULL;
-
-		if (sond_file_part_pdf_decrypt(sfp, &error_pdf))
-			decrypt_handle_failure(stvfm, error_pdf, fp, res);
-		else {
-			res->done++;
-			decrypt_result_add(res->decrypted, fp);
-
-			//jetzt mit bekannten Anhängen: Baumelement (Blatt -> Ordner)
-			sond_treeviewfm_refresh_file_part(stvfm, sfp);
-		}
-		g_clear_error(&error_pdf);
-	}
-
-	sond_password_action_end();
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+	return 0;
 }
 
 gint sond_treeviewfm_decrypt_fileparts(SondTreeviewFM *stvfm, GPtrArray *items,
 		GPtrArray **decrypted, GPtrArray **skipped, gboolean *aborted) {
-	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
-	SFMDecryptJobs jobs = { g_ptr_array_new_with_free_func(zip_job_free),
-			g_ptr_array_new_with_free_func(g_object_unref) };
-	SFMDecryptResult res;
+	SondUnlockHooks hooks;
+	SondUnlockResult res;
+	gint done = 0;
 
-	decrypt_result_init(&res);
+	unlock_hooks_init(&hooks, stvfm);
+	sond_tvfm_unlock_locked_items(items, &hooks, &res);
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 
-	for (guint i = 0; i < items->len; i++) {
-		SondLockedItem *item = g_ptr_array_index(items, i);
-		SondFilePart *sfp = NULL;
-		GError *error = NULL;
-		gboolean ok = FALSE;
-
-		if (item->kind == SOND_LOCKED_ZIP_ENTRY) {
-			gchar const *sep = g_strrstr(item->filepart, "//");
-
-			if (sep) {
-				g_autofree gchar *archive_fp = g_strndup(item->filepart,
-						sep - item->filepart);
-
-				sfp = sond_file_part_from_filepart(archive_fp, &error);
-				if (sfp && SOND_IS_FILE_PART_ZIP(sfp)) {
-					decrypt_job_add_path(decrypt_zip_job(&jobs, sfp), sep + 2);
-					ok = decrypt_ensure_local(stvfm, sfp);
-				}
-			}
-		}
-		else {
-			sfp = sond_file_part_from_filepart(item->filepart, &error);
-			if (sfp && SOND_IS_FILE_PART_PDF(sfp) &&
-					!(klass->file_part_busy && klass->file_part_busy(sfp)) &&
-					decrypt_ensure_local(stvfm, sfp)) {
-				gboolean known = FALSE;
-
-				for (guint k = 0; k < jobs.pdfs->len; k++)
-					known |= (g_ptr_array_index(jobs.pdfs, k) == sfp);
-				if (!known)
-					g_ptr_array_add(jobs.pdfs, g_object_ref(sfp));
-				ok = TRUE;
-			}
-		}
-
-		if (!ok)
-			decrypt_result_add(res.skipped_fps, item->filepart);
-		if (sfp)
-			g_object_unref(sfp);
-		g_clear_error(&error); //Abbruch/Fehler: Datei bleibt gesperrt
-	}
-
-	decrypt_run(stvfm, &jobs, &res);
-
+	done = (gint) res.done;
 	if (decrypted) {
 		*decrypted = res.decrypted;
 		res.decrypted = NULL;
@@ -3208,29 +2973,24 @@ gint sond_treeviewfm_decrypt_fileparts(SondTreeviewFM *stvfm, GPtrArray *items,
 	}
 	if (aborted)
 		*aborted = res.aborted;
-	if (res.decrypted)
-		g_ptr_array_unref(res.decrypted);
-	if (res.skipped_fps)
-		g_ptr_array_unref(res.skipped_fps);
+	sond_tvfm_unlock_result_clear(&res);
 
-	g_ptr_array_unref(jobs.zips);
-	g_ptr_array_unref(jobs.pdfs);
-
-	return (gint) res.done;
+	return done;
 }
 
 static void sond_treeviewfm_action_entsperren(GSimpleAction *a, GVariant *p,
 		gpointer d) {
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
-	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
-	SFMDecryptJobs jobs = { g_ptr_array_new_with_free_func(zip_job_free),
-			g_ptr_array_new_with_free_func(g_object_unref) };
-	SFMDecryptResult res;
+	SondUnlockHooks hooks;
+	SondUnlockJobs jobs;
+	SondUnlockResult res;
 	GError *error = NULL;
 	guint n_total = 0;
 	g_autofree gchar *text = NULL;
+	g_autofree gchar *busy_message = NULL;
 
-	decrypt_result_init(&res);
+	unlock_hooks_init(&hooks, stvfm);
+	sond_tvfm_unlock_jobs_init(&jobs);
 
 	if (sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
 			sond_treeviewfm_collect_decrypt_foreach, &jobs, &error) == -1) {
@@ -3241,52 +3001,25 @@ static void sond_treeviewfm_action_entsperren(GSimpleAction *a, GVariant *p,
 		goto ende;
 	}
 
-	for (guint i = 0; i < jobs.zips->len; i++)
-		n_total += ((SFMZipJob*) g_ptr_array_index(jobs.zips, i))->paths->len;
-	n_total += jobs.pdfs->len;
-
-	if (n_total == 0) {
+	switch (sond_tvfm_unlock_prepare(&jobs, &hooks, &n_total, &busy_message)) {
+	case SOND_UNLOCK_NOTHING:
 		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
 				"Die Auswahl enthält keine passwortgeschützten Dateien.", NULL);
 
 		goto ende;
+	case SOND_UNLOCK_BUSY:
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+				busy_message, NULL);
+
+		goto ende;
+	case SOND_UNLOCK_NOT_LOCAL:
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
+				"Die Datei wird noch geladen. Bitte danach erneut versuchen.", NULL);
+
+		goto ende;
+	default:
+		break;
 	}
-
-	//eine im Viewer geöffnete PDF nicht anfassen
-	if (klass->file_part_busy)
-		for (guint i = 0; i < jobs.pdfs->len; i++) {
-			SondFilePart *sfp = g_ptr_array_index(jobs.pdfs, i);
-
-			if (klass->file_part_busy(sfp)) {
-				g_autofree gchar *fp = sond_file_part_get_filepart(sfp);
-				g_autofree gchar *msg = g_strdup_printf(
-						"Die Datei '%s' ist geöffnet. Bitte zuerst schließen.", fp);
-
-				display_message(SOND_GET_TOPLEVEL(stvfm),
-						"Dauerhaft entsperren\n\n", msg, NULL);
-
-				goto ende;
-			}
-		}
-
-	//lokal verfügbar?
-	for (guint i = 0; i < jobs.zips->len; i++)
-		if (!decrypt_ensure_local(stvfm,
-				((SFMZipJob*) g_ptr_array_index(jobs.zips, i))->zip)) {
-			display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
-					"Die Datei wird noch geladen. Bitte danach erneut versuchen.",
-					NULL);
-
-			goto ende;
-		}
-	for (guint i = 0; i < jobs.pdfs->len; i++)
-		if (!decrypt_ensure_local(stvfm, g_ptr_array_index(jobs.pdfs, i))) {
-			display_message(SOND_GET_TOPLEVEL(stvfm), "Dauerhaft entsperren\n\n",
-					"Die Datei wird noch geladen. Bitte danach erneut versuchen.",
-					NULL);
-
-			goto ende;
-		}
 
 	//einmal bestätigen lassen
 	text = g_strdup_printf("Der Passwortschutz von %u Datei(en) wird dauerhaft "
@@ -3296,7 +3029,8 @@ static void sond_treeviewfm_action_entsperren(GSimpleAction *a, GVariant *p,
 			NULL) != GTK_RESPONSE_YES)
 		goto ende;
 
-	decrypt_run(stvfm, &jobs, &res);
+	sond_tvfm_unlock_run(&jobs, &hooks, &res);
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 
 	{
 		GString *msg = g_string_new(NULL);
@@ -3311,11 +3045,10 @@ static void sond_treeviewfm_action_entsperren(GSimpleAction *a, GVariant *p,
 				msg->str, NULL);
 		g_string_free(msg, TRUE);
 	}
+	sond_tvfm_unlock_result_clear(&res);
 
 ende:
-	decrypt_result_clear(&res);
-	g_ptr_array_unref(jobs.zips);
-	g_ptr_array_unref(jobs.pdfs);
+	sond_tvfm_unlock_jobs_clear(&jobs);
 }
 
 static void sond_treeviewfm_action_loeschen(GSimpleAction *a, GVariant *p,

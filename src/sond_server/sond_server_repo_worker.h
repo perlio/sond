@@ -51,6 +51,7 @@ typedef struct {
     gchar     *job_token;     /* vom Client vergeben, wird nur in /ocr/status zurückgegeben */
     gint       cancel;        /* atomar: Abbruch angefordert */
     gchar     *error_message; /* Grund, wenn der Job nicht (vollständig) lief, sonst NULL */
+    GPtrArray *locked;        /* wegen Passwortschutzes übersprungene Teile (SondLockedItem*), NULL = keine */
 } OcrJobInfo;
 
 /**

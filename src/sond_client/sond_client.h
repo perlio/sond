@@ -588,6 +588,12 @@ gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *ye
  *
  * Status eines OCR-Jobs
  */
+/* Teil, den der Server-Job wegen eines Passwortschutzes übersprungen hat */
+typedef struct {
+    gchar *filepart;           /* Filepart-String ("a.zip//x.pdf") */
+    gboolean is_pdf;           /* TRUE: das PDF-Dokument selbst, sonst ein verschlüsselter ZIP-Eintrag */
+} OcrLockedPart;
+
 typedef struct {
     gboolean running;
     gint total_files;
@@ -599,25 +605,9 @@ typedef struct {
     gchar *job_token;          /* Kennung, die der Start mitgegeben hat (nullable) */
     gboolean cancelled;        /* Abbruch wurde angefordert */
     gchar *error_message;      /* Grund, wenn der Job nicht (vollständig) lief (nullable) */
+    GPtrArray *locked;         /* wegen Passwortschutzes übersprungene Teile (OcrLockedPart*),
+                                  NULL, wenn keine */
 } OcrStatus;
-
-/**
- * sond_client_ocr_start_job:
- * @client: SondClient
- * @library_name: Name der Library (z.B. "2026-23")
- * @force_reprocess: TRUE = alle Dateien neu verarbeiten
- * @error: (nullable): Fehler-Rückgabe
- *
- * Startet einen OCR-Job auf dem Server.
- * Führt automatisch Login durch falls nicht authentifiziert.
- * Bei 401 wird automatisch Re-Login durchgeführt.
- *
- * Returns: TRUE bei Erfolg
- */
-gboolean sond_client_ocr_start_job(SondClient *client,
-                                   const gchar *library_name,
-                                   gboolean force_reprocess,
-                                   GError **error);
 
 /**
  * SondClientOcrMode:
@@ -643,9 +633,10 @@ typedef enum {
  *   höchstens 64 Zeichen), die der Server in sond_client_ocr_get_status() zurückgibt
  * @error: (nullable): Fehler-Rückgabe
  *
- * Wie sond_client_ocr_start_job(), aber mit OCR-Modus und optionaler Auswahl: Ist
- * @files oder @dirs gesetzt, beschränkt sich der Job auf diese Pfade (einzeln
- * gewählte Dateien werden immer verarbeitet), sonst gilt die ganze Library.
+ * Startet einen OCR-/Index-Job mit OCR-Modus und optionaler Auswahl: Ist
+ * @files oder @dirs gesetzt, beschränkt sich der Job auf diese Pfade, sonst gilt die
+ * ganze Library. Schon verarbeitete, unveränderte Dateien werden übersprungen, außer
+ * mit @force_reprocess.
  *
  * Returns: TRUE bei Erfolg
  */

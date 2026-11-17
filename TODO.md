@@ -69,10 +69,9 @@ Status: offen (nach den Tests des Index-Jobs)
     ("/sub/a.pdf" neben "sub/a.pdf") und sollten bei Gelegenheit bereinigt werden.
  2. Abbruch greift erst nach der laufenden Datei (kein Abbruch mitten in einer großen
     PDF mit OCR).
- 3. Der OCR-Knopf im Akten-Fenster (ganze Bibliothek) läuft noch ohne Lease-Übergabe.
- 4. Abgelaufene Job-Lease: wird nur beim nächsten Öffnen der Akte (zond starten)
+ 3. Abgelaufene Job-Lease: wird nur beim nächsten Öffnen der Akte (zond starten)
     zurückgeholt; ein anderer Nutzer kann sie aufräumen, bekommt sie dann frei.
- 5. Zond schreibt den Index weiterhin selbst; mit der Lease-Disziplin gibt es nur einen
+ 4. Zond schreibt den Index weiterhin selbst; mit der Lease-Disziplin gibt es nur einen
     Schreiber zur Zeit (Shard-Variante verworfen).
 ```
 
@@ -289,8 +288,10 @@ Status: zurückgestellt
     (Pfad bis zum Treffer aufklappen).
  2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel beim Öffnen, Kopieren,
     Verschieben; PDF-Seiten, Anhänge, Sections.
- 3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): zusammen mit dem
-    Passwort-Konzept (Zustände, Cache, Abfrage, Indizieren = Entsperren) bauen.
+ 3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
+    GTK-frei (tvfm/sond_tvfm_unlock.c) und im Client eingebunden (Menü im Dokumentenfenster,
+    Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).
+    Als Menüpunkt im GTK4-Baum selbst (für Zond-GTK4) und für Einträge in Containern fehlt es.
  4. Eingangs-Spalte (nur Zond: Zettel, Cache; Vfunc get_eingang ist in GTK3 da).
  5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen
     (GTK3: sond_seadrive_load_file_sync); Vorab-Prüfung beim Einfügen (Platzhalter

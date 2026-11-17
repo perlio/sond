@@ -133,6 +133,10 @@ void sond_treeviewfm_pin_selection(SondTreeviewFM*, guint pin_state);
  * SeaDrive-Laufwerk, Scan noch nicht fertig). */
 gboolean sond_treeviewfm_get_pin_summary(SondTreeviewFM*, guint *total, guint *pinned);
 
+/* Der Eintrag einer Datei des Dateisystems hat sich geändert (z.B. Passwortschutz entfernt):
+ * die sichtbare Zeile durch einen neuen Eintrag aus sfp ersetzen. */
+void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart *sfp);
+
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
 

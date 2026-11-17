@@ -159,6 +159,66 @@ void fm_root_monitor_start(SondTreeviewFM *self) {
 	g_signal_connect(priv->root_monitor, "changed", G_CALLBACK(root_monitor_changed), self);
 }
 
+static gboolean match_fs_rel(gpointer item, gpointer user_data) {
+	gchar *rel = NULL;
+	gboolean match = FALSE;
+
+	if (sond_tvfm_item_fs_path(SOND_TVFM_ITEM(item), &rel, NULL))
+		match = !g_strcmp0(rel, (gchar const*) user_data);
+	g_free(rel);
+
+	return match;
+}
+
+//Ersetzt die Zeile des Eintrags bei rel durch new_item; die Zeile muss sichtbar sein
+static void replace_row_item(SondTreeviewFM *self, SondTVFMItem *old_item,
+		SondTVFMItem *new_item, gchar const *rel) {
+	SondTreeview *base = SOND_TREEVIEW(self);
+	GtkTreeListRow *row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel,
+			NULL);
+	SondLazyChildren *lazy = NULL;
+
+	if (!row)
+		return;
+
+	lazy = fm_lazy_from_model(sond_treeview_row_get_container(base, row));
+	if (lazy)
+		fm_lazy_replace(lazy, old_item, new_item);
+	g_object_unref(row);
+}
+
+/* Der Eintrag einer Datei des Dateisystems hat sich geändert (z.B. Passwortschutz entfernt,
+ * jetzt mit bekanntem Typ und Anhängen): die sichtbare Zeile durch einen neuen Eintrag aus
+ * sfp ersetzen. Unsichtbare Zeilen werden beim Aufklappen richtig geladen. */
+void sond_treeviewfm_refresh_file_part(SondTreeviewFM *self, SondFilePart *sfp) {
+	SondTreeview *base = NULL;
+	gchar const *rel = NULL;
+	GtkTreeListRow *row = NULL;
+	SondTVFMItem *old_item = NULL;
+	SondTVFMItem *new_item = NULL;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	base = SOND_TREEVIEW(self);
+
+	rel = sond_file_part_get_path(sfp);
+	if (!rel || sond_file_part_get_parent(sfp))
+		return; //nur Dateien im Dateisystem
+
+	row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel, NULL);
+	if (!row)
+		return;
+
+	old_item = gtk_tree_list_row_get_item(row);
+	g_object_unref(row);
+	if (!old_item)
+		return;
+
+	new_item = sond_tvfm_item_create(self, sfp, NULL);
+	replace_row_item(self, old_item, new_item, rel);
+	g_object_unref(new_item);
+	g_object_unref(old_item);
+}
+
 #ifdef G_OS_WIN32
 /* --- Anbindung des Watchers (sond_seadrive_watcher.c) --- */
 
@@ -192,17 +252,6 @@ static void watcher_status_cb(SondSeadriveWatcher *w, guint pending_down,
 			pending_down, pending_up);
 }
 
-static gboolean match_fs_rel(gpointer item, gpointer user_data) {
-	gchar *rel = NULL;
-	gboolean match = FALSE;
-
-	if (sond_tvfm_item_fs_path(SOND_TVFM_ITEM(item), &rel, NULL))
-		match = !g_strcmp0(rel, (gchar const*) user_data);
-	g_free(rel);
-
-	return match;
-}
-
 //Pfad relativ zur Wurzel (Zeiger in full_path) oder NULL
 static gchar const* rel_path_of(SondTreeviewFMPrivate *priv, gchar const *full_path) {
 	gsize len = priv->root ? strlen(priv->root) : 0;
@@ -212,23 +261,6 @@ static gchar const* rel_path_of(SondTreeviewFMPrivate *priv, gchar const *full_p
 		return NULL;
 
 	return full_path + len + 1;
-}
-
-//Ersetzt die Zeile des Eintrags bei rel durch new_item; die Zeile muss sichtbar sein
-static void replace_row_item(SondTreeviewFM *self, SondTVFMItem *old_item,
-		SondTVFMItem *new_item, gchar const *rel) {
-	SondTreeview *base = SOND_TREEVIEW(self);
-	GtkTreeListRow *row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel,
-			NULL);
-	SondLazyChildren *lazy = NULL;
-
-	if (!row)
-		return;
-
-	lazy = fm_lazy_from_model(sond_treeview_row_get_container(base, row));
-	if (lazy)
-		fm_lazy_replace(lazy, old_item, new_item);
-	g_object_unref(row);
 }
 
 /* Eine Datei wurde geladen: war sie beim Einlesen ein einfaches Blatt (offline, nicht
