@@ -448,6 +448,8 @@ zond_update_get_vtag(Projekt *zond, GError **error) {
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "perlio");
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 	curl_easy_setopt(curl, CURLOPT_URL,
 			"https://api.github.com/repos/perlio/sond/releases/latest");
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
@@ -460,6 +462,13 @@ zond_update_get_vtag(Projekt *zond, GError **error) {
 				"%s\ncurl_easy_perform:\n%s", __func__,
 				curl_easy_strerror(res));
 		free(mem.response);
+
+		return NULL;
+	}
+
+	if (!mem.response) {
+		*error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,
+				"%s\nLeere Antwort", __func__);
 
 		return NULL;
 	}
@@ -502,12 +511,40 @@ zond_update_get_vtag(Projekt *zond, GError **error) {
 	return vtag;
 }
 
-gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
+/* TRUE, wenn vtag ("vX.Y.Z") neuer ist als die laufende Version */
+static gboolean zond_update_vtag_newer(const gchar *vtag) {
+	gboolean newer = FALSE;
 	gchar **strv_tags = NULL;
-	gchar *title = NULL;
+	gint aktuell[3] = { ZOND_VERSION_MAJOR, ZOND_VERSION_MINOR,
+			ZOND_VERSION_PATCH };
+
+	if (!vtag || vtag[0] != 'v')
+		return FALSE;
+
+	strv_tags = g_strsplit(vtag + 1, ".", -1);
+	if (g_strv_length(strv_tags) >= 3) {
+		for (gint i = 0; i < 3; i++) {
+			gint teil = atoi(strv_tags[i]);
+
+			if (teil > aktuell[i]) {
+				newer = TRUE;
+				break;
+			} else if (teil < aktuell[i])
+				break;
+		}
+	}
+	g_strfreev(strv_tags);
+
+	return newer;
+}
+
+/* Laedt Version vtag herunter, entpackt sie und startet den Installer.
+ Uebernimmt vtag (wird freigegeben).
+ Rueckgabe: -1 Fehler, 0 abgebrochen oder Installer gestartet */
+static gint zond_update_install(Projekt *zond, InfoWindow *info_window,
+		gchar *vtag, GError **error) {
 	gint rc = 0;
 	gchar *argv[5] = { NULL };
-	gchar *vtag = NULL;
 	gboolean ret = FALSE;
 	gboolean res = FALSE;
 	gchar *zipname = NULL;
@@ -518,58 +555,11 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	if (!exe_dir) {
 		*error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
 				"%s\nKonnte eigenes Verzeichnis nicht ermitteln", __func__);
+		g_free(vtag);
 		return -1;
 	}
 	base_dir = g_path_get_dirname(exe_dir); // eine Ebene hoch
 	free(exe_dir);
-
-	vtag = zond_update_get_vtag(zond, error);
-	if (!vtag) {
-		g_prefix_error(error, "%s\n", __func__);
-		g_free(base_dir);
-
-		return -1;
-	}
-
-	//tag mit aktueller version vergleichen
-	strv_tags = g_strsplit(vtag + 1, ".", -1);
-
-	if (atoi(strv_tags[0]) < ZOND_VERSION_MAJOR)
-		goto no_update;
-	else if (atoi(strv_tags[0]) > ZOND_VERSION_MAJOR)
-		goto update;
-	else {
-		if (atoi(strv_tags[1]) < ZOND_VERSION_MINOR)
-			goto no_update;
-		else if (atoi(strv_tags[1]) > ZOND_VERSION_MINOR)
-			goto update;
-		else {
-			if (atoi(strv_tags[2]) <= ZOND_VERSION_PATCH)
-				goto no_update;
-			else if (atoi(strv_tags[2]) > ZOND_VERSION_PATCH)
-				goto update;
-		}
-	}
-
-	no_update: g_strfreev(strv_tags);
-	g_free(vtag);
-	g_free(base_dir);
-
-	return 1;
-
-	update: g_strfreev(strv_tags);
-
-	title = g_strconcat("Aktuellere Version vorhanden (", vtag, ")", NULL);
-
-	rc = abfrage_frage(zond->win.app_window, title,
-			"Herunterladen und installieren?",
-			NULL);
-	g_free(title);
-	if (rc != GTK_RESPONSE_YES) {
-		g_free(vtag);
-		g_free(base_dir);
-		return 0;
-	}
 
 	info_window_set_message(info_window,
 			"Neueste Version wird heruntergeladen");
@@ -686,3 +676,99 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	return 0;
 }
 
+
+gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
+	gchar *vtag = NULL;
+	gchar *title = NULL;
+	gint rc = 0;
+
+	vtag = zond_update_get_vtag(zond, error);
+	if (!vtag) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	if (!zond_update_vtag_newer(vtag)) {
+		g_free(vtag);
+
+		return 1;
+	}
+
+	title = g_strconcat("Aktuellere Version vorhanden (", vtag, ")", NULL);
+	rc = abfrage_frage(zond->win.app_window, title,
+			"Herunterladen und installieren?",
+			NULL);
+	g_free(title);
+	if (rc != GTK_RESPONSE_YES) {
+		g_free(vtag);
+		return 0;
+	}
+
+	return zond_update_install(zond, info_window, vtag, error);
+}
+
+/* Update-Pruefung beim Start: Abfrage im Hintergrund, Dialog nur bei
+ neuerer Version; ohne Verbindung oder bei Fehlern still */
+typedef struct _UpdateStart {
+	Projekt *zond;
+	gchar *vtag; // nur gesetzt, wenn neuere Version vorhanden
+} UpdateStart;
+
+static gboolean zond_update_start_idle(gpointer data) {
+	UpdateStart *us = data;
+
+	if (us->vtag) {
+		gchar *title = g_strconcat("Aktuellere Version vorhanden (", us->vtag,
+				")", NULL);
+		gint rc = abfrage_frage(us->zond->win.app_window, title,
+				"Herunterladen und installieren?", NULL);
+		g_free(title);
+
+		if (rc == GTK_RESPONSE_YES) {
+			GError *error = NULL;
+			gint cancel = 0;
+			InfoWindow *info_window = info_window_open(
+					us->zond->win.app_window, &cancel, "Zond Updater");
+
+			rc = zond_update_install(us->zond, info_window, us->vtag, &error);
+			us->vtag = NULL; // freigegeben durch zond_update_install
+			info_window_kill(info_window);
+			if (rc == -1) {
+				display_message(us->zond->win.app_window,
+						"Update fehlgeschlagen\n\n", error->message, NULL);
+				g_error_free(error);
+			}
+		}
+	}
+
+	g_free(us->vtag);
+	g_free(us);
+
+	return G_SOURCE_REMOVE;
+}
+
+static gpointer zond_update_start_thread(gpointer data) {
+	UpdateStart *us = data;
+	GError *error = NULL;
+
+	us->vtag = zond_update_get_vtag(us->zond, &error);
+	g_clear_error(&error);
+	if (us->vtag && !zond_update_vtag_newer(us->vtag)) {
+		g_free(us->vtag);
+		us->vtag = NULL;
+	}
+
+	g_idle_add(zond_update_start_idle, us);
+
+	return NULL;
+}
+
+void zond_update_check_on_start(Projekt *zond) {
+	UpdateStart *us = g_new0(UpdateStart, 1);
+
+	us->zond = zond;
+	curl_global_init(CURL_GLOBAL_DEFAULT); // vor dem Thread, nicht threadsicher
+	g_thread_unref(g_thread_new("zond-update-check", zond_update_start_thread,
+			us));
+}

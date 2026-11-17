@@ -48,6 +48,7 @@
 
 #include "10init/icons.h"
 #include "10init/app_window.h"
+#include "20allgemein/zond_update.h"
 
 /* Rückgabe TRUE: Merker project/speichern in den Settings müssen erhalten
  * bleiben (Abbruch oder Fehler), damit die Wiederherstellung nicht verloren
@@ -306,6 +307,8 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
 	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
 			g_ptr_array_new( );
+
+	zond_update_check_on_start(zond);
 
 	return;
 }
