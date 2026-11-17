@@ -76,6 +76,14 @@ done < /tmp/dll_list.txt
 
 echo "  → Fertig"
 
+# GLib-Spawn-Helper (g_spawn_async unter Windows, z.B. Auto-Update-Installer)
+if [ -f "/ucrt64/bin/gspawn-win64-helper.exe" ]; then
+    cp /ucrt64/bin/gspawn-win64-helper.exe "$RELEASE_DIR/bin/"
+    echo "  + gspawn-win64-helper.exe"
+else
+    echo "  ! gspawn-win64-helper.exe nicht gefunden (Auto-Update braucht ihn)"
+fi
+
 # 3. DBus (behebt GLib-GIO-WARNING)
 echo "[3/9] Kopiere DBus..."
 if [ -f "/ucrt64/bin/dbus-daemon.exe" ]; then
