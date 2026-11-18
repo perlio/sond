@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
 		if (g_file_test(bat, G_FILE_TEST_EXISTS)) {
 			GError *error_bat = NULL;
 			gchar *cmd_exe = g_build_filename(g_getenv("SYSTEMROOT") ? g_getenv("SYSTEMROOT") : "C:\\Windows", "System32", "cmd.exe", NULL);
-			gchar *spawn_argv[4] = { cmd_exe, "/c", bat, NULL };
+			gchar *spawn_argv[5] = { cmd_exe, "/c", bat, "--quiet", NULL };
 
 			g_spawn_async(NULL, spawn_argv, NULL, G_SPAWN_DEFAULT,
 					NULL, NULL, NULL, &error_bat);

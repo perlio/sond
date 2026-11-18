@@ -503,7 +503,7 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	g_autofree gchar* path = NULL;
 	gchar *path_tmp = NULL;
 
-	path = g_strdup_printf("%s/%s", zond->proj.project_dir, zond->proj.project_name);
+	path = g_build_filename(zond->proj.project_dir, zond->proj.project_name, NULL);
 
 	/* Bewußt NICHT mehr neben der Projektdatei (die auf einem Cloud-Sync-
 	 * Laufwerk liegen kann) - s. Kommentar bei project_get_local_tmp_path(). */
@@ -794,8 +794,8 @@ gint project_close(Projekt *zond, GError **error) {
 	 * project_get_local_tmp_path(). Derselbe volle Projektpfad wie in
 	 * project_create_dbase_zond() liefert deterministisch denselben
 	 * lokalen Pfad zurück. */
-	gchar *project_path_full = g_strdup_printf("%s/%s", zond->proj.project_dir,
-			zond->proj.project_name);
+	gchar *project_path_full = g_build_filename(zond->proj.project_dir,
+			zond->proj.project_name, NULL);
 	gchar *working_copy = project_get_local_tmp_path(project_path_full,
 			&error_remove);
 	g_free(project_path_full);
@@ -939,7 +939,16 @@ gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
 	gchar *filename = NULL;
 	gchar *path_tmp = NULL;
 
-	hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, project_path, -1);
+	/* Pfad vereinheitlichen (Trenner, Groß-/Kleinschreibung unter Windows),
+	 * damit jeder Aufrufweg für dieselbe Datei denselben Hash liefert. */
+	g_autofree gchar *canon = g_canonicalize_filename(project_path, NULL);
+#ifdef G_OS_WIN32
+	g_autofree gchar *norm = g_utf8_casefold(canon, -1);
+#else
+	gchar *norm = canon;
+#endif
+
+	hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, norm, -1);
 
 	dir = g_build_filename(g_get_user_data_dir(), "zond", NULL);
 	if (!sond_mkdir_with_parents(dir, error)) {

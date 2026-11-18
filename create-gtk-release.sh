@@ -292,7 +292,7 @@ echo 'set "GSETTINGS_SCHEMA_DIR=%APP_DIR%\share\glib-2.0\schemas"' >> "$RELEASE_
 echo 'set "XDG_DATA_DIRS=%APP_DIR%\share"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "MAGIC=%APP_DIR%\share\misc\magic.mgc"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "PATH=%APP_DIR%\bin;%PATH%"' >> "$RELEASE_DIR/${APP_NAME}.bat"
-echo 'REM Unterdrücke DBus-Warnung wenn DBus nicht verwendet wird' >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo 'REM Unterdrueckt DBus-Warnung wenn DBus nicht verwendet wird' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "DBUS_SESSION_BUS_ADDRESS=disabled:"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo '"%APP_DIR%\bin\'"${APP_NAME}"'.exe" %*' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo "endlocal" >> "$RELEASE_DIR/${APP_NAME}.bat"
@@ -304,7 +304,7 @@ setlocal
 set "APP_DIR=%~dp0"
 set "APP_DIR=%APP_DIR:~0,-1%"
 
-REM === zond.exe → .znd ===
+REM === zond.exe -> .znd ===
 reg add "HKCU\Software\Classes\.znd" /ve /d "Zond.znd" /f
 reg add "HKCU\Software\Classes\Zond.znd" /ve /d "Zond-Dokument" /f
 reg add "HKCU\Software\Classes\Zond.znd\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
@@ -314,20 +314,35 @@ REM Sie muessen daher bei jedem Versionswechsel auf den neuen Ordner zeigen.
 reg add "HKCU\Software\Classes\Applications\zond.exe\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
 reg add "HKCU\Software\Classes\ZND_auto_file\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
 
-REM === viewer.exe → .pdf ===
+REM === viewer.exe -> .pdf ===
 REM Die Programmklassen werden immer angelegt (waehlbar ueber "Oeffnen mit"),
 REM die Standardzuordnung fuer .pdf nur auf Nachfrage.
 reg add "HKCU\Software\Classes\ZondViewer.pdf" /ve /d "PDF-Dokument (Viewer)" /f
 reg add "HKCU\Software\Classes\ZondViewer.pdf\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
 reg add "HKCU\Software\Classes\Applications\viewer.exe\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
 
-choice /c JN /m "viewer.exe als Standardprogramm fuer .pdf registrieren"
-REM errorlevel 1 = J (ohne goto: Sprungmarken sind in Dateien mit LF unzuverlaessig)
-if errorlevel 1 if not errorlevel 2 reg add "HKCU\Software\Classes\.pdf" /ve /d "ZondViewer.pdf" /f
+REM Beim automatischen Update (zond_installer) keine Rueckfrage.
+if /i "%~1"=="--quiet" goto done
 
+choice /c JN /m "viewer.exe als Standardprogramm fuer .pdf registrieren"
+REM errorlevel 1 = J
+if errorlevel 1 if not errorlevel 2 reg add "HKCU\Software\Classes\.pdf" /ve /d "ZondViewer.pdf" /f
+echo Hinweis: Hat Windows fuer .pdf bereits ein Programm fest zugeordnet, bleibt
+echo diese Auswahl bestehen. viewer.exe erscheint dann unter "Oeffnen mit".
+
+:done
 echo Dateiverknuepfungen wurden registriert.
 endlocal
 EOF
+
+# cmd.exe braucht CRLF und 7-Bit-ASCII (LF/UTF-8 verschiebt den Parser)
+for f in "$RELEASE_DIR/install-assoc.bat" "$RELEASE_DIR/${APP_NAME}.bat"; do
+    sed -i 's/\r$//; s/$/\r/' "$f"
+    if LC_ALL=C grep -q -P '[^\x00-\x7F]' "$f"; then
+        echo "  ! $f enthaelt Nicht-ASCII-Zeichen"
+        exit 1
+    fi
+done
 echo "  + install-assoc.bat"
 
 cat > "$RELEASE_DIR/README.txt" << EOF
