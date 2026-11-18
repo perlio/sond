@@ -36,6 +36,7 @@
 #include "../sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus, SondIndexStatus */
 #include "../tvfm/sond_tvfm_item.h"
 #include "../tvfm/sond_tvfm_search.h"
+#include "../tvfm/sond_tvfm_unlock.h"
 
 G_BEGIN_DECLS
 
@@ -94,6 +95,10 @@ struct _SondTreeviewFMClass {
 	/* Soll das Löschen vorher bestätigt werden? (Standard: ja) */
 	gboolean confirm_delete;
 
+	/* Ist die Datei gerade geöffnet (Viewer) und darf nicht verändert werden, z.B. beim
+	 * Entsperren? NULL = nie. */
+	gboolean (*file_part_busy)(SondFilePart*);
+
 	/* Abschnitte (Anbindungen) von Einträgen; NULL = unterstützt der Baum nicht */
 	gboolean (*has_sections)(SondTVFMItem*);
 	gint (*load_sections)(SondTVFMItem*, GPtrArray**, GError**);
@@ -144,6 +149,24 @@ void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart *sfp);
 
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
+
+/* Prüft vor Aktionen, die Dateien verändern (derzeit: Entsperren), ob das erlaubt ist (z.B. ob
+ * die Schreibberechtigung für die Akte vorliegt, s. sond_akte_lease). FALSE mit error: die Aktion
+ * unterbleibt, die Meldung wird angezeigt. Ohne Funktion ist alles erlaubt. */
+typedef gboolean (*SondTreeviewFMWriteCheckFunc)(gpointer user_data, GError **error);
+
+void sond_treeviewfm_set_write_check(SondTreeviewFM*, SondTreeviewFMWriteCheckFunc func,
+		gpointer user_data);
+
+/* Entfernt den Passwortschutz der markierten ZIP-Einträge und PDFs dauerhaft (Menüpunkt
+ * "Dauerhaft entsperren"): Bestätigung, Passwortabfragen, Ergebnismeldung. Die Dateien werden
+ * dabei verändert. */
+void sond_treeviewfm_unlock_selection(SondTreeviewFM*);
+
+/* Rückrufe für sond_tvfm_unlock_*(), mit denen das Widget SeaDrive-Dateien lädt, Zeilen auffrischt,
+ * Meldungen anzeigt und geöffnete Dateien erkennt. Für Aufrufer, die Teile selbst entsperren
+ * (z.B. nach einem Index-Lauf). Gültig, solange das Widget lebt. */
+void sond_treeviewfm_unlock_hooks_init(SondTreeviewFM*, SondUnlockHooks *hooks);
 
 /* Klappt den Baum bis zu einem Eintrag auf und wählt ihn aus. filepart wie von
  * sond_tvfm_item_get_filepart() (Dateisystempfad, bei Teilen in Containern mit "//"

@@ -1219,124 +1219,17 @@ static void on_after(SondTreeviewFM *tree, gboolean erfolg, gpointer ctx, gpoint
 /*  Dauerhaft entsperren                                               */
 /* ------------------------------------------------------------------ */
 
-static void unlock_report(gchar const *meldung_text, gpointer data) {
-    DokData *d = data;
-
-    meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", meldung_text);
-}
-
-static void unlock_refresh(SondFilePart *sfp, gpointer data) {
-    DokData *d = data;
-
-    if (d->tree)
-        sond_treeviewfm_refresh_file_part(SOND_TREEVIEWFM(d->tree), sfp);
-}
-
+/* Menüpunkt, Bestätigung und Meldungen liegen im Widget (sond_treeviewfm_unlock_selection());
+ * hier nur die Rückrufe für den Nachlauf nach einem Index-Lauf und die Prüfung der
+ * Schreibberechtigung: die Dateien werden dabei verändert. */
 static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d) {
     memset(hooks, 0, sizeof(SondUnlockHooks));
-    hooks->refresh = unlock_refresh;
-    hooks->report = unlock_report;
-    hooks->data = d;
+    if (d->tree)
+        sond_treeviewfm_unlock_hooks_init(SOND_TREEVIEWFM(d->tree), hooks);
 }
 
-typedef struct {
-    DokData *d;
-    SondUnlockJobs jobs;
-} UnlockCtx;
-
-static void unlock_ctx_free(UnlockCtx *ctx) {
-    sond_tvfm_unlock_jobs_clear(&ctx->jobs);
-    g_free(ctx);
-}
-
-static void on_unlock_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpointer user_data) {
-    UnlockCtx *ctx = user_data;
-    DokData *d = ctx->d;
-    GError *error = NULL;
-    gint knopf = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(quelle), ergebnis, &error);
-
-    g_clear_error(&error);
-    if (knopf == 0 && d->window) {
-        SondUnlockHooks hooks;
-        SondUnlockResult res;
-        GString *text = g_string_new(NULL);
-
-        unlock_hooks_init(&hooks, d);
-        sond_tvfm_unlock_run(&ctx->jobs, &hooks, &res);
-
-        g_string_append_printf(text, "%u Datei(en) entsperrt", res.done);
-        if (res.skipped)
-            g_string_append_printf(text, ", %u übersprungen", res.skipped);
-        if (res.aborted)
-            g_string_append(text, "\n\nAbgebrochen.");
-        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", text->str);
-        g_string_free(text, TRUE);
-        sond_tvfm_unlock_result_clear(&res);
-
-        if (d->tree)
-            sond_treeviewfm_refresh_status(SOND_TREEVIEWFM(d->tree));
-    }
-
-    unlock_ctx_free(ctx);
-}
-
-/* Entfernt den Passwortschutz der markierten ZIP-Einträge und PDFs. Die Dateien werden dabei
- * verändert, dafür ist die Schreibberechtigung der Akte nötig. */
-static void on_entsperren_aktion(GSimpleAction *aktion, GVariant *parameter, gpointer user_data) {
-    DokData *d = user_data;
-    GError *error = NULL;
-    GPtrArray *items = NULL;
-    UnlockCtx *ctx = NULL;
-    SondUnlockHooks hooks;
-    guint n_total = 0;
-    gchar *busy_text = NULL;
-    SondUnlockPrepare bereit = SOND_UNLOCK_NOTHING;
-
-    (void) aktion;
-    (void) parameter;
-
-    if (!schreibberechtigung_holen(d, &error)) {
-        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", error->message);
-        g_clear_error(&error);
-
-        return;
-    }
-
-    ctx = g_new0(UnlockCtx, 1);
-    ctx->d = d;
-    sond_tvfm_unlock_jobs_init(&ctx->jobs);
-
-    items = sond_treeview_get_selected_items(SOND_TREEVIEW(d->tree));
-    for (guint i = 0; i < items->len; i++)
-        sond_tvfm_unlock_collect_item(&ctx->jobs, g_ptr_array_index(items, i));
-    g_ptr_array_unref(items);
-
-    unlock_hooks_init(&hooks, d);
-    bereit = sond_tvfm_unlock_prepare(&ctx->jobs, &hooks, &n_total, &busy_text);
-
-    if (bereit == SOND_UNLOCK_READY) {
-        GtkAlertDialog *frage = gtk_alert_dialog_new(
-                "Der Passwortschutz von %u Datei(en) wird dauerhaft entfernt.", n_total);
-        const char *knoepfe[] = { "Fortfahren", "Abbrechen", NULL };
-
-        gtk_alert_dialog_set_detail(frage, "Die Dateien werden dabei verändert, eine "
-                "Sicherung gibt es nicht.");
-        gtk_alert_dialog_set_buttons(frage, knoepfe);
-        gtk_alert_dialog_set_default_button(frage, 1);
-        gtk_alert_dialog_set_cancel_button(frage, 1);
-        gtk_alert_dialog_set_modal(frage, TRUE);
-        gtk_alert_dialog_choose(frage, GTK_WINDOW(d->window), NULL, on_unlock_bestaetigt, ctx);
-        g_object_unref(frage);
-
-        return; //ctx gehört nun dem Dialog
-    }
-
-    meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren",
-            bereit == SOND_UNLOCK_NOTHING ? "Die Auswahl enthält keine passwortgeschützten "
-                    "Dateien." : bereit == SOND_UNLOCK_BUSY ? busy_text :
-                    "Die Datei wird noch geladen. Bitte danach erneut versuchen.");
-    g_free(busy_text);
-    unlock_ctx_free(ctx);
+static gboolean unlock_write_check(gpointer data, GError **error) {
+    return schreibberechtigung_holen((DokData*) data, error);
 }
 
 void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
@@ -1474,8 +1367,7 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     //Kontextmenü: Auswahl zum Indizieren senden
     {
         static const GActionEntry aktionen[] = {
-            { "index-senden", on_index_aktion, NULL, NULL, NULL },
-            { "entsperren", on_entsperren_aktion, NULL, NULL, NULL }
+            { "index-senden", on_index_aktion, NULL, NULL, NULL }
         };
         SondTreeview *basis = SOND_TREEVIEW(d->tree);
 
@@ -1483,9 +1375,10 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
                 G_N_ELEMENTS(aktionen), d);
         g_menu_append(sond_treeview_get_menu(basis),
                 "Zum Indizieren an den Server senden ...", "tv.index-senden");
-        g_menu_append(sond_treeview_get_menu(basis), "Dauerhaft entsperren ...",
-                "tv.entsperren");
     }
+
+    //Entsperren (Menüpunkt im Widget) verändert Dateien: Schreibberechtigung der Akte
+    sond_treeviewfm_set_write_check(SOND_TREEVIEWFM(d->tree), unlock_write_check, d);
 
     //Index-Symbole: Index-DB lesen und bei Änderungen neu öffnen
     d->index_pfad = g_build_filename(d->lib_dir, ".sond_index.db", NULL);

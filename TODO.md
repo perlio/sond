@@ -337,7 +337,9 @@ Status: zurückgestellt
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
     GTK-frei (tvfm/sond_tvfm_unlock.c) und im Client eingebunden (Menü im Dokumentenfenster,
     Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).
-    Als Menüpunkt im GTK4-Baum selbst (für Zond-GTK4) und für Einträge in Containern fehlt es.
+    Menüpunkt im GTK4-Baum selbst (gtk4/sond_treeviewfm_unlock.c, auch für Einträge in
+    Containern; Schreibprüfung über sond_treeviewfm_set_write_check, Vfunc file_part_busy)
+    gebaut, ungetestet; das Dokumentenfenster nutzt ihn statt eines eigenen Menüpunkts.
  4. Eingangs-Spalte (nur Zond: Zettel, Cache; Vfunc get_eingang ist in GTK3 da).
  5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen und
     Vorab-Laden beim Kopieren: gebaut (gtk4/sond_seadrive_load_dialog.c auf dem GTK-freien

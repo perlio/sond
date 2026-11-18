@@ -203,24 +203,35 @@ void fm_replace_item(SondTreeviewFM *self, SondTVFMItem *old_item, SondTVFMItem 
 	g_object_unref(row);
 }
 
-/* Der Eintrag einer Datei des Dateisystems hat sich geändert (z.B. Passwortschutz entfernt,
- * jetzt mit bekanntem Typ und Anhängen): die sichtbare Zeile durch einen neuen Eintrag aus
- * sfp ersetzen. Unsichtbare Zeilen werden beim Aufklappen richtig geladen. */
+static gboolean match_filepart(gpointer item, gpointer user_data) {
+	gchar *filepart = sond_tvfm_item_get_filepart(SOND_TVFM_ITEM(item));
+	gboolean match = !g_strcmp0(filepart, (gchar const*) user_data);
+
+	g_free(filepart);
+
+	return match;
+}
+
+/* Der Eintrag einer Datei (im Dateisystem oder in einem Container) hat sich geändert (z.B.
+ * Passwortschutz entfernt, jetzt mit bekanntem Typ und Anhängen): die sichtbare Zeile durch einen
+ * neuen Eintrag aus sfp ersetzen. Unsichtbare Zeilen werden beim Aufklappen richtig geladen. */
 void sond_treeviewfm_refresh_file_part(SondTreeviewFM *self, SondFilePart *sfp) {
 	SondTreeview *base = NULL;
-	gchar const *rel = NULL;
+	gchar *filepart = NULL;
 	GtkTreeListRow *row = NULL;
 	SondTVFMItem *old_item = NULL;
 	SondTVFMItem *new_item = NULL;
 
 	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	g_return_if_fail(sfp);
 	base = SOND_TREEVIEW(self);
 
-	rel = sond_file_part_get_path(sfp);
-	if (!rel || sond_file_part_get_parent(sfp))
-		return; //nur Dateien im Dateisystem
+	filepart = sond_file_part_get_filepart(sfp);
+	if (!filepart)
+		return;
 
-	row = sond_treeview_find_row(base, match_fs_rel, (gpointer) rel, NULL);
+	row = sond_treeview_find_row(base, match_filepart, filepart, NULL);
+	g_free(filepart);
 	if (!row)
 		return;
 
@@ -230,7 +241,7 @@ void sond_treeviewfm_refresh_file_part(SondTreeviewFM *self, SondFilePart *sfp) 
 		return;
 
 	new_item = sond_tvfm_item_create(self, sfp, NULL);
-	replace_row_item(self, old_item, new_item, rel);
+	fm_replace_item(self, old_item, new_item);
 	g_object_unref(new_item);
 	g_object_unref(old_item);
 }

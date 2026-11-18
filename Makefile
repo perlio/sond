@@ -89,7 +89,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_akte_name.c \
 	$(SRC_DIRS)/sond_zond_ctl.c \
 	$(SRC_DIRS)/seadrive/sond_seadrive_core.c $(SRC_DIRS)/seadrive/sond_seadrive_watcher.c \
-	$(SRC_DIRS)/gtk4/sond_treeview.c $(SRC_DIRS)/gtk4/sond_treeviewfm.c $(SRC_DIRS)/gtk4/sond_treeviewfm_lazy.c $(SRC_DIRS)/gtk4/sond_treeviewfm_cells.c $(SRC_DIRS)/gtk4/sond_treeviewfm_watch.c $(SRC_DIRS)/gtk4/sond_treeviewfm_edit.c $(SRC_DIRS)/gtk4/sond_treeviewfm_search.c $(SRC_DIRS)/gtk4/sond_busy_dialog.c $(SRC_DIRS)/gtk4/sond_seadrive_load_dialog.c $(SRC_DIRS)/gtk4/sond_treeviewfm_transfer.c \
+	$(SRC_DIRS)/gtk4/sond_treeview.c $(SRC_DIRS)/gtk4/sond_treeviewfm.c $(SRC_DIRS)/gtk4/sond_treeviewfm_lazy.c $(SRC_DIRS)/gtk4/sond_treeviewfm_cells.c $(SRC_DIRS)/gtk4/sond_treeviewfm_watch.c $(SRC_DIRS)/gtk4/sond_treeviewfm_edit.c $(SRC_DIRS)/gtk4/sond_treeviewfm_search.c $(SRC_DIRS)/gtk4/sond_treeviewfm_unlock.c $(SRC_DIRS)/gtk4/sond_busy_dialog.c $(SRC_DIRS)/gtk4/sond_seadrive_load_dialog.c $(SRC_DIRS)/gtk4/sond_treeviewfm_transfer.c \
 	$(SRC_DIRS)/sond_icon_util.c $(SRC_DIRS)/icons.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c $(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_open.c \

@@ -537,6 +537,7 @@ static void default_setup_menu(SondTreeviewFM *self) {
 		{ "unpin", action_unpin, NULL, NULL, NULL },
 		{ "free", action_free, NULL, NULL, NULL },
 		{ "dateisuche", fm_action_search, NULL, NULL, NULL },
+		{ "unlock", fm_action_unlock, NULL, NULL, NULL },
 		{ "refresh", action_refresh, NULL, NULL, NULL }
 	};
 
@@ -584,6 +585,7 @@ static void default_setup_menu(SondTreeviewFM *self) {
 	gtk_widget_add_controller(GTK_WIDGET(self), shortcuts);
 
 	g_menu_append(search_sec, "Dateisuche …", "tv.dateisuche");
+	g_menu_append(search_sec, "Dauerhaft entsperren …", "tv.unlock");
 	g_menu_append_section(menu, NULL, G_MENU_MODEL(search_sec));
 	g_object_unref(search_sec);
 
@@ -639,6 +641,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->fs_entry_moved = NULL;
 	klass->open_item = fm_default_open_item;
 	klass->confirm_delete = TRUE;
+	klass->file_part_busy = NULL;
 	fm_search_register_signals(G_OBJECT_CLASS(klass));
 
 	//der Pin-Zustand einiger Einträge hat sich geändert: Anzeige neu lesen
