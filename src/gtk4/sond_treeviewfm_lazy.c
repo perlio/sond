@@ -35,6 +35,8 @@
 #include "../sond_icon_util.h"
 #include "../tvfm/sond_tvfm_status.h"
 #include "../sond_mime.h"
+#include "sond_seadrive_load_dialog.h"
+#include "../tvfm/sond_tvfm_load.h"
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
@@ -47,12 +49,103 @@
  * ist, und wirft das Ergebnis dann weg. Die Kinder dürfen deshalb erst gelesen
  * werden, wenn jemand sie wirklich braucht (Aufklappen): diese Liste lädt beim
  * ersten Zugriff auf ihre Einträge. */
+#ifdef G_OS_WIN32
+typedef struct {
+	SondLazyChildren *lazy;
+	GWeakRef tree;
+} LoadPending;
+
+static void load_pending_free(gpointer data) {
+	LoadPending *pending = (LoadPending*) data;
+
+	g_weak_ref_clear(&pending->tree);
+	g_object_unref(pending->lazy);
+	g_free(pending);
+}
+
+/* Der Container (ZIP, E-Mail, PDF) ist ein nicht geladener SeaDrive-Platzhalter: ihn zu lesen
+ * löste sonst den Download-Dialog des Betriebssystems aus. Stattdessen mit unserem
+ * Fortschrittsfenster laden (mit Abbrechen) und erst danach die Kinder einlesen. Das geschieht
+ * nicht mitten im Zugriff auf das Listenmodell (eine verschachtelte Hauptschleife dort wäre
+ * unsicher), sondern danach: bis dahin ist die Liste leer. Bei Abbruch klappt die Zeile wieder zu. */
+static gboolean lazy_load_idle(gpointer data) {
+	LoadPending *pending = (LoadPending*) data;
+	SondLazyChildren *self = pending->lazy;
+	SondTreeviewFM *tree = g_weak_ref_get(&pending->tree);
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(self->item);
+	gboolean ok = FALSE;
+
+	if (!tree)
+		return G_SOURCE_REMOVE;
+
+	{
+		gchar *path = sond_tvfm_load_root_file_path(SOND_TVFM_OWNER(tree),
+				priv->sond_file_part);
+
+		ok = sond_seadrive_load_file_sync(fm_parent_window(tree), path);
+		g_free(path);
+	}
+
+	if (ok) {
+		GPtrArray *children = NULL;
+		GError *error = NULL;
+
+		if (sond_tvfm_item_load_children(self->item, &children, NULL, &error)) {
+			LOG_WARN("Kinder von '%s' nicht geladen: %s",
+					sond_tvfm_item_get_display_name(self->item) ?
+							sond_tvfm_item_get_display_name(self->item) : "?",
+					error ? error->message : "?");
+			g_clear_error(&error);
+		} else {
+			g_ptr_array_unref(self->children);
+			self->children = children;
+			g_list_model_items_changed(G_LIST_MODEL(self), 0, 0, children->len);
+		}
+	} else {
+		GtkTreeListRow *row = sond_treeview_find_row(SOND_TREEVIEW(tree), fm_match_same,
+				self->item, NULL);
+
+		if (row) {
+			gtk_tree_list_row_set_expanded(row, FALSE);
+			g_object_unref(row);
+		}
+	}
+
+	g_object_unref(tree);
+
+	return G_SOURCE_REMOVE;
+}
+
+//TRUE, wenn das Laden der Kinder zurückgestellt wurde (s. lazy_load_idle)
+static gboolean lazy_defer_load(SondLazyChildren *self) {
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(self->item);
+	LoadPending *pending = NULL;
+
+	if (!priv->sond_file_part || priv->path_or_section || !priv->owner ||
+			!sond_tvfm_load_not_loaded(priv->owner, priv->sond_file_part))
+		return FALSE;
+
+	pending = g_new0(LoadPending, 1);
+	pending->lazy = g_object_ref(self);
+	g_weak_ref_init(&pending->tree, priv->owner);
+	self->children = g_ptr_array_new_with_free_func(g_object_unref);
+	g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, lazy_load_idle, pending, load_pending_free);
+
+	return TRUE;
+}
+#endif
+
 static void lazy_ensure_loaded(SondLazyChildren *self) {
 	GError *error = NULL;
 
 	if (self->loaded)
 		return;
 	self->loaded = TRUE;
+
+#ifdef G_OS_WIN32
+	if (lazy_defer_load(self))
+		return;
+#endif
 
 	if (sond_tvfm_item_load_children(self->item, &self->children, NULL, &error)) {
 		LOG_WARN("Kinder von '%s' nicht geladen: %s\n",

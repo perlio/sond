@@ -186,6 +186,23 @@ static void replace_row_item(SondTreeviewFM *self, SondTVFMItem *old_item,
 	g_object_unref(row);
 }
 
+/* Ersetzt die sichtbare Zeile von old_item (Datei im Dateisystem oder Eintrag in einem
+ * Container) durch new_item, z.B. nach dem Entsperren eines Platzhalters. Ist die Zeile nicht
+ * mehr zu finden, geschieht nichts. */
+void fm_replace_item(SondTreeviewFM *self, SondTVFMItem *old_item, SondTVFMItem *new_item) {
+	SondTreeview *base = SOND_TREEVIEW(self);
+	GtkTreeListRow *row = sond_treeview_find_row(base, fm_match_same, old_item, NULL);
+	SondLazyChildren *lazy = NULL;
+
+	if (!row)
+		return;
+
+	lazy = fm_lazy_from_model(sond_treeview_row_get_container(base, row));
+	if (lazy)
+		fm_lazy_replace(lazy, old_item, new_item);
+	g_object_unref(row);
+}
+
 /* Der Eintrag einer Datei des Dateisystems hat sich geändert (z.B. Passwortschutz entfernt,
  * jetzt mit bekanntem Typ und Anhängen): die sichtbare Zeile durch einen neuen Eintrag aus
  * sfp ersetzen. Unsichtbare Zeilen werden beim Aufklappen richtig geladen. */

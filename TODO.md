@@ -328,10 +328,12 @@ Status: zurückgestellt
  und Root-Monitor. Es fehlt gegenüber der GTK3-Fassung:
  1. Dateisuche: Kern GTK-frei (tvfm/sond_tvfm_search.c, GTK3 getestet). GTK4:
     sond_treeviewfm_search.c (Dialog, Ergebnisfenster, Treffer im Baum zeigen) und
-    sond_busy_dialog.c (Fortschritt mit Abbrechen); gebaut, ungetestet. Offen: Treffer in
-    nicht geladenen SeaDrive-Containern lösen beim Aufklappen einen Download aus.
- 2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel beim Öffnen, Kopieren,
-    Verschieben; PDF-Seiten, Anhänge, Sections.
+    sond_busy_dialog.c (Fortschritt mit Abbrechen); getestet. Aufklappen eines nicht
+    geladenen Containers lädt jetzt über den eigenen Ladedialog (sond_treeviewfm_lazy.c).
+ 2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel: Öffnen von Containereinträgen samt
+    Entsperren vorab ist da (Stufe 1, getestet). Offen: Kopieren, Verschieben und Einfügen
+    mit Containern (Passwort-Vorprüfung als GTK-freies tvfm/sond_tvfm_preflight.c, Quellen
+    und Ziele in Containern, PDF ohne Anhänge wird Container); E-Mail als Ziel s. #247.
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
     GTK-frei (tvfm/sond_tvfm_unlock.c) und im Client eingebunden (Menü im Dokumentenfenster,
     Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).

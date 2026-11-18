@@ -112,6 +112,7 @@ void fm_watcher_start(SondTreeviewFM *self);
 void fm_watcher_stop(SondTreeviewFM *self);
 GListModel* fm_create_children(SondTreeview *base, gpointer object);
 SondTreeviewFMPrivate* fm_get_priv(SondTreeviewFM *self);
+void fm_replace_item(SondTreeviewFM *self, SondTVFMItem *old_item, SondTVFMItem *new_item);
 gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart);
 void fm_action_search(GSimpleAction *action, GVariant *parameter, gpointer data);
 void fm_search_register_signals(GObjectClass *klass);

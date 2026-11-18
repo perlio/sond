@@ -189,6 +189,11 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart*, gboolean read_only, GErro
 
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 
+/* Wie sond_file_part_open(), aber immer mit dem Standardprogramm bzw. "Öffnen mit" des
+ * Betriebssystems (kein eigener Viewer, GTK-frei; Teile in Containern über eine schreibgeschützte
+ * Temp-Datei). In sond_fileparts_open.c, nicht für sond_server. */
+gint sond_file_part_open_external(SondFilePart*, gboolean, GError**);
+
 gchar* sond_file_part_get_filepart(SondFilePart*);
 
 SondFilePart* sond_file_part_from_filepart(gchar const*, GError**);

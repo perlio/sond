@@ -515,10 +515,17 @@ gint fm_default_open_item(SondTreeviewFM *self, SondTVFMItem *item,
 	gboolean ok = FALSE;
 
 	if (!full) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-				"Einträge in Containern lassen sich in dieser Ansicht noch nicht öffnen");
+		//Eintrag in einem Container (ZIP-Eintrag, PDF-Anhang, E-Mail-Teil): über seinen Filepart
+		SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
 
-		return -1;
+		if (!sfp) {
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+					"Dieser Eintrag lässt sich nicht öffnen");
+
+			return -1;
+		}
+
+		return sond_file_part_open_external(sfp, open_with, error) ? -1 : 0;
 	}
 
 	ok = sond_open(full, open_with, error);
@@ -548,6 +555,36 @@ static gboolean load_item_file(SondTreeviewFM *self, SondTVFMItem *item, gboolea
 	return ok;
 }
 
+/* Gesperrtes Element (verschlüsselter ZIP-Eintrag, PDF mit Passwort): entsperren (Dialog) und
+ * die Zeile durch eine mit dem echten Typ ersetzen. Mit externem Programm (open_with) nur ein
+ * Platzhalter-Eintrag, die PDF-Passwortabfrage übernimmt dann das Programm selbst. *item wird
+ * durch das neue Element ersetzt (Referenz). 0 = weiter, -1 = Fehler (error; bei Abbruch durch
+ * den Nutzer G_IO_ERROR_CANCELLED). */
+static gint unlock_before_open(SondTreeviewFM *self, SondTVFMItem **item, gboolean open_with,
+		GError **error) {
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(*item);
+	SondFilePart *sfp_new = NULL;
+	SondTVFMItem *item_new = NULL;
+
+	if (priv->path_or_section || !priv->sond_file_part)
+		return 0;
+	if (!(open_with ? sond_file_part_is_placeholder(priv->sond_file_part) :
+			sond_file_part_needs_unlock(priv->sond_file_part)))
+		return 0;
+
+	sfp_new = sond_file_part_unlock(priv->sond_file_part, error);
+	if (!sfp_new)
+		return -1;
+
+	item_new = sond_tvfm_item_create(self, sfp_new, NULL);
+	g_object_unref(sfp_new);
+	fm_replace_item(self, *item, item_new);
+	g_object_unref(*item);
+	*item = item_new;
+
+	return 0;
+}
+
 static void open_row(SondTreeviewFM *self, GtkTreeListRow *row, gboolean open_with) {
 	SondTVFMItem *item = gtk_tree_list_row_get_item(row);
 	GError *error = NULL;
@@ -560,6 +597,25 @@ static void open_row(SondTreeviewFM *self, GtkTreeListRow *row, gboolean open_wi
 		g_object_unref(item);
 
 		return;
+	}
+
+	if (sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_DIR) {
+		if (unlock_before_open(self, &item, open_with, &error)) {
+			if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+				fm_show_error(self, "Fehler beim Öffnen",
+						error ? error->message : "unbekannt");
+			g_clear_error(&error);
+			g_object_unref(item);
+
+			return;
+		}
+
+		//jetzt ein Container: der Nutzer klappt ihn selbst auf
+		if (sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_DIR) {
+			g_object_unref(item);
+
+			return;
+		}
 	}
 
 	if (sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_DIR) {

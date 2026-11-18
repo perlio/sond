@@ -66,36 +66,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	else if (!open_with && SOND_IS_FILE_PART_PDF(sfp)) {
 
 	}*/
-	else {
-		g_autofree gchar* path = NULL;
-
-		if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
-			path = g_strconcat(SOND_FILE_PART_CLASS(
-					g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-					"/", sond_file_part_get_path(sfp), NULL);
-		else { //Datei in zip/pdf/gmessage
-			path = sond_file_part_write_to_tmp_file(sfp, TRUE, error);
-			if (!path)
-				return -1;
-		}
-
-		if (!sond_open(path, open_with, error)) {
-			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
-				GError* error_rem = NULL;
-
-				if (!sond_tmp_remove(path, &error_rem)) {
-					LOG_WARN("Datei '%s' konnte nicht gelöscht werden:\n%s",
-							path, error_rem ? error_rem->message : "(kein Fehler gesetzt)");
-					g_clear_error(&error_rem);
-				}
-			}
-			return -1;
-		}
-
-		//Kopie aus einem Container: löschen, sobald keine Anwendung sie mehr hält
-		if (sond_file_part_get_parent(sfp))
-			sond_tmp_register(path);
-	}
+	else if (sond_file_part_open_external(sfp, open_with, error))
+		return -1;
 
 	return 0;
 }
