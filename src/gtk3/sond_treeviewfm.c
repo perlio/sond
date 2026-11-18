@@ -38,6 +38,7 @@
 #include "../sond_pdf_helper.h"
 #include "../seadrive/sond_seadrive_gtk3.h"
 #include "../sond_icon_util.h"
+#include "../tvfm/sond_tvfm_search.h"
 #include "../tvfm/sond_tvfm_status.h"
 #include "../tvfm/sond_tvfm_unlock.h"
 #include "../sond_eingang_zettel.h"
@@ -2550,177 +2551,6 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 	return;
 }
 
-typedef struct {
-	SondTVFMSearchOpts opts;
-	gchar *needle; //bei !case_sensitive bereits gefaltet
-	GPatternSpec *pspec; //nur bei SOND_TVFM_SEARCH_WILDCARD
-	GPtrArray *arr_hits;
-	GHashTable *ht_seen; //Trefferstrings (gehören arr_hits), gegen Doppelte
-	guint n_skipped;
-	guint n_not_loaded; //nicht geladene SeaDrive-Container, nicht durchsucht
-	gint ready;
-	gint cancelled;
-} SearchCtx;
-
-static gboolean sond_treeviewfm_search_name_matches(SearchCtx *ctx,
-		gchar const *name) {
-	gboolean found = FALSE;
-	gchar *folded = NULL;
-	gchar const *cmp = name;
-
-	if (!ctx->opts.case_sensitive) {
-		folded = g_utf8_casefold(name, -1);
-		cmp = folded;
-	}
-
-	switch (ctx->opts.mode) {
-	case SOND_TVFM_SEARCH_WHOLE_NAME:
-		found = !g_strcmp0(cmp, ctx->needle);
-		break;
-	case SOND_TVFM_SEARCH_WILDCARD:
-		found = g_pattern_spec_match_string(ctx->pspec, cmp);
-		break;
-	default:
-		found = (strstr(cmp, ctx->needle) != NULL);
-	}
-
-	g_free(folded);
-
-	return found;
-}
-
-static void sond_treeviewfm_search_add_hit(SearchCtx *ctx,
-		SondTVFMItem *item) {
-	gchar *filepart = sond_tvfm_item_get_filepart(item);
-
-	if (!filepart)
-		return;
-
-	if (g_hash_table_contains(ctx->ht_seen, filepart)) {
-		g_free(filepart);
-
-		return;
-	}
-
-	g_hash_table_add(ctx->ht_seen, filepart);
-	g_ptr_array_add(ctx->arr_hits, filepart);
-
-	return;
-}
-
-/* Prüft das Item und durchsucht (bei Verzeichnissen und, wenn erlaubt,
- * Containern) rekursiv seine Kinder. Nur für das oberste Item (top) wird ein
- * Lesefehler als Fehler gemeldet, tiefer liegende nicht lesbare Verzeichnisse
- * werden übersprungen und gezählt. */
-static gint sond_treeviewfm_search_item(SearchCtx *ctx, SondTVFMItem *item,
-		gboolean top, guint depth, GError **error) {
-	GPtrArray *arr_children = NULL;
-	GError *error_load = NULL;
-	gboolean container_root = FALSE;
-	gboolean check = FALSE;
-
-	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(item);
-
-	if (g_atomic_int_get(&ctx->cancelled))
-		return 0;
-
-	//Schutz vor Verzeichnisschleifen: zu tief verschachtelt - nicht weiter absteigen
-	if (depth > SCAN_MAX_DEPTH) {
-		LOG_WARN("Dateisuche: Verschachtelungstiefe > %d - übersprungen "
-				"(Verzeichnisschleife?)", SCAN_MAX_DEPTH);
-		ctx->n_skipped++;
-
-		return 0;
-	}
-
-	if (priv->type != SOND_TVFM_ITEM_TYPE_DIR
-			&& priv->type != SOND_TVFM_ITEM_TYPE_LEAF)
-		return 0;
-
-	//Pseudo-Kinder PageTree/Message stehen für den Container selbst
-	if (priv->is_content_root_marker)
-		return 0;
-
-	//Container (ZIP, PDF mit Anhängen, E-Mail mit Teilen) zählt als Datei
-	container_root = (priv->type == SOND_TVFM_ITEM_TYPE_DIR
-			&& priv->sond_file_part && !priv->path_or_section);
-	check = (priv->type == SOND_TVFM_ITEM_TYPE_LEAF || container_root) ?
-			ctx->opts.match_files : ctx->opts.match_dirs;
-
-	if (check) {
-		gchar const *name = sond_tvfm_item_get_display_name(item);
-
-		if (!name)
-			name = sond_tvfm_item_get_basename(item);
-		if (name && sond_treeviewfm_search_name_matches(ctx, name))
-			sond_treeviewfm_search_add_hit(ctx, item);
-	}
-
-	if (priv->type != SOND_TVFM_ITEM_TYPE_DIR || !priv->has_children)
-		return 0;
-	if (container_root && !ctx->opts.in_containers)
-		return 0;
-
-#ifdef _WIN32
-	//nicht geladener Container: nicht lesen, das löste sonst einen Download aus
-	if (container_root && sond_treeviewfm_not_loaded(priv->stvfm,
-			priv->sond_file_part)) {
-		ctx->n_not_loaded++;
-
-		return 0;
-	}
-#endif
-
-	if (sond_tvfm_item_load_children(item, &arr_children, NULL, &error_load)) {
-		if (top) {
-			g_propagate_error(error, error_load);
-
-			return -1;
-		}
-
-		LOG_WARN("Dateisuche: Verzeichnis übersprungen: %s",
-				error_load ? error_load->message : "?");
-		g_clear_error(&error_load);
-		ctx->n_skipped++;
-
-		return 0;
-	}
-
-	for (guint i = 0; i < arr_children->len; i++)
-		sond_treeviewfm_search_item(ctx,
-				(SondTVFMItem*) g_ptr_array_index(arr_children, i), FALSE,
-				depth + 1, NULL);
-
-	g_ptr_array_unref(arr_children);
-
-	return 0;
-}
-
-typedef struct {
-	SearchCtx *ctx;
-	GPtrArray *arr_start;
-	GError *error;
-	gint rc;
-} SearchThreadData;
-
-static gpointer sond_treeviewfm_thread_search(gpointer data) {
-	SearchThreadData *data_thread = (SearchThreadData*) data;
-
-	for (guint i = 0; i < data_thread->arr_start->len; i++) {
-		if (sond_treeviewfm_search_item(data_thread->ctx,
-				g_ptr_array_index(data_thread->arr_start, i), TRUE, 0,
-				&data_thread->error)) {
-			data_thread->rc = -1;
-			break;
-		}
-	}
-
-	//in jedem Fall, sonst wartet der Hauptthread endlos
-	g_atomic_int_set(&data_thread->ctx->ready, 1);
-
-	return NULL;
-}
-
 static gint sond_treeviewfm_search_collect_start(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *item = NULL;
@@ -2732,11 +2562,31 @@ static gint sond_treeviewfm_search_collect_start(SondTreeview *stv,
 	return 0;
 }
 
+typedef struct {
+	SondTVFMSearch *search;
+	GPtrArray *arr_start;
+	GError *error;
+	gint rc;
+	gint ready;
+} SearchThreadData;
+
+static gpointer sond_treeviewfm_thread_search(gpointer data) {
+	SearchThreadData *data_thread = (SearchThreadData*) data;
+
+	data_thread->rc = sond_tvfm_search_run(data_thread->search,
+			data_thread->arr_start, &data_thread->error);
+
+	//in jedem Fall, sonst wartet der Hauptthread endlos
+	g_atomic_int_set(&data_thread->ready, 1);
+
+	return NULL;
+}
+
 GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 		SondTVFMSearchOpts const *opts, gboolean selected_only,
 		guint *n_skipped, guint *n_not_loaded, GError **error) {
-	SearchCtx ctx = { 0 };
 	SearchThreadData data_thread = { 0 };
+	SondTVFMSearch *search = NULL;
 	GPtrArray *arr_start = NULL;
 	GPtrArray *arr_hits = NULL;
 	GThread *thread_search = NULL;
@@ -2762,15 +2612,9 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 	} else
 		g_ptr_array_add(arr_start, sond_tvfm_item_create(stvfm, NULL, NULL));
 
-	ctx.opts = *opts;
-	ctx.needle = opts->case_sensitive ? g_strdup(opts->text) :
-			g_utf8_casefold(opts->text, -1);
-	if (opts->mode == SOND_TVFM_SEARCH_WILDCARD)
-		ctx.pspec = g_pattern_spec_new(ctx.needle);
-	ctx.arr_hits = g_ptr_array_new_with_free_func(g_free);
-	ctx.ht_seen = g_hash_table_new(g_str_hash, g_str_equal);
+	search = sond_tvfm_search_new(SOND_TVFM_OWNER(stvfm), opts);
 
-	data_thread.ctx = &ctx;
+	data_thread.search = search;
 	data_thread.arr_start = arr_start;
 	info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm), &cancelled,
 			opts->text);
@@ -2779,9 +2623,9 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 
 	/* Keine reine Busy-Loop: anstehende Events abarbeiten, damit
 	 * Fortschrittsfenster und Abbrechen reagieren, danach kurz schlafen. */
-	while (!g_atomic_int_get(&ctx.ready)) {
+	while (!g_atomic_int_get(&data_thread.ready)) {
 		if (*(info_window->cancel))
-			g_atomic_int_set(&ctx.cancelled, 1);
+			sond_tvfm_search_cancel(search);
 
 		while (gtk_events_pending())
 			gtk_main_iteration_do(FALSE);
@@ -2791,21 +2635,17 @@ GPtrArray* sond_treeviewfm_search(SondTreeviewFM *stvfm,
 	g_thread_join(thread_search);
 	info_window_kill(info_window);
 
-	if (data_thread.rc == -1) {
+	if (data_thread.rc == -1)
 		g_propagate_error(error, data_thread.error);
-		g_ptr_array_unref(ctx.arr_hits);
-	} else {
-		arr_hits = ctx.arr_hits;
+	else {
+		arr_hits = sond_tvfm_search_take_hits(search);
 		if (n_skipped)
-			*n_skipped = ctx.n_skipped;
+			*n_skipped = sond_tvfm_search_get_n_skipped(search);
 		if (n_not_loaded)
-			*n_not_loaded = ctx.n_not_loaded;
+			*n_not_loaded = sond_tvfm_search_get_n_not_loaded(search);
 	}
 
-	g_hash_table_destroy(ctx.ht_seen);
-	if (ctx.pspec)
-		g_pattern_spec_free(ctx.pspec);
-	g_free(ctx.needle);
+	sond_tvfm_search_free(search);
 	g_ptr_array_unref(arr_start);
 
 	return arr_hits;

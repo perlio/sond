@@ -36,7 +36,6 @@
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
-#include "../zond/10init/icons.h"
 
 static void sond_treeviewfm_owner_init(SondTVFMOwnerInterface *iface);
 
@@ -340,6 +339,34 @@ static void report_failures(SondTreeviewFM *self, GPtrArray *failed) {
 }
 #endif
 
+void sond_treeviewfm_pin_root(SondTreeviewFM *self, guint pin_state) {
+#ifdef G_OS_WIN32
+	SondTreeviewFMPrivate *priv = NULL;
+	GPtrArray *failed = NULL;
+	GError *error = NULL;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	priv = sond_treeviewfm_get_instance_private(self);
+
+	if (!priv->is_seadrive || !priv->root)
+		return;
+
+	//das ganze Projektverzeichnis rekursiv
+	if (!sond_seadrive_set_pin_state(priv->root, pin_state, TRUE, &error)) {
+		failed = g_ptr_array_new_with_free_func(g_free);
+		sond_seadrive_pin_note_failure(failed, priv->root, error);
+		report_failures(self, failed);
+		g_ptr_array_unref(failed);
+	}
+	g_clear_error(&error);
+
+	sond_treeviewfm_refresh_status(self);
+#else
+	(void) self;
+	(void) pin_state;
+#endif
+}
+
 void sond_treeviewfm_pin_selection(SondTreeviewFM *self, guint pin_state) {
 #ifdef G_OS_WIN32
 	SondTreeviewFMPrivate *priv = NULL;
@@ -477,6 +504,7 @@ static void sond_treeviewfm_finalize(GObject *object) {
 		g_clear_object(&priv->watcher);
 	}
 #endif
+	g_free(priv->search_text);
 	g_free(priv->root);
 
 	G_OBJECT_CLASS(sond_treeviewfm_parent_class)->finalize(object);
@@ -490,6 +518,7 @@ static void default_setup_menu(SondTreeviewFM *self) {
 	GMenu *edit = g_menu_new();
 	GMenu *new_dir = g_menu_new();
 	GMenu *open_sec = g_menu_new();
+	GMenu *search_sec = g_menu_new();
 	GMenu *paste_sub = g_menu_new();
 	GtkEventController *shortcuts = NULL;
 	static const GActionEntry entries[] = {
@@ -507,6 +536,7 @@ static void default_setup_menu(SondTreeviewFM *self) {
 		{ "pin", action_pin, NULL, NULL, NULL },
 		{ "unpin", action_unpin, NULL, NULL, NULL },
 		{ "free", action_free, NULL, NULL, NULL },
+		{ "dateisuche", fm_action_search, NULL, NULL, NULL },
 		{ "refresh", action_refresh, NULL, NULL, NULL }
 	};
 
@@ -552,6 +582,10 @@ static void default_setup_menu(SondTreeviewFM *self) {
 			gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_v, GDK_CONTROL_MASK),
 					gtk_named_action_new("tv.paste")));
 	gtk_widget_add_controller(GTK_WIDGET(self), shortcuts);
+
+	g_menu_append(search_sec, "Dateisuche …", "tv.dateisuche");
+	g_menu_append_section(menu, NULL, G_MENU_MODEL(search_sec));
+	g_object_unref(search_sec);
 
 	g_menu_append(menu, "Immer offline halten", "tv.pin");
 	g_menu_append(menu, "Offline-Haltung aufheben", "tv.unpin");
@@ -605,6 +639,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->fs_entry_moved = NULL;
 	klass->open_item = fm_default_open_item;
 	klass->confirm_delete = TRUE;
+	fm_search_register_signals(G_OBJECT_CLASS(klass));
 
 	//der Pin-Zustand einiger Einträge hat sich geändert: Anzeige neu lesen
 	fm_signals[SIGNAL_PINS_CHANGED] = g_signal_new("pins-changed",

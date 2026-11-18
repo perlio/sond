@@ -15,6 +15,7 @@
 /* SondTVFMItem - MUSS vor der SondTreeviewFMClass-Deklaration stehen,
  * deren vfuncs SondTVFMItem* verwenden. */
 #include "../tvfm/sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_search.h"
 
 G_BEGIN_DECLS
 
@@ -132,21 +133,6 @@ void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart*);
  * entsperrten Dateien. */
 gint sond_treeviewfm_decrypt_fileparts(SondTreeviewFM*, GPtrArray *items,
 		GPtrArray **decrypted, GPtrArray **skipped, gboolean *aborted);
-
-typedef enum {
-	SOND_TVFM_SEARCH_CONTAINS, //Name enthält Text
-	SOND_TVFM_SEARCH_WHOLE_NAME, //Name ist gleich Text
-	SOND_TVFM_SEARCH_WILDCARD //Text ist Muster mit * und ?
-} SondTVFMSearchMode;
-
-typedef struct {
-	gchar const *text;
-	SondTVFMSearchMode mode;
-	gboolean case_sensitive;
-	gboolean match_files; //Dateien (auch Container) als Treffer
-	gboolean match_dirs; //Verzeichnisse als Treffer
-	gboolean in_containers; //ZIP, PDF-Anhänge, E-Mails durchsuchen
-} SondTVFMSearchOpts;
 
 /* Sucht im Dateisystembaum nach Namen. Liefert die Fileparts der Treffer
  * (GPtrArray mit g_free) in der Form, die sond_treeviewfm_file_part_visible()

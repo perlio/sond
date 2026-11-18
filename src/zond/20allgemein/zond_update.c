@@ -31,7 +31,7 @@
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../zond_init.h"
-#include "../zond_version.h"
+#include "../../zond_version.h"
 
 #include "../anbindung.h"
 #include "../zond_dbase.h"

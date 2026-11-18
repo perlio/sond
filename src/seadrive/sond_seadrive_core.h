@@ -69,6 +69,59 @@ gboolean sond_seadrive_needs_hydration(const gchar *full_path);
  * lange blockieren); TRUE auch, wenn die Datei schon lokal ist. */
 gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error);
 
+/* Hydrierung im Hintergrund. Reiht den Download von full_path in einem eigenen
+ * Thread (use_pool: in einem Pool mit wenigen Arbeitern, für viele Dateien) ein und
+ * kehrt sofort zurück. TRUE, wenn neu eingereiht; FALSE, wenn für die Datei schon ein
+ * Download läuft oder das Einreihen scheiterte. Bei einem Fehlschlag (nicht bei Abbruch
+ * durch den Nutzer) ruft der Hauptthread failed(full_path, Meldung, user_data) auf
+ * (darf NULL sein). destroy(user_data) (darf NULL sein) wird in jedem Fall genau einmal
+ * aufgerufen: im Hauptthread nach dem Download, bei FALSE sofort. */
+typedef void (*SondSeadriveHydrateFailedFunc)(const gchar *full_path,
+        const gchar *message, gpointer user_data);
+
+gboolean sond_seadrive_hydrate_start(const gchar *full_path, gboolean use_pool,
+        SondSeadriveHydrateFailedFunc failed, gpointer user_data,
+        GDestroyNotify destroy);
+
+/* Läuft für full_path gerade ein Hintergrund-Download? */
+gboolean sond_seadrive_is_hydrating(const gchar *full_path);
+
+/* Versucht (bestmöglich, ohne Erfolgsgarantie), einen laufenden Download abzubrechen. */
+void sond_seadrive_hydrate_cancel(const gchar *full_path);
+
+/* Lade-Auftrag: lädt alle nicht geladenen Dateien aus full_paths (Pool ab acht Dateien)
+ * und hält den Zustand für eine Fortschrittsanzeige. NULL, wenn nichts zu laden ist.
+ * sond_seadrive_load_job_poll() aktualisiert den Zustand (z.B. alle 300 ms im Timer);
+ * die Einträge sind nur lesbar. Ab mehr als 20 Dateien (is_aggregate) fragt poll nur
+ * wenige laufende Dateien nach dem Fortschritt, die Anzeige sollte dann eine Sammelzeile
+ * zeigen. cancel bricht alle noch laufenden Downloads ab; abgebrochene Dateien gelten
+ * als nicht geladen. take_failed liefert die Namen aller nicht geladenen Dateien
+ * (GPtrArray mit g_free). */
+typedef struct _SondSeadriveLoadJob SondSeadriveLoadJob;
+
+typedef struct {
+    gchar   *full_path;
+    guint64  file_size;
+    guint64  on_disk;  /* zuletzt ermittelte, lokal vorhandene Bytes */
+    gboolean done;     /* Download beendet (Erfolg oder nicht) */
+    gboolean ok;       /* Datei ist danach vollständig lokal */
+} SondSeadriveLoadEntry;
+
+SondSeadriveLoadJob* sond_seadrive_load_job_new(GPtrArray *full_paths);
+void sond_seadrive_load_job_poll(SondSeadriveLoadJob *job);
+gboolean sond_seadrive_load_job_all_done(SondSeadriveLoadJob *job);
+guint sond_seadrive_load_job_n_entries(SondSeadriveLoadJob *job);
+SondSeadriveLoadEntry const* sond_seadrive_load_job_entry(SondSeadriveLoadJob *job,
+        guint index);
+guint sond_seadrive_load_job_n_done(SondSeadriveLoadJob *job);
+guint64 sond_seadrive_load_job_total_bytes(SondSeadriveLoadJob *job);
+guint64 sond_seadrive_load_job_loaded_bytes(SondSeadriveLoadJob *job);
+gboolean sond_seadrive_load_job_is_aggregate(SondSeadriveLoadJob *job);
+void sond_seadrive_load_job_cancel(SondSeadriveLoadJob *job);
+gboolean sond_seadrive_load_job_cancelled(SondSeadriveLoadJob *job);
+GPtrArray* sond_seadrive_load_job_take_failed(SondSeadriveLoadJob *job);
+void sond_seadrive_load_job_free(SondSeadriveLoadJob *job);
+
 /* Zeiger auf CfGetPlaceholderInfo (cldapi.dll, zur Laufzeit geladen) oder NULL;
  * für Code, der Platzhalter-Informationen selbst abfragt (Sync-Zustand). */
 gpointer sond_seadrive_core_placeholder_info(void);

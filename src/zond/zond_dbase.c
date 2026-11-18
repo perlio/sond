@@ -28,7 +28,7 @@ void section_free(gpointer data) {
 #include <gtk/gtk.h>
 
 #include "zond_convert.h"
-#include "zond_version.h"
+#include "../zond_version.h"
 #include "zond_init.h"
 #include "anbindung.h"
 

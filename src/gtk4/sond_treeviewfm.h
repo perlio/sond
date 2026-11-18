@@ -35,6 +35,7 @@
 #include "sond_treeview.h"
 #include "../sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus, SondIndexStatus */
 #include "../tvfm/sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_search.h"
 
 G_BEGIN_DECLS
 
@@ -128,6 +129,10 @@ GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM*);
  * Ohne SeaDrive ohne Wirkung. */
 void sond_treeviewfm_pin_selection(SondTreeviewFM*, guint pin_state);
 
+/* Pin-Zustand des ganzen Projektverzeichnisses (Wurzel) rekursiv setzen; Fehler werden in
+ * einem Dialog gemeldet. Ohne SeaDrive ohne Wirkung. */
+void sond_treeviewfm_pin_root(SondTreeviewFM*, guint pin_state);
+
 /* Wie viele Dateien des Projekts gibt es, und wie viele davon sind angeheftet (lokal und
  * gepinnt oder gepinnt und noch im Laden)? FALSE, wenn das nicht bekannt ist (kein
  * SeaDrive-Laufwerk, Scan noch nicht fertig). */
@@ -139,6 +144,17 @@ void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart *sfp);
 
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
+
+/* Klappt den Baum bis zu einem Eintrag auf und wählt ihn aus. filepart wie von
+ * sond_tvfm_item_get_filepart() (Dateisystempfad, bei Teilen in Containern mit "//"
+ * eingeschoben, z.B. "sub/a.zip//b/c.pdf"). Lädt dabei Verzeichnisse und Container.
+ * FALSE, wenn der Eintrag nicht gefunden wurde. */
+gboolean sond_treeviewfm_reveal_filepart(SondTreeviewFM*, gchar const *filepart);
+
+/* Dateisuche mit Dialog, Fortschrittsfenster und Ergebnisfenster (wie im Kontextmenü).
+ * Ein Doppelklick auf einen Treffer löst das Signal "search-hit-activated" (filepart)
+ * aus; die Standardbehandlung zeigt ihn im Baum (sond_treeviewfm_reveal_filepart). */
+void sond_treeviewfm_search_activate(SondTreeviewFM*);
 
 G_END_DECLS
 

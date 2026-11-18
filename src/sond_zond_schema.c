@@ -18,7 +18,7 @@
 
 #include "sond_zond_schema.h"
 
-#include "zond/zond_version.h"
+#include "zond_version.h"
 
 gint sond_zond_schema_create(sqlite3 *db, GError **error) {
 	gchar *errmsg = NULL;

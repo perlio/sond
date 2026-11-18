@@ -28,6 +28,8 @@
 #include "../sond_log_and_error.h"
 #include "../sond_fileparts.h"
 #include "../sond_file_helper.h"
+#include "sond_seadrive_load_dialog.h"
+#include "../tvfm/sond_tvfm_load.h"
 #include "../tvfm/sond_tvfm_item.h"
 #include "../tvfm/sond_tvfm_item_private.h"
 #include "../tvfm/sond_tvfm_owner.h"
@@ -38,7 +40,6 @@
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
-#include "../zond/10init/icons.h"
 
 /* ------------------------------------------------------------------------
  * Bearbeiten: Neues Verzeichnis, Umbenennen, Löschen (über die Item-Schicht, mit
@@ -526,17 +527,52 @@ gint fm_default_open_item(SondTreeviewFM *self, SondTVFMItem *item,
 	return ok ? 0 : -1;
 }
 
+/* Ist die Datei des Eintrags (bei Teilen in Containern die oberste) ein nicht geladener
+ * SeaDrive-Platzhalter, wird sie zuerst geladen (Fortschrittsfenster mit Abbrechen). *loaded:
+ * es wurde geladen, der Baum kann sich währenddessen geändert haben. FALSE: Abbruch oder
+ * Download gescheitert (schon gemeldet). */
+static gboolean load_item_file(SondTreeviewFM *self, SondTVFMItem *item, gboolean *loaded) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
+	gchar *path = NULL;
+	gboolean ok = TRUE;
+
+	*loaded = FALSE;
+	if (!sfp || !sond_tvfm_load_not_loaded(SOND_TVFM_OWNER(self), sfp))
+		return TRUE;
+
+	path = sond_tvfm_load_root_file_path(SOND_TVFM_OWNER(self), sfp);
+	ok = sond_seadrive_load_file_sync(fm_parent_window(self), path);
+	g_free(path);
+	*loaded = ok;
+
+	return ok;
+}
+
 static void open_row(SondTreeviewFM *self, GtkTreeListRow *row, gboolean open_with) {
 	SondTVFMItem *item = gtk_tree_list_row_get_item(row);
 	GError *error = NULL;
+	gboolean loaded = FALSE;
 
 	if (!item)
 		return;
 
+	if (!load_item_file(self, item, &loaded)) {
+		g_object_unref(item);
+
+		return;
+	}
+
 	if (sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_DIR) {
-		//Doppelklick auf ein Verzeichnis: auf- bzw. zuklappen
-		if (!open_with && gtk_tree_list_row_is_expandable(row))
-			gtk_tree_list_row_set_expanded(row, !gtk_tree_list_row_get_expanded(row));
+		//Doppelklick auf ein Verzeichnis: auf- bzw. zuklappen. Nach dem Laden die Zeile
+		//neu suchen, der Baum kann sich währenddessen geändert haben.
+		GtkTreeListRow *row_now = loaded ?
+				sond_treeview_find_row(SOND_TREEVIEW(self), fm_match_same, item, NULL) :
+				g_object_ref(row);
+
+		if (row_now && !open_with && gtk_tree_list_row_is_expandable(row_now))
+			gtk_tree_list_row_set_expanded(row_now,
+					!gtk_tree_list_row_get_expanded(row_now));
+		g_clear_object(&row_now);
 		g_object_unref(item);
 
 		return;

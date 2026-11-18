@@ -38,7 +38,7 @@
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
-#include "../zond/10init/icons.h"
+#include "../icons.h"
 
 /* ------------------------------------------------------------------------
  * Sortierung: Verzeichnisse zuerst, dann nach der Spalte

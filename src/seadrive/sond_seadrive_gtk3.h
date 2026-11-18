@@ -95,20 +95,7 @@ void sond_seadrive_hydrate_async(const gchar *full_path);
 void sond_seadrive_hydrate_async_notify(const gchar *full_path,
         GtkWindow *parent);
 
-/*
- * TRUE, wenn full_path aktuell hydriert wird (sond_seadrive_hydrate_
- * async() dafür einen Hintergrund-Thread laufen hat).
- */
-gboolean sond_seadrive_is_hydrating(const gchar *full_path);
-
-/*
- * Versucht (bestmöglich, keine Erfolgsgarantie), eine laufende
- * Hydrierung von full_path abzubrechen. S. ausführlichen Doc-Kommentar
- * an der Implementierung (sond_treeviewfm_seadrive.c) zu den Grenzen
- * dieses Mechanismus (CancelSynchronousIo, für CfHydratePlaceholder()
- * nicht offiziell dokumentiert).
- */
-void sond_seadrive_hydrate_cancel(const gchar *full_path);
+/* sond_seadrive_is_hydrating() und sond_seadrive_hydrate_cancel(): s. sond_seadrive_core.h */
 
 /*
  * Lädt alle full_paths, die als nicht geladene SeaDrive-Platzhalter vorliegen: Downloads

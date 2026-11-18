@@ -69,75 +69,27 @@ void sond_seadrive_pin_report_failures(GtkWidget *parent, GPtrArray *failed)
     display_message(parent, "SeaDrive\n\n", text->str, NULL);
     g_string_free(text, TRUE);
 }
-
 /* ------------------------------------------------------------------ */
-/*  Public API: sond_seadrive_hydrate_async                            */
+/*  Hydrierung im Hintergrund: der Kern liegt in sond_seadrive_core.c  */
 /* ------------------------------------------------------------------ */
 
-/* Menge der Pfade, für die aktuell ein Hydrier-Hintergrund-Thread läuft -
- * verhindert, dass ein erneuter Doppelklick auf dieselbe, noch
- * herunterladende Datei einen zweiten, redundanten Thread/
- * CfHydratePlaceholder()-Aufruf auslöst. Bei sehr großen Dateien (z.B.
- * 51 GB) würde ein SYNCHRONER Aufruf von sond_seadrive_hydrate() im
- * GTK-Hauptthread das gesamte Programm minutenlang ohne Rückmeldung oder
- * Abbrechen-Möglichkeit blockieren. Deshalb: kein Info-Fenster beim ERSTEN
- * Doppelklick (der Download läuft ohnehin im Hintergrund weiter,
- * unabhängig davon, ob die UI darauf wartet) - stattdessen sofort in die UI
- * zurückkehren (Fire-and-forget).
- *
- * Aktionen, die Dateien lesen, laden vorab über sond_seadrive_load_sync()
- * (weiter unten): modales Fortschrittsfenster mit Abbrechen, danach läuft die
- * Aktion automatisch weiter.
- *
- * Wert je Pfad: HydratingEntry (unten), enthält u.a. ein
- * THREAD_TERMINATE-Handle auf den Hydrier-Thread für CancelSynchronousIo()
- * (echter Abbruch-Versuch, s. sond_seadrive_hydrate_cancel()). Schlüssel:
- * full_path (g_strdup'd). Von Haupt- UND Hintergrund-Threads genutzt,
- * deshalb per Mutex geschützt (statisch/all-zero-initialisiert - laut
- * GLib-Doku für GMutex zulässig, kein g_mutex_init() nötig). */
-static GMutex      g_hydrating_mutex;
-static GHashTable *g_hydrating_paths = NULL;
+//Ab so vielen Dateien lädt der Kern über einen Pool (s. sond_seadrive_core.c)
+#define HYDRATE_POOL_MIN_FILES 8
 
 typedef struct {
-    HANDLE   thread_handle;    /* NULL, bis der Hydrier-Thread wirklich
-                                 * läuft (kurzes Zeitfenster direkt nach
-                                 * dem Einfügen in g_hydrating_paths, s.
-                                 * sond_seadrive_hydrate_async()) */
-    gboolean cancel_requested; /* per sond_seadrive_hydrate_cancel()
-                                 * gesetzt - falls thread_handle zu diesem
-                                 * Zeitpunkt noch NULL ist (s.o.), wertet
-                                 * hydrate_thread_func() dies selbst aus
-                                 * und startet den Download erst gar
-                                 * nicht. */
-} HydratingEntry;
+    GWeakRef parent; /* Fenster für die Fehlermeldung, kann leer sein */
+} HydrateNotify;
 
-static void hydrating_entry_free(gpointer data)
+static void hydrate_notify_failed(const gchar *full_path, const gchar *message,
+        gpointer user_data)
 {
-    HydratingEntry *entry = (HydratingEntry *) data;
-    if (entry->thread_handle)
-        CloseHandle(entry->thread_handle);
-    g_free(entry);
-}
+    HydrateNotify *notify = (HydrateNotify *) user_data;
+    GtkWidget *parent = g_weak_ref_get(&notify->parent);
 
-typedef struct {
-    gchar *full_path;
-    GWeakRef parent;   /* Fenster für die Fehlermeldung, kann leer sein */
-    gboolean notify;
-} HydrateThreadData;
-
-typedef struct {
-    gchar *full_path;
-    gchar *message;
-    GWeakRef parent;
-} HydrateReport;
-
-static gboolean hydrate_report_idle(gpointer data)
-{
-    HydrateReport *report = (HydrateReport *) data;
-    GtkWidget *parent = g_weak_ref_get(&report->parent);
+    (void) message;
 
     if (parent) {
-        gchar *base = g_path_get_basename(report->full_path);
+        gchar *base = g_path_get_basename(full_path);
         gchar *text = g_strdup_printf("%s - Download gescheitert", base);
 
         display_message(parent, text, NULL);
@@ -145,259 +97,34 @@ static gboolean hydrate_report_idle(gpointer data)
         g_free(base);
         g_object_unref(parent);
     }
-
-    g_weak_ref_clear(&report->parent);
-    g_free(report->full_path);
-    g_free(report->message);
-    g_free(report);
-
-    return G_SOURCE_REMOVE;
 }
 
-//Fehlschlag im Hintergrundthread an den Hauptthread melden (Dialog)
-static void hydrate_report_error(HydrateThreadData *td, gchar const *message)
+static void hydrate_notify_free(gpointer user_data)
 {
-    HydrateReport *report = g_new0(HydrateReport, 1);
-    gpointer parent = g_weak_ref_get(&td->parent);
+    HydrateNotify *notify = (HydrateNotify *) user_data;
 
-    report->full_path = g_strdup(td->full_path);
-    report->message = g_strdup(message ? message : "unbekannter Fehler");
-    g_weak_ref_init(&report->parent, parent);
-    if (parent)
-        g_object_unref(parent);
-
-    g_idle_add(hydrate_report_idle, report);
-}
-
-static void hydrate_run(HydrateThreadData *td)
-{
-    GError *error = NULL;
-    HydratingEntry *entry;
-    HANDLE thread_handle_dup = NULL;
-    gboolean pre_cancelled = FALSE;
-
-    /* Eigenes Thread-Handle (mit THREAD_TERMINATE-Recht, s.
-     * CancelSynchronousIo()-Doku) für einen möglichen späteren
-     * Abbrechen-Versuch von außen bereitstellen. */
-    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
-            GetCurrentProcess(), &thread_handle_dup, THREAD_TERMINATE,
-            FALSE, 0);
-
-    g_mutex_lock(&g_hydrating_mutex);
-    entry = g_hash_table_lookup(g_hydrating_paths, td->full_path);
-    if (entry) {
-        if (entry->cancel_requested)
-            pre_cancelled = TRUE;
-        else
-            entry->thread_handle = thread_handle_dup;
-    }
-    g_mutex_unlock(&g_hydrating_mutex);
-
-    if (pre_cancelled) {
-        /* Abbrechen wurde schon angefordert, bevor dieser Thread überhaupt
-         * so weit kam, sein Handle einzutragen - Download erst gar nicht
-         * starten. */
-        if (thread_handle_dup)
-            CloseHandle(thread_handle_dup);
-    } else if (!sond_seadrive_hydrate(td->full_path, &error)) {
-        /* Bei per CancelSynchronousIo() abgebrochenen Aufrufen liefert
-         * GetLastError() innerhalb von sond_seadrive_hydrate() i.d.R.
-         * ERROR_OPERATION_ABORTED - wird hier wie jeder andere Fehler
-         * einfach mitgeloggt. */
-        LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
-                td->full_path, error ? error->message : "?");
-
-        /* vom Nutzer abgebrochen? Dann keine Fehlermeldung */
-        g_mutex_lock(&g_hydrating_mutex);
-        entry = g_hash_table_lookup(g_hydrating_paths, td->full_path);
-        pre_cancelled = entry && entry->cancel_requested;
-        g_mutex_unlock(&g_hydrating_mutex);
-
-        if (td->notify && !pre_cancelled)
-            hydrate_report_error(td, error ? error->message : NULL);
-        g_clear_error(&error);
-    }
-
-    g_mutex_lock(&g_hydrating_mutex);
-    g_hash_table_remove(g_hydrating_paths, td->full_path); /* schließt
-            thread_handle_dup via hydrating_entry_free(), falls gesetzt */
-    g_mutex_unlock(&g_hydrating_mutex);
-
-    g_weak_ref_clear(&td->parent);
-    g_free(td->full_path);
-    g_free(td);
-}
-
-static gpointer hydrate_thread_func(gpointer data)
-{
-    hydrate_run((HydrateThreadData *) data);
-
-    return NULL;
-}
-
-/* Bei vielen Dateien (Kopieren, Auszug) nicht ein Thread je Datei, sondern ein
- * Pool mit wenigen Arbeitern: SeaDrive lädt ohnehin nicht beliebig parallel,
- * und Hunderte gleichzeitige CfHydratePlaceholder()-Aufrufe belasten Rechner
- * und Server unnötig. Die Dateien gelten ab dem Einreihen als "wird geladen"
- * (g_hydrating_paths), Fortschritt und Abbrechen funktionieren unverändert. */
-#define HYDRATE_POOL_THREADS   4
-#define HYDRATE_POOL_MIN_FILES 8
-
-static void hydrate_pool_func(gpointer data, gpointer user_data)
-{
-    (void) user_data;
-    hydrate_run((HydrateThreadData *) data);
-}
-
-static GThreadPool *g_hydrate_pool = NULL;
-
-static GThreadPool* hydrate_pool_get(void)
-{
-    g_mutex_lock(&g_hydrating_mutex);
-    if (!g_hydrate_pool)
-        g_hydrate_pool = g_thread_pool_new(hydrate_pool_func, NULL,
-                HYDRATE_POOL_THREADS, FALSE, NULL);
-    g_mutex_unlock(&g_hydrating_mutex);
-
-    return g_hydrate_pool;
-}
-
-/*
- * sond_seadrive_hydrate_async:
- *
- * Wie sond_seadrive_hydrate(), aber nicht-blockierend: startet die
- * eigentliche Hydrierung in einem eigenen Hintergrund-Thread und kehrt
- * sofort zurück (Fire-and-forget, s. Doc-Kommentar oben). Ein
- * erneuter Aufruf für denselben full_path, während bereits ein Thread
- * dafür läuft, ist ein No-Op (Aufrufer sollte in diesem Fall stattdessen
- * den Fortschrittsdialog zeigen, s. sond_seadrive_load_sync()). Fehler landen nur im Log (LOG_WARN in
- * hydrate_thread_func()) - ein synchroner Rückgabewert wäre ohnehin
- * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
- * i.d.R. noch läuft.
- */
-/* Reiht die Hydrierung von full_path ein. TRUE, wenn sie neu eingereiht wurde,
- * FALSE, wenn schon eine läuft oder das Einreihen scheiterte. Mit parent wird
- * ein Fehlschlag in einem Dialog gemeldet; use_pool: Pool statt eigenem
- * Thread. */
-static gboolean hydrate_start(const gchar *full_path, GtkWindow *parent,
-        gboolean use_pool)
-{
-    HydrateThreadData *td = NULL;
-
-    g_mutex_lock(&g_hydrating_mutex);
-    if (!g_hydrating_paths)
-        g_hydrating_paths = g_hash_table_new_full(g_str_hash, g_str_equal,
-                g_free, hydrating_entry_free);
-
-    if (g_hash_table_contains(g_hydrating_paths, full_path)) {
-        /* schon ein Hydrier-Thread für diese Datei unterwegs - No-Op */
-        g_mutex_unlock(&g_hydrating_mutex);
-        return FALSE;
-    }
-    g_hash_table_insert(g_hydrating_paths, g_strdup(full_path),
-            g_new0(HydratingEntry, 1));
-    g_mutex_unlock(&g_hydrating_mutex);
-
-    td = g_new0(HydrateThreadData, 1);
-    td->full_path = g_strdup(full_path);
-    td->notify = (parent != NULL);
-    g_weak_ref_init(&td->parent, parent);
-
-    if (use_pool) {
-        g_thread_pool_push(hydrate_pool_get(), td, NULL);
-        return TRUE;
-    }
-
-    {
-        GThread *thread = g_thread_new("seadrive-hydrate", hydrate_thread_func,
-                td);
-
-        if (!thread) {
-            /* Thread-Erzeugung fehlgeschlagen - Eintrag wieder entfernen,
-             * sonst bliebe die Datei für immer fälschlich als "läuft schon"
-             * markiert. */
-            g_mutex_lock(&g_hydrating_mutex);
-            g_hash_table_remove(g_hydrating_paths, td->full_path);
-            g_mutex_unlock(&g_hydrating_mutex);
-            g_weak_ref_clear(&td->parent);
-            g_free(td->full_path);
-            g_free(td);
-            return FALSE;
-        }
-        g_thread_unref(thread); /* fire-and-forget, kein g_thread_join() */
-    }
-
-    return TRUE;
+    g_weak_ref_clear(&notify->parent);
+    g_free(notify);
 }
 
 void sond_seadrive_hydrate_async_notify(const gchar *full_path,
         GtkWindow *parent)
 {
-    hydrate_start(full_path, parent, FALSE);
+    HydrateNotify *notify = NULL;
+
+    if (parent) {
+        notify = g_new0(HydrateNotify, 1);
+        g_weak_ref_init(&notify->parent, parent);
+    }
+
+    sond_seadrive_hydrate_start(full_path, FALSE,
+            notify ? hydrate_notify_failed : NULL, notify,
+            notify ? hydrate_notify_free : NULL);
 }
 
 void sond_seadrive_hydrate_async(const gchar *full_path)
 {
     sond_seadrive_hydrate_async_notify(full_path, NULL);
-}
-
-/*
- * sond_seadrive_is_hydrating:
- *
- * TRUE, wenn für full_path aktuell ein Hydrier-Hintergrund-Thread läuft
- * (s.o.). Vom Aufrufer genutzt, um bei einem erneuten Doppelklick
- * zwischen "neue Hydrierung anstoßen" (sond_seadrive_hydrate_async()) und
- * "Fortschritt/Abbrechen-Dialog zeigen" (sond_seadrive_show_hydrate_
- * progress_dialog()) zu unterscheiden.
- */
-gboolean sond_seadrive_is_hydrating(const gchar *full_path)
-{
-    gboolean result;
-
-    g_mutex_lock(&g_hydrating_mutex);
-    result = g_hydrating_paths &&
-            g_hash_table_contains(g_hydrating_paths, full_path);
-    g_mutex_unlock(&g_hydrating_mutex);
-
-    return result;
-}
-
-/*
- * sond_seadrive_hydrate_cancel:
- *
- * Versucht, eine laufende Hydrierung von full_path abzubrechen - über
- * CancelSynchronousIo() auf das Thread-Handle des Hydrier-Threads (dieser
- * steckt synchron/blockierend in CfHydratePlaceholder(), s.
- * sond_seadrive_hydrate()). Ist der Thread noch nicht so weit, sein
- * Handle einzutragen (s. HydratingEntry oben), wird nur cancel_requested
- * gesetzt - der Thread bricht dann selbst vorzeitig ab, bevor er den
- * Download überhaupt beginnt.
- *
- * WICHTIG: CancelSynchronousIo() ist für CfHydratePlaceholder()
- * offiziell nicht dokumentiert (Microsoft dokumentiert es allgemein für
- * synchrone Dateizugriffe, s. cancelsynchronousio-func). Ob der
- * SeaDrive-Minifilter/-Dienst einen so markierten Abbruch tatsächlich
- * zeitnah beachtet und den Download serverseitig stoppt, ist nicht
- * garantiert - es ist aber der einzige als Konsument (nicht Sync-
- * Provider) verfügbare Mechanismus, ohne den eigentlichen CF-API-Aufruf
- * auf OVERLAPPED umzustellen. Kein Rückgabewert: Erfolg zeigt sich
- * indirekt darüber, dass der Eintrag aus g_hydrating_paths verschwindet
- * (von sond_seadrive_show_hydrate_progress_dialog() gepollt).
- */
-void sond_seadrive_hydrate_cancel(const gchar *full_path)
-{
-    HydratingEntry *entry;
-
-    g_mutex_lock(&g_hydrating_mutex);
-    entry = g_hydrating_paths ?
-            g_hash_table_lookup(g_hydrating_paths, full_path) : NULL;
-    if (entry) {
-        //immer merken: abgebrochene Dateien gelten nicht als gescheitert
-        entry->cancel_requested = TRUE;
-        if (entry->thread_handle)
-            CancelSynchronousIo(entry->thread_handle);
-    }
-    g_mutex_unlock(&g_hydrating_mutex);
 }
 
 /* ------------------------------------------------------------------ */
@@ -802,8 +529,9 @@ static gboolean ensure_loaded(GtkWindow *parent, GPtrArray *full_paths,
         gboolean use_pool = (pending->len >= HYDRATE_POOL_MIN_FILES);
 
         for (i = 0; i < pending->len; i++)
-            hydrate_start((const gchar *) g_ptr_array_index(pending, i), NULL,
-                    use_pool);
+            sond_seadrive_hydrate_start(
+                    (const gchar *) g_ptr_array_index(pending, i), use_pool,
+                    NULL, NULL, NULL);
     }
 
     job = g_new0(LoadJob, 1);

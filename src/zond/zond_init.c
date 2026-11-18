@@ -46,7 +46,7 @@
 
 #include "20allgemein/project.h"
 
-#include "10init/icons.h"
+#include "../icons.h"
 #include "10init/app_window.h"
 #include "20allgemein/zond_update.h"
 

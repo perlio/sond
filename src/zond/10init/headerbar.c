@@ -43,7 +43,7 @@
  * abgeklemmt (siehe Makefile-Kommentar, Ziel "zond"), noch nicht ausgereift. */
 #include "../zond_treeviewfm.h"
 #include "../zond_init.h"
-#include "../zond_version.h"
+#include "../../zond_version.h"
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/suchen.h"

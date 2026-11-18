@@ -93,9 +93,9 @@ Status: offen (Entscheidung: der Server soll auch Teile in Containern indizieren
 Status: offen (Voraussetzung: GTK4-Gegenstücke)
 
 ```text
- Im GTK4-Baum fehlen noch ein Ladedialog (Gegenstück zu sond_seadrive_load_sync und
- load_file_sync), pin_root und pin_report_failures. Erst danach kann zond umgestellt und
- seadrive_gtk3 entfernt werden. Reste dort: sond_seadrive_is_offline,
+ Der GTK4-Baum hat jetzt Ladedialog und pin_root (Hydrier-Threads und Lade-Auftrag liegen
+ im Kern, seadrive_gtk3 nutzt sie). Zond und seadrive_gtk3 sind noch nicht umgestellt; der
+ Zustandscode des GTK3-Ladedialogs ist bis dahin doppelt (Kern und seadrive_gtk3.c). Reste dort: sond_seadrive_is_offline,
  sond_treeviewfm_seadrive_item_dehydrated.
 ```
 
@@ -326,9 +326,10 @@ Status: zurückgestellt
  Overlays (Offline, Ordnerstatus, Index), Neues Verzeichnis, Umbenennen, Löschen,
  Öffnen, Kopieren, Ausschneiden, Einfügen, Drag-and-drop, Pinnen, SeaDrive-Watcher
  und Root-Monitor. Es fehlt gegenüber der GTK3-Fassung:
- 1. Dateisuche: der Kern ist GTK-frei (tvfm/sond_tvfm_search.c, GTK3 darauf umgestellt,
-    ungetestet). GTK4 bekommt Dialog, Fortschrittsfenster mit Abbrechen,
-    Ergebnisfenster und "im Baum zeigen" (Pfad bis zum Treffer aufklappen).
+ 1. Dateisuche: Kern GTK-frei (tvfm/sond_tvfm_search.c, GTK3 getestet). GTK4:
+    sond_treeviewfm_search.c (Dialog, Ergebnisfenster, Treffer im Baum zeigen) und
+    sond_busy_dialog.c (Fortschritt mit Abbrechen); gebaut, ungetestet. Offen: Treffer in
+    nicht geladenen SeaDrive-Containern lösen beim Aufklappen einen Download aus.
  2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel beim Öffnen, Kopieren,
     Verschieben; PDF-Seiten, Anhänge, Sections.
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
@@ -336,9 +337,10 @@ Status: zurückgestellt
     Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).
     Als Menüpunkt im GTK4-Baum selbst (für Zond-GTK4) und für Einträge in Containern fehlt es.
  4. Eingangs-Spalte (nur Zond: Zettel, Cache; Vfunc get_eingang ist in GTK3 da).
- 5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen
-    (GTK3: sond_seadrive_load_file_sync); Vorab-Prüfung beim Einfügen (Platzhalter
-    vorab laden, Passwörter).
+ 5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen und
+    Vorab-Laden beim Kopieren: gebaut (gtk4/sond_seadrive_load_dialog.c auf dem GTK-freien
+    Lade-Auftrag in seadrive/sond_seadrive_core.c, tvfm/sond_tvfm_load.c), ungetestet.
+    Offen: Passwörter vorab abfragen (mit Containern), Ziel in einer nicht geladenen Datei.
  6. Drop-Ziel im Inhaltsbaum von Zond (Anbinden): die Nutzlast beim Ziehen ist ein
     GPtrArray aus SondTVFMItem; Strg unter Windows nur über GetAsyncKeyState lesbar.
 ```

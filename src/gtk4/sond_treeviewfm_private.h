@@ -24,6 +24,7 @@
  *   sond_treeviewfm_watch.c    Root-Monitor und SeaDrive-Watcher
  *   sond_treeviewfm_edit.c     Neues Verzeichnis, Umbenennen, Löschen, Öffnen
  *   sond_treeviewfm_transfer.c Kopieren, Ausschneiden, Einfügen, Ziehen und Ablegen
+ *   sond_treeviewfm_search.c   Dateisuche (Dialog, Fortschritt, Ergebnisse)
  */
 
 #ifndef SOND_GTK4_TREEVIEWFM_PRIVATE_H_INCLUDED
@@ -43,6 +44,9 @@ typedef struct {
 	gpointer index_ctx_func_data;
 	GFileMonitor *root_monitor; //Zugänge von außen auf Wurzel-Ebene
 	guint root_monitor_timer;   //Entprellung
+	gchar *search_text;         //Einstellungen der letzten Dateisuche
+	SondTVFMSearchOpts search_opts;
+	gboolean search_settings_valid;
 #ifdef G_OS_WIN32
 	SondSeadriveWatcher *watcher; //nur bei einer Wurzel im SeaDrive-Laufwerk
 	guint refresh_idle;           //gebündelte Auffrischung der Symbole
@@ -108,6 +112,9 @@ void fm_watcher_start(SondTreeviewFM *self);
 void fm_watcher_stop(SondTreeviewFM *self);
 GListModel* fm_create_children(SondTreeview *base, gpointer object);
 SondTreeviewFMPrivate* fm_get_priv(SondTreeviewFM *self);
+gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart);
+void fm_action_search(GSimpleAction *action, GVariant *parameter, gpointer data);
+void fm_search_register_signals(GObjectClass *klass);
 
 G_END_DECLS
 

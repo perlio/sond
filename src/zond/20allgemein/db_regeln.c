@@ -23,7 +23,7 @@
 #include "../../sond_log_and_error.h"
 
 #include "../zond_dbase.h"
-#include "../zond_version.h"
+#include "../../zond_version.h"
 
 #include "db_check.h"
 #include "db_regeln.h"

@@ -38,7 +38,6 @@
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
-#include "../zond/10init/icons.h"
 
 /* --- Zugänge von außen auf der obersten Ebene --- */
 

@@ -28,6 +28,8 @@
 #include "../sond_log_and_error.h"
 #include "../sond_fileparts.h"
 #include "../sond_file_helper.h"
+#include "sond_seadrive_load_dialog.h"
+#include "../tvfm/sond_tvfm_load.h"
 #include "../tvfm/sond_tvfm_item.h"
 #include "../tvfm/sond_tvfm_item_private.h"
 #include "../tvfm/sond_tvfm_owner.h"
@@ -38,7 +40,6 @@
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
-#include "../zond/10init/icons.h"
 
 /* ------------------------------------------------------------------------
  * Kopieren, Ausschneiden, Einfügen, Ziehen und Ablegen
@@ -265,6 +266,23 @@ static gboolean match_moved_source(gpointer item, gpointer user_data) {
 	return match;
 }
 
+/* Kopieren liest die Quellen: nicht geladene SeaDrive-Dateien (bei Verzeichnissen alle
+ * darunter) werden vorher geladen (Fortschrittsfenster mit Abbrechen). Verschieben im selben
+ * Laufwerk benennt nur um und liest nichts. FALSE: Abbruch oder Download gescheitert (schon
+ * gemeldet), es geschieht nichts. */
+static gboolean paste_preload(SondTreeviewFM *self, GPtrArray *items) {
+	GPtrArray *arr = g_ptr_array_new_with_free_func(g_free);
+	gboolean ok = TRUE;
+
+	for (guint i = 0; i < items->len; i++)
+		sond_tvfm_load_collect(arr, SOND_TVFM_OWNER(self), g_ptr_array_index(items, i));
+	if (arr->len > 0)
+		ok = sond_seadrive_load_sync(fm_parent_window(self), arr);
+	g_ptr_array_unref(arr);
+
+	return ok;
+}
+
 /* Fügt items in das Verzeichnis ein, das zur Zeile row gehört: deren Inhalt
  * (child) oder das Verzeichnis, in dem sie steht. cut = verschieben, sonst kopieren. */
 static void paste_items(SondTreeviewFM *self, GPtrArray *items, gboolean cut,
@@ -288,6 +306,9 @@ static void paste_items(SondTreeviewFM *self, GPtrArray *items, gboolean cut,
 		goto out;
 	}
 	parent_rel = sond_tvfm_item_get_path_or_section(parent);
+
+	if (!cut && !paste_preload(self, items))
+		goto out;
 
 	for (guint i = 0; i < items->len; i++) {
 		SondTVFMItem *item = g_ptr_array_index(items, i);
