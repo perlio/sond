@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #255.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #259.
 
 ## Inhalt
 
-Offen: #245, #247, #254
+Offen: #245, #247, #254, #255, #256, #257, #258
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253
 Ideen: #167, #169, #205, #232, #233
 
@@ -73,6 +73,50 @@ Status: offen (nach den Tests des Index-Jobs)
     zurückgeholt; ein anderer Nutzer kann sie aufräumen, bekommt sie dann frei.
  4. Zond schreibt den Index weiterhin selbst; mit der Lease-Disziplin gibt es nur einen
     Schreiber zur Zeit (Shard-Variante verworfen).
+```
+
+### #255 Server: Indizieren ausgehend von fileparts
+
+Status: offen (Entscheidung: der Server soll auch Teile in Containern indizieren können)
+
+```text
+ Heute ruft der Server nur sond_process_file() mit den Bytes ganzer Dateien auf; Container-
+ inhalte werden dabei rekursiv mitverarbeitet. Der fileparts-getriebene Einstieg
+ (sond_process_fileparts, _roots_to_read in sond_process_file.c) wird nur von zond benutzt.
+ Ziel: derselbe Einstieg auch im Server (Pfade wie x.zip//a.pdf). SondFilePart öffnet bisher
+ über Dateipfade; der Server hat die Bytes aus Seafile. Zu klären: Quelle als Rückruf oder
+ Download in eine Temp-Datei, Abbruch, Passwörter gesperrter Teile. Kein Split der Datei nötig.
+```
+
+### #256 seadrive_gtk3 ablösen
+
+Status: offen (Voraussetzung: GTK4-Gegenstücke)
+
+```text
+ Im GTK4-Baum fehlen noch ein Ladedialog (Gegenstück zu sond_seadrive_load_sync und
+ load_file_sync), pin_root und pin_report_failures. Erst danach kann zond umgestellt und
+ seadrive_gtk3 entfernt werden. Reste dort: sond_seadrive_is_offline,
+ sond_treeviewfm_seadrive_item_dehydrated.
+```
+
+### #257 Viewer weiter aufräumen
+
+Status: offen
+
+```text
+ Lange Funktionen (viewer_do_save_dd rund 320 Zeilen u. a.) aufteilen. Stufe 2: Modell-
+ Signale statt arr_pv.
+```
+
+### #258 Kleine Altlasten
+
+Status: offen
+
+```text
+ - 99conv/test.c samt Menü "test" und Make-Ziel test entfernen.
+ - Stillgelegte Chat-Dateien (zond_chat, sond_chat) prüfen.
+ - misc.h umbenennen/aufteilen.
+ - Tests für tvfm, anbindung, dbase_zond fehlen (src/tests).
 ```
 
 ## Zurückgestellt
@@ -282,10 +326,9 @@ Status: zurückgestellt
  Overlays (Offline, Ordnerstatus, Index), Neues Verzeichnis, Umbenennen, Löschen,
  Öffnen, Kopieren, Ausschneiden, Einfügen, Drag-and-drop, Pinnen, SeaDrive-Watcher
  und Root-Monitor. Es fehlt gegenüber der GTK3-Fassung:
- 1. Dateisuche: Suchlogik (SearchCtx, Namensvergleich, Rekursion) in eine gemeinsame
-    GTK-freie Datei auslagern, GTK3 darauf umstellen; GTK4 bekommt Dialog,
-    Fortschrittsfenster mit Abbrechen, Ergebnisfenster und "im Baum zeigen"
-    (Pfad bis zum Treffer aufklappen).
+ 1. Dateisuche: der Kern ist GTK-frei (tvfm/sond_tvfm_search.c, GTK3 darauf umgestellt,
+    ungetestet). GTK4 bekommt Dialog, Fortschrittsfenster mit Abbrechen,
+    Ergebnisfenster und "im Baum zeigen" (Pfad bis zum Treffer aufklappen).
  2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel beim Öffnen, Kopieren,
     Verschieben; PDF-Seiten, Anhänge, Sections.
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt

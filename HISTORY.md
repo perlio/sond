@@ -6052,3 +6052,19 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  für viewer.exe nur noch nach Rückfrage (choice), die Programmklassen bleiben immer angelegt.
  Gilt erst ab dem nächsten Release, nicht ausgeführt geprüft.
 ```
+
+## Nachtest v1.2.20 (Koll): bat-Dateien, Pfad-Hash, stilles Update (18.11.2026) (#250a)
+
+```text
+ create-gtk-release.sh: install-assoc.bat und zond.bat werden mit CRLF und reinem ASCII
+ erzeugt (LF mit UTF-8 verschob den cmd-Parser; Registry-Einträge blieben leer). Das Skript
+ bricht ab, wenn Nicht-ASCII-Zeichen in den Dateien stehen.
+ project_get_local_tmp_path() (project.c): Pfad wird vor dem SHA-256 mit
+ g_canonicalize_filename() vereinheitlicht, unter Windows zusätzlich casefold; recover()
+ (Backslash aus GSettings) und project_create_dbase_zond() ("/" im Pfad) liefern so denselben
+ Hash. Aufrufer bauen den Pfad mit g_build_filename(). Alte .tmp-Dateien (Hash vor dieser
+ Änderung) werden nicht mehr gefunden.
+ zond_installer: ruft install-assoc.bat mit --quiet auf; das Skript überspringt dann die
+ PDF-Abfrage. Beim manuellen Start Hinweis auf die Windows-UserChoice für .pdf.
+ Kein Speicherleck in project_create_dbase_zond() (path ist g_autofree).
+```
