@@ -244,6 +244,26 @@ void fm_lazy_insert(SondLazyChildren *self, SondTVFMItem *item) {
 	g_list_model_items_changed(G_LIST_MODEL(self), self->children->len - 1, 0, 1);
 }
 
+//Position des Eintrags in der Liste (lädt sie ggf.); -1, wenn er nicht darin steht
+gint fm_lazy_index_of(SondLazyChildren *self, SondTVFMItem *item) {
+	lazy_ensure_loaded(self);
+
+	return lazy_index_of(self, item);
+}
+
+//Fügt den Eintrag an der Position index ein (negativ oder zu groß: am Ende)
+void fm_lazy_insert_at(SondLazyChildren *self, gint index, SondTVFMItem *item) {
+	lazy_ensure_loaded(self);
+	if (!self->children)
+		self->children = g_ptr_array_new_with_free_func(g_object_unref);
+
+	if (index < 0 || (guint) index > self->children->len)
+		index = (gint) self->children->len;
+
+	g_ptr_array_insert(self->children, index, g_object_ref(item));
+	g_list_model_items_changed(G_LIST_MODEL(self), (guint) index, 0, 1);
+}
+
 void fm_lazy_remove(SondLazyChildren *self, SondTVFMItem *item) {
 	gint index = lazy_index_of(self, item);
 

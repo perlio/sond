@@ -331,9 +331,11 @@ Status: zurückgestellt
     sond_busy_dialog.c (Fortschritt mit Abbrechen); getestet. Aufklappen eines nicht
     geladenen Containers lädt jetzt über den eigenen Ladedialog (sond_treeviewfm_lazy.c).
  2. Container (ZIP, PDF, E-Mail) als Quelle und Ziel: Öffnen von Containereinträgen samt
-    Entsperren vorab ist da (Stufe 1, getestet). Offen: Kopieren, Verschieben und Einfügen
-    mit Containern (Passwort-Vorprüfung als GTK-freies tvfm/sond_tvfm_preflight.c, Quellen
-    und Ziele in Containern, PDF ohne Anhänge wird Container); E-Mail als Ziel s. #247.
+    Entsperren vorab ist da (Stufe 1, getestet). Kopieren, Verschieben und Einfügen mit
+    Containern (Quellen und Ziele ZIP/PDF, Passwort-Vorprüfung tvfm/sond_tvfm_preflight.c,
+    Einfügen am Ort der Zielzeile, PDF ohne Anhänge wird Container, letzter Anhang entfernt
+    macht die PDF wieder zum Blatt, Mimeparts rücken nach) ist gebaut, ungetestet (Stufe 3).
+    E-Mail als Ziel bleibt gesperrt, s. #247.
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
     GTK-frei (tvfm/sond_tvfm_unlock.c) und im Client eingebunden (Menü im Dokumentenfenster,
     Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).

@@ -39,6 +39,7 @@
 #include "../seadrive/sond_seadrive_gtk3.h"
 #include "../sond_icon_util.h"
 #include "../tvfm/sond_tvfm_search.h"
+#include "../tvfm/sond_tvfm_preflight.h"
 #include "../tvfm/sond_tvfm_status.h"
 #include "../tvfm/sond_tvfm_unlock.h"
 #include "../sond_eingang_zettel.h"
@@ -1554,19 +1555,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	return 0;
 }
 
-/* Vorab-Phase von Kopieren/Verschieben (s. sond_treeviewfm_paste_clipboard()):
- * Stellt für jedes gesperrte ZIP-Element der Auswahl, dessen Inhalt gelesen
- * werden muss, das Passwort sicher (still mit gemerkten, sonst Dialog), bevor
- * irgendetwas kopiert wird. Nicht lesbare Elemente werden beim Kopieren
- * vorgemerkt (sond_password_action_skip_add()), beim Verschieben bricht die
- * Aktion ab. */
-typedef struct {
-	SFMPasteSelection *sel;
-	gboolean move;
-	gboolean aborted; //Nutzer hat abgebrochen bzw. beim Verschieben übersprungen
-	gchar *failure;   //Fehlermeldung, wenn nicht gefragt werden konnte
-} SFMPreflight;
-
 #ifdef _WIN32
 static gchar* sond_treeviewfm_root_file_path(SondTreeviewFM*, SondFilePart*);
 
@@ -1683,94 +1671,16 @@ static gint paste_load_scan_foreach(SondTreeview *stv, GtkTreeIter *iter,
 }
 #endif
 
-//Ein Eintrag prüfen; FALSE = Aktion abbrechen
-static gboolean preflight_entry(SFMPreflight *pf, SondFilePart *sfp_zip,
-		gchar const *path) {
-	GError *error = NULL;
-	g_autofree gchar *archive_fp = NULL;
+/* Sammelt die Quellen der Zwischenablage für die Passwort-Vorprüfung
+ * (tvfm/sond_tvfm_preflight.c, gemeinsam mit dem GTK4-Dateibaum) */
+static gint preflight_collect_foreach(SondTreeview *stv, GtkTreeIter *iter,
+		gpointer data, GError **error) {
+	SondTVFMItem *stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stv), iter);
 
-	if (sond_file_part_zip_probe_entry(sfp_zip, path, &error))
-		return TRUE;
+	if (stvfm_item) //Dummy-Zeilen haben kein Item; die Referenz geht ans Array
+		g_ptr_array_add((GPtrArray*) data, stvfm_item);
 
-	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-		g_clear_error(&error);
-
-		if (sond_password_last_result() == SOND_PROMPT_CANCEL || pf->move) {
-			pf->aborted = TRUE;
-
-			return FALSE;
-		}
-
-		//übersprungen: beim Kopieren auslassen
-		archive_fp = sond_file_part_get_filepart(sfp_zip);
-		{
-			g_autofree gchar *entry_fp = g_strconcat(archive_fp, "//", path, NULL);
-
-			sond_password_action_skip_add(entry_fp);
-		}
-
-		return TRUE;
-	}
-
-	//nicht gefragt werden konnte oder anderer Fehler
-	g_free(pf->failure);
-	pf->failure = g_strdup(error ? error->message : "Eintrag nicht lesbar");
-	g_clear_error(&error);
-
-	return FALSE;
-}
-
-static gint sond_treeviewfm_preflight_foreach(SondTreeview *stv,
-		GtkTreeIter *iter, gpointer data, GError **error) {
-	SFMPreflight *pf = (SFMPreflight*) data;
-	g_autoptr(SondTVFMItem) stvfm_item = NULL; //eigene Ref bis zum Funktionsende
-	SondTVFMItemPrivate *item_priv = NULL;
-	SondTVFMItemPrivate *parent_priv = NULL;
-	SondFilePart *sfp = NULL;
-	SondFilePart *sfp_target = NULL;
-	gboolean ok = TRUE;
-
-	stvfm_item = sond_tvfm_item_from_view(GTK_TREE_VIEW(stv), iter);
-	if (!stvfm_item)
-		return 0;
-	item_priv = sond_tvfm_item_get_priv(stvfm_item);
-
-	sfp = item_priv->sond_file_part;
-	if (!sfp)
-		return 0; //Dateisystem: nichts zu entsperren
-
-	parent_priv = sond_tvfm_item_get_priv(pf->sel->stvfm_item_parent);
-	sfp_target = parent_priv->sond_file_part;
-
-	if (!item_priv->path_or_section) {
-		//einzelne Datei: gesperrter Eintrag in einem ZIP?
-		SondFilePart *sfp_zip = sond_file_part_get_parent(sfp);
-
-		if (!sfp_zip || !SOND_IS_FILE_PART_ZIP(sfp_zip) ||
-				!(sond_file_part_is_placeholder(sfp) ||
-				sond_file_part_get_lock_entry(sfp) != SOND_LOCK_NONE))
-			return 0;
-
-		//Verschieben im selben Archiv ist ein Umbenennen, ohne Lesen
-		if (pf->move && sfp_target == sfp_zip)
-			return 0;
-
-		ok = preflight_entry(pf, sfp_zip, sond_file_part_get_path(sfp));
-	}
-	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
-		//Verzeichnis im ZIP: alle gesperrten Einträge darunter
-		GPtrArray *arr = NULL;
-
-		if (pf->move && sfp_target == sfp)
-			return 0;
-
-		arr = sond_file_part_zip_locked_entries(sfp, item_priv->path_or_section);
-		for (guint i = 0; i < arr->len && ok; i++)
-			ok = preflight_entry(pf, sfp, g_ptr_array_index(arr, i));
-		g_ptr_array_unref(arr);
-	}
-
-	return ok ? 0 : 1;
+	return 0;
 }
 
 /* PDF-Zeile, die bisher keine Anhänge hatte (Sections direkt darunter oder
@@ -2039,13 +1949,17 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	 * beim Verschieben verloren gehen). Abbruch oder Fehler: nichts kopieren
 	 * oder verschieben. */
 	{
-		SFMPreflight pf = { &s_paste_sel, clipboard->ausschneiden, FALSE, NULL };
+		SondTVFMPreflightResult pf = { FALSE, NULL };
+		GPtrArray *arr_src = g_ptr_array_new_with_free_func(g_object_unref);
 		GPtrArray *arr_skipped = NULL;
 
 		sond_password_action_begin(!clipboard->ausschneiden);
 
-		rc = sond_treeview_clipboard_foreach(sond_treeviewfm_preflight_foreach,
-				(gpointer) &pf, error);
+		rc = sond_treeview_clipboard_foreach(preflight_collect_foreach,
+				(gpointer) arr_src, error);
+		if (rc != -1)
+			sond_tvfm_preflight(arr_src, stvfm_item_parent, clipboard->ausschneiden, &pf);
+		g_ptr_array_unref(arr_src);
 
 		if (rc == -1 || pf.aborted || pf.failure) {
 			if (rc != -1 && pf.failure) {

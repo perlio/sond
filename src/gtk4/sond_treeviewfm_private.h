@@ -77,6 +77,8 @@ SondLazyChildren* fm_lazy_from_model(GListModel *model);
 SondLazyChildren* fm_lazy_new_loaded(GPtrArray *items);
 void fm_lazy_insert(SondLazyChildren *self, SondTVFMItem *item);
 void fm_lazy_remove(SondLazyChildren *self, SondTVFMItem *item);
+gint fm_lazy_index_of(SondLazyChildren *self, SondTVFMItem *item);
+void fm_lazy_insert_at(SondLazyChildren *self, gint index, SondTVFMItem *item);
 void fm_lazy_replace(SondLazyChildren *self, SondTVFMItem *old_item,
 		SondTVFMItem *new_item);
 void fm_lazy_touch(SondLazyChildren *self, SondTVFMItem *item);
