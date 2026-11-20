@@ -352,14 +352,14 @@ static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
 }
 
 static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
-		gboolean create, GError **error) {
+		gboolean create, gboolean readonly, GError **error) {
 	gint rc = 0;
 
 	ZondDBasePrivate *zond_dbase_priv = zond_dbase_get_instance_private(
 			zond_dbase);
 
 	rc = sqlite3_open_v2(zond_dbase_priv->path, &(zond_dbase_priv->dbase),
-			SQLITE_OPEN_READWRITE
+			readonly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE
 					| ((create_file || create) ? SQLITE_OPEN_CREATE : 0), NULL);
 	if (rc != SQLITE_OK) //Datei nicht vorhanden und weder create_file noch create
 	{
@@ -379,7 +379,8 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 		if (g_strcmp0(v_string, G_STRINGIFY(ZOND_VERSION_MAJOR))) {
 			gint rc = 0;
 
-			if (!version_handler.confirm || !version_handler.convert ||
+			//lesend wird nie umgestellt
+			if (readonly || !version_handler.confirm || !version_handler.convert ||
 					!version_handler.confirm(v_string, version_handler.data)) {
 				g_set_error(error, SOND_ERROR, 0,
 						"Falsche Projektversion (%s)", v_string);
@@ -432,6 +433,10 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 			return -1;
 		}
 	}
+
+	//lesend nichts korrigieren und keine Indizes anlegen (beides schreibt in die Datei)
+	if (readonly)
+		return 0;
 
 	rc = zond_dbase_check_journal_settings(zond_dbase, error);
 	if (rc)
@@ -597,8 +602,25 @@ zond_dbase_new(const gchar *path, gboolean create_file, gboolean create,
 
 	zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL);
 
-	rc = zond_dbase_open(zond_dbase, create_file, create, error);
+	rc = zond_dbase_open(zond_dbase, create_file, create, FALSE, error);
 	if (rc == -1) {
+		g_object_unref(zond_dbase);
+
+		return NULL;
+	}
+
+	return zond_dbase;
+}
+
+ZondDBase*
+zond_dbase_new_readonly(const gchar *path, GError **error) {
+	ZondDBase *zond_dbase = NULL;
+
+	g_return_val_if_fail(path, NULL);
+
+	zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL);
+
+	if (zond_dbase_open(zond_dbase, FALSE, FALSE, TRUE, error) == -1) {
 		g_object_unref(zond_dbase);
 
 		return NULL;

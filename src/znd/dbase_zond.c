@@ -292,6 +292,19 @@ DBaseZond* dbase_zond_new_store(gchar const *path, GError **error) {
 	return dbase_zond;
 }
 
+DBaseZond* dbase_zond_new_store_readonly(gchar const *path, GError **error) {
+	DBaseZond *dbase_zond = NULL;
+	ZondDBase *store = zond_dbase_new_readonly(path, error);
+
+	if (!store)
+		return NULL;
+
+	dbase_zond = g_new0(DBaseZond, 1);
+	dbase_zond->zond_dbase_store = store;
+
+	return dbase_zond;
+}
+
 void dbase_zond_free(DBaseZond *dbase_zond) {
 	if (!dbase_zond)
 		return;

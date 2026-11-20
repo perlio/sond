@@ -22,6 +22,10 @@ typedef struct _DBase_Zond {
  * in zond (s. zond_dbase_new()). NULL bei Fehler. */
 DBaseZond* dbase_zond_new_store(gchar const *path, GError **error);
 
+/* Wie dbase_zond_new_store(), aber nur lesend (s. zond_dbase_new_readonly()). Schreibende
+ * Funktionen (Transaktionen, Index) dürfen auf so geöffnetem Objekt nicht aufgerufen werden. */
+DBaseZond* dbase_zond_new_store_readonly(gchar const *path, GError **error);
+
 //Gibt die Datenbanken (auch work, falls vorhanden) und die Struktur frei
 void dbase_zond_free(DBaseZond*);
 
