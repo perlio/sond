@@ -31,6 +31,7 @@
 #include "../../tvfm/sond_tvfm_unlock.h"
 #include "../sond_password_dialog.h"
 #include "../../sond_index.h"
+#include "../../znd/dbase_zond.h"
 
 typedef struct {
     gchar *lib_dir;
@@ -63,6 +64,10 @@ typedef struct {
     gint64 index_mtime;        /* Stand der Datei beim letzten Ã–ffnen */
     gint64 index_size;
     guint index_timer;
+    DBaseZond *projekt_db;     /* Projektdatei (.ZND), nur lesend; NULL, wenn nicht lesbar */
+    gchar *projekt_pfad;
+    gint64 projekt_mtime;      /* Stand der Datei beim letzten Öffnen */
+    gint64 projekt_size;
 } DokData;
 
 static void dok_free(gpointer data) {
@@ -80,6 +85,8 @@ static void dok_free(gpointer data) {
     if (d->tree)
         g_object_remove_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
     sond_index_ctx_free(d->index_ctx);
+    dbase_zond_free(d->projekt_db);
+    g_free(d->projekt_pfad);
     g_free(d->job_token);
     if (d->nachlauf_timer)
         g_source_remove(d->nachlauf_timer);
@@ -157,6 +164,47 @@ static gboolean index_pruefen(gpointer data) {
 #ifdef G_OS_WIN32
 static void ganz_abgleichen(DokData *d);
 #endif
+
+/* Projektdatei wie die Index-DB: nur lesend, bei geänderter Datei neu öffnen (Seafile ersetzt
+ * sie beim Abgleich). Eine noch nicht geladene SeaDrive-Datei wird nicht geöffnet. Fehlt die
+ * Projektdatei oder ist sie nicht lesbar, bleibt projekt_db NULL. */
+static void projekt_pruefen(DokData *d) {
+    GStatBuf st = { 0 };
+    gboolean vorhanden = !g_stat(d->projekt_pfad, &st);
+    gint64 mtime = vorhanden ? (gint64) st.st_mtime : 0;
+    gint64 groesse = vorhanden ? (gint64) st.st_size : -1;
+
+    if (mtime == d->projekt_mtime && groesse == d->projekt_size &&
+            (d->projekt_db || !vorhanden))
+        return;
+
+    if (vorhanden) {
+        SondSeadriveBadge badge = sond_tvfm_badge_seadrive_live(d->projekt_pfad);
+
+        if (badge == SOND_SEADRIVE_BADGE_OFFLINE || badge == SOND_SEADRIVE_BADGE_PENDING)
+            return; //noch nicht lokal, später wieder
+    }
+
+    dbase_zond_free(d->projekt_db);
+    d->projekt_db = NULL;
+    d->projekt_mtime = mtime;
+    d->projekt_size = groesse;
+
+    if (vorhanden) {
+        GError *error = NULL;
+
+        d->projekt_db = dbase_zond_new_store_readonly(d->projekt_pfad, &error);
+        if (!d->projekt_db)
+            g_debug("Projektdatei nicht lesbar: %s", error ? error->message : "?");
+        g_clear_error(&error);
+    }
+}
+
+static gboolean dateien_pruefen(gpointer data) {
+    projekt_pruefen(data);
+
+    return index_pruefen(data);
+}
 
 /* Sync-Zustand wie in zond: alles synchron, oder wie viele Dateien noch geladen (â†“)
  * bzw. hochgeladen (â†‘) werden */
@@ -1385,8 +1433,11 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     d->index_mtime = -1;
     d->index_size = -2;
     sond_treeviewfm_set_index_ctx_func(SOND_TREEVIEWFM(d->tree), index_ctx_von, d);
-    index_pruefen(d);
-    d->index_timer = g_timeout_add_seconds(5, index_pruefen, d);
+    d->projekt_pfad = sond_zond_project_file(d->lib_dir, d->lib_name);
+    d->projekt_mtime = -1;
+    d->projekt_size = -2;
+    dateien_pruefen(d);
+    d->index_timer = g_timeout_add_seconds(5, dateien_pruefen, d);
 
     if (sond_treeviewfm_set_root(SOND_TREEVIEWFM(d->tree), d->lib_dir, &error)) {
         meldung(parent, "Verzeichnis nicht lesbar", error ? error->message : "unbekannt");

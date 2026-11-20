@@ -97,7 +97,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_fileparts_open.c \
 	$(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_pdf_helper.c \
-	$(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_tmpfiles.c
+	$(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_tmpfiles.c 	$(SRC_DIRS)/znd/zond_dbase.c $(SRC_DIRS)/znd/dbase_zond.c $(SRC_DIRS)/znd/anbindung.c 	$(SRC_DIRS)/sond_zond_schema.c
 CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb gmime-3.0 libmagic libxml-2.0 libzip)
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb libmagic libxml-2.0 sqlite3 libcurl tesseract libzip gmime-3.0 mupdf zlib)
 ifneq ($(CONFIG), Debug_Linux)
