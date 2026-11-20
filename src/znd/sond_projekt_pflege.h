@@ -145,6 +145,25 @@ typedef enum {
 SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege*, gboolean suc, gboolean dual,
 		gchar const *project_dir, GError **error);
 
+/* ---- Löschen ---- */
+
+//Ein Löschvorgang in den Projektdaten (nach check_delete)
+typedef struct {
+	gchar const *path; //Filepart des Eintrags bzw. Verzeichnisses
+	gchar const *section; //Abschnitt; NULL: ganze Datei bzw. Verzeichnis
+	gboolean from_gmessage; //Mimepart einer Mail (index_from gültig)
+	gint index_from;
+	SondFilePart *sfp_emb; //Element, wenn es ein Anhang einer PDF ist, sonst NULL
+	SondFilePart *container; //PDF oder Mail, deren Struktur danach neu einzulesen ist, sonst NULL
+} SondProjektDelete;
+
+/* Beginnt die Transaktion und schreibt alles um, was das Löschen betrifft: Index (Datei und
+ * Coverage), Mimepart-Nummern, Anhang-Adressen, FILE_PART-Zeile. *dual: ob die Transaktion store und
+ * work (TRUE) oder nur work umfasst - der Abschluss (tx_ende) braucht es. Commit oder Rollback macht
+ * der Aufrufer über tx_ende. 0 bei Erfolg; bei -1 ist alles zurückgenommen. */
+gint sond_projekt_pflege_delete(SondProjektPflege*, SondProjektDelete const*, gboolean *dual,
+		GError **error);
+
 /* ---- Kopieren (Einfügen) ---- */
 
 /* Vorbereitung, bevor neuer, ungeprüfter Inhalt unter prefix_new (fertig gebildeter Zielpfad) entsteht:

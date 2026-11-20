@@ -38,26 +38,6 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
 
-//Index-Kontext für Schreibzugriffe in der Transaktion; NULL ohne Index
-static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
-	return sond_projekt_pflege_index_tx(priv->pflege);
-}
-
-//Transaktion verwerfen (Fehlerweg von before_delete/before_move)
-static void tx_abort(ZondTreeviewFMPrivate *priv) {
-	sond_projekt_pflege_tx_abort(priv->pflege);
-}
-
-//Fehler der Index-DB (idx_err wird freigegeben) in *error übernehmen
-static void set_idx_error(GError **error, gchar const *func,
-		gchar const *what, GError **idx_err) {
-	if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-			"%s: %s: %s", func, what, *idx_err ? (*idx_err)->message : "?");
-	g_clear_error(idx_err);
-
-	return;
-}
-
 //Löschen gesperrt: Eintrag steht noch in der Speicher-Datenbank
 static void show_still_in_store(ZondTreeviewFMPrivate *priv) {
 	display_message(priv->zond->win.app_window,
@@ -144,12 +124,6 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 	return FALSE;
 }
 
-//Index-DB-Gegenstück zu dbase_zond_update_gmessage_index(), s. sond_projekt_pflege.h
-static gint gmessage_index_renumber(ZondTreeviewFMPrivate *priv,
-		gchar const *prefix, gint index, gboolean into, GError **error) {
-	return sond_projekt_pflege_gmessage_index_renumber(priv->pflege, prefix, index, into, error);
-}
-
 /* PDF bzw. Mail, deren Inhalt das Element ist (Anhang, Mimepart, Multipart-
  * Verzeichnis einer Mail); NULL sonst (auch PageTree/Message, Sections) */
 static SondFilePart* structure_container_of_item(SondTVFMItem *stvfm_item) {
@@ -186,15 +160,6 @@ static void structure_pending_clear(ZondTreeviewFMPrivate *priv) {
 	sond_projekt_pflege_structure_clear(priv->pflege);
 }
 
-//Nach erfolgreicher Aktion: Struktur der vorgemerkten PDFs/Mails neu in die Index-DB einlesen
-static void structure_refresh(ZondTreeviewFMPrivate *priv) {
-	sond_projekt_pflege_structure_refresh(priv->pflege);
-}
-
-static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
-	sond_projekt_pflege_emb_sibling_clear(priv->pflege);
-}
-
 /* Eingebettete Datei einer PDF (nicht PageTree, keine Section)? Ohne
  * Dateizugriff. */
 static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
@@ -207,41 +172,14 @@ static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
 	return SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(sfp));
 }
 
-/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen bzw. Herausverschieben
- * (filename_new NULL) oder Umbenennen ggf. die Adressen der übrigen Anhänge (s.
- * sond_projekt_pflege_emb_sibling_changes()); nichts zu tun: nichts vorgemerkt. */
-static gint emb_sibling_changes(ZondTreeviewFMPrivate *priv,
-		SondTVFMItem *stvfm_item, gchar const *filename_new, GError **error) {
-	emb_sibling_pending_clear(priv);
-
-	if (!is_pdf_emb(stvfm_item))
-		return 0;
-
-	return sond_projekt_pflege_emb_sibling_changes(priv->pflege,
-			sond_tvfm_item_get_sond_file_part(stvfm_item), filename_new, error);
-}
-
-//Vorgemerkte Anhang-Adressen in store/work und Index umschreiben - innerhalb der offenen Transaktionen
-static gint emb_sibling_apply(ZondTreeviewFMPrivate *priv, GError **error) {
-	return sond_projekt_pflege_emb_sibling_apply(priv->pflege, error);
-}
-
-//Nach erfolgreichem Commit: geöffnete Fileparts der Anhänge auf ihre neue Adresse setzen
-static void emb_sibling_adjust_opened(ZondTreeviewFMPrivate *priv) {
-	sond_projekt_pflege_emb_sibling_adjust_opened(priv->pflege);
-}
-
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		SondTVFMItem *stvfm_item, GError **error, gpointer *ctx,
 		gpointer user_data) {
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
-	gint index_from = 0;
 	gchar const* section = NULL;
 	SondTVFMItemType type;
-	gboolean from_gmessage = FALSE;
 	gboolean dual = FALSE;
-	g_autofree gchar* prefix = NULL;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
@@ -290,93 +228,25 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		}
 	}
 
-	/* Vorgezogen: muss vor der Wahl single-/dual-DB feststehen */
-	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
-	if (from_gmessage)
-		prefix = g_strndup(path, strlen(path) - strlen(strrchr(path, '/') + 1));
+	{
+		SondProjektDelete del = {
+			.path = path,
+			.section = section,
+			.sfp_emb = is_pdf_emb(stvfm_item) ? sond_tvfm_item_get_sond_file_part(stvfm_item) : NULL,
+			.container = structure_container_of_item(stvfm_item)
+		};
 
-	/* Anhang einer PDF: ggf. Adressen der übrigen Anhänge nachführen
-	 * (emb_sibling_apply() unten) - schreibt wie bei GMessage in beide
-	 * Datenbanken */
-	dual = from_gmessage || is_pdf_emb(stvfm_item) || !section;
+		del.from_gmessage = get_gmessage_index(stvfm_item, &del.index_from);
+
+		//Transaktion beginnen, Index, Mimepart-Nummern, Anhang-Adressen und FILE_PART umschreiben
+		if (sond_projekt_pflege_delete(priv->pflege, &del, &dual, error))
+			return -1;
+	}
 
 	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
 	*ctx = GINT_TO_POINTER(
 			(dual ? 1 : 0) |
 			(priv->zond->proj.dbase_zond->changed ? 2 : 0));
-
-	//Transaktion (mit Index-DB, wenn eine Datei gelöscht wird), s. sond_projekt_pflege_tx_begin()
-	if (sond_projekt_pflege_tx_begin(priv->pflege, dual, !section, error))
-		return -1;
-
-	if (index_tx(priv)) {
-		GError *idx_err = NULL;
-
-		if (!sond_index_ctx_clear_file(index_tx(priv), path, &idx_err)) {
-			tx_abort(priv);
-			set_idx_error(error, __func__, "sond_index_ctx_clear_file", &idx_err);
-			return -1;
-		}
-
-		/* Vorsichtsmaßnahme: einen eventuell bestehenden eigenen
-		 * coverage-Eintrag für genau diesen Pfad (oder darunter) entfernen.
-		 * Nicht wegen des gelöschten Pfads selbst (der existiert ja gleich
-		 * nicht mehr), sondern damit nicht irgendwann später ein neuer,
-		 * völlig anderer Pfad gleichen Namens fälschlich als "schon
-		 * abgedeckt" gilt. Ein eventuell abdeckender VORFAHRE wird bewusst
-		 * NICHT angetastet - reines Löschen von Inhalt kann dessen Aussage
-		 * nicht verletzen, s. Kommentar bei sond_index_ctx_coverage_clear(). */
-		if (!sond_index_ctx_coverage_clear(index_tx(priv), path, &idx_err)) {
-			tx_abort(priv);
-			set_idx_error(error, __func__, "sond_index_ctx_coverage_clear",
-					&idx_err);
-			return -1;
-		}
-	}
-
-	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
-	if (from_gmessage) {
-		gint rc = 0;
-
-		rc = dbase_zond_update_gmessage_index(priv->zond->proj.dbase_zond,
-				prefix, index_from, FALSE, error);
-		if (!rc && !section) //Index-DB ebenso
-			rc = gmessage_index_renumber(priv, prefix, index_from, FALSE, error);
-		if (rc) {
-			tx_abort(priv);
-			return -1;
-		}
-	}
-
-	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen
-	if (emb_sibling_changes(priv, stvfm_item, NULL, error) ||
-			emb_sibling_apply(priv, error)) {
-		emb_sibling_pending_clear(priv);
-		tx_abort(priv);
-		return -1;
-	}
-
-	/* Die (nicht mehr angebundene, s. Sperre oben) FILE_PART-Zeile zum Pfad
-	 * in work und store mitlöschen, sonst bleibt sie als Müll stehen */
-	if (!section && !from_gmessage &&
-			dbase_zond_remove_filepart(priv->zond->proj.dbase_zond, path, error)) {
-		emb_sibling_pending_clear(priv);
-		tx_abort(priv);
-		return -1;
-	}
-
-	/* Erst jetzt, unmittelbar vor dem garantierten Erfolg, für den Abschluss vormerken: nach der
-	 * physischen Löschung könnte das Elternverzeichnis von path vollständig abgedeckt sein (die
-	 * gelöschte Datei war ggf. der einzige "Lückenfüller"). Eine Löschung ist nie eine physische
-	 * Verschiebung: Vormerkung einer früheren Verschiebung verwerfen, sonst würde ein gescheiterter
-	 * Commit sie versehentlich zurückdrehen. */
-	sond_projekt_pflege_delete_merken(priv->pflege,
-			(priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx && !section) ? path : NULL);
-	sond_projekt_pflege_move_merken(priv->pflege, NULL, NULL, FALSE);
-
-	//Struktur der PDF/Mail nach dem Löschen neu einlesen
-	structure_pending_clear(priv);
-	structure_pending_add(priv, structure_container_of_item(stvfm_item));
 
 	return 0;
 }

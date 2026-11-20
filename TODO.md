@@ -409,10 +409,10 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     und legt Anbindungen an. Gehört zu zond_treeview/zond_tree_store (noch GTK3).
  3. GTK-freies Modul src/znd/sond_projekt_pflege (Verweise in store/work, Index in der
     Transaktion, Mimepart-Renummerierung, Anhang-Adressen, Struktur, Verschieben, Kopieren,
-    Transaktionsrahmen tx_begin/tx_ende mit Revert und Fehlerdatei): aus zond_treeviewfm.c
+    Löschen, Transaktionsrahmen tx_begin/tx_ende mit Revert und Fehlerdatei): aus zond_treeviewfm.c
     herausgelöst, die Abläufe before_delete/_move/_insert und after rufen sie nur noch auf (Anzeige,
-    Projekt schließen und Programmende bleiben in der Anwendung). Noch in zond_treeviewfm.c: der
-    Löschablauf selbst (Index/Mail/Anhang beim Löschen), Eingang (zond_eingang_*) und die
+    Projekt schließen und Programmende bleiben in der Anwendung). Noch in zond_treeviewfm.c:
+    Eingang (zond_eingang_*) und die
     Anbindungs-Zugriffe auf work. Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch
     ungeplant.
 ```

@@ -531,6 +531,46 @@ static void pending_clear(SondProjektPflege *pflege) {
 	sond_projekt_pflege_structure_clear(pflege);
 }
 
+/* Ist das Elternverzeichnis von path (echtes Dateisystemverzeichnis unterhalb von project_dir) leer?
+ * Dann ist es nur im leeren Sinn "vollständig abgedeckt": die Coverage entfernen, damit es nicht grün
+ * bleibt. Rückgabe TRUE, wenn das Verzeichnis leer war (der Aufrufer fasst dann nichts zusammen),
+ * auch wenn das Entfernen scheitert. Verzeichnisse in Containern (mit "//"), die Projektwurzel und
+ * nicht lesbare Verzeichnisse: FALSE, nichts zu tun. */
+static gboolean coverage_leeres_verzeichnis(SondIndexCtx *index_ctx, gchar const *path,
+		gchar const *project_dir) {
+	g_autofree gchar *parent = NULL;
+	g_autofree gchar *parent_abs = NULL;
+	gchar const *slash = NULL;
+	GDir *dir = NULL;
+	gboolean leer = FALSE;
+	GError *idx_err = NULL;
+
+	if (!project_dir || strstr(path, "//"))
+		return FALSE;
+
+	slash = strrchr(path, '/');
+	if (!slash)
+		return FALSE;
+
+	parent = g_strndup(path, slash - path);
+	parent_abs = g_build_filename(project_dir, parent, NULL);
+
+	dir = g_dir_open(parent_abs, 0, NULL);
+	if (!dir)
+		return FALSE;
+
+	leer = g_dir_read_name(dir) == NULL;
+	g_dir_close(dir);
+
+	if (leer && !sond_index_ctx_coverage_clear(index_ctx, parent, &idx_err)) {
+		LOG_WARN("%s: sond_index_ctx_coverage_clear('%s'): %s", __func__, parent,
+				idx_err ? idx_err->message : "?");
+		g_clear_error(&idx_err);
+	}
+
+	return leer;
+}
+
 SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gboolean suc,
 		gboolean dual, gchar const *project_dir, GError **error) {
 	DBaseZond *dbase = pflege_dbase(pflege);
@@ -553,8 +593,11 @@ SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gbo
 	/* Löschung war erfolgreich: ist das Elternverzeichnis jetzt - und nur jetzt, weil der Knoten
 	 * physisch weg ist - vollständig abgedeckt (die gelöschte, nicht indizierte Datei war ggf. der
 	 * einzige "Lückenfüller")? Dann wieder zu einem Ordner-Eintrag zusammenfassen. Vor dem Commit,
-	 * damit der Eintrag Teil derselben Transaktion ist. */
-	if (pflege->pending_delete_path && sond_projekt_pflege_index_tx(pflege)) {
+	 * damit der Eintrag Teil derselben Transaktion ist. Ist das Verzeichnis dadurch leer geworden,
+	 * verliert es stattdessen seine Coverage (ein leerer Ordner soll nicht grün bleiben). */
+	if (pflege->pending_delete_path && sond_projekt_pflege_index_tx(pflege) &&
+			!coverage_leeres_verzeichnis(sond_projekt_pflege_index_tx(pflege),
+					pflege->pending_delete_path, project_dir)) {
 		GError *collapse_error = NULL;
 
 		if (!sond_index_ctx_coverage_try_collapse(sond_projekt_pflege_index_tx(pflege),
@@ -637,4 +680,90 @@ void sond_projekt_pflege_insert_ende(SondProjektPflege *pflege, gboolean suc) {
 	if (suc)
 		sond_projekt_pflege_structure_refresh(pflege);
 	sond_projekt_pflege_structure_clear(pflege);
+}
+
+/* ------------------------------------------------------------------------
+ * Löschen
+ * --------------------------------------------------------------------- */
+
+gint sond_projekt_pflege_delete(SondProjektPflege *pflege, SondProjektDelete const *d,
+		gboolean *dual, GError **error) {
+	DBaseZond *dbase = pflege_dbase(pflege);
+	SondIndexCtx *index_tx = NULL;
+	g_autofree gchar *prefix = NULL;
+
+	/* Nur eine Datei oder ein Verzeichnis (section NULL) betrifft auch den Index; ein Abschnitt nur
+	 * work. Mimepart und Anhang einer PDF schreiben wie ein Mimepart in beide Datenbanken. */
+	*dual = d->from_gmessage || d->sfp_emb || !d->section;
+
+	if (d->from_gmessage)
+		prefix = g_strndup(d->path, strlen(d->path) - strlen(strrchr(d->path, '/') + 1));
+
+	if (sond_projekt_pflege_tx_begin(pflege, *dual, !d->section, error))
+		return -1;
+
+	index_tx = sond_projekt_pflege_index_tx(pflege);
+	if (index_tx) {
+		GError *idx_err = NULL;
+
+		if (!sond_index_ctx_clear_file(index_tx, d->path, &idx_err)) {
+			sond_projekt_pflege_tx_abort(pflege);
+			set_idx_error(error, __func__, "sond_index_ctx_clear_file", &idx_err);
+
+			return -1;
+		}
+
+		/* Einen eigenen coverage-Eintrag für genau diesen Pfad (oder darunter) entfernen, damit nicht
+		 * später ein neuer, ganz anderer Pfad gleichen Namens fälschlich als schon abgedeckt gilt.
+		 * Ein abdeckender Vorfahre bleibt unberührt: Löschen von Inhalt kann seine Aussage nicht
+		 * verletzen. */
+		if (!sond_index_ctx_coverage_clear(index_tx, d->path, &idx_err)) {
+			sond_projekt_pflege_tx_abort(pflege);
+			set_idx_error(error, __func__, "sond_index_ctx_coverage_clear", &idx_err);
+
+			return -1;
+		}
+	}
+
+	//aus einer Mail heraus: die nachfolgenden Nummern rücken auf
+	if (d->from_gmessage &&
+			gmessage_renumber_all(pflege, prefix, d->index_from, FALSE, error)) {
+		sond_projekt_pflege_tx_abort(pflege);
+
+		return -1;
+	}
+
+	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen
+	sond_projekt_pflege_emb_sibling_clear(pflege);
+	if (d->sfp_emb && (sond_projekt_pflege_emb_sibling_changes(pflege, d->sfp_emb, NULL, error) ||
+			sond_projekt_pflege_emb_sibling_apply(pflege, error))) {
+		sond_projekt_pflege_emb_sibling_clear(pflege);
+		sond_projekt_pflege_tx_abort(pflege);
+
+		return -1;
+	}
+
+	/* Die (nicht mehr angebundene, s. check_delete) FILE_PART-Zeile zum Pfad in work und store
+	 * mitlöschen, sonst bleibt sie als Müll stehen */
+	if (!d->section && !d->from_gmessage && dbase_zond_remove_filepart(dbase, d->path, error)) {
+		sond_projekt_pflege_emb_sibling_clear(pflege);
+		sond_projekt_pflege_tx_abort(pflege);
+
+		return -1;
+	}
+
+	/* Erst jetzt, unmittelbar vor dem garantierten Erfolg, für den Abschluss vormerken: nach der
+	 * physischen Löschung kann das Elternverzeichnis vollständig abgedeckt sein (die gelöschte
+	 * Datei war ggf. der einzige "Lückenfüller"). Eine Löschung ist nie eine physische Verschiebung:
+	 * die Vormerkung einer früheren Verschiebung verwerfen, sonst würde ein gescheiterter Commit sie
+	 * versehentlich zurückdrehen. */
+	sond_projekt_pflege_delete_merken(pflege,
+			(pflege_index_ctx(pflege) && !d->section) ? d->path : NULL);
+	sond_projekt_pflege_move_merken(pflege, NULL, NULL, FALSE);
+
+	//Struktur der PDF/Mail nach dem Löschen neu einlesen
+	sond_projekt_pflege_structure_clear(pflege);
+	sond_projekt_pflege_structure_add(pflege, d->container);
+
+	return 0;
 }
