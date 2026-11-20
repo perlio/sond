@@ -145,6 +145,39 @@ typedef enum {
 SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege*, gboolean suc, gboolean dual,
 		gchar const *project_dir, GError **error);
 
+/* ---- Anbindungen und Abschnitte ----
+ *
+ * Gelesen und geändert wird in der Primärdatenbank (dbase_zond_primary(): work in zond, store im
+ * Client). Ein Eintrag wird durch seinen Filepart und den Abschnitt (NULL: die ganze Datei)
+ * bezeichnet. Alle Funktionen: 0 bei Erfolg, -1 bei Fehler (*error). */
+
+/* Gibt es mindestens einen Abschnitt, der den übergebenen (section) mindestens umfaßt? 1 ja, 0 nein,
+ * -1 Fehler */
+gint sond_projekt_pflege_anbindung_volltreffer(SondProjektPflege*, gchar const *filepart,
+		gchar const *section, GError **error);
+
+//ID des Abschnitts in der Datenbank, 0: nicht vorhanden
+gint sond_projekt_pflege_section_id(SondProjektPflege*, gchar const *filepart, gchar const *section,
+		gint *ID, GError **error);
+
+/* Anzeigetext des Abschnitts (g_free()): sein Text in der Datenbank, sonst der Bereich in Worten
+ * (z.B. "S. 3-5") */
+gint sond_projekt_pflege_section_text(SondProjektPflege*, gchar const *filepart, gchar const *section,
+		gchar **text, GError **error);
+
+//Text des Abschnitts ändern; *ID (optional) erhält seine ID. Ein nicht vorhandener Abschnitt ist ein Fehler.
+gint sond_projekt_pflege_section_set_text(SondProjektPflege*, gchar const *filepart,
+		gchar const *section, gchar const *text, gint *ID, GError **error);
+
+//Abschnitt aus der Datenbank entfernen (nach check_delete)
+gint sond_projekt_pflege_section_delete(SondProjektPflege*, gchar const *filepart,
+		gchar const *section, GError **error);
+
+/* Die Abschnitte direkt unter dem Eintrag (g_ptr_array_unref(), Elemente: gchar* section). Bei
+ * sections NULL: nur die Frage, ob es welche gibt, Rückgabe dann 1 ja, 0 nein, -1 Fehler. */
+gint sond_projekt_pflege_sections(SondProjektPflege*, gchar const *filepart, gchar const *section,
+		GPtrArray **sections, GError **error);
+
 /* ---- Löschen ---- */
 
 //Ein Löschvorgang in den Projektdaten (nach check_delete)

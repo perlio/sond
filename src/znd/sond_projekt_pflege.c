@@ -21,6 +21,8 @@
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
 #include "zond_dbase.h"
+#include "anbindung.h"
+#include "zond_error.h"
 #include "../sond_process_file.h"
 
 struct _SondProjektPflege {
@@ -764,6 +766,128 @@ gint sond_projekt_pflege_delete(SondProjektPflege *pflege, SondProjektDelete con
 	//Struktur der PDF/Mail nach dem Löschen neu einlesen
 	sond_projekt_pflege_structure_clear(pflege);
 	sond_projekt_pflege_structure_add(pflege, d->container);
+
+	return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Anbindungen und Abschnitte
+ * --------------------------------------------------------------------- */
+
+//Die Datenbank, in der Anbindungen gelesen und geändert werden: work in zond, store im Client
+static ZondDBase* anbindungen_db(SondProjektPflege *pflege) {
+	return dbase_zond_primary(pflege_dbase(pflege));
+}
+
+gint sond_projekt_pflege_anbindung_volltreffer(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, GError **error) {
+	//Funktion testet, ob mindestens ein Abschnitt in der Datenbank die section mindestens umfaßt
+	return zond_dbase_test_path_section(anbindungen_db(pflege), filepart, section, TRUE, error);
+}
+
+gint sond_projekt_pflege_section_id(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, gint *ID, GError **error) {
+	*ID = 0; //zond_dbase_get_section() setzt die ID nur bei einem Treffer
+	return zond_dbase_get_section(anbindungen_db(pflege), filepart, section, ID, error) ? -1 : 0;
+}
+
+gint sond_projekt_pflege_section_text(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, gchar **text, GError **error) {
+	gint ID = 0;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID, error))
+		return -1;
+
+	if (ID == 0) { //nicht in der Datenbank: Text aus dem Bereich selbst
+		Anbindung anbindung = { 0 };
+
+		anbindung_parse_file_section(section, &anbindung);
+		*text = anbindung_to_human_readable(&anbindung);
+
+		return 0;
+	}
+
+	return zond_dbase_get_node(anbindungen_db(pflege), ID, NULL, NULL, NULL, NULL, NULL, text, NULL,
+			error) ? -1 : 0;
+}
+
+gint sond_projekt_pflege_section_set_text(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, gchar const *text, gint *ID, GError **error) {
+	gint ID_section = 0;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID_section, error))
+		return -1;
+
+	if (ID_section == 0) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nAbschnitt nicht gefunden", __func__);
+
+		return -1;
+	}
+
+	if (zond_dbase_update_node_text(anbindungen_db(pflege), ID_section, text, error))
+		return -1;
+
+	if (ID)
+		*ID = ID_section;
+
+	return 0;
+}
+
+gint sond_projekt_pflege_section_delete(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, GError **error) {
+	gint ID = 0;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID, error))
+		return -1;
+
+	/* Ist ID selbst oder ein Abkömmling im Bestandsverzeichnis angebunden, wurde die Löschung
+	 * schon vorher verhindert (check_delete): für einen angebundenen Abschnitt wird das hier nie
+	 * erreicht. */
+	return zond_dbase_remove_node(anbindungen_db(pflege), ID, error) ? -1 : 0;
+}
+
+gint sond_projekt_pflege_sections(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, GPtrArray **sections, GError **error) {
+	ZondDBase *db = anbindungen_db(pflege);
+	g_autoptr(GPtrArray) arr = NULL;
+	gint ID = 0;
+	gint child = 0;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID, error))
+		return -1;
+
+	if (section && ID == 0) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nAbschnitt nicht gefunden", __func__);
+
+		return -1;
+	}
+
+	if (zond_dbase_get_first_child(db, ID, &child, error))
+		return -1;
+
+	if (!sections)
+		return child ? 1 : 0;
+
+	arr = g_ptr_array_new_with_free_func(g_free);
+	while (child) {
+		gchar *section_child = NULL;
+		gint younger_sibling_id = 0;
+
+		if (zond_dbase_get_node(db, child, NULL, NULL, NULL, &section_child, NULL, NULL, NULL,
+				error))
+			return -1;
+
+		g_ptr_array_add(arr, section_child);
+
+		if (zond_dbase_get_younger_sibling(db, child, &younger_sibling_id, error))
+			return -1;
+
+		child = younger_sibling_id;
+	}
+
+	*sections = g_ptr_array_ref(arr);
 
 	return 0;
 }

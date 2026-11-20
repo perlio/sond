@@ -413,9 +413,13 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     herausgelöst, die Abläufe before_delete/_move/_insert und after rufen sie nur noch auf (Anzeige,
     Projekt schließen und Programmende bleiben in der Anwendung). Die Nachführung der
     Eingangsangaben (Umbenennen, Verschieben, Kopieren, Löschen) liegt GTK-frei in
-    src/sond_eingang_pflege; zond_eingang.c behält Auswahl, Dialog und Meldungen. Noch in
-    zond_treeviewfm.c: die Anbindungs-Zugriffe auf work. Inhaltsbäume, Viewer, Headerbar und
-    Export für GTK4 sind noch ungeplant.
+    src/sond_eingang_pflege; zond_eingang.c behält Auswahl, Dialog und Meldungen. Die Zugriffe
+    auf Anbindungen und Abschnitte (Text, ID, Kinder, Löschen, Volltreffer) laufen über
+    sond_projekt_pflege_section_*/_sections/_anbindung_volltreffer auf der Primärdatenbank
+    (dbase_zond_primary(): work in zond, store im Client); zond_treeviewfm.c hält nur noch die
+    Anzeige. Die Pflegelogik ist damit aus zond_treeviewfm.c herausgelöst. Offen für den Client:
+    DB-Schicht (Lease, nur lesend öffnen), GTK4-Klasse unter SondTreeviewFM, Dialog "Eingang
+    setzen". Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
 ```
 
 ## Ideen

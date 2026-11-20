@@ -38,6 +38,16 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
 
+//Private-Daten bzw. Pflege des Dateibaums, zu dem der Eintrag gehört
+static ZondTreeviewFMPrivate* ztvfm_of_item(SondTVFMItem *stvfm_item) {
+	return zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+}
+
+static SondProjektPflege* pflege_of_item(SondTVFMItem *stvfm_item) {
+	return ztvfm_of_item(stvfm_item)->pflege;
+}
+
 //Löschen gesperrt: Eintrag steht noch in der Speicher-Datenbank
 static void show_still_in_store(ZondTreeviewFMPrivate *priv) {
 	display_message(priv->zond->win.app_window,
@@ -67,30 +77,13 @@ static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
 }
 
 static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **error) {
-	//prüfen auf Volltreffer
-	//nur, wenn kein Verzeichnis
+	//prüfen auf Volltreffer, nur wenn kein Verzeichnis
 	if (sond_tvfm_item_get_item_type(stvfm_item) != SOND_TVFM_ITEM_TYPE_DIR) {
-		gint rc = 0;
-		SondFilePart* sfp = NULL;
-		g_autofree gchar* filepart = NULL;
-		gchar const* section = NULL;
+		g_autofree gchar* filepart = sond_file_part_get_filepart(
+				sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-		ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-				ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
-
-		sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-		filepart = sond_file_part_get_filepart(sfp);
-
-		section = sond_tvfm_item_get_path_or_section(stvfm_item);
-
-		//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
-		rc = zond_dbase_test_path_section(
-				priv->zond->proj.dbase_zond->zond_dbase_work, filepart,
-				section, TRUE, error);
-		if (rc == -1)
-			return -1;
-		else if (rc == 1)
-			return 1; //Treffer
+		return sond_projekt_pflege_anbindung_volltreffer(pflege_of_item(stvfm_item), filepart,
+				sond_tvfm_item_get_path_or_section(stvfm_item), error);
 	}
 
 	return 0;
@@ -482,27 +475,12 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		gint ID_section = 0;
 		g_autofree gchar* filepart = NULL;
-		gint rc = 0;
 		GtkTreeIter* iter_tree = NULL;
 
 		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-		rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), &ID_section, error);
-		if (rc)
-			return -1;
-
-		if (ID_section == 0) {
-			if (error) *error = g_error_new(ZOND_ERROR, 0,
-					"%s\nAbschnitt nicht gefunden", __func__);
-
-			return -1;
-		}
-
-		rc = zond_dbase_update_node_text(
-				ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID_section,
-				new_text, error);
-		if (rc)
+		if (sond_projekt_pflege_section_set_text(ztvfm_priv->pflege, filepart,
+				sond_tvfm_item_get_path_or_section(stvfm_item), new_text, &ID_section, error))
 			return -1;
 
 		//Text in treeview anpassen
@@ -615,52 +593,20 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 }
 
 static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** error) {
-	gint rc = 0;
-	gchar* filepart = NULL;
-	gchar const* section = NULL;
-	gint ID = 0;
-
-	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
-
-	ztvfm_priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
-
-	section = sond_tvfm_item_get_path_or_section(stvfm_item);
-	filepart = sond_file_part_get_filepart(
+	g_autofree gchar* filepart = sond_file_part_get_filepart(
 			sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-			filepart, section, &ID, error);
-	g_free(filepart);
-	if (rc)
-		return -1;
-
-	/* Ist ID selbst oder ein Abkömmling von ID im Bestandsverzeichnis
-	 * angebunden, wurde die Löschung bereits in
-	 * zond_treeviewfm_before_delete verhindert - diese Funktion hier wird
-	 * für einen angebundenen Abschnitt also nie erreicht. */
-	rc = zond_dbase_remove_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID, error);
-	if (rc)
-		return -1;
-
-	return 0;
+	return sond_projekt_pflege_section_delete(pflege_of_item(stvfm_item), filepart,
+			sond_tvfm_item_get_path_or_section(stvfm_item), error);
 }
 
 static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		GPtrArray** arr_children, GError** error) {
 	g_autofree gchar* filepart = NULL;
-	g_autoptr(GPtrArray) arr_children_int = NULL;
-	SondFilePart* sfp = NULL;
-	gchar const* section = NULL;
-	gint ID = 0;
-	gint child = 0;
+	g_autoptr(GPtrArray) sections = NULL;
+	SondFilePart* sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	SondProjektPflege *pflege = pflege_of_item(stvfm_item);
 	gint rc = 0;
-
-	ZondTreeviewFMPrivate* ztvfm_priv =
-			zond_treeviewfm_get_instance_private(
-					ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
-
-	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 
 	if (!sfp) {
 		LOG_WARN("sfp darf nicht NULL sein");
@@ -670,59 +616,27 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 	if (!SOND_IS_FILE_PART_PDF(sfp))
 		return 0;
 
-	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-			filepart, section, &ID, error);
+	//ohne arr_children: nur die Frage, ob es Abschnitte gibt (1/0)
+	if (!arr_children)
+		return sond_projekt_pflege_sections(pflege, filepart,
+				sond_tvfm_item_get_path_or_section(stvfm_item), NULL, error);
+
+	rc = sond_projekt_pflege_sections(pflege, filepart,
+			sond_tvfm_item_get_path_or_section(stvfm_item), &sections, error);
 	if (rc)
 		return -1;
 
-	if (section && ID == 0) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nAbschnitt nicht gefunden", __func__);
+	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
+	for (guint i = 0; i < sections->len; i++) {
+		SondTVFMItem* stvfm_item_child = sond_tvfm_item_create(
+				sond_tvfm_item_get_stvfm(stvfm_item), sfp, g_ptr_array_index(sections, i));
 
-		return -1;
-	}
-
-	rc = zond_dbase_get_first_child(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, ID, &child, error);
-	if (rc)
-		return -1;
-
-	if (!arr_children) {
-		if (child) return 1;
-		else return 0;
-	}
-
-	arr_children_int = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
-	while (child) {
-		SondTVFMItem* stvfm_item_child = NULL;
-		gchar* section_child = NULL;
-		gint rc = 0;
-		gint younger_sibling_id = 0;
-
-		rc = zond_dbase_get_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work, child,
-				NULL, NULL, NULL, &section_child, NULL, NULL, NULL, error);
-		if (rc)
-			return -1;
-
-		stvfm_item_child =
-				sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
-						sfp, section_child);
-		g_free(section_child);
 		sond_tvfm_item_set_icon_name(stvfm_item_child,
-				ztvfm_priv->zond->app.icon[ICON_ANBINDUNG].icon_name);
-		g_ptr_array_add(arr_children_int, stvfm_item_child);
-
-		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-				child, &younger_sibling_id, error);
-		if (rc)
-			return -1;
-
-		child = younger_sibling_id;
+				ztvfm_of_item(stvfm_item)->zond->app.icon[ICON_ANBINDUNG].icon_name);
+		g_ptr_array_add(*arr_children, stvfm_item_child);
 	}
-
-	*arr_children = g_ptr_array_ref(arr_children_int);
 
 	return 0;
 }
@@ -744,38 +658,11 @@ static gboolean zond_treeviewfm_has_sections(SondTVFMItem* stvfm_item) {
 
 static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 		gchar** text, GError** error) {
-	gchar* filepart = NULL;
-	gchar const* section = NULL;
-	gint ID = 0;
-	gint rc = 0;
-
-	ZondTreeviewFMPrivate* ztvfm_priv =
-			zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
-
-	section = sond_tvfm_item_get_path_or_section(stvfm_item);
-	filepart = sond_file_part_get_filepart(
+	g_autofree gchar* filepart = sond_file_part_get_filepart(
 			sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-	rc = zond_dbase_get_section(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-			filepart, section, &ID, error);
-	g_free(filepart);
-	if (rc)
-		return -1;
-
-	if (ID == 0) {
-		Anbindung anbindung = { 0 };
-
-		anbindung_parse_file_section(section, &anbindung);
-		*text = anbindung_to_human_readable(&anbindung);
-	}
-	else {
-		rc = zond_dbase_get_node(ztvfm_priv->zond->proj.dbase_zond->zond_dbase_work,
-				ID, NULL, NULL, NULL, NULL, NULL, text, NULL, error);
-		if (rc)
-			return -1;
-	}
-
-	return 0;
+	return sond_projekt_pflege_section_text(pflege_of_item(stvfm_item), filepart,
+			sond_tvfm_item_get_path_or_section(stvfm_item), text, error);
 }
 
 /* Reiner readdir-Scanner für "wirkliche" (nicht in einem Container liegende)
@@ -1276,7 +1163,7 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
-	rc = zond_dbase_get_section(zond->proj.dbase_zond->zond_dbase_work, filepart, section, &ID, &error);
+	rc = sond_projekt_pflege_section_id(pflege_of_item(stvfm_item), filepart, section, &ID, &error);
 	g_free(filepart);
 	g_object_unref(stvfm_item); //section ist damit nicht mehr gültig
 	if (rc) {
