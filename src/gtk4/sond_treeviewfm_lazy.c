@@ -135,8 +135,43 @@ static gboolean lazy_defer_load(SondLazyChildren *self) {
 }
 #endif
 
+/* Wartecursor, solange Kinder eines Containers (ZIP, PDF, E-Mail) gelesen werden: das kann bei großen
+ * Archiven spürbar dauern und die Oberfläche steht währenddessen. Es wird nicht gepumpt (ein
+ * verschachteltes Abarbeiten von Ereignissen mitten im Zugriff auf das Listenmodell ist unsicher),
+ * ob die Sanduhr schon vor der Arbeit erscheint, hängt deshalb vom Fenstersystem ab. Ein Zähler
+ * schützt vor verschachteltem Aufklappen. */
+static guint wait_cursor_depth = 0;
+
+static GtkWidget* wait_cursor_window(SondTVFMItem *item) {
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(item);
+
+	return (priv->owner && GTK_IS_WIDGET(priv->owner)) ?
+			GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(priv->owner))) : NULL;
+}
+
+static void wait_cursor_begin(SondTVFMItem *item) {
+	GtkWidget *window = wait_cursor_window(item);
+
+	if (!window || wait_cursor_depth++)
+		return;
+
+	gtk_widget_set_cursor_from_name(window, "wait");
+	gdk_display_flush(gtk_widget_get_display(window));
+}
+
+static void wait_cursor_end(SondTVFMItem *item) {
+	GtkWidget *window = wait_cursor_window(item);
+
+	if (!window || !wait_cursor_depth || --wait_cursor_depth)
+		return;
+
+	gtk_widget_set_cursor(window, NULL);
+}
+
 static void lazy_ensure_loaded(SondLazyChildren *self) {
 	GError *error = NULL;
+	SondTVFMItemPrivate *priv = NULL;
+	gboolean container = FALSE;
 
 	if (self->loaded)
 		return;
@@ -147,6 +182,12 @@ static void lazy_ensure_loaded(SondLazyChildren *self) {
 		return;
 #endif
 
+	priv = sond_tvfm_item_get_priv(self->item);
+	container = priv->sond_file_part != NULL;
+
+	if (container)
+		wait_cursor_begin(self->item);
+
 	if (sond_tvfm_item_load_children(self->item, &self->children, NULL, &error)) {
 		LOG_WARN("Kinder von '%s' nicht geladen: %s\n",
 				sond_tvfm_item_get_display_name(self->item) ?
@@ -155,6 +196,9 @@ static void lazy_ensure_loaded(SondLazyChildren *self) {
 		g_clear_error(&error);
 		self->children = g_ptr_array_new_with_free_func(g_object_unref);
 	}
+
+	if (container)
+		wait_cursor_end(self->item);
 }
 
 static GType lazy_get_item_type(GListModel *list) {

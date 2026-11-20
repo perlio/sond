@@ -73,6 +73,12 @@ struct _SondTreeviewFMClass {
 	 * Bedeutung von Sections nicht. NULL = kein Symbol für Sections. */
 	SondIndexStatus (*get_section_index_status)(SondTVFMItem*, SondIndexCtx*);
 
+	/* Wirksames Eingangsdatum (JJJJMMTT) eines Eintrags des Dateisystems (rel_path relativ zur
+	 * Wurzel, '/' als Trenner), 0 = keine Angabe, negativ = noch nicht verfügbar (wird später
+	 * erneut gefragt). Setzt eine Unterklasse dieses Vfunc, zeigt der Baum die Spalte "Eingang"
+	 * (sortierbar, ohne Angabe gilt die Änderungszeit). Ohne Vfunc gibt es die Spalte nicht. */
+	gint (*get_eingang)(SondTreeviewFM*, gchar const *rel_path, gboolean is_dir);
+
 	/* Ein Eintrag des Dateisystems (rel_path relativ zur Wurzel, '/' als Trenner)
 	 * wurde gelöscht bzw. umbenannt: die Unterklasse kann Zusatzangaben (Eingangs-
 	 * stempel) nachführen. NULL = nichts zu tun. */
@@ -98,6 +104,21 @@ struct _SondTreeviewFMClass {
 	/* Ist die Datei gerade geöffnet (Viewer) und darf nicht verändert werden, z.B. beim
 	 * Entsperren? NULL = nie. */
 	gboolean (*file_part_busy)(SondFilePart*);
+
+	/* Anzeigetext eines Abschnitts (LEAF_SECTION). 0 bei Erfolg, -1 bei Fehler (der Baum zeigt dann
+	 * die Fehlermeldung). NULL = Abschnitte haben keinen Text. */
+	gint (*text_from_section)(SondTVFMItem*, gchar **text, GError**);
+
+	/* Soll die Zeile hervorgehoben werden (z.B. weil der Abschnitt die gesuchte Stelle enthält)?
+	 * 1 ja, 0 nein, -1 Fehler (wird protokolliert, die Zeile bleibt unhervorgehoben). NULL = nie. */
+	gint (*deter_background)(SondTVFMItem*, GError**);
+
+	/* Der Name oder Text einer Zeile wurde geändert (Umbenennen). item: die Zeile, parent: ihr Eltern-
+	 * Eintrag (Wurzel, wenn sie oben steht), text_new: der neue Text. 0 bei Erfolg, -1 bei Fehler (error).
+	 * Standard: Eintrag des Dateisystems bzw. im Container umbenennen. Eine Unterklasse überschreibt
+	 * das für Abschnitte (Text der Anbindung ändern) und ruft sonst die Elternfunktion. */
+	gint (*text_edited)(SondTreeviewFM*, SondTVFMItem *item, SondTVFMItem *parent,
+			gchar const *text_new, GError**);
 
 	/* Abschnitte (Anbindungen) von Einträgen; NULL = unterstützt der Baum nicht */
 	gboolean (*has_sections)(SondTVFMItem*);
@@ -147,6 +168,10 @@ gboolean sond_treeviewfm_get_pin_summary(SondTreeviewFM*, guint *total, guint *p
  * die sichtbare Zeile durch einen neuen Eintrag aus sfp ersetzen. */
 void sond_treeviewfm_refresh_file_part(SondTreeviewFM*, SondFilePart *sfp);
 
+/* Nach geänderten Eingangsangaben (z.B. neue Zettel eingelesen): die Angaben aller sichtbaren
+ * Einträge neu holen, die Spalte neu anzeigen und, falls danach sortiert ist, neu sortieren. */
+void sond_treeviewfm_eingang_refresh(SondTreeviewFM*);
+
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
 
@@ -168,11 +193,28 @@ void sond_treeviewfm_unlock_selection(SondTreeviewFM*);
  * (z.B. nach einem Index-Lauf). Gültig, solange das Widget lebt. */
 void sond_treeviewfm_unlock_hooks_init(SondTreeviewFM*, SondUnlockHooks *hooks);
 
+/* Ist der Eintrag zu filepart (wie bei sond_tvfm_item_get_filepart()) in der Anzeige? Mit open
+ * werden die Vorfahren dafür aufgeklappt (lädt Verzeichnisse und Container), sonst werden nur
+ * schon aufgeklappte Zeilen durchsucht und der Baum bleibt unverändert. TRUE: gefunden, *item
+ * (darf NULL sein) ist eine neue Referenz. */
+gboolean sond_treeviewfm_filepart_visible(SondTreeviewFM*, gchar const *filepart, gboolean open,
+		SondTVFMItem **item);
+
 /* Klappt den Baum bis zu einem Eintrag auf und wählt ihn aus. filepart wie von
  * sond_tvfm_item_get_filepart() (Dateisystempfad, bei Teilen in Containern mit "//"
  * eingeschoben, z.B. "sub/a.zip//b/c.pdf"). Lädt dabei Verzeichnisse und Container.
  * FALSE, wenn der Eintrag nicht gefunden wurde. */
 gboolean sond_treeviewfm_reveal_filepart(SondTreeviewFM*, gchar const *filepart);
+
+/* Sucht im Dateibaum nach Namen, ohne Dialog und Ergebnisfenster. Liefert die Fileparts der Treffer
+ * (GPtrArray mit g_free) in der Form, die sond_treeviewfm_filepart_visible() erwartet, oder NULL
+ * und error. Läuft mit Fortschrittsfenster und Abbrechen (die Oberfläche bleibt bedienbar); bei
+ * Abbruch kommen die bis dahin gefundenen Treffer zurück. selected_only: nur unterhalb der
+ * markierten Punkte, sonst ab der Wurzel. n_skipped (optional): Zahl nicht lesbarer,
+ * übersprungener Verzeichnisse; n_not_loaded (optional): Zahl nicht geladener SeaDrive-Container,
+ * die nicht durchsucht wurden (die Suche löst keinen Download aus). */
+GPtrArray* sond_treeviewfm_search(SondTreeviewFM*, SondTVFMSearchOpts const*,
+		gboolean selected_only, guint *n_skipped, guint *n_not_loaded, GError**);
 
 /* Dateisuche mit Dialog, Fortschrittsfenster und Ergebnisfenster (wie im Kontextmenü).
  * Ein Doppelklick auf einen Treffer löst das Signal "search-hit-activated" (filepart)

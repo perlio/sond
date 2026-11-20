@@ -642,10 +642,19 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->open_item = fm_default_open_item;
 	klass->confirm_delete = TRUE;
 	klass->file_part_busy = NULL;
+	klass->get_eingang = NULL;
+	klass->text_from_section = NULL;
+	klass->deter_background = NULL;
+	klass->text_edited = fm_default_text_edited;
 	fm_search_register_signals(G_OBJECT_CLASS(klass));
 
 	//der Pin-Zustand einiger Einträge hat sich geändert: Anzeige neu lesen
 	fm_signals[SIGNAL_PINS_CHANGED] = g_signal_new("pins-changed",
+			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+			G_TYPE_NONE, 0);
+
+	//die Eingangsangaben haben sich geändert: Spalte neu lesen
+	fm_signals[SIGNAL_EINGANG_CHANGED] = g_signal_new("eingang-changed",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 			G_TYPE_NONE, 0);
 

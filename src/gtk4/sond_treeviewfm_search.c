@@ -34,21 +34,21 @@ static guint signal_hit_activated = 0;
  * Treffer im Baum zeigen
  * --------------------------------------------------------------------- */
 
-/* Klappt Ebene für Ebene auf: auf jeder Ebene den Eintrag mit genau diesem Pfad
- * suchen (dann auswählen) oder den, dessen Pfad ein Vorfahre ist (Trenner "/" direkt
- * dahinter; das schließt "//" bei Containern ein), ihn aufklappen und eine Ebene
- * tiefer weitermachen. Der PageTree-/Message-Marker trägt denselben Pfad wie sein
- * Container, enthält aber nie Anhänge: kein Abstieg. */
-gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart) {
+/* Sucht den Eintrag zu filepart Ebene für Ebene: auf jeder Ebene den Eintrag mit genau diesem Pfad
+ * (dann gefunden) oder den, dessen Pfad ein Vorfahr ist (Trenner "/" direkt dahinter; das schließt
+ * "//" bei Containern ein) und eine Ebene tiefer weitermachen. Mit open werden die Vorfahren
+ * dabei aufgeklappt (laden Verzeichnisse und Container), sonst werden nur schon aufgeklappte Zeilen
+ * durchsucht und der Baum bleibt unverändert. Der PageTree-/Message-Marker trägt denselben Pfad
+ * wie sein Container, enthält aber nie Anhänge: kein Abstieg. *found: neue Referenz. */
+static gboolean find_filepart(SondTreeviewFM *self, gchar const *filepart, gboolean open,
+		SondTVFMItem **found) {
 	SondTreeview *base = SOND_TREEVIEW(self);
-	GListModel *level = NULL;
+	GListModel *level = sond_treeview_get_roots(base);
 	GtkTreeListRow *row_keep = NULL;
-	gboolean found = FALSE;
+	gboolean ok = FALSE;
 
-	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), FALSE);
-	g_return_val_if_fail(filepart && *filepart, FALSE);
-
-	level = sond_treeview_get_roots(base);
+	if (found)
+		*found = NULL;
 
 	while (level) {
 		guint n = g_list_model_get_n_items(level);
@@ -75,11 +75,11 @@ gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart) {
 		}
 
 		if (exact) {
-			found = sond_treeview_select_item(base, exact);
+			if (found)
+				*found = g_object_ref(exact);
 			g_object_unref(exact);
 			g_clear_object(&descend);
-			if (found)
-				gtk_widget_grab_focus(GTK_WIDGET(sond_treeview_get_column_view(base)));
+			ok = TRUE;
 
 			break;
 		}
@@ -92,13 +92,48 @@ gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart) {
 		if (!row)
 			break;
 
-		gtk_tree_list_row_set_expanded(row, TRUE);
+		if (!open && !gtk_tree_list_row_get_expanded(row)) {
+			g_object_unref(row);
+
+			break;
+		}
+
+		if (open)
+			gtk_tree_list_row_set_expanded(row, TRUE);
 		level = gtk_tree_list_row_get_children(row);
 		g_clear_object(&row_keep);
 		row_keep = row;
 	}
 
 	g_clear_object(&row_keep);
+
+	return ok;
+}
+
+gboolean sond_treeviewfm_filepart_visible(SondTreeviewFM *self, gchar const *filepart,
+		gboolean open, SondTVFMItem **item) {
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), FALSE);
+	g_return_val_if_fail(filepart && *filepart, FALSE);
+
+	return find_filepart(self, filepart, open, item);
+}
+
+//Klappt den Baum bis zum Eintrag auf, wählt ihn aus und zeigt ihn
+gboolean fm_reveal_filepart(SondTreeviewFM *self, gchar const *filepart) {
+	SondTreeview *base = SOND_TREEVIEW(self);
+	SondTVFMItem *item = NULL;
+	gboolean found = FALSE;
+
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), FALSE);
+	g_return_val_if_fail(filepart && *filepart, FALSE);
+
+	if (!find_filepart(self, filepart, TRUE, &item))
+		return FALSE;
+
+	found = sond_treeview_select_item(base, item);
+	g_object_unref(item);
+	if (found)
+		gtk_widget_grab_focus(GTK_WIDGET(sond_treeview_get_column_view(base)));
 
 	return found;
 }
@@ -457,35 +492,28 @@ static gpointer search_thread_func(gpointer data) {
 	return NULL;
 }
 
-void sond_treeviewfm_search_activate(SondTreeviewFM *self) {
-	SondTreeviewFMPrivate *priv = NULL;
+/* Die Suche selbst ohne Dialog: Fortschrittsfenster mit Abbrechen, die Oberfläche bleibt bedienbar.
+ * Liefert die Fileparts der Treffer (GPtrArray mit g_free) oder NULL mit error. */
+GPtrArray* sond_treeviewfm_search(SondTreeviewFM *self, SondTVFMSearchOpts const *opts,
+		gboolean selected_only, guint *n_skipped, guint *n_not_loaded, GError **error) {
 	GPtrArray *selected = NULL;
 	GPtrArray *start = NULL;
 	GPtrArray *hits = NULL;
 	SondTVFMSearch *search = NULL;
-	SondTVFMSearchOpts opts = { 0 };
 	SearchThread st = { 0 };
 	SondBusyDialog *busy = NULL;
 	GThread *thread = NULL;
-	GString *msg = NULL;
-	gboolean selected_only = FALSE;
 	gint cancelled = 0;
-	guint n_skipped = 0;
-	guint n_not_loaded = 0;
 
-	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
-	priv = fm_get_priv(self);
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), NULL);
+	g_return_val_if_fail(opts && opts->text && *opts->text, NULL);
 
-	if (!priv->root)
-		return;
+	if (n_skipped)
+		*n_skipped = 0;
+	if (n_not_loaded)
+		*n_not_loaded = 0;
 
 	selected = sond_treeview_get_selected_items(SOND_TREEVIEW(self));
-	if (!search_dialog(self, selected->len, &selected_only)) {
-		g_ptr_array_unref(selected);
-
-		return;
-	}
-
 	if (selected_only && selected->len > 0)
 		start = g_ptr_array_ref(selected);
 	else {
@@ -494,14 +522,11 @@ void sond_treeviewfm_search_activate(SondTreeviewFM *self) {
 	}
 	g_ptr_array_unref(selected);
 
-	opts = priv->search_opts;
-	opts.text = priv->search_text;
-	search = sond_tvfm_search_new(SOND_TVFM_OWNER(self), &opts);
+	search = sond_tvfm_search_new(SOND_TVFM_OWNER(self), opts);
 
 	st.search = search;
 	st.start = start;
-	busy = sond_busy_dialog_new(fm_parent_window(self), "Dateisuche", opts.text,
-			&cancelled);
+	busy = sond_busy_dialog_new(fm_parent_window(self), "Dateisuche", opts->text, &cancelled);
 	thread = g_thread_new("tvfm-search", search_thread_func, &st);
 
 	//Ereignisse abarbeiten, damit das Fenster und Abbrechen reagieren
@@ -517,19 +542,57 @@ void sond_treeviewfm_search_activate(SondTreeviewFM *self) {
 	g_thread_join(thread);
 	sond_busy_dialog_close(busy);
 
-	if (st.rc == -1) {
-		fm_show_error(self, "Fehler bei Dateisuche",
-				st.error ? st.error->message : "?");
-		g_clear_error(&st.error);
-		sond_tvfm_search_free(search);
-		g_ptr_array_unref(start);
+	if (st.rc == -1)
+		g_propagate_error(error, st.error);
+	else {
+		hits = sond_tvfm_search_take_hits(search);
+		if (n_skipped)
+			*n_skipped = sond_tvfm_search_get_n_skipped(search);
+		if (n_not_loaded)
+			*n_not_loaded = sond_tvfm_search_get_n_not_loaded(search);
+	}
+
+	sond_tvfm_search_free(search);
+	g_ptr_array_unref(start);
+
+	return hits;
+}
+
+void sond_treeviewfm_search_activate(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = NULL;
+	GPtrArray *selected = NULL;
+	GPtrArray *hits = NULL;
+	SondTVFMSearchOpts opts = { 0 };
+	GError *error = NULL;
+	GString *msg = NULL;
+	gboolean selected_only = FALSE;
+	guint n_skipped = 0;
+	guint n_not_loaded = 0;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	priv = fm_get_priv(self);
+
+	if (!priv->root)
+		return;
+
+	selected = sond_treeview_get_selected_items(SOND_TREEVIEW(self));
+	if (!search_dialog(self, selected->len, &selected_only)) {
+		g_ptr_array_unref(selected);
 
 		return;
 	}
+	g_ptr_array_unref(selected);
 
-	hits = sond_tvfm_search_take_hits(search);
-	n_skipped = sond_tvfm_search_get_n_skipped(search);
-	n_not_loaded = sond_tvfm_search_get_n_not_loaded(search);
+	opts = priv->search_opts;
+	opts.text = priv->search_text;
+
+	hits = sond_treeviewfm_search(self, &opts, selected_only, &n_skipped, &n_not_loaded, &error);
+	if (!hits) {
+		fm_show_error(self, "Fehler bei Dateisuche", error ? error->message : "?");
+		g_clear_error(&error);
+
+		return;
+	}
 
 	msg = g_string_new(NULL);
 	if (n_skipped)
@@ -552,8 +615,6 @@ void sond_treeviewfm_search_activate(SondTreeviewFM *self) {
 
 	g_string_free(msg, TRUE);
 	g_ptr_array_unref(hits);
-	sond_tvfm_search_free(search);
-	g_ptr_array_unref(start);
 }
 
 void fm_action_search(GSimpleAction *action, GVariant *parameter, gpointer data) {

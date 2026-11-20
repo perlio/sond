@@ -319,7 +319,7 @@ Status: zurückgestellt (Prüfauftrag)
 
 ### #252 GTK4-Dateibaum: noch fehlende Funktionen
 
-Status: zurückgestellt (alles gebaut und getestet bis auf Punkt 4)
+Status: zurückgestellt (alles gebaut; Punkt 4 noch ungetestet)
 
 ```text
  Der GTK4-Dateibaum (src/gtk4/sond_treeviewfm.c) kann Wurzel setzen, Anzeige mit
@@ -342,13 +342,16 @@ Status: zurückgestellt (alles gebaut und getestet bis auf Punkt 4)
     Menüpunkt im GTK4-Baum selbst (gtk4/sond_treeviewfm_unlock.c, auch für Einträge in
     Containern; Schreibprüfung über sond_treeviewfm_set_write_check, Vfunc file_part_busy)
     getestet; das Dokumentenfenster nutzt ihn statt eines eigenen Menüpunkts.
- 4. Eingangs-Spalte als Teil der Basis: das Vfunc get_eingang ist in der GTK4-Fassung noch
-    nicht deklariert (GTK3: gtk3/sond_treeviewfm.h, gesetzt erst von zond_treeviewfm), die
-    Spalte fehlt. Zuschnitt: Vfunc get_eingang (rel_path, is_dir -> Datum oder -1) in
-    SondTreeviewFMClass deklarieren; die Spalte "Eingang" (Breite 100, sortierbar) nur
-    anlegen, wenn eine Unterklasse das Vfunc setzt; Anzeige und Sortierschlüssel wie in GTK3
-    (item_eingang, Datum JJJJMMTT, Schlüssel in Sekunden). Die fs_entry_*-Hooks sind schon da.
-    Den Inhalt (Zettel, Cache, Menü Eingang) liefert zond-GTK4, s. #259.
+ 4. Gleichwertigkeit der Basis mit der GTK3-Fassung (gebaut, ungetestet): Vfunc get_eingang
+    (Spalte "Eingang" nur, wenn eine Unterklasse es setzt; sortierbar, ohne Angabe gilt die
+    Änderungszeit) und sond_treeviewfm_eingang_refresh(); sond_treeviewfm_filepart_visible()
+    (mit/ohne Aufklappen); sond_treeviewfm_search() ohne Dialog; Wartecursor beim Lesen der
+    Kinder von Containern (ohne Pumpen, ob die Sanduhr erscheint, hängt vom Fenstersystem ab);
+    Hooks text_from_section, deter_background (Hervorhebung per CSS-Klasse "sond-hit") und
+    text_edited (Umbenennen, Standard fm_default_text_edited). Nicht übernommen: klassenweite
+    Zwischenablage über mehrere Bäume (GTK4: nur dieselbe Ansicht); öffentliche Hilfen
+    item_fs_path/file_part_indexable (sond_tvfm_item_fs_path ist in tvfm/ öffentlich). Den Inhalt
+    (Zettel, Cache, Menü Eingang, Abschnitte) liefert eine Unterklasse, s. #259.
  5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen und
     Vorab-Laden beim Kopieren: gebaut (gtk4/sond_seadrive_load_dialog.c auf dem GTK-freien
     Lade-Auftrag in seadrive/sond_seadrive_core.c, tvfm/sond_tvfm_load.c), getestet.

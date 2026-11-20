@@ -48,6 +48,7 @@ typedef struct {
 	gchar *search_text;         //Einstellungen der letzten Dateisuche
 	SondTVFMSearchOpts search_opts;
 	gboolean search_settings_valid;
+	GtkColumnViewColumn *column_eingang; //nur mit Vfunc get_eingang
 	SondTreeviewFMWriteCheckFunc write_check;
 	gpointer write_check_data;
 #ifdef G_OS_WIN32
@@ -57,7 +58,7 @@ typedef struct {
 } SondTreeviewFMPrivate;
 
 enum {
-	SIGNAL_PINS_CHANGED, SIGNAL_SEADRIVE_STATUS, N_SIGNALS
+	SIGNAL_PINS_CHANGED, SIGNAL_SEADRIVE_STATUS, SIGNAL_EINGANG_CHANGED, N_SIGNALS
 };
 
 extern guint fm_signals[N_SIGNALS];
@@ -109,6 +110,8 @@ void fm_action_paste(GSimpleAction *action, GVariant *parameter, gpointer data);
 void fm_action_paste_same(GSimpleAction *action, GVariant *parameter, gpointer data);
 void fm_action_paste_child(GSimpleAction *action, GVariant *parameter, gpointer data);
 void fm_on_activate(GtkColumnView *column_view, guint position, gpointer data);
+gint fm_default_text_edited(SondTreeviewFM *self, SondTVFMItem *item, SondTVFMItem *parent,
+		gchar const *text_new, GError **error);
 gint fm_default_open_item(SondTreeviewFM *self, SondTVFMItem *item,
 		gboolean open_with, GError **error);
 void fm_root_monitor_start(SondTreeviewFM *self);

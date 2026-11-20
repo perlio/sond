@@ -154,8 +154,9 @@ void fm_action_mkdir_child(GSimpleAction *action, GVariant *parameter, gpointer 
 /* --- Umbenennen --- */
 
 /* Benennt den Eintrag um (Prüfung des Namens, Signale vor und nach der Änderung,
- * Nachführen von Zusatzangaben und geöffneten Dateien). 0 bei Erfolg, -1 bei Fehler. */
-static gint rename_item(SondTreeviewFM *self, SondTVFMItem *item, SondTVFMItem *parent,
+ * Nachführen von Zusatzangaben und geöffneten Dateien). 0 bei Erfolg, -1 bei Fehler.
+ * Standard des Vfunc text_edited. */
+gint fm_default_text_edited(SondTreeviewFM *self, SondTVFMItem *item, SondTVFMItem *parent,
 		gchar const *text_new, GError **error) {
 	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(self);
 	SondTVFMItemPrivate *item_priv = sond_tvfm_item_get_priv(item);
@@ -214,11 +215,13 @@ typedef struct {
 	SondTVFMItem *item;
 	SondTVFMItem *parent;
 	SondLazyChildren *container;
+	gchar *name_old; //Text vor dem Bearbeiten (Name, bei Abschnitten der Anzeigetext)
 	GtkWidget *window;
 	GtkWidget *entry;
 } RenameDialog;
 
 static void rename_dialog_free(RenameDialog *d) {
+	g_free(d->name_old);
 	g_clear_object(&d->self);
 	g_clear_object(&d->item);
 	g_clear_object(&d->parent);
@@ -233,8 +236,9 @@ static void rename_dialog_ok(GtkWidget *widget, gpointer user_data) {
 
 	(void) widget;
 
-	if (g_strcmp0(text, sond_tvfm_item_get_display_name(d->item))) {
-		if (rename_item(d->self, d->item, d->parent, text, &error)) {
+	if (g_strcmp0(text, d->name_old)) {
+		if (SOND_TREEVIEWFM_GET_CLASS(d->self)->text_edited(d->self, d->item, d->parent, text,
+				&error)) {
 			//das Schließen gibt d frei: vorher alles Nötige sichern
 			SondTreeviewFM *self = g_object_ref(d->self);
 			gchar *message = g_strdup(error ? error->message : "unbekannt");
@@ -300,7 +304,16 @@ static void rename_selected(SondTreeviewFM *self) {
 		g_object_ref(d->container);
 	g_ptr_array_unref(rows);
 
-	name = sond_tvfm_item_get_display_name(d->item);
+	//Abschnitte haben keinen Namen, ihr Text kommt von der Unterklasse
+	if (sond_tvfm_item_get_item_type(d->item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION &&
+			SOND_TREEVIEWFM_GET_CLASS(self)->text_from_section) {
+		GError *error = NULL;
+
+		if (SOND_TREEVIEWFM_GET_CLASS(self)->text_from_section(d->item, &d->name_old, &error))
+			g_clear_error(&error);
+	} else
+		d->name_old = g_strdup(sond_tvfm_item_get_display_name(d->item));
+	name = d->name_old;
 
 	d->window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(d->window), "Umbenennen");

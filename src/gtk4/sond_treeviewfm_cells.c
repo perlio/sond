@@ -35,6 +35,7 @@
 #include "../sond_icon_util.h"
 #include "../tvfm/sond_tvfm_status.h"
 #include "../sond_mime.h"
+#include "../sond_eingang_zettel.h"
 #ifdef G_OS_WIN32
 #include "../seadrive/sond_seadrive_watcher.h"
 #endif
@@ -102,6 +103,61 @@ static gint compare_size(gconstpointer a, gconstpointer b, gpointer data) {
 	sond_tvfm_item_fs_stat((SondTVFMItem*) b, NULL, &size_b, NULL);
 
 	return (size_a > size_b) - (size_a < size_b);
+}
+
+/* Wirksames Eingangsdatum (JJJJMMTT, 0 = keine Angabe) des Eintrags. Beim ersten Bedarf über das
+ * Vfunc get_eingang der Unterklasse geholt und im Item gemerkt. Ist die Auskunft (noch) nicht
+ * verfügbar, wird später erneut gefragt. */
+static gint item_eingang(SondTreeviewFM *view, SondTVFMItem *item) {
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(item);
+	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(view);
+	gchar *rel = NULL;
+	gboolean is_dir = FALSE;
+	gint result = 0;
+
+	if (priv->eingang_done)
+		return priv->eingang;
+
+	if (!klass->get_eingang || !sond_tvfm_item_fs_path(item, &rel, &is_dir))
+		return 0;
+
+	result = klass->get_eingang(view, rel, is_dir);
+	g_free(rel);
+	if (result < 0) //noch nicht verfügbar
+		return 0;
+
+	priv->eingang = result;
+	priv->eingang_key = (result > 0) ? sond_eingang_int_zu_unix(result) : 0;
+	priv->eingang_done = TRUE;
+
+	return result;
+}
+
+//Sortierschlüssel: Eingangsdatum, ohne Angabe die Änderungszeit
+static gint64 eingang_sort_key(SondTreeviewFM *view, SondTVFMItem *item) {
+	gint64 mtime = 0;
+
+	item_eingang(view, item);
+	sond_tvfm_item_fs_stat(item, &mtime, NULL, NULL);
+
+	return sond_tvfm_item_get_priv(item)->eingang_key > 0 ?
+			sond_tvfm_item_get_priv(item)->eingang_key : mtime;
+}
+
+//Nur Einträge des Dateisystems werden verglichen; Inhalte von Containern behalten ihre Reihenfolge
+static gint compare_eingang(gconstpointer a, gconstpointer b, gpointer data) {
+	SondTreeviewFM *view = SOND_TREEVIEWFM(data);
+	gint64 key_a = 0;
+	gint64 key_b = 0;
+
+	if (!sond_tvfm_item_fs_path((SondTVFMItem*) a, NULL, NULL) ||
+			!sond_tvfm_item_fs_path((SondTVFMItem*) b, NULL, NULL))
+		return 0;
+
+	key_a = eingang_sort_key(view, (SondTVFMItem*) a);
+	key_b = eingang_sort_key(view, (SondTVFMItem*) b);
+
+	return (key_a > key_b) - (key_a < key_b);
 }
 
 /* ------------------------------------------------------------------------
@@ -476,6 +532,50 @@ static SondTreeviewFM* factory_get_view(GtkSignalListItemFactory *factory) {
 	return ref ? g_weak_ref_get(ref) : NULL;
 }
 
+#define HIT_CSS_CLASS "sond-hit"
+
+//Text der Namenszelle: Name; bei Abschnitten der Text der Unterklasse (Fehlermeldung bei Fehler)
+static gchar* name_cell_text(SondTreeviewFM *view, SondTVFMItem *item) {
+	SondTreeviewFMClass *klass = view ? SOND_TREEVIEWFM_GET_CLASS(view) : NULL;
+	gchar *text = NULL;
+
+	if (sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION && klass &&
+			klass->text_from_section) {
+		GError *error = NULL;
+
+		if (klass->text_from_section(item, &text, &error)) {
+			text = g_strdup(error ? error->message : "?");
+			g_clear_error(&error);
+		}
+
+		return text ? text : g_strdup("");
+	}
+
+	return g_strdup(sond_tvfm_item_get_display_name(item));
+}
+
+//Hervorhebung der Zeile (Vfunc deter_background)
+static void name_cell_highlight(SondTreeviewFM *view, SondTVFMItem *item, GtkWidget *label) {
+	SondTreeviewFMClass *klass = view ? SOND_TREEVIEWFM_GET_CLASS(view) : NULL;
+	gint rc = 0;
+
+	if (klass && klass->deter_background) {
+		GError *error = NULL;
+
+		rc = klass->deter_background(item, &error);
+		if (rc == -1) {
+			LOG_WARN("Fehler bei Ermittlung background: %s", error ? error->message : "?");
+			g_clear_error(&error);
+			rc = 0;
+		}
+	}
+
+	if (rc == 1)
+		gtk_widget_add_css_class(label, HIT_CSS_CLASS);
+	else
+		gtk_widget_remove_css_class(label, HIT_CSS_CLASS);
+}
+
 static void name_setup(GtkSignalListItemFactory *factory, GtkListItem *listitem,
 		gpointer data) {
 	GtkWidget *expander = gtk_tree_expander_new();
@@ -525,7 +625,13 @@ static void name_bind(GtkSignalListItemFactory *factory, GtkListItem *listitem,
 		return;
 	}
 
-	gtk_label_set_text(GTK_LABEL(label), sond_tvfm_item_get_display_name(item));
+	{
+		gchar *text = name_cell_text(view, item);
+
+		gtk_label_set_text(GTK_LABEL(label), text);
+		g_free(text);
+		name_cell_highlight(view, item, label);
+	}
 
 	if (view) {
 		icon_refresh(view, icon, item);
@@ -630,12 +736,114 @@ static GtkListItemFactory* text_factory(CellKind kind) {
 	return factory;
 }
 
+//Anzeige: Datum, Gedankenstrich ohne Angabe, leer für Einträge in Containern
+static gchar* eingang_text(SondTreeviewFM *view, SondTVFMItem *item) {
+	gint eingang = 0;
+
+	if (!sond_tvfm_item_fs_path(item, NULL, NULL))
+		return g_strdup("");
+
+	eingang = item_eingang(view, item);
+
+	return eingang > 0 ? sond_eingang_int_zu_anzeige(eingang) : g_strdup("–");
+}
+
+static void eingang_changed_cb(SondTreeviewFM *view, gpointer label) {
+	SondTVFMItem *item = g_object_get_data(G_OBJECT(label), ITEM_KEY);
+	gchar *text = NULL;
+
+	if (!item)
+		return;
+
+	text = eingang_text(view, item);
+	gtk_label_set_text(GTK_LABEL(label), text);
+	g_free(text);
+}
+
+static void eingang_bind(GtkSignalListItemFactory *factory, GtkListItem *listitem,
+		gpointer data) {
+	GtkWidget *label = gtk_list_item_get_child(listitem);
+	SondTVFMItem *item = sond_treeview_listitem_get_item(listitem);
+	SondTreeviewFM *view = factory_get_view(factory);
+	gchar *text = NULL;
+
+	(void) data;
+
+	if (!item || !view) {
+		g_clear_object(&item);
+		g_clear_object(&view);
+
+		return;
+	}
+
+	text = eingang_text(view, item);
+	gtk_label_set_text(GTK_LABEL(label), text);
+	g_free(text);
+
+	//die Zelle folgt neuen Eingangsangaben
+	g_object_set_data_full(G_OBJECT(label), ITEM_KEY, g_object_ref(item), g_object_unref);
+	g_signal_handlers_disconnect_by_data(view, label); //nie doppelt verbunden
+	g_signal_connect_object(view, "eingang-changed", G_CALLBACK(eingang_changed_cb), label, 0);
+
+	g_object_unref(view);
+	g_object_unref(item);
+}
+
+static void eingang_unbind(GtkSignalListItemFactory *factory, GtkListItem *listitem,
+		gpointer data) {
+	GtkWidget *label = gtk_list_item_get_child(listitem);
+	SondTreeviewFM *view = factory_get_view(factory);
+
+	(void) data;
+
+	if (view)
+		g_signal_handlers_disconnect_by_data(view, label);
+	if (label)
+		g_object_set_data(G_OBJECT(label), ITEM_KEY, NULL);
+	g_clear_object(&view);
+}
+
+static gboolean reset_eingang_match(gpointer item, gpointer user_data) {
+	(void) user_data;
+
+	sond_tvfm_item_get_priv(SOND_TVFM_ITEM(item))->eingang_done = FALSE;
+
+	return FALSE; //alle sichtbaren Zeilen durchgehen
+}
+
+void sond_treeviewfm_eingang_refresh(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = NULL;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	priv = fm_get_priv(self);
+
+	//Zeilen, die nicht sichtbar sind, lesen ihre Angaben beim Aufklappen frisch
+	sond_treeview_find_row(SOND_TREEVIEW(self), reset_eingang_match, NULL, NULL);
+	g_signal_emit(self, fm_signals[SIGNAL_EINGANG_CHANGED], 0);
+
+	//ist nach der Spalte sortiert, neu sortieren
+	if (priv->column_eingang)
+		gtk_sorter_changed(gtk_column_view_column_get_sorter(priv->column_eingang),
+				GTK_SORTER_CHANGE_DIFFERENT);
+}
+
 void fm_register_icons(void) {
 	static gboolean registered = FALSE;
 
 	if (registered)
 		return;
 	registered = TRUE;
+
+	//Hervorhebung von Zeilen (Vfunc deter_background)
+	{
+		GtkCssProvider *provider = gtk_css_provider_new();
+
+		gtk_css_provider_load_from_string(provider,
+				"label." HIT_CSS_CLASS " { background-color: rgba(255, 213, 79, 0.45); }");
+		gtk_style_context_add_provider_for_display(gdk_display_get_default(),
+				GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+		g_object_unref(provider);
+	}
 
 	//die eigenen Symbole (pdf, pdf-folder, ...) wie in Zond als Ressource im Icon-Theme
 	g_resources_register(icons_get_resource());
@@ -657,6 +865,18 @@ void fm_default_setup_columns(SondTreeviewFM *self) {
 	factory_set_view(factory, self);
 	sorter = GTK_SORTER(gtk_custom_sorter_new(compare_name, NULL, NULL));
 	column = sond_treeview_add_column(base, "Name", factory, sorter, TRUE);
+
+	//Eingang nur, wenn eine Unterklasse die Angaben liefert (Vfunc get_eingang)
+	if (SOND_TREEVIEWFM_GET_CLASS(self)->get_eingang) {
+		factory = gtk_signal_list_item_factory_new();
+		g_signal_connect(factory, "setup", G_CALLBACK(text_setup), NULL);
+		g_signal_connect(factory, "bind", G_CALLBACK(eingang_bind), NULL);
+		g_signal_connect(factory, "unbind", G_CALLBACK(eingang_unbind), NULL);
+		factory_set_view(factory, self);
+		sorter = GTK_SORTER(gtk_custom_sorter_new(compare_eingang, self, NULL));
+		fm_get_priv(self)->column_eingang = sond_treeview_add_column(base, "Eingang",
+				factory, sorter, FALSE);
+	}
 
 	sorter = GTK_SORTER(gtk_custom_sorter_new(compare_date, NULL, NULL));
 	sond_treeview_add_column(base, "Geändert", text_factory(CELL_DATE), sorter, FALSE);
