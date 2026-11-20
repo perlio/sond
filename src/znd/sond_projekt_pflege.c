@@ -19,6 +19,8 @@
 #include "sond_projekt_pflege.h"
 
 #include "../sond_log_and_error.h"
+#include "../sond_file_helper.h"
+#include "zond_dbase.h"
 #include "../sond_process_file.h"
 
 struct _SondProjektPflege {
@@ -37,6 +39,19 @@ struct _SondProjektPflege {
 	SondFilePart *pending_sibling_pdf;
 	GPtrArray *pending_sibling_old;
 	GPtrArray *pending_sibling_new;
+
+	/* Von der Vorbereitung (vor Löschen/Verschieben) an den Abschluss (tx_ende) übergeben:
+	 * - Pfad der gelöschten Datei: nach der physischen Löschung ist zu prüfen, ob das
+	 *   Elternverzeichnis dadurch vollständig abgedeckt ist (Coverage zusammenfassen)
+	 * - alter/neuer absoluter Pfad einer Verschiebung samt Kennzeichnung, ob sie physisch im
+	 *   Dateisystem stattfand (nur dann kann ein gescheiterter Commit per Umbenennen mit
+	 *   vertauschten Pfaden zurückgenommen werden)
+	 * Gesetzt erst unmittelbar vor dem garantierten Erfolg der Vorbereitung, damit bei einem
+	 * Fehlerweg (der Abschluss kommt dann nicht) nichts hängen bleibt. */
+	gchar *pending_delete_path;
+	gchar *pending_move_old;
+	gchar *pending_move_new;
+	gboolean pending_move_physical;
 };
 
 SondProjektPflege* sond_projekt_pflege_new(SondProjektKontext const *kontext) {
@@ -56,6 +71,9 @@ void sond_projekt_pflege_free(SondProjektPflege *pflege) {
 
 	sond_projekt_pflege_emb_sibling_clear(pflege);
 	sond_projekt_pflege_structure_clear(pflege);
+	g_free(pflege->pending_delete_path);
+	g_free(pflege->pending_move_old);
+	g_free(pflege->pending_move_new);
 	g_free(pflege);
 }
 
@@ -308,14 +326,8 @@ static gint gmessage_renumber_all(SondProjektPflege *pflege, gchar const *prefix
 gint sond_projekt_pflege_move(SondProjektPflege *pflege, SondProjektMove const *m, GError **error) {
 	DBaseZond *dbase = pflege_dbase(pflege);
 
-	if (sond_projekt_pflege_index_tx_begin(pflege, error))
+	if (sond_projekt_pflege_tx_begin(pflege, TRUE, TRUE, error))
 		return -1;
-
-	if (dbase_zond_begin(dbase, error)) {
-		sond_projekt_pflege_index_tx_end(pflege);
-
-		return -1;
-	}
 
 	//Index-Pfad umbenennen - in derselben Transaktion wie store/work
 	if (sond_projekt_pflege_index_tx(pflege)) {
@@ -419,4 +431,181 @@ gint sond_projekt_pflege_move(SondProjektPflege *pflege, SondProjektMove const *
 	}
 
 	return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Transaktionsrahmen
+ * --------------------------------------------------------------------- */
+
+gint sond_projekt_pflege_tx_begin(SondProjektPflege *pflege, gboolean dual, gboolean with_index,
+		GError **error) {
+	DBaseZond *dbase = pflege_dbase(pflege);
+	gint rc = 0;
+
+	//Index-DB als Schema idx anhängen (vor der Transaktion): ihre Schreibzugriffe laufen in derselben
+	if (with_index && sond_projekt_pflege_index_tx_begin(pflege, error))
+		return -1;
+
+	rc = dual ? dbase_zond_begin(dbase, error) : zond_dbase_begin(dbase->zond_dbase_work, error);
+	if (rc) {
+		sond_projekt_pflege_index_tx_end(pflege);
+
+		return -1;
+	}
+
+	return 0;
+}
+
+void sond_projekt_pflege_delete_merken(SondProjektPflege *pflege, gchar const *path) {
+	g_free(pflege->pending_delete_path);
+	pflege->pending_delete_path = g_strdup(path);
+}
+
+void sond_projekt_pflege_move_merken(SondProjektPflege *pflege, gchar const *path_old,
+		gchar const *path_new, gboolean physical) {
+	g_free(pflege->pending_move_old);
+	g_free(pflege->pending_move_new);
+	pflege->pending_move_old = g_strdup(path_old);
+	pflege->pending_move_new = g_strdup(path_new);
+	pflege->pending_move_physical = path_old && path_new && physical;
+}
+
+/* Schreibt eine lesbare Fehlerdatei ZOND_FEHLER_<Zeitstempel>.txt ins Projektverzeichnis, wenn eine
+ * Verschiebung/Umbenennung nicht gespeichert und (soweit physisch möglich) nicht zurückgenommen werden
+ * konnte. Einziger dauerhafter Anhaltspunkt, weil die Anwendung danach das Projekt schließt.
+ * path_old/path_new NULL: keine physische Änderung betroffen; msg_revert NULL: kein Rückgängigmachen
+ * versucht. Best-effort: Fehler beim Schreiben werden nur geloggt. */
+static void write_commit_failure_report(gchar const *project_dir, gchar const *path_old,
+		gchar const *path_new, gchar const *msg_commit, gchar const *msg_revert) {
+	g_autoptr(GDateTime) now = NULL;
+	g_autofree gchar *timestamp = NULL;
+	g_autofree gchar *filename = NULL;
+	GError *error_report = NULL;
+	FILE *fp = NULL;
+
+	if (!project_dir)
+		return;
+
+	now = g_date_time_new_now_local();
+	timestamp = g_date_time_format(now, "%Y%m%d_%H%M%S");
+	filename = g_strdup_printf("%s/ZOND_FEHLER_%s.txt", project_dir, timestamp);
+
+	fp = sond_fopen(filename, "w", &error_report);
+	if (!fp) {
+		LOG_WARN("%s: sond_fopen('%s'): %s", __func__, filename,
+				error_report ? error_report->message : "?");
+		g_clear_error(&error_report);
+
+		return;
+	}
+
+	fprintf(fp, "ZOND - Fehlerbericht\n");
+	fprintf(fp, "Zeitpunkt: %s\n\n", timestamp);
+	fprintf(fp, "Eine Verschiebung/Umbenennung konnte nicht gespeichert werden. Das Programm wurde "
+			"sicherheitshalber beendet, nachdem versucht wurde, das Projekt zu speichern und zu "
+			"schließen.\n\n");
+
+	if (path_old && path_new) {
+		fprintf(fp, "Alter Pfad: %s\n", path_old);
+		fprintf(fp, "Neuer Pfad: %s\n\n", path_new);
+	} else
+		fprintf(fp, "(Keine physische Dateisystem-Änderung betroffen.)\n\n");
+
+	fprintf(fp, "Fehler beim Speichern:\n%s\n\n", msg_commit ? msg_commit : "unbekannt");
+
+	if (msg_revert)
+		fprintf(fp, "Fehler beim Rückgängigmachen der Verschiebung:\n%s\n", msg_revert);
+	else if (path_old && path_new)
+		fprintf(fp, "Ein Rückgängigmachen wurde nicht versucht.\n");
+
+	fclose(fp);
+}
+
+//Vormerkungen verwerfen (nach jedem Abschluss)
+static void pending_clear(SondProjektPflege *pflege) {
+	g_clear_pointer(&pflege->pending_delete_path, g_free);
+	g_clear_pointer(&pflege->pending_move_old, g_free);
+	g_clear_pointer(&pflege->pending_move_new, g_free);
+	pflege->pending_move_physical = FALSE;
+	sond_projekt_pflege_emb_sibling_clear(pflege);
+	sond_projekt_pflege_structure_clear(pflege);
+}
+
+SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gboolean suc,
+		gboolean dual, gchar const *project_dir, GError **error) {
+	DBaseZond *dbase = pflege_dbase(pflege);
+	SondProjektTxErgebnis ergebnis = SOND_PROJEKT_TX_OK;
+	GError *error_int = NULL;
+
+	if (!suc) {
+		if (dual)
+			dbase_zond_rollback(dbase, &error_int);
+		else
+			zond_dbase_rollback(dbase->zond_dbase_work, &error_int);
+
+		sond_projekt_pflege_index_tx_end(pflege);
+		g_clear_error(&error_int);
+		pending_clear(pflege);
+
+		return SOND_PROJEKT_TX_OK;
+	}
+
+	/* Löschung war erfolgreich: ist das Elternverzeichnis jetzt - und nur jetzt, weil der Knoten
+	 * physisch weg ist - vollständig abgedeckt (die gelöschte, nicht indizierte Datei war ggf. der
+	 * einzige "Lückenfüller")? Dann wieder zu einem Ordner-Eintrag zusammenfassen. Vor dem Commit,
+	 * damit der Eintrag Teil derselben Transaktion ist. */
+	if (pflege->pending_delete_path && sond_projekt_pflege_index_tx(pflege)) {
+		GError *collapse_error = NULL;
+
+		if (!sond_index_ctx_coverage_try_collapse(sond_projekt_pflege_index_tx(pflege),
+				pflege->pending_delete_path, project_dir, &collapse_error)) {
+			LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s", __func__,
+					pflege->pending_delete_path, collapse_error ? collapse_error->message : "?");
+			g_clear_error(&collapse_error);
+		}
+	}
+
+	if (dual ? dbase_zond_commit(dbase, &error_int) :
+			zond_dbase_commit(dbase->zond_dbase_work, &error_int)) {
+		gboolean reverted = FALSE;
+		GError *error_revert = NULL;
+
+		sond_projekt_pflege_index_tx_end(pflege);
+
+		//Physische Verschiebung zurücknehmen; vertauschte Pfade decken Umbenennen und Verschieben ab
+		if (dual && pflege->pending_move_physical)
+			reverted = sond_rename(pflege->pending_move_new, pflege->pending_move_old,
+					&error_revert);
+
+		if (!dual || reverted) {
+			//zurückgenommen, keine Nachführung
+			ergebnis = SOND_PROJEKT_TX_FEHLER;
+		} else {
+			/* Kein Zurücknehmen möglich oder gescheitert (z.B. reine Mimepart-Renummerierung ohne
+			 * physische Aktion): Fehlerbericht schreiben, die Anwendung beendet sich. */
+			write_commit_failure_report(project_dir,
+					pflege->pending_move_physical ? pflege->pending_move_old : NULL,
+					pflege->pending_move_physical ? pflege->pending_move_new : NULL,
+					error_int ? error_int->message : NULL,
+					error_revert ? error_revert->message : NULL);
+			ergebnis = SOND_PROJEKT_TX_KRITISCH;
+		}
+
+		if (error && error_int)
+			*error = g_error_copy(error_int);
+		g_clear_error(&error_int);
+		g_clear_error(&error_revert);
+		pending_clear(pflege);
+
+		return ergebnis;
+	}
+
+	sond_projekt_pflege_index_tx_end(pflege);
+
+	//geöffnete Anhänge auf ihre nachgeführte Adresse setzen, Struktur geänderter PDFs/Mails neu einlesen
+	sond_projekt_pflege_emb_sibling_adjust_opened(pflege);
+	sond_projekt_pflege_structure_refresh(pflege);
+	pending_clear(pflege);
+
+	return SOND_PROJEKT_TX_OK;
 }

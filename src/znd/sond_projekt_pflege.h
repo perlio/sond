@@ -115,6 +115,36 @@ void sond_projekt_pflege_structure_clear(SondProjektPflege*);
 //Nach erfolgreicher Aktion: Struktur der vorgemerkten Container neu in den Index einlesen
 void sond_projekt_pflege_structure_refresh(SondProjektPflege*);
 
+/* ---- Transaktionsrahmen von Löschen und Verschieben ---- */
+
+/* Beginnt die Transaktion: dual = store und work (bzw. nur store ohne work), sonst nur work.
+ * with_index hängt vorher die Index-DB an (Schema idx), ihre Schreibzugriffe gehören dann zum selben
+ * Commit. 0 bei Erfolg, -1 bei Fehler (nichts angehängt, nichts offen). */
+gint sond_projekt_pflege_tx_begin(SondProjektPflege*, gboolean dual, gboolean with_index,
+		GError **error);
+
+/* Vormerken für den Abschluss, erst unmittelbar vor dem garantierten Erfolg der Vorbereitung:
+ * der gelöschte Pfad (Coverage des Elternverzeichnisses nach der physischen Löschung neu
+ * zusammenfassen; NULL: nichts) bzw. alter/neuer absoluter Pfad einer Verschiebung und ob sie
+ * physisch im Dateisystem stattfand (NULL-Pfade: nichts). */
+void sond_projekt_pflege_delete_merken(SondProjektPflege*, gchar const *path);
+void sond_projekt_pflege_move_merken(SondProjektPflege*, gchar const *path_old,
+		gchar const *path_new, gboolean physical);
+
+typedef enum {
+	SOND_PROJEKT_TX_OK, //Aktion gespeichert (suc) bzw. zurückgerollt (nicht suc)
+	SOND_PROJEKT_TX_FEHLER, //Commit gescheitert, Zustand zurückgenommen (error: Grund); bitte erneut versuchen
+	SOND_PROJEKT_TX_KRITISCH //Commit gescheitert und nicht zurücknehmbar: Fehlerdatei ist geschrieben
+		//(error: Grund), die Anwendung soll das Projekt schließen und sich beenden
+} SondProjektTxErgebnis;
+
+/* Schließt die Transaktion ab: bei suc Coverage zusammenfassen, Commit, Index lösen, geöffnete Anhänge
+ * auf ihre neue Adresse setzen, Struktur neu einlesen; sonst Rollback. Bei gescheitertem Commit einer
+ * physischen Verschiebung wird diese per Umbenennen mit vertauschten Pfaden zurückgenommen. Alle
+ * Vormerkungen sind danach verworfen. project_dir: Projektverzeichnis (Coverage, Fehlerdatei). */
+SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege*, gboolean suc, gboolean dual,
+		gchar const *project_dir, GError **error);
+
 /* ---- Verschieben, Umbenennen ---- */
 
 /* Eine Verschiebung oder Umbenennung in den Projektdaten. Die Pfade sind fertig gebildet (Filepart,

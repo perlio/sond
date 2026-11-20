@@ -31,56 +31,12 @@
 typedef struct {
 	Projekt *zond;
 
-	/* Übergabe zond_treeviewfm_before_delete() -> zond_treeviewfm_after():
-	 * Pfad des gerade gelöschten Knotens, damit NACH der tatsächlichen
-	 * physischen Löschung (also erst im "after"-Handler, wenn
-	 * g_dir_open()/g_dir_read_name() den Knoten nicht mehr sehen) geprüft
-	 * werden kann, ob das Elternverzeichnis dadurch jetzt vollständig
-	 * abgedeckt ist (sond_index_ctx_coverage_try_collapse()). NULL, wenn
-	 * für die aktuelle Löschung keine Coverage-Prüfung nötig/möglich ist.
-	 * Wird in before_delete() ausschließlich unmittelbar vor dem
-	 * erfolgreichen return gesetzt, damit bei einem Fehler-return (kein
-	 * "after" wird dann emittiert) nichts hängen bleibt. */
-	gchar *pending_delete_path;
-
-	/* Übergabe zond_treeviewfm_before_move() -> zond_treeviewfm_after():
-	 * alter/neuer absoluter Pfad der gerade vorgemerkten Verschiebung/
-	 * Umbenennung, für den Fehlerbericht (s. write_commit_failure_report())
-	 * IMMER gesetzt, unabhängig davon, ob es sich um eine physische
-	 * Dateisystem-Aktion handelte. pending_move_is_physical ist nur dann
-	 * TRUE, wenn weder der verschobene Knoten noch sein neuer Elternknoten
-	 * einen sond_file_part haben - exakt die Bedingung, unter der die
-	 * Basisklasse (sond_tvfm_item_rename()/sond_tvfm_item_copy() in
-	 * sond_treeviewfm.c) real sond_rename() bzw.
-	 * sond_copy_r()+sond_rmdir_r() aufruft; nur dann ist ein Revert per
-	 * sond_rename() mit vertauschten Pfaden sinnvoll/zulässig (deckt
-	 * sowohl den reinen Rename- als auch den Move(Kopieren+Löschen)-Fall
-	 * ab, weil das Dateisystem danach gleich aussieht). FALSE z.B. bei
-	 * reiner GMessage-Index-Renumerierung ohne physische Aktion. Wird -
-	 * wie pending_delete_path - erst unmittelbar vor dem garantiert
-	 * erfolgreichen return in before_move() gesetzt, damit bei einem
-	 * Fehler-return (kein "after" wird dann emittiert) nichts hängen
-	 * bleibt. */
-	gchar *pending_move_path_old;
-	gchar *pending_move_path_new;
-	gboolean pending_move_is_physical;
-
 	/* Pflege der Projektdaten (Verweise in store/work, Index, Anhang-Adressen, Struktur): GTK-frei,
 	 * gemeinsam mit dem Client, s. src/znd/sond_projekt_pflege.h */
 	SondProjektPflege *pflege;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
-
-//Index-DB als Schema idx anhängen; VOR dbase_zond_begin(). Ohne Index-Kontext ist nichts zu tun.
-static gint index_tx_begin(ZondTreeviewFMPrivate *priv, GError **error) {
-	return sond_projekt_pflege_index_tx_begin(priv->pflege, error);
-}
-
-//NACH commit/rollback (auch auf allen Fehlerwegen vor dem "after")
-static void index_tx_end(ZondTreeviewFMPrivate *priv) {
-	sond_projekt_pflege_index_tx_end(priv->pflege);
-}
 
 //Index-Kontext für Schreibzugriffe in der Transaktion; NULL ohne Index
 static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
@@ -344,23 +300,14 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	 * Datenbanken */
 	dual = from_gmessage || is_pdf_emb(stvfm_item) || !section;
 
-	/* Index-DB als Schema idx anhängen (vor der Transaktion). Ihre
-	 * Schreibzugriffe unten laufen in derselben Transaktion wie store/work. */
-	if (!section && index_tx_begin(priv, error))
-		return -1;
-
 	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
 	*ctx = GINT_TO_POINTER(
 			(dual ? 1 : 0) |
 			(priv->zond->proj.dbase_zond->changed ? 2 : 0));
 
-	rc = dual ?
-			dbase_zond_begin(priv->zond->proj.dbase_zond, error) :
-			zond_dbase_begin(priv->zond->proj.dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		index_tx_end(priv);
+	//Transaktion (mit Index-DB, wenn eine Datei gelöscht wird), s. sond_projekt_pflege_tx_begin()
+	if (sond_projekt_pflege_tx_begin(priv->pflege, dual, !section, error))
 		return -1;
-	}
 
 	if (index_tx(priv)) {
 		GError *idx_err = NULL;
@@ -418,34 +365,18 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		return -1;
 	}
 
-	/* Erst jetzt, unmittelbar vor dem garantiert erfolgreichen return, für
-	 * zond_treeviewfm_after() vormerken: nach der gleich folgenden
-	 * physischen Löschung könnte das Elternverzeichnis von path vollständig
-	 * abgedeckt sein (die gelöschte Datei war ja evtl. gerade der einzige
-	 * "Lückenfüller") - s. Kommentar bei pending_delete_path. Bewusst erst
-	 * hier (nach allen obigen Fehler-return-Pfaden, bei denen kein "after"
-	 * emittiert wird) gesetzt, damit nichts hängen bleibt. */
-	if (priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx && !section) {
-		g_free(priv->pending_delete_path);
-		priv->pending_delete_path = g_strdup(path);
-	}
+	/* Erst jetzt, unmittelbar vor dem garantierten Erfolg, für den Abschluss vormerken: nach der
+	 * physischen Löschung könnte das Elternverzeichnis von path vollständig abgedeckt sein (die
+	 * gelöschte Datei war ggf. der einzige "Lückenfüller"). Eine Löschung ist nie eine physische
+	 * Verschiebung: Vormerkung einer früheren Verschiebung verwerfen, sonst würde ein gescheiterter
+	 * Commit sie versehentlich zurückdrehen. */
+	sond_projekt_pflege_delete_merken(priv->pflege,
+			(priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx && !section) ? path : NULL);
+	sond_projekt_pflege_move_merken(priv->pflege, NULL, NULL, FALSE);
 
 	//Struktur der PDF/Mail nach dem Löschen neu einlesen
 	structure_pending_clear(priv);
 	structure_pending_add(priv, structure_container_of_item(stvfm_item));
-
-	/* Diese Löschung (nicht zond_treeviewfm_before_move()) hat die
-	 * folgende "after"-Emission ausgelöst - ein hier evtl. dual_write=1
-	 * (from_gmessage, s.o.) gesetzter Kontext betrifft eine rein
-	 * datenbankinterne Index-Renumerierung, nie eine physische
-	 * Dateisystem-Aktion. pending_move_path_old/_new/pending_move_is_physical
-	 * daher hier zurücksetzen, damit zond_treeviewfm_after() im Fehlerfall
-	 * nicht versehentlich mit veralteten Pfaden von einer früheren,
-	 * unabhängigen Verschiebung revertiert (s. Kommentar bei
-	 * pending_move_path_old/_new oben). */
-	g_clear_pointer(&priv->pending_move_path_old, g_free);
-	g_clear_pointer(&priv->pending_move_path_new, g_free);
-	priv->pending_move_is_physical = FALSE;
 
 	return 0;
 }
@@ -595,21 +526,26 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			return -1;
 	}
 
-	/* Erst hier, unmittelbar vor dem garantiert erfolgreichen return (s.
-	 * Kommentar bei pending_move_path_old/_new/pending_move_is_physical
-	 * oben), für zond_treeviewfm_after() vormerken: alter/neuer absoluter
-	 * Pfad dieser Verschiebung/Umbenennung, samt Kennzeichnung, ob es sich
-	 * dabei um eine physische Dateisystem-Aktion handelt (dann - und nur
-	 * dann - kann im Fehlerfall per sond_rename() revertiert werden). */
-	g_free(ztvfm_priv->pending_move_path_old);
-	g_free(ztvfm_priv->pending_move_path_new);
-	ztvfm_priv->pending_move_path_old = g_strconcat(
-			ztvfm_priv->zond->proj.project_dir, "/", prefix_old, NULL);
-	ztvfm_priv->pending_move_path_new = g_strconcat(
-			ztvfm_priv->zond->proj.project_dir, "/", prefix_new, NULL);
-	ztvfm_priv->pending_move_is_physical =
-			!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
-			!sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
+	/* Erst hier, unmittelbar vor dem garantierten Erfolg, für den Abschluss vormerken: alter/neuer
+	 * absoluter Pfad, samt Kennzeichnung, ob es eine physische Dateisystem-Aktion war (dann - und nur
+	 * dann - kann ein gescheiterter Commit per sond_rename() zurückgenommen werden). */
+	{
+		g_autofree gchar *path_old_abs = g_strconcat(
+				ztvfm_priv->zond->proj.project_dir, "/", prefix_old, NULL);
+		g_autofree gchar *path_new_abs = g_strconcat(
+				ztvfm_priv->zond->proj.project_dir, "/", prefix_new, NULL);
+
+		sond_projekt_pflege_move_merken(ztvfm_priv->pflege, path_old_abs, path_new_abs,
+				!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
+				!sond_tvfm_item_get_sond_file_part(stvfm_item_parent));
+	}
+
+	/* Wird der Eintrag aus seinem Verzeichnis herausgenommen, kann dieses dadurch vollständig
+	 * abgedeckt sein (die herausgenommene, nicht indizierte Datei war der einzige "Lückenfüller"):
+	 * wie beim Löschen nach der physischen Aktion wieder zusammenfassen. Nicht beim Umbenennen. */
+	sond_projekt_pflege_delete_merken(ztvfm_priv->pflege,
+			(index_to != -1 && !rename_in_gmessage && ztvfm_priv->zond->proj.wctx &&
+			ztvfm_priv->zond->proj.wctx->index_ctx) ? prefix_old : NULL);
 
 	//Struktur von Quell- und Ziel-PDF/Mail danach neu einlesen
 	structure_pending_clear(ztvfm_priv);
@@ -620,215 +556,59 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	return 0;
 }
 
-/* Schreibt eine für den Anwender lesbare Klartext-Fehlerdatei
- * (ZOND_FEHLER_<Zeitstempel>.txt) ins Projektverzeichnis, wenn eine
- * Verschiebung/Umbenennung in der Datenbank nicht gespeichert werden
- * konnte und (soweit physisch möglich) auch nicht per sond_rename()
- * rückgängig gemacht werden konnte - s. zond_treeviewfm_after(). Einziger
- * dauerhafter Anhaltspunkt für Anwender/Support, weil project_close()
- * gleich im Anschluss die lokale Arbeitskopie aufräumt. path_old/path_new
- * können NULL sein (keine physische Aktion betroffen), ebenso msg_revert
- * (kein Revert versucht). Best-effort: ein Fehler beim Schreiben des
- * Berichts selbst wird nur geloggt, verhindert aber nicht das Beenden. */
-static void write_commit_failure_report(Projekt *zond, gchar const *path_old,
-		gchar const *path_new, gchar const *msg_commit,
-		gchar const *msg_revert) {
-	g_autoptr(GDateTime) now = NULL;
-	g_autofree gchar *timestamp = NULL;
-	g_autofree gchar *filename = NULL;
-	GError *error_report = NULL;
-	FILE *fp = NULL;
-
-	if (!zond->proj.project_dir)
-		return;
-
-	now = g_date_time_new_now_local();
-	timestamp = g_date_time_format(now, "%Y%m%d_%H%M%S");
-	filename = g_strdup_printf("%s/ZOND_FEHLER_%s.txt", zond->proj.project_dir,
-			timestamp);
-
-	fp = sond_fopen(filename, "w", &error_report);
-	if (!fp) {
-		LOG_WARN("%s: sond_fopen('%s'): %s", __func__, filename,
-				error_report ? error_report->message : "?");
-		g_clear_error(&error_report);
-		return;
-	}
-
-	fprintf(fp, "ZOND - Fehlerbericht\n");
-	fprintf(fp, "Zeitpunkt: %s\n\n", timestamp);
-	fprintf(fp, "Eine Verschiebung/Umbenennung konnte nicht gespeichert "
-			"werden. Das Programm wurde sicherheitshalber beendet, "
-			"nachdem versucht wurde, das Projekt zu speichern und zu "
-			"schließen.\n\n");
-
-	if (path_old && path_new) {
-		fprintf(fp, "Alter Pfad: %s\n", path_old);
-		fprintf(fp, "Neuer Pfad: %s\n\n", path_new);
-	} else
-		fprintf(fp, "(Keine physische Dateisystem-Änderung betroffen.)\n\n");
-
-	fprintf(fp, "Fehler beim Speichern:\n%s\n\n",
-			msg_commit ? msg_commit : "unbekannt");
-
-	if (msg_revert)
-		fprintf(fp, "Fehler beim Rückgängigmachen der Verschiebung:\n%s\n",
-				msg_revert);
-	else if (path_old && path_new)
-		fprintf(fp, "Ein Rückgängigmachen wurde nicht versucht.\n");
-
-	fclose(fp);
-
-	return;
-}
-
+//Abschluss von Löschen, Verschieben und Umbenennen: Commit bzw. Rollback macht die Pflege, hier nur die Anzeige
 static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		gboolean suc, gpointer ctx, gpointer user_data) {
 	GError* error_int = NULL;
 	gint c = GPOINTER_TO_INT(ctx);
 	gboolean dual_write = c & 1;
 	gboolean changed_before = (c >> 1) & 1;
+	SondProjektTxErgebnis ergebnis = SOND_PROJEKT_TX_OK;
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
-	if (suc) {
-		gint rc = 0;
+	ergebnis = sond_projekt_pflege_tx_ende(priv->pflege, suc, dual_write,
+			priv->zond->proj.project_dir, &error_int);
 
-		/* Löschung war erfolgreich: falls dabei ein Pfad zur
-		 * Coverage-Nachprüfung vorgemerkt wurde (s. pending_delete_path),
-		 * jetzt - und nur jetzt, weil der Knoten physisch weg ist und ein
-		 * echtes Verzeichnis-Listing ihn nicht mehr sieht - prüfen, ob das
-		 * Elternverzeichnis dadurch vollständig abgedeckt ist (die gerade
-		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Sonst
-		 * bliebe ein Ordner nach Löschen der zuvor hineinkopierten, nicht
-		 * indizierten Datei dauerhaft "orange" (gemischt), obwohl wieder
-		 * alle verbliebenen Geschwister einzeln abgedeckt sind - es fehlte
-		 * lediglich das erneute Zusammenfassen (Coalescing) zu einem
-		 * Ordner-Eintrag. Vor dem Commit, damit der evtl. neu gesetzte
-		 * coverage-Eintrag Teil derselben Transaktion ist wie das Löschen
-		 * selbst. */
-		if (priv->pending_delete_path && index_tx(priv)) {
-			GError *collapse_error = NULL;
-
-			if (!sond_index_ctx_coverage_try_collapse(
-					index_tx(priv), priv->pending_delete_path,
-					priv->zond->proj.project_dir, &collapse_error)) {
-				LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s",
-						__func__, priv->pending_delete_path,
-						collapse_error ? collapse_error->message : "?");
-				g_clear_error(&collapse_error);
-			}
-		}
-
-		if (dual_write) {
-			rc = dbase_zond_commit(priv->zond->proj.dbase_zond, &error_int);
-			if (rc) {
-				gboolean reverted = FALSE;
-				GError *error_revert = NULL;
-
-				index_tx_end(priv);
-
-				/* Physische Verschiebung rückgängig machen, wenn möglich
-				 * (s. Kommentar bei pending_move_is_physical) - vertauschte
-				 * Pfade decken sowohl reinen Rename- als auch
-				 * Move(Kopieren+Löschen)-Fall ab, weil das Dateisystem
-				 * danach gleich aussieht. */
-				if (priv->pending_move_is_physical)
-					reverted = sond_rename(priv->pending_move_path_new,
-							priv->pending_move_path_old, &error_revert);
-
-				if (reverted) {
-					display_message(priv->zond->win.app_window,
-							"Speichern der Verschiebung/Umbenennung ist "
-							"fehlgeschlagen und wurde rückgängig gemacht:\n\n",
-							error_int->message, "\n\nBitte erneut versuchen.",
-							NULL);
-					g_clear_error(&error_int);
-					g_clear_pointer(&priv->pending_move_path_old, g_free);
-					g_clear_pointer(&priv->pending_move_path_new, g_free);
-					priv->pending_move_is_physical = FALSE;
-					g_clear_pointer(&priv->pending_delete_path, g_free);
-
-					//Commit gescheitert und zurückgenommen: keine
-					//Nachführung, aber changed-Flag und Aufräumen unten
-					goto aufraeumen;
-				}
-
-				/* Revert fehlgeschlagen oder keiner möglich (z.B. reine
-				 * GMessage-Index-Renumerierung ohne physische Aktion):
-				 * Fehlerbericht schreiben, Projekt in einer Schleife zu
-				 * schließen versuchen (Chance, ein z.B. nur kurzzeitig
-				 * nicht erreichbares Netzlaufwerk zwischenzeitlich zu
-				 * beheben), dann in jedem Fall beenden. */
-				write_commit_failure_report(priv->zond,
-						priv->pending_move_is_physical ? priv->pending_move_path_old : NULL,
-						priv->pending_move_is_physical ? priv->pending_move_path_new : NULL,
-						error_int->message,
-						error_revert ? error_revert->message : NULL);
-
-				display_message(priv->zond->win.app_window,
-						"Kritischer Fehler beim Speichern einer "
-						"Verschiebung/Umbenennung. Projekt und Datenbank "
-						"können inkonsistent sein. Details wurden in eine "
-						"Fehlerdatei im Projektordner geschrieben "
-						"(ZOND_FEHLER_*.txt). Das Programm wird jetzt "
-						"beendet.", NULL);
-
-				g_clear_error(&error_int);
-				g_clear_error(&error_revert);
-
-				{
-					gint rc_close;
-
-					do {
-						GError *error_close = NULL;
-						rc_close = project_close(priv->zond, &error_close);
-						g_clear_error(&error_close);
-					} while (rc_close);
-				}
-
-				exit(EXIT_FAILURE);
-			}
-		} else {
-			rc = zond_dbase_commit(priv->zond->proj.dbase_zond->zond_dbase_work, &error_int);
-			if (rc) {
-				index_tx_end(priv);
-				display_message(priv->zond->win.app_window,
-						"Fehler beim Speichern:\n\n", error_int->message, NULL);
-				g_clear_error(&error_int);
-
-				//Commit gescheitert: weder Adressen noch Struktur nachführen
-				goto aufraeumen;
-			}
-		}
-		index_tx_end(priv);
-
-		//geöffnete Anhänge auf ihre nachgeführte Adresse setzen
-		emb_sibling_adjust_opened(priv);
-
-		//Struktur geänderter PDFs/Mails neu einlesen
-		structure_refresh(priv);
-	}
-	else {
+	if (ergebnis == SOND_PROJEKT_TX_FEHLER) {
 		if (dual_write)
-			dbase_zond_rollback(priv->zond->proj.dbase_zond, &error_int);
+			display_message(priv->zond->win.app_window,
+					"Speichern der Verschiebung/Umbenennung ist "
+					"fehlgeschlagen und wurde rückgängig gemacht:\n\n",
+					error_int ? error_int->message : "?", "\n\nBitte erneut versuchen.",
+					NULL);
 		else
-			zond_dbase_rollback(priv->zond->proj.dbase_zond->zond_dbase_work, &error_int);
-
-		index_tx_end(priv);
+			display_message(priv->zond->win.app_window,
+					"Fehler beim Speichern:\n\n", error_int ? error_int->message : "?", NULL);
 		g_clear_error(&error_int);
+	} else if (ergebnis == SOND_PROJEKT_TX_KRITISCH) {
+		/* Die Fehlerdatei ist geschrieben. Projekt in einer Schleife zu schließen versuchen (Chance,
+		 * ein z.B. nur kurzzeitig nicht erreichbares Netzlaufwerk zwischenzeitlich zu beheben), dann
+		 * in jedem Fall beenden. */
+		display_message(priv->zond->win.app_window,
+				"Kritischer Fehler beim Speichern einer "
+				"Verschiebung/Umbenennung. Projekt und Datenbank "
+				"können inkonsistent sein. Details wurden in eine "
+				"Fehlerdatei im Projektordner geschrieben "
+				"(ZOND_FEHLER_*.txt). Das Programm wird jetzt "
+				"beendet.", NULL);
+		g_clear_error(&error_int);
+
+		{
+			gint rc_close;
+
+			do {
+				GError *error_close = NULL;
+				rc_close = project_close(priv->zond, &error_close);
+				g_clear_error(&error_close);
+			} while (rc_close);
+		}
+
+		exit(EXIT_FAILURE);
 	}
 
-aufraeumen:
 	if (dual_write)
 		project_reset_changed(priv->zond, changed_before);
-
-	g_clear_pointer(&priv->pending_delete_path, g_free);
-	g_clear_pointer(&priv->pending_move_path_old, g_free);
-	g_clear_pointer(&priv->pending_move_path_new, g_free);
-	priv->pending_move_is_physical = FALSE;
-	emb_sibling_pending_clear(priv);
-	structure_pending_clear(priv);
 
 	return;
 }
@@ -1478,9 +1258,6 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(obj));
 
-	g_clear_pointer(&priv->pending_delete_path, g_free);
-	g_clear_pointer(&priv->pending_move_path_old, g_free);
-	g_clear_pointer(&priv->pending_move_path_new, g_free);
 	sond_projekt_pflege_free(priv->pflege);
 	priv->pflege = NULL;
 
