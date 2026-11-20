@@ -45,6 +45,7 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(SRC_DIRS)/sond_icon_util.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c $(SRC_DIRS)/sond_zond_schema.c \
 	$(SRC_DIRS)/sond_eingang_zettel.c $(SRC_DIRS)/sond_eingang_cache.c \
+	$(SRC_DIRS)/sond_eingang_pflege.c \
 	$(SRC_DIRS)/sond_zond_ctl.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)

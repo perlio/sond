@@ -411,10 +411,11 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     Transaktion, Mimepart-Renummerierung, Anhang-Adressen, Struktur, Verschieben, Kopieren,
     Löschen, Transaktionsrahmen tx_begin/tx_ende mit Revert und Fehlerdatei): aus zond_treeviewfm.c
     herausgelöst, die Abläufe before_delete/_move/_insert und after rufen sie nur noch auf (Anzeige,
-    Projekt schließen und Programmende bleiben in der Anwendung). Noch in zond_treeviewfm.c:
-    Eingang (zond_eingang_*) und die
-    Anbindungs-Zugriffe auf work. Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch
-    ungeplant.
+    Projekt schließen und Programmende bleiben in der Anwendung). Die Nachführung der
+    Eingangsangaben (Umbenennen, Verschieben, Kopieren, Löschen) liegt GTK-frei in
+    src/sond_eingang_pflege; zond_eingang.c behält Auswahl, Dialog und Meldungen. Noch in
+    zond_treeviewfm.c: die Anbindungs-Zugriffe auf work. Inhaltsbäume, Viewer, Headerbar und
+    Export für GTK4 sind noch ungeplant.
 ```
 
 ## Ideen
