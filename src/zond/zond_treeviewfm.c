@@ -22,6 +22,7 @@
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 #include "../znd/dbase_zond.h"
+#include "../znd/sond_projekt_pflege.h"
 #include "20allgemein/project.h"
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
@@ -64,69 +65,31 @@ typedef struct {
 	gchar *pending_move_path_new;
 	gboolean pending_move_is_physical;
 
-	/* Übergabe before_delete()/before_move() -> after(): Adressänderungen
-	 * der übrigen Anhänge einer PDF (s. emb_sibling_changes()). Nach
-	 * erfolgreichem Commit werden damit die Pfade bereits geöffneter
-	 * SondFilePart-Objekte nachgeführt. */
-	SondFilePart *pending_sibling_pdf;
-	GPtrArray *pending_sibling_old;
-	GPtrArray *pending_sibling_new;
-
-	/* PDFs/Mails, deren Anhänge bzw. Mimeparts sich durch die laufende
-	 * Aktion ändern - nach Erfolg wird ihre Struktur in der Index-DB neu
-	 * eingelesen. Eigene Refs. */
-	GPtrArray *pending_structure;
-
-	/* Index-DB innerhalb der Dual-Write-Transaktion: als Schema idx an die
-	 * store-Connection gehängt (index_tx_begin()), index_tx ist eine Kopie
-	 * des Index-Kontexts, die über diese Connection arbeitet. So gehören die
-	 * Schreibzugriffe auf die Index-DB zum selben Commit wie store und work. */
-	SondIndexCtx index_tx;
-	gboolean index_tx_active;
+	/* Pflege der Projektdaten (Verweise in store/work, Index, Anhang-Adressen, Struktur): GTK-frei,
+	 * gemeinsam mit dem Client, s. src/znd/sond_projekt_pflege.h */
+	SondProjektPflege *pflege;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
 
-//Index-DB als Schema idx anhängen; VOR dbase_zond_begin(). Ohne Index-Kontext
-//ist nichts zu tun.
+//Index-DB als Schema idx anhängen; VOR dbase_zond_begin(). Ohne Index-Kontext ist nichts zu tun.
 static gint index_tx_begin(ZondTreeviewFMPrivate *priv, GError **error) {
-	if (!priv->zond->proj.wctx || !priv->zond->proj.wctx->index_ctx
-			|| priv->index_tx_active)
-		return 0;
-
-	if (dbase_zond_attach_index(priv->zond->proj.dbase_zond,
-			priv->zond->proj.wctx->index_ctx->db_path, error))
-		return -1;
-
-	dbase_zond_index_ctx(priv->zond->proj.dbase_zond, &priv->index_tx,
-			priv->zond->proj.wctx->index_ctx);
-	priv->index_tx_active = TRUE;
-
-	return 0;
+	return sond_projekt_pflege_index_tx_begin(priv->pflege, error);
 }
 
 //NACH commit/rollback (auch auf allen Fehlerwegen vor dem "after")
 static void index_tx_end(ZondTreeviewFMPrivate *priv) {
-	if (!priv->index_tx_active)
-		return;
-
-	dbase_zond_detach_index(priv->zond->proj.dbase_zond);
-	priv->index_tx_active = FALSE;
-
-	return;
+	sond_projekt_pflege_index_tx_end(priv->pflege);
 }
 
 //Index-Kontext für Schreibzugriffe in der Transaktion; NULL ohne Index
 static SondIndexCtx* index_tx(ZondTreeviewFMPrivate *priv) {
-	return priv->index_tx_active ? &priv->index_tx : NULL;
+	return sond_projekt_pflege_index_tx(priv->pflege);
 }
 
 //Transaktion verwerfen (Fehlerweg von before_delete/before_move)
 static void tx_abort(ZondTreeviewFMPrivate *priv) {
-	dbase_zond_rollback(priv->zond->proj.dbase_zond, NULL);
-	index_tx_end(priv);
-
-	return;
+	sond_projekt_pflege_tx_abort(priv->pflege);
 }
 
 //Fehler der Index-DB (idx_err wird freigegeben) in *error übernehmen
@@ -225,39 +188,10 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 	return FALSE;
 }
 
-/* Index-DB-Gegenstück zu dbase_zond_update_gmessage_index(): Mimepart-
- * Nummern hinter prefix ("x.eml//", "x.eml//0/") umzählen und die
- * Strukturangaben der Mail (Teilezahl, Inline-Teile) verwerfen - sie werden
- * bei der nächsten Indizierung neu ermittelt */
+//Index-DB-Gegenstück zu dbase_zond_update_gmessage_index(), s. sond_projekt_pflege.h
 static gint gmessage_index_renumber(ZondTreeviewFMPrivate *priv,
 		gchar const *prefix, gint index, gboolean into, GError **error) {
-	SondIndexCtx *index_ctx = NULL;
-	gchar const *boundary = NULL;
-	g_autofree gchar *mail = NULL;
-	GError *idx_err = NULL;
-
-	index_ctx = index_tx(priv);
-	if (!index_ctx)
-		return 0;
-
-	if (!sond_index_ctx_update_gmessage_index(index_ctx, prefix, index, into,
-			&idx_err))
-		goto err;
-
-	//Mail = alles vor dem letzten "//"
-	boundary = g_strrstr(prefix, "//");
-	mail = boundary ? g_strndup(prefix, boundary - prefix) : g_strdup(prefix);
-	if (!sond_index_ctx_clear_gmessage_structure(index_ctx, mail, &idx_err))
-		goto err;
-
-	return 0;
-
-err:
-	if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-			"%s: %s", __func__, idx_err ? idx_err->message : "?");
-	g_clear_error(&idx_err);
-
-	return -1;
+	return sond_projekt_pflege_gmessage_index_renumber(priv->pflege, prefix, index, into, error);
 }
 
 /* PDF bzw. Mail, deren Inhalt das Element ist (Anhang, Mimepart, Multipart-
@@ -289,44 +223,20 @@ static SondFilePart* structure_container_of_target(SondTVFMItem *parent_item) {
 
 static void structure_pending_add(ZondTreeviewFMPrivate *priv,
 		SondFilePart *container) {
-	if (!container)
-		return;
-
-	if (!priv->pending_structure)
-		priv->pending_structure =
-				g_ptr_array_new_with_free_func(g_object_unref);
-	else if (g_ptr_array_find(priv->pending_structure, container, NULL))
-		return;
-
-	g_ptr_array_add(priv->pending_structure, g_object_ref(container));
+	sond_projekt_pflege_structure_add(priv->pflege, container);
 }
 
 static void structure_pending_clear(ZondTreeviewFMPrivate *priv) {
-	g_clear_pointer(&priv->pending_structure, g_ptr_array_unref);
+	sond_projekt_pflege_structure_clear(priv->pflege);
 }
 
-/* Nach erfolgreicher Aktion: Struktur der vorgemerkten PDFs/Mails neu in
- * die Index-DB einlesen (Anhang-Adressen bzw. Mimeparts) */
+//Nach erfolgreicher Aktion: Struktur der vorgemerkten PDFs/Mails neu in die Index-DB einlesen
 static void structure_refresh(ZondTreeviewFMPrivate *priv) {
-	if (!priv->pending_structure || !priv->zond->proj.wctx ||
-			!priv->zond->proj.wctx->index_ctx)
-		return;
-
-	for (guint i = 0; i < priv->pending_structure->len; i++) {
-		GError *error = NULL;
-
-		if (sond_process_file_record_structure(priv->zond->proj.wctx->index_ctx,
-				g_ptr_array_index(priv->pending_structure, i), &error)) {
-			LOG_WARN("%s: %s", __func__, error ? error->message : "?");
-			g_clear_error(&error);
-		}
-	}
+	sond_projekt_pflege_structure_refresh(priv->pflege);
 }
 
 static void emb_sibling_pending_clear(ZondTreeviewFMPrivate *priv) {
-	g_clear_object(&priv->pending_sibling_pdf);
-	g_clear_pointer(&priv->pending_sibling_old, g_ptr_array_unref);
-	g_clear_pointer(&priv->pending_sibling_new, g_ptr_array_unref);
+	sond_projekt_pflege_emb_sibling_clear(priv->pflege);
 }
 
 /* Eingebettete Datei einer PDF (nicht PageTree, keine Section)? Ohne
@@ -341,99 +251,28 @@ static gboolean is_pdf_emb(SondTVFMItem *stvfm_item) {
 	return SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(sfp));
 }
 
-/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen
- * bzw. Herausverschieben (filename_new NULL) oder Umbenennen ggf. die
- * Adressen der übrigen Anhänge: wird ein doppelter Dateiname eindeutig,
- * wechselt die Adresse des anderen vom Schlüssel zum Dateinamen.
- * Ermittelt die Änderungen (vor der Aktion, PDF nur lesend) und legt
- * sie in priv->pending_sibling_* ab; nichts zu tun -> alles NULL. */
+/* Ist stvfm_item eine eingebettete Datei einer PDF, ändert ihr Löschen bzw. Herausverschieben
+ * (filename_new NULL) oder Umbenennen ggf. die Adressen der übrigen Anhänge (s.
+ * sond_projekt_pflege_emb_sibling_changes()); nichts zu tun: nichts vorgemerkt. */
 static gint emb_sibling_changes(ZondTreeviewFMPrivate *priv,
 		SondTVFMItem *stvfm_item, gchar const *filename_new, GError **error) {
-	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-	SondFilePart *sfp_pdf = NULL;
-	GPtrArray *old = NULL;
-	GPtrArray *new = NULL;
-
 	emb_sibling_pending_clear(priv);
 
 	if (!is_pdf_emb(stvfm_item))
 		return 0;
 
-	sfp_pdf = sond_file_part_get_parent(sfp);
-
-	if (sond_file_part_pdf_emb_address_changes(SOND_FILE_PART_PDF(sfp_pdf),
-			sond_file_part_get_path(sfp), filename_new, &old, &new, error))
-		return -1;
-
-	if (old->len == 0) {
-		g_ptr_array_unref(old);
-		g_ptr_array_unref(new);
-		return 0;
-	}
-
-	priv->pending_sibling_pdf = g_object_ref(sfp_pdf);
-	priv->pending_sibling_old = old;
-	priv->pending_sibling_new = new;
-
-	return 0;
+	return sond_projekt_pflege_emb_sibling_changes(priv->pflege,
+			sond_tvfm_item_get_sond_file_part(stvfm_item), filename_new, error);
 }
 
-/* Gespeicherte Fileparts (zond-DB main/work) und Index-Pfade der Anhänge
- * aus priv->pending_sibling_* umschreiben - innerhalb der offenen
- * Transaktionen */
+//Vorgemerkte Anhang-Adressen in store/work und Index umschreiben - innerhalb der offenen Transaktionen
 static gint emb_sibling_apply(ZondTreeviewFMPrivate *priv, GError **error) {
-	g_autofree gchar *filepart_pdf = NULL;
-
-	if (!priv->pending_sibling_pdf)
-		return 0;
-
-	filepart_pdf = sond_file_part_get_filepart(priv->pending_sibling_pdf);
-
-	for (guint i = 0; i < priv->pending_sibling_old->len; i++) {
-		g_autofree gchar *path_old = g_strconcat(filepart_pdf, "//",
-				g_ptr_array_index(priv->pending_sibling_old, i), NULL);
-		g_autofree gchar *path_new = g_strconcat(filepart_pdf, "//",
-				g_ptr_array_index(priv->pending_sibling_new, i), NULL);
-		GError *idx_err = NULL;
-
-		if (dbase_zond_update_path(priv->zond->proj.dbase_zond, path_old, path_new,
-				error))
-			return -1;
-
-		if (index_tx(priv) &&
-				!sond_index_ctx_rename_file(index_tx(priv),
-						path_old, path_new, &idx_err)) {
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_rename_file: %s", __func__,
-					idx_err ? idx_err->message : "?");
-			g_clear_error(&idx_err);
-			return -1;
-		}
-	}
-
-	return 0;
+	return sond_projekt_pflege_emb_sibling_apply(priv->pflege, error);
 }
 
-/* Nach erfolgreichem Commit: bereits geöffnete SondFilePart-Objekte der
- * betroffenen Anhänge auf ihre neue Adresse setzen */
+//Nach erfolgreichem Commit: geöffnete Fileparts der Anhänge auf ihre neue Adresse setzen
 static void emb_sibling_adjust_opened(ZondTreeviewFMPrivate *priv) {
-	GPtrArray *opened = NULL;
-
-	if (!priv->pending_sibling_pdf)
-		return;
-
-	opened = sond_file_part_get_arr_opened_files(priv->pending_sibling_pdf);
-	for (guint i = 0; opened && i < opened->len; i++) {
-		SondFilePart *child = g_ptr_array_index(opened, i);
-
-		for (guint j = 0; j < priv->pending_sibling_old->len; j++)
-			if (!g_strcmp0(sond_file_part_get_path(child),
-					g_ptr_array_index(priv->pending_sibling_old, j))) {
-				sond_file_part_set_path(child,
-						g_ptr_array_index(priv->pending_sibling_new, j));
-				break;
-			}
-	}
+	sond_projekt_pflege_emb_sibling_adjust_opened(priv->pflege);
 }
 
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
@@ -476,17 +315,12 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	 * gegen beide Datenbanken. */
 	{
 		DBaseZondRef ref = DBASE_ZOND_REF_NONE;
+		gboolean is_container_root = type == SOND_TVFM_ITEM_TYPE_DIR &&
+				sond_tvfm_item_get_sond_file_part(stvfm_item) &&
+				!sond_tvfm_item_get_path_or_section(stvfm_item);
 
-		if (type == SOND_TVFM_ITEM_TYPE_DIR) {
-			gboolean is_container_root = sond_tvfm_item_get_sond_file_part(stvfm_item)
-					&& !sond_tvfm_item_get_path_or_section(stvfm_item);
-			g_autofree gchar *path_prefix = g_strconcat(path,
-					is_container_root ? "//" : "/", NULL);
-
-			rc = dbase_zond_test_path(priv->zond->proj.dbase_zond, path_prefix, &ref, error);
-		} else
-			rc = dbase_zond_test_path_section(priv->zond->proj.dbase_zond, path, section,
-					FALSE, &ref, error);
+		rc = sond_projekt_pflege_check_delete(priv->pflege, path,
+				type == SOND_TVFM_ITEM_TYPE_DIR, is_container_root, section, &ref, error);
 		if (rc == -1)
 			return -1;
 
@@ -1762,8 +1596,8 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	g_clear_pointer(&priv->pending_delete_path, g_free);
 	g_clear_pointer(&priv->pending_move_path_old, g_free);
 	g_clear_pointer(&priv->pending_move_path_new, g_free);
-	emb_sibling_pending_clear(priv);
-	structure_pending_clear(priv);
+	sond_projekt_pflege_free(priv->pflege);
+	priv->pflege = NULL;
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }
@@ -2072,6 +1906,17 @@ static SondIndexCtx* zond_treeviewfm_get_index_ctx_cb(gpointer user_data) {
 	return zond_project_index_ctx(zond);
 }
 
+//Woher die Pflege Datenbank und Index nimmt: das jeweils geöffnete Projekt
+static DBaseZond* pflege_dbase(gpointer data) {
+	return ((Projekt*) data)->proj.dbase_zond;
+}
+
+static SondIndexCtx* pflege_index_ctx(gpointer data) {
+	Projekt *zond = data;
+
+	return (zond->proj.wctx && zond->proj.wctx->index_ctx) ? zond->proj.wctx->index_ctx : NULL;
+}
+
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ZondTreeviewFM* ztvfm = NULL;
 	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
@@ -2080,6 +1925,11 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ztvfm_priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	ztvfm_priv->zond = zond;
+	{
+		SondProjektKontext kontext = { pflege_dbase, pflege_index_ctx, zond };
+
+		ztvfm_priv->pflege = sond_projekt_pflege_new(&kontext);
+	}
 
 	sond_treeviewfm_set_index_ctx_func(SOND_TREEVIEWFM(ztvfm),
 			zond_treeviewfm_get_index_ctx_cb, zond);

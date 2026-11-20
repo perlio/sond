@@ -397,9 +397,12 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     open_item mit dem Viewer, Index-Kontext.
  2. Drop-Ziel im Inhaltsbaum (BAUM_INHALT): nimmt die Nutzlast GPtrArray aus SondTVFMItem an
     und legt Anbindungen an. Gehört zu zond_treeview/zond_tree_store (noch GTK3).
- 3. Offene Entwürfe: GTK-freies Modul sond_projekt_pflege (ZND-Verweise + Index + Eingang,
-    Rückrufe für Lease und "läuft zond?") auf Basis von DBaseZond; Inhaltsbäume, Viewer,
-    Headerbar und Export für GTK4 sind noch ungeplant.
+ 3. GTK-freies Modul src/znd/sond_projekt_pflege (Verweise in store/work, Index in der
+    Transaktion, Mimepart-Renummerierung, Anhang-Adressen, Struktur): die Bausteine sind aus
+    zond_treeviewfm.c herausgelöst, zond ruft sie über dünne Hüllfunktionen. Noch in
+    zond_treeviewfm.c: die Abläufe before_delete/_move/_insert und after (Transaktion, Commit,
+    Revert, Fehlerdatei), Eingang (zond_eingang_*) und die Anbindungs-Zugriffe auf work. Inhaltsbäume,
+    Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
 ```
 
 ## Ideen
