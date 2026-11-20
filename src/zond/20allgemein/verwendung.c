@@ -31,10 +31,10 @@
 
 #include "../../misc.h"
 #include "../zond_init.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_tree_store.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 #include "suchen.h"
 #include "verwendung.h"

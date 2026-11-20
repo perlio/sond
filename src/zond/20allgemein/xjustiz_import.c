@@ -38,10 +38,10 @@
 
 #include "../zond_init.h"
 #include "../10init/app_window.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_treeview.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 #include "xjustiz_import.h"
 

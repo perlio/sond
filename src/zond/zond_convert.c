@@ -23,17 +23,19 @@
 #include <stdio.h>
 #include <fcntl.h>
 
+#include "../misc.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"
 #include "../sond_file_helper.h"
 
-#include "zond_dbase.h"
+#include "../znd/zond_dbase.h"
+#include "zond_convert.h"
 #include "zond_treeview.h"
 #include "zond_init.h"
 #include "../zond_version.h"
 
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 
 static gint treeviews_get_page_num_from_dest_doc(fz_context *ctx,
 		pdf_document *doc, const gchar *dest, GError **error) {
@@ -1215,4 +1217,28 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 	//später: if ( atoi( v_string ) == 1 ) ...
 
 	return 0;
+}
+
+//Rückfrage vor dem Konvertieren einer Projektdatei anderer Version
+static gboolean convert_confirm(gchar const *version, gpointer data) {
+	g_autofree gchar *message = g_strdup_printf(
+			"Projekt in abweichender Version (%s) gespeichert", version);
+
+	(void) data;
+
+	return abfrage_frage(NULL, message, "Konvertieren", NULL) == GTK_RESPONSE_YES;
+}
+
+static gint convert_run(ZondDBase *zond_dbase, gchar const *version, gpointer data,
+		GError **error) {
+	(void) data;
+
+	return zond_convert(zond_dbase, version, error);
+}
+
+//Meldet die Rückfrage und die Konvertierung bei zond_dbase an (ZondDBase selbst ist GTK-frei)
+void zond_convert_register_handler(void) {
+	static ZondDBaseVersionHandler handler = { convert_confirm, convert_run, NULL };
+
+	zond_dbase_set_version_handler(&handler);
 }

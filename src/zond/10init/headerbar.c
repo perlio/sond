@@ -37,7 +37,7 @@
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeview.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_indexsuche.h"
 /* zond_chat.h bewußt nicht mehr eingebunden - Chat-Funktion fürs Release
  * abgeklemmt (siehe Makefile-Kommentar, Ziel "zond"), noch nicht ausgereift. */

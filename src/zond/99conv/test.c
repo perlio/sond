@@ -8,7 +8,7 @@
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 #include "../zond_init.h"
 
 /** rc == -1: Fähler

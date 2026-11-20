@@ -25,10 +25,10 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_treeviewfm.h"
 
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"
@@ -36,7 +36,7 @@
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 
 static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,

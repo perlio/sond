@@ -25,18 +25,38 @@ void section_free(gpointer data) {
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <sqlite3.h>
-#include <gtk/gtk.h>
 
-#include "zond_convert.h"
 #include "../zond_version.h"
-#include "zond_init.h"
 #include "anbindung.h"
 
 #include "../sond_zond_schema.h"
 
 #include "../sond_log_and_error.h"
 
-#include "../misc.h"
+
+#ifndef nelem
+#define nelem(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
+//Hängt add an old an und gibt beide frei (wie add_string() in misc.c, das GTK braucht)
+static gchar* message_append(gchar *old, gchar *add) {
+	gchar *result = old ? g_strconcat(old, add, NULL) : g_strdup(add);
+
+	g_free(old);
+	g_free(add);
+
+	return result;
+}
+
+//Handler für abweichende Projektversionen (s. zond_dbase.h)
+static ZondDBaseVersionHandler version_handler = { NULL, NULL, NULL };
+
+void zond_dbase_set_version_handler(ZondDBaseVersionHandler const *handler) {
+	if (handler)
+		version_handler = *handler;
+	else
+		memset(&version_handler, 0, sizeof(version_handler));
+}
 
 /* Fehlercode und -text werden vor dem Rollback gesichert: die erfolgreichen
  * Rollback-Statements überschreiben sonst die Meldung der eigentlichen
@@ -56,11 +76,11 @@ void section_free(gpointer data) {
             \
             if ( res ) \
             { \
-                (*error)->message = add_string( (*error)->message, \
+                (*error)->message = message_append( (*error)->message, \
                         g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) ); \
                 g_error_free( error_tmp ); \
             } \
-            else (*error)->message = add_string( (*error)->message, \
+            else (*error)->message = message_append( (*error)->message, \
                     g_strdup_printf( "\n\nRollback durchgeführt" ) ); \
         } \
         else \
@@ -331,15 +351,9 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 
 		if (g_strcmp0(v_string, G_STRINGIFY(ZOND_VERSION_MAJOR))) {
 			gint rc = 0;
-			gchar *message = NULL;
 
-			message = g_strdup_printf(
-					"Projekt in abweichender Version (%s) gespeichert",
-					v_string);
-			rc = abfrage_frage( NULL, message, "Konvertieren", NULL);
-			g_free(message);
-
-			if (rc != GTK_RESPONSE_YES) {
+			if (!version_handler.confirm || !version_handler.convert ||
+					!version_handler.confirm(v_string, version_handler.data)) {
 				g_set_error(error, SOND_ERROR, 0,
 						"Falsche Projektversion (%s)", v_string);
 				g_free(v_string);
@@ -349,7 +363,7 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 
 			sqlite3_close(zond_dbase_priv->dbase);
 
-			rc = zond_convert(zond_dbase, v_string, error);
+			rc = version_handler.convert(zond_dbase, v_string, version_handler.data, error);
 			g_free(v_string);
 			if (rc)
 				return -1;

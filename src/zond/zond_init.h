@@ -5,8 +5,8 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 
-#include "anbindung.h"
-#include "zond_error.h"
+#include "../znd/anbindung.h"
+#include "../znd/zond_error.h"
 #include "../sond_eingang_cache.h"
 
 

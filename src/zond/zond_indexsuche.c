@@ -47,7 +47,7 @@
 #include "40viewer/viewer_search.h"
 #include "40viewer/document.h"
 
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 
 
 /* -------------------------------------------------------------------------

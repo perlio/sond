@@ -12,8 +12,8 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 
-#include "../anbindung.h"
-#include "../zond_error.h"
+#include "../../znd/anbindung.h"
+#include "../../znd/zond_error.h"
 #include "viewer_session.h"
 
 typedef struct _GtkTreeIter GtkTreeIter;

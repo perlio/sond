@@ -20,13 +20,13 @@
 
 #include "../../sond_log_and_error.h"
 
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_tree_store.h"
 
 #include "../10init/app_window.h"
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 #include "export_selection.h"
 

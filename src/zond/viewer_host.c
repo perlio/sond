@@ -31,10 +31,10 @@
 #include "../seadrive/sond_seadrive_gtk3.h"
 
 #include "zond_init.h"
-#include "zond_dbase.h"
-#include "dbase_zond.h"
+#include "../znd/zond_dbase.h"
+#include "../znd/dbase_zond.h"
 #include "zond_pdf_document.h"
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 #include "20allgemein/project.h"
 #include "20allgemein/ziele.h"
 #include "40viewer/viewer.h"

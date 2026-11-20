@@ -15,17 +15,17 @@
 #include "zond_eingang.h"
 #include "zond_pdf_document.h"
 
-#include "zond_dbase.h"
+#include "../znd/zond_dbase.h"
 #include "zond_treeview.h"
 #include "zond_tree_store.h"
 
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
-#include "dbase_zond.h"
+#include "../znd/dbase_zond.h"
 #include "20allgemein/project.h"
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 
 typedef struct {
 	Projekt *zond;

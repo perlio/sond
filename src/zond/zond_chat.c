@@ -33,7 +33,7 @@
 
 #include "20allgemein/project.h"
 
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 #include "40viewer/viewer.h"
 
 /* Wieviele Fundstellen höchstens an das Chat-Modell als Kontext übergeben

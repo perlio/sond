@@ -21,18 +21,18 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_treeview.h"
 #include "../zond_treeviewfm.h"
 
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 #include "../20allgemein/ziele.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 #include "suchen.h"
 #include "verwendung.h"

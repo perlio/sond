@@ -25,10 +25,10 @@
 #include "../../sond_file_helper.h"
 
 #include "../zond_init.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../zond_tree_store.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "project.h"
 #include "db_regeln.h"
 #include "db_check_fenster.h"

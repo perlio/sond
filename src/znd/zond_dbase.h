@@ -74,6 +74,19 @@ typedef gint (*ZondDBaseRestartFunc)(ZondDBase*, gpointer, GError**);
 
 void zond_dbase_set_restart_func(ZondDBase*, ZondDBaseRestartFunc, gpointer);
 
+/* Weicht die Version einer vorhandenen Projektdatei von der aktuellen ab, entscheidet die
+ * Oberfläche: confirm fragt, ob konvertiert werden soll (FALSE: Öffnen scheitert mit Fehler),
+ * convert konvertiert die Datei (die Verbindung ist dafür geschlossen, danach wird sie neu
+ * geöffnet). Ohne Handler scheitert das Öffnen sofort mit "Falsche Projektversion". Das Modul
+ * ist GTK-frei, zond registriert seinen Handler beim Start (zond_convert_register_handler()). */
+typedef struct {
+	gboolean (*confirm)(gchar const *version, gpointer data);
+	gint (*convert)(ZondDBase*, gchar const *version, gpointer data, GError**);
+	gpointer data;
+} ZondDBaseVersionHandler;
+
+void zond_dbase_set_version_handler(ZondDBaseVersionHandler const *handler);
+
 gint zond_dbase_backup(ZondDBase*, ZondDBase*, GError**);
 
 gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,

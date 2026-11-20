@@ -5,7 +5,7 @@
 #include "../zond_pdf_document.h"
 #include "viewer_annot.h"
 
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 
 #include"../../sond_log_and_error.h"
 

@@ -34,7 +34,7 @@
 #include "../seadrive/sond_seadrive_gtk3.h"
 
 #include "zond_init.h"
-#include "zond_dbase.h"
+#include "../znd/zond_dbase.h"
 #include "zond_tree_store.h"
 #include "zond_treeviewfm.h"
 #include "zond_pdf_document.h"
@@ -42,14 +42,14 @@
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 
-#include "dbase_zond.h"
+#include "../znd/dbase_zond.h"
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
 #include "40viewer/viewer_ui.h"
 #include "40viewer/document.h"
 
-#include "anbindung.h"
+#include "../znd/anbindung.h"
 #include "zond_indexsuche.h"
 
 typedef struct {

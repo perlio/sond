@@ -2,12 +2,12 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #259.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #260.
 
 ## Inhalt
 
 Offen: #245, #247, #254, #255, #256, #257, #258
-Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259
 Ideen: #167, #169, #205, #232, #233
 
 ## Offen
@@ -319,7 +319,7 @@ Status: zurückgestellt (Prüfauftrag)
 
 ### #252 GTK4-Dateibaum: noch fehlende Funktionen
 
-Status: zurückgestellt
+Status: zurückgestellt (alles gebaut und getestet bis auf Punkt 4)
 
 ```text
  Der GTK4-Dateibaum (src/gtk4/sond_treeviewfm.c) kann Wurzel setzen, Anzeige mit
@@ -334,21 +334,28 @@ Status: zurückgestellt
     Entsperren vorab ist da (Stufe 1, getestet). Kopieren, Verschieben und Einfügen mit
     Containern (Quellen und Ziele ZIP/PDF, Passwort-Vorprüfung tvfm/sond_tvfm_preflight.c,
     Einfügen am Ort der Zielzeile, PDF ohne Anhänge wird Container, letzter Anhang entfernt
-    macht die PDF wieder zum Blatt, Mimeparts rücken nach) ist gebaut, ungetestet (Stufe 3).
+    macht die PDF wieder zum Blatt, Mimeparts rücken nach) ist da (Stufe 3, getestet).
     E-Mail als Ziel bleibt gesperrt, s. #247.
  3. "Dauerhaft entsperren" (Passwortschutz von ZIP/PDF entfernen): der Kern ist jetzt
     GTK-frei (tvfm/sond_tvfm_unlock.c) und im Client eingebunden (Menü im Dokumentenfenster,
     Passwortdialog sond_client/sond_password_dialog.c, Nachlauf nach dem Index-Job).
     Menüpunkt im GTK4-Baum selbst (gtk4/sond_treeviewfm_unlock.c, auch für Einträge in
     Containern; Schreibprüfung über sond_treeviewfm_set_write_check, Vfunc file_part_busy)
-    gebaut, ungetestet; das Dokumentenfenster nutzt ihn statt eines eigenen Menüpunkts.
- 4. Eingangs-Spalte (nur Zond: Zettel, Cache; Vfunc get_eingang ist in GTK3 da).
+    getestet; das Dokumentenfenster nutzt ihn statt eines eigenen Menüpunkts.
+ 4. Eingangs-Spalte als Teil der Basis: das Vfunc get_eingang ist in der GTK4-Fassung noch
+    nicht deklariert (GTK3: gtk3/sond_treeviewfm.h, gesetzt erst von zond_treeviewfm), die
+    Spalte fehlt. Zuschnitt: Vfunc get_eingang (rel_path, is_dir -> Datum oder -1) in
+    SondTreeviewFMClass deklarieren; die Spalte "Eingang" (Breite 100, sortierbar) nur
+    anlegen, wenn eine Unterklasse das Vfunc setzt; Anzeige und Sortierschlüssel wie in GTK3
+    (item_eingang, Datum JJJJMMTT, Schlüssel in Sekunden). Die fs_entry_*-Hooks sind schon da.
+    Den Inhalt (Zettel, Cache, Menü Eingang) liefert zond-GTK4, s. #259.
  5. Öffnen einer nicht geladenen SeaDrive-Datei mit Fortschrittsdialog und Abbrechen und
     Vorab-Laden beim Kopieren: gebaut (gtk4/sond_seadrive_load_dialog.c auf dem GTK-freien
-    Lade-Auftrag in seadrive/sond_seadrive_core.c, tvfm/sond_tvfm_load.c), ungetestet.
-    Offen: Passwörter vorab abfragen (mit Containern), Ziel in einer nicht geladenen Datei.
- 6. Drop-Ziel im Inhaltsbaum von Zond (Anbinden): die Nutzlast beim Ziehen ist ein
-    GPtrArray aus SondTVFMItem; Strg unter Windows nur über GetAsyncKeyState lesbar.
+    Lade-Auftrag in seadrive/sond_seadrive_core.c, tvfm/sond_tvfm_load.c), getestet.
+    Passwörter vorab abfragen: erledigt mit Punkt 2 (tvfm/sond_tvfm_preflight.c).
+ Der Drop-Ziel-Teil (Anbinden im Inhaltsbaum von zond) gehört nicht ins Dateibaum-Widget,
+ s. #259; die Quellseite (Nutzlast beim Ziehen: GPtrArray aus SondTVFMItem, Strg unter
+ Windows nur über GetAsyncKeyState lesbar) ist fertig und getestet.
 ```
 
 ### #253 Absturz beim Schließen eines Projekts (nicht reproduziert)
@@ -370,6 +377,26 @@ Status: beobachten
  reproduzierbar. Gemeinsam mit dem ersten Fall: Store liegt auf einem Netzlaufwerk.
  Beim nächsten Auftreten festhalten: Netzlaufwerk ja/nein, wievieltes Schließen in der
  Sitzung, Modulname der obersten Frames (sqlite-DLL?), vorher ZIP-/Mail-Aktionen.
+```
+
+### #259 GTK4-zond: Inhalt für den Dateibaum (Eingang, Anbinden)
+
+Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
+
+```text
+ Was nicht ins Dateibaum-Widget gehört, sondern in die zond-Unterklasse und den Inhaltsbaum
+ eines GTK4-zond:
+ 1. Unterklasse zond_treeviewfm (GTK4): setzt get_eingang (Cache sond_eingang_cache,
+    Zettel sond_eingang_zettel), fs_entry_deleted/_renamed/_moved (zond_eingang_*),
+    Menü "Eingang" (Setzen, Entfernen, Neu einlesen), die Signale before-move, before-insert,
+    before-delete, after (Transaktion mit work-/store-DB und Index, Prüfung beider DBs),
+    Vfunc file_part_busy (PDF im Viewer geöffnet), has_sections/load_sections/delete_section,
+    open_item mit dem Viewer, Index-Kontext.
+ 2. Drop-Ziel im Inhaltsbaum (BAUM_INHALT): nimmt die Nutzlast GPtrArray aus SondTVFMItem an
+    und legt Anbindungen an. Gehört zu zond_treeview/zond_tree_store (noch GTK3).
+ 3. Offene Entwürfe: GTK-freies Modul sond_projekt_pflege (ZND-Verweise + Index + Eingang,
+    Rückrufe für Lease und "läuft zond?") auf Basis von DBaseZond; Inhaltsbäume, Viewer,
+    Headerbar und Export für GTK4 sind noch ungeplant.
 ```
 
 ## Ideen

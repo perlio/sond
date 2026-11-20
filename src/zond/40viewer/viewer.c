@@ -35,7 +35,7 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 
 #include "../zond_pdf_document.h"
 
-#include "../anbindung.h"
+#include "../../znd/anbindung.h"
 
 
 #include "document.h"

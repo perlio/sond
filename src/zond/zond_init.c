@@ -40,6 +40,7 @@
  * Freigeben mehr nötig. */
 
 #include "zond_init.h"
+#include "zond_convert.h"
 #include "zond_pdf_document.h"
 #include "viewer_host.h"
 #include "40viewer/viewer_session.h"
@@ -257,6 +258,9 @@ static void init_css(void) {
 
 void zond_init(GtkApplication *app, Projekt *zond) {
 	setlocale(LC_NUMERIC, "C");
+
+	//Rückfrage und Konvertierung für Projektdateien anderer Version (zond_dbase ist GTK-frei)
+	zond_convert_register_handler();
 
 	zond->app.ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!zond->app.ctx)

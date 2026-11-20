@@ -24,13 +24,13 @@
 #include "../../seadrive/sond_seadrive_gtk3.h"
 #include "../../sond_log_and_error.h"
 #include "../zond_init.h"
-#include "../zond_dbase.h"
+#include "../../znd/zond_dbase.h"
 #include "../40viewer/viewer_session.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeviewfm.h"
 
-#include "../dbase_zond.h"
+#include "../../znd/dbase_zond.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/suchen.h"
 
