@@ -572,142 +572,27 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
 	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->proj.dbase_zond->changed ? 2 : 0));
 
-	/* Index-DB als Schema idx anhängen (vor der Transaktion) */
-	if (index_tx_begin(ztvfm_priv, error))
-		return -1;
-
-	rc = dbase_zond_begin(ztvfm_priv->zond->proj.dbase_zond, error);
-	if (rc) {
-		index_tx_end(ztvfm_priv);
-		return -1;
-	}
-
-	/* Index-Pfad umbenennen - in derselben Transaktion wie store/work */
-	if (index_tx(ztvfm_priv)) {
-		GError *idx_err = NULL;
-
-		/* Vorsichtsmaßnahme: falls der ZIEL-Pfad schon (direkt oder über
-		 * einen Vorfahren) als abgedeckt gilt, muss das VOR dem Umbenennen
-		 * aufgelöst werden - hierher kommt gleich neuer Inhalt (die
-		 * verschobene Datei/das Verzeichnis), der ggf. noch gar nicht
-		 * geprüft ist und die Abdeckungs-Aussage sonst verletzen würde.
-		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
-		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
-		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht.
-		 * Nicht beim Umbenennen an Ort und Stelle (index_to -1): der Inhalt
-		 * bleibt derselbe, ein abdeckender Vorfahre (Verzeichnis, PDF) bliebe
-		 * sonst aufgelöst und müsste neu zusammengefasst werden. */
-		if (!rename_in_gmessage && index_to != -1 &&
-				!sond_index_ctx_coverage_invalidate(index_tx(ztvfm_priv),
-				prefix_new, ztvfm_priv->zond->proj.project_dir, &idx_err)) {
-			tx_abort(ztvfm_priv);
-			set_idx_error(error, __func__,
-					"sond_index_ctx_coverage_invalidate", &idx_err);
-			return -1;
-		}
-
-		if (!rename_in_gmessage &&
-				!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
-				prefix_old, prefix_new, &idx_err)) {
-			tx_abort(ztvfm_priv);
-			set_idx_error(error, __func__, "sond_index_ctx_rename_file",
-					&idx_err);
-			return -1;
-		}
-	}
-
-	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
-		//-> umbenennen
-	rc = rename_in_gmessage ? 0 :
-			dbase_zond_update_path(ztvfm_priv->zond->proj.dbase_zond, prefix_old, prefix_new, error);
-	if (rc) {
-		tx_abort(ztvfm_priv); //Fehler von update_path bleibt erhalten
-		return -1;
-	}
-
-	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen (-1)
-	if (from_gmessage && !rename_in_gmessage) {
-		gint rc = 0;
-		gchar* prefix_gmessage = NULL;
-
-		prefix_gmessage = g_strndup(prefix_old, strlen(prefix_old) -
-				strlen(strrchr(prefix_old, '/') + 1));
-
-		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->proj.dbase_zond,
-				prefix_gmessage, index_from, FALSE, error);
-		if (!rc) //Index-DB ebenso
-			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
-					index_from, FALSE, error);
-		g_free(prefix_gmessage);
-		if (rc) {
-			tx_abort(ztvfm_priv);
-			return -1;
-		}
-	}
-
-	//wenn in GMESSAGE
-	if (!rename_in_gmessage &&
-			SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent))) {
-		gint rc = 0;
-		gchar* prefix_gmessage = NULL;
-
-		//"alpha" wieder wegnehmen
-		prefix_gmessage = g_strndup(prefix_new, strlen(prefix_new) - strlen(strrchr(prefix_new, '/') + 1));
-
-		//indizes ab index_to +1
-		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->proj.dbase_zond,
-				prefix_gmessage, index_to, TRUE, error);
-		if (!rc) //Index-DB ebenso
-			rc = gmessage_index_renumber(ztvfm_priv, prefix_gmessage,
-					index_to, TRUE, error);
-		if (rc) {
-			tx_abort(ztvfm_priv);
-			g_free(prefix_gmessage);
-
-			return -1;
-		}
-
-		//index_to als basename hinzufügen
-		prefix_gmessage = add_string(prefix_gmessage, g_strdup_printf("%u", index_to));
-
-		rc = dbase_zond_update_path(ztvfm_priv->zond->proj.dbase_zond, prefix_new,
-				prefix_gmessage, error);
-
-		/* Index-DB: Platzhalter "alpha" (s. rename_file() oben) auf den
-		 * Zielindex (sonst bliebe der Teil dort dauerhaft "x.eml//alpha"). */
-		if (!rc && index_tx(ztvfm_priv)) {
-			GError *idx_err = NULL;
-
-			if (!sond_index_ctx_rename_file(index_tx(ztvfm_priv),
-					prefix_new, prefix_gmessage, &idx_err)) {
-				set_idx_error(error, __func__, "sond_index_ctx_rename_file",
-						&idx_err);
-				rc = -1;
-			}
-		}
-		g_free(prefix_gmessage);
-		if (rc) {
-			tx_abort(ztvfm_priv);
-			return -1;
-		}
-	}
-
-	/* Anhang einer PDF: Adressen der übrigen Anhänge nachführen -
-	 * nach dem Element selbst, damit sich alte und neue Pfade nicht
-	 * überschneiden. Bleibt der Anhang in derselben PDF, ist es ein
-	 * Umbenennen, sonst verlässt er sie (wie Löschen). */
 	{
 		SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-		gboolean same_pdf = sfp && sond_file_part_get_parent(sfp) ==
-				sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
+		SondFilePart *sfp_parent = sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
+		SondProjektMove move = {
+			.prefix_old = prefix_old,
+			.prefix_new = prefix_new,
+			.project_dir = ztvfm_priv->zond->proj.project_dir,
+			.index_to = index_to,
+			.from_gmessage = from_gmessage,
+			.index_from = index_from,
+			.into_gmessage = SOND_IS_FILE_PART_GMESSAGE(sfp_parent),
+			.rename_in_gmessage = rename_in_gmessage,
+			.sfp_emb = is_pdf_emb(stvfm_item) ? sfp : NULL,
+			.sfp_target = sfp_parent,
+			.base_new = base_new
+		};
 
-		if (emb_sibling_changes(ztvfm_priv, stvfm_item,
-				same_pdf ? base_new : NULL, error) ||
-				emb_sibling_apply(ztvfm_priv, error)) {
-			emb_sibling_pending_clear(ztvfm_priv);
-			tx_abort(ztvfm_priv);
+		//Transaktion beginnen, Pfade, Mimepart-Nummern und Anhang-Adressen umschreiben
+		rc = sond_projekt_pflege_move(ztvfm_priv->pflege, &move, error);
+		if (rc)
 			return -1;
-		}
 	}
 
 	/* Erst hier, unmittelbar vor dem garantiert erfolgreichen return (s.

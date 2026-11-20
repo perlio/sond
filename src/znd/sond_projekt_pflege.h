@@ -115,6 +115,29 @@ void sond_projekt_pflege_structure_clear(SondProjektPflege*);
 //Nach erfolgreicher Aktion: Struktur der vorgemerkten Container neu in den Index einlesen
 void sond_projekt_pflege_structure_refresh(SondProjektPflege*);
 
+/* ---- Verschieben, Umbenennen ---- */
+
+/* Eine Verschiebung oder Umbenennung in den Projektdaten. Die Pfade sind fertig gebildet (Filepart,
+ * Container-Inhalte mit "//", Anhang einer PDF mit kodiertem Dateinamen, Mimepart mit Nummer). */
+typedef struct {
+	gchar const *prefix_old; //bisheriger Pfad (Präfix)
+	gchar const *prefix_new; //neuer Pfad; bei einem Mimepart noch mit Platzhalter "alpha"
+	gchar const *project_dir;
+	gint index_to; //-1: Umbenennen an Ort und Stelle; sonst Einfügeposition (Mimepart)
+	gboolean from_gmessage; //kommt aus einer Mail (index_from gültig)
+	gint index_from;
+	gboolean into_gmessage; //geht in eine Mail
+	gboolean rename_in_gmessage; //nur Anzeigename eines Mimeparts: Pfad bleibt
+	SondFilePart *sfp_emb; //Element, wenn es ein Anhang einer PDF ist, sonst NULL
+	SondFilePart *sfp_target; //neuer Container (für "bleibt in derselben PDF")
+	gchar const *base_new; //neuer Name im Ziel
+} SondProjektMove;
+
+/* Beginnt die Dual-Write-Transaktion (Index-DB angehängt, dbase_zond_begin) und schreibt Pfad,
+ * Mimepart-Nummern und Anhang-Adressen in store/work und Index um; Commit oder Rollback macht der
+ * Aufrufer. 0 bei Erfolg; bei -1 ist alles zurückgenommen (kein Rollback nötig). */
+gint sond_projekt_pflege_move(SondProjektPflege*, SondProjektMove const*, GError **error);
+
 G_END_DECLS
 
 #endif // SOND_PROJEKT_PFLEGE_H_INCLUDED

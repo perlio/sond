@@ -283,3 +283,140 @@ void sond_projekt_pflege_structure_refresh(SondProjektPflege *pflege) {
 		}
 	}
 }
+
+/* ------------------------------------------------------------------------
+ * Verschieben, Umbenennen
+ * --------------------------------------------------------------------- */
+
+//Fehler der Index-DB (idx_err wird freigegeben) in *error übernehmen
+static void set_idx_error(GError **error, gchar const *func, gchar const *what, GError **idx_err) {
+	if (error)
+		*error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED, "%s: %s: %s", func, what,
+				*idx_err ? (*idx_err)->message : "?");
+	g_clear_error(idx_err);
+}
+
+//Mimepart-Nummern hinter prefix in store/work und Index umzählen
+static gint gmessage_renumber_all(SondProjektPflege *pflege, gchar const *prefix, gint index,
+		gboolean into, GError **error) {
+	if (dbase_zond_update_gmessage_index(pflege_dbase(pflege), prefix, index, into, error))
+		return -1;
+
+	return sond_projekt_pflege_gmessage_index_renumber(pflege, prefix, index, into, error);
+}
+
+gint sond_projekt_pflege_move(SondProjektPflege *pflege, SondProjektMove const *m, GError **error) {
+	DBaseZond *dbase = pflege_dbase(pflege);
+
+	if (sond_projekt_pflege_index_tx_begin(pflege, error))
+		return -1;
+
+	if (dbase_zond_begin(dbase, error)) {
+		sond_projekt_pflege_index_tx_end(pflege);
+
+		return -1;
+	}
+
+	//Index-Pfad umbenennen - in derselben Transaktion wie store/work
+	if (sond_projekt_pflege_index_tx(pflege)) {
+		SondIndexCtx *index_tx = sond_projekt_pflege_index_tx(pflege);
+		GError *idx_err = NULL;
+
+		/* Gilt der Zielpfad (direkt oder über einen Vorfahren) schon als abgedeckt, ist das VOR dem
+		 * Umbenennen aufzulösen: hierher kommt neuer, ungeprüfter Inhalt. Reihenfolge wichtig, sonst
+		 * würde der gerade umbenannte, korrekte eigene Eintrag gleich wieder mitgelöscht. Nicht beim
+		 * Umbenennen an Ort und Stelle (index_to -1): der Inhalt bleibt, ein abdeckender Vorfahre
+		 * bliebe sonst aufgelöst. */
+		if (!m->rename_in_gmessage && m->index_to != -1 &&
+				!sond_index_ctx_coverage_invalidate(index_tx, m->prefix_new, m->project_dir,
+				&idx_err)) {
+			sond_projekt_pflege_tx_abort(pflege);
+			set_idx_error(error, __func__, "sond_index_ctx_coverage_invalidate", &idx_err);
+
+			return -1;
+		}
+
+		if (!m->rename_in_gmessage &&
+				!sond_index_ctx_rename_file(index_tx, m->prefix_old, m->prefix_new, &idx_err)) {
+			sond_projekt_pflege_tx_abort(pflege);
+			set_idx_error(error, __func__, "sond_index_ctx_rename_file", &idx_err);
+
+			return -1;
+		}
+	}
+
+	//alle Dateien, die mit prefix_old anfangen (einschließlich der Datei selbst) umbenennen
+	if (!m->rename_in_gmessage &&
+			dbase_zond_update_path(dbase, m->prefix_old, m->prefix_new, error)) {
+		sond_projekt_pflege_tx_abort(pflege); //Fehler von update_path bleibt erhalten
+
+		return -1;
+	}
+
+	//aus einer Mail heraus: die nachfolgenden Nummern rücken auf (-1)
+	if (m->from_gmessage && !m->rename_in_gmessage) {
+		g_autofree gchar *prefix_gmessage = g_strndup(m->prefix_old,
+				strlen(m->prefix_old) - strlen(strrchr(m->prefix_old, '/') + 1));
+
+		if (gmessage_renumber_all(pflege, prefix_gmessage, m->index_from, FALSE, error)) {
+			sond_projekt_pflege_tx_abort(pflege);
+
+			return -1;
+		}
+	}
+
+	//in eine Mail hinein
+	if (!m->rename_in_gmessage && m->into_gmessage) {
+		gint rc = 0;
+		//"alpha" wieder wegnehmen
+		g_autofree gchar *prefix_gmessage = g_strndup(m->prefix_new,
+				strlen(m->prefix_new) - strlen(strrchr(m->prefix_new, '/') + 1));
+		g_autofree gchar *path_final = NULL;
+
+		//Nummern ab index_to rücken um 1 weiter
+		if (gmessage_renumber_all(pflege, prefix_gmessage, m->index_to, TRUE, error)) {
+			sond_projekt_pflege_tx_abort(pflege);
+
+			return -1;
+		}
+
+		//Platzhalter "alpha" auf den Zielindex setzen
+		path_final = g_strdup_printf("%s%d", prefix_gmessage, m->index_to);
+		rc = dbase_zond_update_path(dbase, m->prefix_new, path_final, error);
+
+		if (!rc && sond_projekt_pflege_index_tx(pflege)) {
+			GError *idx_err = NULL;
+
+			if (!sond_index_ctx_rename_file(sond_projekt_pflege_index_tx(pflege), m->prefix_new,
+					path_final, &idx_err)) {
+				set_idx_error(error, __func__, "sond_index_ctx_rename_file", &idx_err);
+				rc = -1;
+			}
+		}
+
+		if (rc) {
+			sond_projekt_pflege_tx_abort(pflege);
+
+			return -1;
+		}
+	}
+
+	/* Anhang einer PDF: Adressen der übrigen Anhänge nachführen - nach dem Element selbst, damit sich
+	 * alte und neue Pfade nicht überschneiden. Bleibt der Anhang in derselben PDF, ist es ein
+	 * Umbenennen, sonst verlässt er sie (wie Löschen). */
+	sond_projekt_pflege_emb_sibling_clear(pflege);
+	if (m->sfp_emb) {
+		gboolean same_pdf = sond_file_part_get_parent(m->sfp_emb) == m->sfp_target;
+
+		if (sond_projekt_pflege_emb_sibling_changes(pflege, m->sfp_emb,
+				same_pdf ? m->base_new : NULL, error) ||
+				sond_projekt_pflege_emb_sibling_apply(pflege, error)) {
+			sond_projekt_pflege_emb_sibling_clear(pflege);
+			sond_projekt_pflege_tx_abort(pflege);
+
+			return -1;
+		}
+	}
+
+	return 0;
+}
