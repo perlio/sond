@@ -161,9 +161,36 @@ void zond_dbase_finalize_stmts(sqlite3 *db) {
 static void zond_dbase_finalize(GObject *self) {
 	ZondDBasePrivate *priv = zond_dbase_get_instance_private(ZOND_DBASE(self));
 
+#ifdef CONFIG_Debug
+	/* Diagnose zu TODO #253 (SIGSEGV in sqlite3_close): Zustand der Verbindung vor dem Schließen
+	 * - angehängte Datenbanken, noch offene Statements, laufende Transaktion. Nur in Debug-Builds. */
+	if (priv->dbase) {
+		sqlite3_stmt *st = NULL;
+		sqlite3_stmt *dl = NULL;
+
+		g_printerr("[DIAG] close '%s' db=%p\n", priv->path, (void*) priv->dbase);
+		if (sqlite3_prepare_v2(priv->dbase, "PRAGMA database_list;", -1, &dl, NULL) == SQLITE_OK) {
+			while (sqlite3_step(dl) == SQLITE_ROW)
+				g_printerr("[DIAG]   schema '%s' file '%s'\n", sqlite3_column_text(dl, 1),
+						sqlite3_column_text(dl, 2));
+			sqlite3_finalize(dl);
+		}
+		while ((st = sqlite3_next_stmt(priv->dbase, st)))
+			g_printerr("[DIAG]   stmt %p busy=%d sql=%.80s\n", (void*) st, sqlite3_stmt_busy(st),
+					sqlite3_sql(st) ? sqlite3_sql(st) : "?");
+		g_printerr("[DIAG]   autocommit=%d\n", sqlite3_get_autocommit(priv->dbase));
+	}
+#endif
+
 	if (priv->dbase)
 		zond_dbase_finalize_stmts(priv->dbase);
+#ifdef CONFIG_Debug
+	g_printerr("[DIAG]   stmts finalisiert, schliesse\n");
+#endif
 	sqlite3_close(priv->dbase);
+#ifdef CONFIG_Debug
+	g_printerr("[DIAG]   geschlossen\n");
+#endif
 
 	if (priv->stmt_keys)
 		g_ptr_array_unref(priv->stmt_keys);

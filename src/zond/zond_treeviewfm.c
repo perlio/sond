@@ -398,7 +398,6 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 		gchar const* base_new, gint index_to, GError **error,
 		gpointer user_data) {
 	g_autofree gchar* prefix_new = NULL;
-	GError *idx_err = NULL;
 
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
@@ -423,16 +422,9 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
-	if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->proj.wctx->index_ctx,
-			prefix_new, ztvfm_priv->zond->proj.project_dir, &idx_err)) {
-		LOG_WARN("%s: sond_index_ctx_coverage_invalidate('%s'): %s", __func__,
-				prefix_new, idx_err ? idx_err->message : "?");
-		g_clear_error(&idx_err);
-	}
-
-	//Struktur der Ziel-PDF/Mail nach dem Kopieren neu einlesen
-	structure_pending_clear(ztvfm_priv);
-	structure_pending_add(ztvfm_priv,
+	//Abdeckung auflösen, Struktur der Ziel-PDF/Mail zum Neueinlesen vormerken
+	sond_projekt_pflege_insert(ztvfm_priv->pflege, prefix_new,
+			ztvfm_priv->zond->proj.project_dir,
 			structure_container_of_target(stvfm_item_parent));
 
 	return 0;
@@ -444,9 +436,7 @@ static void zond_treeviewfm_after_insert(SondTreeviewFM* stvfm,
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
-	if (suc)
-		structure_refresh(ztvfm_priv);
-	structure_pending_clear(ztvfm_priv);
+	sond_projekt_pflege_insert_ende(ztvfm_priv->pflege, suc);
 }
 
 static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,

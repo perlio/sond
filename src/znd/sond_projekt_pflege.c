@@ -609,3 +609,32 @@ SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gbo
 
 	return SOND_PROJEKT_TX_OK;
 }
+
+/* ------------------------------------------------------------------------
+ * Kopieren (Einfügen)
+ * --------------------------------------------------------------------- */
+
+void sond_projekt_pflege_insert(SondProjektPflege *pflege, gchar const *prefix_new,
+		gchar const *project_dir, SondFilePart *container) {
+	SondIndexCtx *index_ctx = pflege_index_ctx(pflege);
+	GError *idx_err = NULL;
+
+	if (!index_ctx)
+		return;
+
+	if (!sond_index_ctx_coverage_invalidate(index_ctx, prefix_new, project_dir, &idx_err)) {
+		LOG_WARN("%s: sond_index_ctx_coverage_invalidate('%s'): %s", __func__, prefix_new,
+				idx_err ? idx_err->message : "?");
+		g_clear_error(&idx_err);
+	}
+
+	//Struktur der Ziel-PDF/Mail nach dem Kopieren neu einlesen
+	sond_projekt_pflege_structure_clear(pflege);
+	sond_projekt_pflege_structure_add(pflege, container);
+}
+
+void sond_projekt_pflege_insert_ende(SondProjektPflege *pflege, gboolean suc) {
+	if (suc)
+		sond_projekt_pflege_structure_refresh(pflege);
+	sond_projekt_pflege_structure_clear(pflege);
+}

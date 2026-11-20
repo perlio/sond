@@ -145,6 +145,18 @@ typedef enum {
 SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege*, gboolean suc, gboolean dual,
 		gchar const *project_dir, GError **error);
 
+/* ---- Kopieren (Einfügen) ---- */
+
+/* Vorbereitung, bevor neuer, ungeprüfter Inhalt unter prefix_new (fertig gebildeter Zielpfad) entsteht:
+ * eine Abdeckung des Pfads oder eines abdeckenden Vorfahren im Index auflösen und die Struktur des
+ * Ziel-Containers (PDF oder Mail, sonst NULL) zum Neueinlesen vormerken. Best-effort: ein Fehler
+ * verhindert das Kopieren nicht. Ohne Index nichts zu tun. */
+void sond_projekt_pflege_insert(SondProjektPflege*, gchar const *prefix_new, gchar const *project_dir,
+		SondFilePart *container);
+
+//Nach dem Kopieren: bei Erfolg die vorgemerkte Struktur neu einlesen, die Vormerkung verwerfen
+void sond_projekt_pflege_insert_ende(SondProjektPflege*, gboolean suc);
+
 /* ---- Verschieben, Umbenennen ---- */
 
 /* Eine Verschiebung oder Umbenennung in den Projektdaten. Die Pfade sind fertig gebildet (Filepart,

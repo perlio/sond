@@ -380,6 +380,16 @@ Status: beobachten
  reproduzierbar. Gemeinsam mit dem ersten Fall: Store liegt auf einem Netzlaufwerk.
  Beim nächsten Auftreten festhalten: Netzlaufwerk ja/nein, wievieltes Schließen in der
  Sitzung, Modulname der obersten Frames (sqlite-DLL?), vorher ZIP-/Mail-Aktionen.
+
+ Dritte und vierte Beobachtung (20.11.2026): zweimal derselbe Stack (libsqlite3-0.dll,
+ zond_dbase_finalize -> dbase_zond_free -> project_close), Projekt Test.ZND auf der LOKALEN
+ Platte (kein Netzlaufwerk, kein SeaDrive). Beide Male nach Dateioperationen im Baum (Verschieben
+ mit Index) und Schließen per Fensterkreuz. Gleiches Szenario danach mehrfach sauber (auch mit
+ Diagnose), im Test (Projektkopie, work und Index angehängt, Verschieben, Commit, Speichern,
+ Schließen) nicht reproduzierbar. Also kein Netzlaufwerk-Problem und kein Watcher.
+ Debug-Builds geben beim Schließen jeder Verbindung "[DIAG]"-Zeilen auf stderr aus
+ (angehängte Schemas, offene Statements, autocommit, "schliesse"/"geschlossen"): bei einem
+ Absturz die letzten Zeilen sichern - fehlt "geschlossen", war es sqlite3_close.
 ```
 
 ### #259 GTK4-zond: Inhalt für den Dateibaum (Eingang, Anbinden)
@@ -398,11 +408,13 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
  2. Drop-Ziel im Inhaltsbaum (BAUM_INHALT): nimmt die Nutzlast GPtrArray aus SondTVFMItem an
     und legt Anbindungen an. Gehört zu zond_treeview/zond_tree_store (noch GTK3).
  3. GTK-freies Modul src/znd/sond_projekt_pflege (Verweise in store/work, Index in der
-    Transaktion, Mimepart-Renummerierung, Anhang-Adressen, Struktur): die Bausteine sind aus
-    zond_treeviewfm.c herausgelöst, zond ruft sie über dünne Hüllfunktionen. Noch in
-    zond_treeviewfm.c: die Abläufe before_delete/_move/_insert und after (Transaktion, Commit,
-    Revert, Fehlerdatei), Eingang (zond_eingang_*) und die Anbindungs-Zugriffe auf work. Inhaltsbäume,
-    Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
+    Transaktion, Mimepart-Renummerierung, Anhang-Adressen, Struktur, Verschieben, Kopieren,
+    Transaktionsrahmen tx_begin/tx_ende mit Revert und Fehlerdatei): aus zond_treeviewfm.c
+    herausgelöst, die Abläufe before_delete/_move/_insert und after rufen sie nur noch auf (Anzeige,
+    Projekt schließen und Programmende bleiben in der Anwendung). Noch in zond_treeviewfm.c: der
+    Löschablauf selbst (Index/Mail/Anhang beim Löschen), Eingang (zond_eingang_*) und die
+    Anbindungs-Zugriffe auf work. Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch
+    ungeplant.
 ```
 
 ## Ideen
