@@ -606,9 +606,7 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
  * @param dbase_zond Pointer to database structure pointer
  */
 static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
-	g_object_unref((*dbase_zond)->zond_dbase_store);
-	g_object_unref((*dbase_zond)->zond_dbase_work);
-	g_free(*dbase_zond);
+	dbase_zond_free(*dbase_zond);
 
 	*dbase_zond = NULL;
 

@@ -41,9 +41,11 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	if (rc)
 		return -1;
 
-	rc = zond_dbase_check_journal_settings(dbase_zond->zond_dbase_work, error);
-	if (rc)
-		return -1;
+	if (dbase_zond->zond_dbase_work) {
+		rc = zond_dbase_check_journal_settings(dbase_zond->zond_dbase_work, error);
+		if (rc)
+			return -1;
+	}
 
 	/* Ein BEGIN auf der store-Connection - work ist per ATTACH
 	 * (project_create_dbase_zond()) als zweites Schema mit eingehängt,
@@ -104,134 +106,18 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	return 0;
 }
 
-/* Journal-Modus der angehängten Index-DB: wie bei store/work Voraussetzung
- * für die atomare Mehrdatei-Transaktion (s. zond_dbase_check_journal_
- * settings()). */
-static gint dbase_zond_check_index_journal(sqlite3 *db, GError **error) {
-	sqlite3_stmt *stmt = NULL;
-	g_autofree gchar *journal_mode = NULL;
+/* Die Schemata, auf denen die Dual-Write-Funktionen schreiben: "main" (store) und, wenn vorhanden,
+ * "work" (per ATTACH an die store-Connection gehängt). Ohne work (Client) nur "main". */
+static guint dbase_zond_schemas(DBaseZond *dbase_zond, gchar const *out[2]) {
+	out[0] = "main";
+	out[1] = NULL;
 
-	if (sqlite3_prepare_v2(db, "PRAGMA idx.journal_mode;", -1, &stmt, NULL)
-			!= SQLITE_OK) {
-		g_set_error(error, SOND_ERROR, 0, "%s: PRAGMA idx.journal_mode: %s",
-				__func__, sqlite3_errmsg(db));
-		return -1;
-	}
-	if (sqlite3_step(stmt) == SQLITE_ROW)
-		journal_mode = g_strdup((gchar const*) sqlite3_column_text(stmt, 0));
-	sqlite3_finalize(stmt);
+	if (!dbase_zond->zond_dbase_work)
+		return 1;
 
-	if (!journal_mode || (g_ascii_strcasecmp(journal_mode, "delete")
-			&& g_ascii_strcasecmp(journal_mode, "truncate")
-			&& g_ascii_strcasecmp(journal_mode, "persist"))) {
-		g_set_error(error, SOND_ERROR, 0,
-				"Die Index-Datenbank wird von einem anderen Programm "
-				"verwendet (journal_mode)");
-		return -1;
-	}
+	out[1] = "work";
 
-	return 0;
-}
-
-/* Die Index-Funktionen (sond_index.c) arbeiten mit unqualifizierten
- * Tabellennamen und laufen über die store-Connection gegen idx, weil SQLite
- * unqualifizierte Namen in allen angehängten Datenbanken sucht. Das geht
- * nur, solange kein Tabellenname in idx auch in main oder work vorkommt -
- * sonst würde still in die falsche Datenbank geschrieben. */
-static gint dbase_zond_check_index_names(sqlite3 *db, GError **error) {
-	sqlite3_stmt *stmt = NULL;
-	g_autofree gchar *name = NULL;
-
-	if (sqlite3_prepare_v2(db,
-			"SELECT name FROM idx.sqlite_master WHERE type='table' "
-			"AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
-			"AND (name IN (SELECT name FROM main.sqlite_master) "
-			"OR name IN (SELECT name FROM work.sqlite_master)) LIMIT 1;",
-			-1, &stmt, NULL) != SQLITE_OK) {
-		g_set_error(error, SOND_ERROR, 0, "%s: %s", __func__,
-				sqlite3_errmsg(db));
-		return -1;
-	}
-	if (sqlite3_step(stmt) == SQLITE_ROW)
-		name = g_strdup((gchar const*) sqlite3_column_text(stmt, 0));
-	sqlite3_finalize(stmt);
-
-	if (name) {
-		g_set_error(error, SOND_ERROR, 0,
-				"Tabelle '%s' kommt in der Projekt- und der Index-Datenbank "
-				"vor", name);
-		return -1;
-	}
-
-	return 0;
-}
-
-void dbase_zond_detach_index(DBaseZond* dbase_zond) {
-	sqlite3 *db = NULL;
-	gchar *errmsg = NULL;
-
-	if (!dbase_zond->index_attached)
-		return;
-
-	db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-	if (sqlite3_exec(db, "DETACH DATABASE idx;", NULL, NULL, &errmsg)
-			!= SQLITE_OK) {
-		LOG_WARN("%s: DETACH idx: %s", __func__, errmsg ? errmsg : "?");
-		sqlite3_free(errmsg);
-
-		return; //bleibt angehängt, der nächste attach nutzt es weiter
-	}
-
-	dbase_zond->index_attached = FALSE;
-
-	return;
-}
-
-void dbase_zond_index_ctx(DBaseZond* dbase_zond, SondIndexCtx* out,
-		SondIndexCtx const* src) {
-	sond_index_ctx_init_attached(out, src,
-			zond_dbase_get_dbase(dbase_zond->zond_dbase_store));
-
-	return;
-}
-
-gint dbase_zond_attach_index(DBaseZond* dbase_zond,
-		gchar const* index_db_path, GError** error) {
-	sqlite3 *db = NULL;
-	gchar *sql = NULL;
-	gchar *errmsg = NULL;
-	gint rc = 0;
-
-	if (dbase_zond->index_attached)
-		return 0;
-
-	db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-
-	//läuft die Index-Verbindung gerade (Lesen im Chat-Thread), kurz warten
-	sqlite3_busy_timeout(db, 5000);
-
-	sql = sqlite3_mprintf("ATTACH DATABASE %Q AS idx;", index_db_path);
-	rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg);
-	sqlite3_free(sql);
-	if (rc != SQLITE_OK) {
-		g_set_error(error, g_quark_from_static_string("SQLITE3"), rc,
-				"%s: ATTACH idx: %s", __func__, errmsg ? errmsg : "?");
-		sqlite3_free(errmsg);
-
-		return -1;
-	}
-	dbase_zond->index_attached = TRUE;
-
-	sqlite3_exec(db, "PRAGMA idx.synchronous=FULL;", NULL, NULL, NULL);
-
-	if (dbase_zond_check_index_journal(db, error)
-			|| dbase_zond_check_index_names(db, error)) {
-		dbase_zond_detach_index(dbase_zond);
-
-		return -1;
-	}
-
-	return 0;
+	return 2;
 }
 
 // ============================================================================
@@ -249,9 +135,10 @@ gint dbase_zond_attach_index(DBaseZond* dbase_zond,
 gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 		gchar const* prefix_new, GError** error) {
 	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-	static gchar const *schemas[] = { "main", "work" };
+	gchar const *schemas[2] = { NULL, NULL };
+	guint n_schemas = dbase_zond_schemas(dbase_zond, schemas);
 
-	for (gint i = 0; i < 2; i++) {
+	for (guint i = 0; i < n_schemas; i++) {
 		gchar *sql = NULL;
 		sqlite3_stmt *stmt = NULL;
 		gint rc = 0;
@@ -293,9 +180,10 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 gint dbase_zond_remove_filepart(DBaseZond* dbase_zond, gchar const* path,
 		GError** error) {
 	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-	static gchar const *schemas[] = { "main", "work" };
+	gchar const *schemas[2] = { NULL, NULL };
+	guint n_schemas = dbase_zond_schemas(dbase_zond, schemas);
 
-	for (gint i = 0; i < 2; i++) {
+	for (guint i = 0; i < n_schemas; i++) {
 		gchar *sql = NULL;
 		sqlite3_stmt *stmt = NULL;
 		gint rc = 0;
@@ -330,9 +218,10 @@ gint dbase_zond_remove_filepart(DBaseZond* dbase_zond, gchar const* path,
 gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 		gchar const* prefix, gint index, gboolean into, GError** error) {
 	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
-	static gchar const *schemas[] = { "main", "work" };
+	gchar const *schemas[2] = { NULL, NULL };
+	guint n_schemas = dbase_zond_schemas(dbase_zond, schemas);
 
-	for (gint i = 0; i < 2; i++) {
+	for (guint i = 0; i < n_schemas; i++) {
 		gchar *sql = NULL;
 		sqlite3_stmt *stmt = NULL;
 		gint rc = 0;
@@ -381,6 +270,96 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
 			return -1;
 		}
+	}
+
+	return 0;
+}
+
+// ============================================================================
+// Anlegen, primäre Datenbank, Prüfen auf Verweise
+// ============================================================================
+
+DBaseZond* dbase_zond_new_store(gchar const *path, GError **error) {
+	DBaseZond *dbase_zond = NULL;
+	ZondDBase *store = zond_dbase_new(path, FALSE, FALSE, error);
+
+	if (!store)
+		return NULL;
+
+	dbase_zond = g_new0(DBaseZond, 1);
+	dbase_zond->zond_dbase_store = store;
+
+	return dbase_zond;
+}
+
+void dbase_zond_free(DBaseZond *dbase_zond) {
+	if (!dbase_zond)
+		return;
+
+	//eine angehängte Index-DB löst sich mit dem Schließen der store-Verbindung
+	if (dbase_zond->zond_dbase_store)
+		g_object_unref(dbase_zond->zond_dbase_store);
+	if (dbase_zond->zond_dbase_work)
+		g_object_unref(dbase_zond->zond_dbase_work);
+	g_free(dbase_zond);
+}
+
+ZondDBase* dbase_zond_primary(DBaseZond *dbase_zond) {
+	return dbase_zond->zond_dbase_work ? dbase_zond->zond_dbase_work :
+			dbase_zond->zond_dbase_store;
+}
+
+/* Zuerst die primäre DB, bei Treffer fertig (REF_PRIMARY). Sonst, mit work, auch den store: ein
+ * Treffer nur dort heißt, die Anbindung ist in work schon entfernt, aber noch nicht gespeichert. */
+gint dbase_zond_test_path(DBaseZond *dbase_zond, gchar const *path_prefix,
+		DBaseZondRef *ref, GError **error) {
+	gint rc = 0;
+
+	*ref = DBASE_ZOND_REF_NONE;
+
+	rc = zond_dbase_test_path(dbase_zond_primary(dbase_zond), path_prefix, error);
+	if (rc == -1)
+		return -1;
+	if (rc == 1) {
+		*ref = DBASE_ZOND_REF_PRIMARY;
+
+		return 0;
+	}
+
+	if (dbase_zond->zond_dbase_work) {
+		rc = zond_dbase_test_path(dbase_zond->zond_dbase_store, path_prefix, error);
+		if (rc == -1)
+			return -1;
+		if (rc == 1)
+			*ref = DBASE_ZOND_REF_ONLY_STORE;
+	}
+
+	return 0;
+}
+
+gint dbase_zond_test_path_section(DBaseZond *dbase_zond, gchar const *filepart,
+		gchar const *section, gboolean smaller, DBaseZondRef *ref, GError **error) {
+	gint rc = 0;
+
+	*ref = DBASE_ZOND_REF_NONE;
+
+	rc = zond_dbase_test_path_section(dbase_zond_primary(dbase_zond), filepart, section,
+			smaller, error);
+	if (rc == -1)
+		return -1;
+	if (rc == 1) {
+		*ref = DBASE_ZOND_REF_PRIMARY;
+
+		return 0;
+	}
+
+	if (dbase_zond->zond_dbase_work) {
+		rc = zond_dbase_test_path_section(dbase_zond->zond_dbase_store, filepart, section,
+				smaller, error);
+		if (rc == -1)
+			return -1;
+		if (rc == 1)
+			*ref = DBASE_ZOND_REF_ONLY_STORE;
 	}
 
 	return 0;

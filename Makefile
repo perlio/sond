@@ -78,7 +78,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_a
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c $(SRC_DIRS)/sond_zond_schema.c \
 	$(SRC_DIRS)/sond_akte_name.c
 CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
-	libsoup-3.0 json-glib-1.0 libxml-2.0 pango) -I/usr/local/include/mupdf
+	libsoup-3.0 json-glib-1.0 libxml-2.0 pango sqlite3) -I/usr/local/include/mupdf
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
 	sqlite3 tesseract libzip libxml-2.0 pango) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif
@@ -122,6 +122,11 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_sond_graph_db_filter.c \
 	$(SRC_DIRS)/tests/test_sond_mime.c \
 	$(SRC_DIRS)/tests/test_sond_text_extract.c \
+	$(SRC_DIRS)/tests/test_dbase_zond.c \
+	$(SRC_DIRS)/znd/zond_dbase.c \
+	$(SRC_DIRS)/znd/dbase_zond.c \
+	$(SRC_DIRS)/znd/anbindung.c \
+	$(SRC_DIRS)/sond_zond_schema.c \
 	$(SRC_DIRS)/sond_graph/sond_graph_property.c \
 	$(SRC_DIRS)/sond_graph/sond_graph_node.c \
 	$(SRC_DIRS)/sond_graph/sond_graph_edge.c \
@@ -132,9 +137,9 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_gmessage_helper.c
 CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
-	json-glib-1.0 libxml-2.0 pango) -I/usr/local/include/mupdf
+	json-glib-1.0 libxml-2.0 pango sqlite3) -I/usr/local/include/mupdf
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb json-glib-1.0 \
-	libzip libxml-2.0 pango) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
+	libzip libxml-2.0 pango sqlite3) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif
 
 # Object files

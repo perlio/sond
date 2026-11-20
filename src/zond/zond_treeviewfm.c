@@ -474,41 +474,26 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	 * LEAF_SECTION zusätzlich Bereichsvergleich (umfaßt path_or_section
 	 * die in BAUM_INHALT gefundene section, oder ist sie gleich?). Beides
 	 * gegen beide Datenbanken. */
-	if (type == SOND_TVFM_ITEM_TYPE_DIR) {
-		gboolean is_container_root = sond_tvfm_item_get_sond_file_part(stvfm_item)
-				&& !sond_tvfm_item_get_path_or_section(stvfm_item);
-		g_autofree gchar *path_prefix = g_strconcat(path,
-				is_container_root ? "//" : "/", NULL);
+	{
+		DBaseZondRef ref = DBASE_ZOND_REF_NONE;
 
-		rc = zond_dbase_test_path(priv->zond->proj.dbase_zond->zond_dbase_work,
-				path_prefix, error);
+		if (type == SOND_TVFM_ITEM_TYPE_DIR) {
+			gboolean is_container_root = sond_tvfm_item_get_sond_file_part(stvfm_item)
+					&& !sond_tvfm_item_get_path_or_section(stvfm_item);
+			g_autofree gchar *path_prefix = g_strconcat(path,
+					is_container_root ? "//" : "/", NULL);
+
+			rc = dbase_zond_test_path(priv->zond->proj.dbase_zond, path_prefix, &ref, error);
+		} else
+			rc = dbase_zond_test_path_section(priv->zond->proj.dbase_zond, path, section,
+					FALSE, &ref, error);
 		if (rc == -1)
 			return -1;
-		else if (rc == 1)
+
+		//angebunden: in work, oder nur noch im store (in work schon entfernt, nicht gespeichert)
+		if (ref == DBASE_ZOND_REF_PRIMARY)
 			return 1;
-
-		rc = zond_dbase_test_path(priv->zond->proj.dbase_zond->zond_dbase_store,
-				path_prefix, error);
-		if (rc == -1)
-			return -1;
-		else if (rc == 1) {
-			show_still_in_store(priv);
-
-			return 1;
-		}
-	} else {
-		rc = zond_dbase_test_path_section(priv->zond->proj.dbase_zond->zond_dbase_work,
-				path, section, FALSE, error);
-		if (rc == -1)
-			return -1;
-		else if (rc == 1)
-			return 1;
-
-		rc = zond_dbase_test_path_section(priv->zond->proj.dbase_zond->zond_dbase_store,
-				path, section, FALSE, error);
-		if (rc == -1)
-			return -1;
-		else if (rc == 1) {
+		if (ref == DBASE_ZOND_REF_ONLY_STORE) {
 			show_still_in_store(priv);
 
 			return 1;
