@@ -1652,6 +1652,20 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 						gmessage_message_covered(wctx, file_part) :
 						sond_index_ctx_coverage_get(wctx->index_ctx, coverage_key)
 								>= wctx->ocr_mode)) {
+			/* Auch eine übersprungene, schon abgedeckte Datei ist zum Zusammenfassen
+			 * vorzumerken: ist sie die letzte noch nicht zusammengefasste, wird das
+			 * Verzeichnis sonst nie vollständig abgedeckt (z.B. nachdem die nicht
+			 * indizierte Datei daraus entfernt wurde). */
+			if (wctx->project_dir && sond_index_ctx_coverage_get(wctx->index_ctx,
+					coverage_key) >= wctx->ocr_mode) {
+				gchar *group = collapse_group(coverage_key);
+
+				if (group && !g_hash_table_contains(collapse_groups, group))
+					g_hash_table_insert(collapse_groups, group, g_strdup(coverage_key));
+				else
+					g_free(group);
+			}
+
 			if (coverage_key != file_part) g_free(coverage_key);
 			g_free(file_part);
 			continue;
