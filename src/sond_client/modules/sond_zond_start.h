@@ -51,8 +51,9 @@ gchar* sond_zond_find_exe(const gchar *configured, GError **error);
  * @project_file: Pfad der Projektdatei
  * @error: (nullable)
  *
- * Startet zond mit der Projektdatei als Argument, ohne auf das Ende zu warten.
- * Prüft vorher, dass die Projektdatei erreichbar ist.
+ * Startet zond im Akten-Modus (Option --akte-projekt): eine eigene Instanz, die genau diese
+ * Projektdatei öffnet und kein anderes Projekt öffnen oder anlegen kann; Schließen des Fensters
+ * beendet zond. Wartet nicht auf das Ende. Prüft vorher, dass die Projektdatei erreichbar ist.
  *
  * Returns: TRUE, wenn der Prozess gestartet wurde
  */
@@ -66,8 +67,8 @@ gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
  *   muss sie mit g_spawn_close_pid() schließen (oder g_child_watch_add()
  *   verwenden).
  *
- * Wie sond_zond_start(). Achtung: zond ist eine Einzelinstanz-Anwendung; läuft
- * schon eine Instanz, beendet sich der neue Prozess sofort.
+ * Wie sond_zond_start(). Der Akten-Modus ist nie die Einzelinstanz: auch wenn ein normales zond
+ * läuft, gehört der Prozess zu diesem Projekt.
  */
 gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
         GPid *pid, GError **error);

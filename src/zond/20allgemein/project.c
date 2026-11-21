@@ -1049,10 +1049,27 @@ static void project_eingang_cache_open(Projekt *zond, const gchar *project_path)
  * @param error GError for error reporting
  * @return 0 on success, -1 on error, 1 if user cancelled
  */
+/* Gleicher Pfad? Windows kennt keine Schreibweise von Groß- und Kleinbuchstaben und beide
+ * Trennzeichen */
+static gboolean pfad_gleich(gchar const *a, gchar const *b) {
+	g_autofree gchar *na = g_strdelimit(g_strdup(a), "\\", '/');
+	g_autofree gchar *nb = g_strdelimit(g_strdup(b), "\\", '/');
+
+	return g_ascii_strcasecmp(na, nb) == 0;
+}
+
 gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError **error) {
 	gint rc = 0;
 	gboolean repariert = FALSE;
 	gboolean nach_laden_pruefen = FALSE;
+
+	//Akten-Modus: nur das eine Projekt, mit dem zond gestartet wurde
+	if (zond->app.akte_projekt && (create || !pfad_gleich(abs_path, zond->app.akte_projekt))) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+				"zond wurde für eine Akte gestartet und kann nur deren Projekt öffnen.");
+
+		return -1;
+	}
 
 	// Close current project if open
 	rc = project_close(zond, error);

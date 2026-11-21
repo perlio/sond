@@ -29,6 +29,16 @@
 #include "20allgemein/password_dialog.h"
 #include "../sond_password.h"
 
+//Wert der Kommandozeilenoption --akte-projekt (vom Client; s. Projekt.app.akte_projekt)
+static gchar *akte_projekt_opt = NULL;
+
+static GOptionEntry optionen[] = {
+	{ "akte-projekt", 0, 0, G_OPTION_ARG_FILENAME, &akte_projekt_opt,
+			"Projektdatei einer Akte; zond öffnet nur dieses Projekt (vom Client gestartet)",
+			"DATEI" },
+	{ NULL, 0, 0, 0, NULL, NULL, NULL }
+};
+
 /**
  * Callback: Application startup
  *
@@ -37,6 +47,12 @@
  */
 static void cb_startup(GApplication *app, gpointer user_data) {
     Projekt *zond = (Projekt*) user_data;
+
+	//Akten-Modus (Option --akte-projekt): Pfad mit '/' wie bei Dateien, die zond sonst bekommt
+	if (akte_projekt_opt) {
+		zond->app.akte_projekt = g_strdup(akte_projekt_opt);
+		g_strdelimit(zond->app.akte_projekt, "\\", '/');
+	}
 
 	zond_init(GTK_APPLICATION(app), zond);
 
@@ -58,6 +74,20 @@ static void cb_startup(GApplication *app, gpointer user_data) {
 static void cb_activate(GApplication *app, gpointer user_data) {
     Projekt *zond = (Projekt*) user_data;
 
+	//Akten-Modus: das eine Projekt öffnen; gelingt das nicht, ist zond zu nichts nütze
+	if (zond->app.akte_projekt && !zond_project_is_open(zond)) {
+		GError *error = NULL;
+
+		if (project_open(zond, zond->app.akte_projekt, FALSE, &error) == -1) {
+			display_message(zond->win.app_window, "Fehler - Projekt kann nicht geöffnet werden\n\n",
+					error ? error->message : "unbekannt", NULL);
+			g_clear_error(&error);
+			g_application_quit(app);
+
+			return;
+		}
+	}
+
 	gtk_window_present(GTK_WINDOW(zond->win.app_window));
 
 	return;
@@ -77,6 +107,13 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
 	gchar *uri_unesc = NULL;
 
     Projekt *zond = (Projekt*) user_data;
+
+	//Akten-Modus: kein anderes Projekt
+	if (zond->app.akte_projekt) {
+		gtk_window_present(GTK_WINDOW(zond->win.app_window));
+
+		return;
+	}
 
 	uri = g_file_get_uri(files[0]);
 	uri_unesc = g_uri_unescape_string(uri, NULL);
@@ -122,8 +159,20 @@ int main(int argc, char **argv) {
 	_setmaxstdio(8192);
 #endif
 
-	//ApplicationApp erzeugen
-	app = gtk_application_new("de.perlio.zond", G_APPLICATION_HANDLES_OPEN);
+	/* Akten-Modus: eine eigene Instanz, auch wenn ein normales zond läuft. Sonst übergäbe ein zweiter
+	 * Start seine Datei an die laufende Instanz und beendete sich, und der Client könnte den Prozess
+	 * nicht mehr dem Projekt zuordnen. */
+	{
+		GApplicationFlags flags = G_APPLICATION_HANDLES_OPEN;
+
+		for (gint i = 1; i < argc; i++)
+			if (g_str_has_prefix(argv[i], "--akte-projekt"))
+				flags |= G_APPLICATION_NON_UNIQUE;
+
+		//ApplicationApp erzeugen
+		app = gtk_application_new("de.perlio.zond", flags);
+	}
+	g_application_add_main_option_entries(G_APPLICATION(app), optionen);
 
     // Callbacks registrieren
     g_signal_connect(app, "startup", G_CALLBACK(cb_startup), &zond);
@@ -137,6 +186,8 @@ int main(int argc, char **argv) {
 	status = g_application_run(G_APPLICATION(app), argc, argv);
 
 	g_object_unref(app);
+	g_free(akte_projekt_opt);
+	g_free(zond.app.akte_projekt);
 
 	LOG_INFO("zond beendet");
 	logging_cleanup();

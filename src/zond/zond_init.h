@@ -123,6 +123,11 @@ typedef struct _ZondApp {
 	//Verzeichnis des zuletzt geschlossenen Projekts (Startordner des Öffnen-Dialogs)
 	gchar *last_project_dir;
 
+	/* Akten-Modus: der Client hat zond mit --akte-projekt gestartet. zond öffnet genau dieses Projekt,
+	 * kann kein anderes öffnen oder anlegen und das Projekt nicht schließen, ohne zond zu beenden.
+	 * NULL: normaler Betrieb. */
+	gchar *akte_projekt;
+
 	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
 	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
 	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt

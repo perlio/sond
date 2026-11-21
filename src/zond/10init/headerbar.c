@@ -77,9 +77,23 @@ static void activate_baum_action(Projekt *zond, const gchar *action_name) {
  * CALLBACKS - PROJEKT
  * ========================================================================== */
 
+//Akten-Modus: kein Wechsel des Projekts; true, wenn abgelehnt (mit Hinweis)
+static gboolean akten_modus_abgelehnt(Projekt *zond) {
+	if (!zond->app.akte_projekt)
+		return FALSE;
+
+	display_message(zond->win.app_window, "Nicht möglich\n\n",
+			"zond wurde für eine Akte gestartet und kann nur deren Projekt bearbeiten. Zum "
+			"Schließen das Fenster schließen.", NULL);
+
+	return TRUE;
+}
+
 static void cb_app_projekt_neu(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
+	if (akten_modus_abgelehnt(zond))
+		return;
 	if (project_new(zond, &error)) {
 		display_message(zond->win.app_window, "Fehler beim Anlegen des Projekts\n", error->message, NULL);
 		g_error_free(error);
@@ -89,6 +103,8 @@ static void cb_app_projekt_neu(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_app_projekt_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
+	if (akten_modus_abgelehnt(zond))
+		return;
 	if (project_load(zond, &error)) {
 		display_message(zond->win.app_window, "Fehler beim Laden des Projekts\n\n", error->message, NULL);
 		g_error_free(error);
@@ -98,6 +114,8 @@ static void cb_app_projekt_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_app_projekt_schliessen(GSimpleAction *a, GVariant *p, gpointer d) {
 	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
+	if (akten_modus_abgelehnt(zond))
+		return;
 	if (project_close(zond, &error) == -1) {
 		display_message(zond->win.app_window, "Fehler beim Schließen des Projekts\n", error->message, NULL);
 		g_error_free(error);
@@ -1345,10 +1363,14 @@ static GMenuModel* build_menu(Projekt *zond) {
 
 	/* ---- Projekt ---- */
 	GMenu *m_proj = g_menu_new();
-	g_menu_append(m_proj, "Neu",        "win.projekt-neu");
-	g_menu_append(m_proj, "Öffnen",     "win.projekt-oeffnen");
+	//Akten-Modus: kein Wechsel des Projekts, Schließen des Fensters beendet zond
+	if (!zond->app.akte_projekt) {
+		g_menu_append(m_proj, "Neu",        "win.projekt-neu");
+		g_menu_append(m_proj, "Öffnen",     "win.projekt-oeffnen");
+	}
 	g_menu_append(m_proj, "Speichern",  "win.projekt-speichern");
-	g_menu_append(m_proj, "Schliessen", "win.projekt-schliessen");
+	if (!zond->app.akte_projekt)
+		g_menu_append(m_proj, "Schliessen", "win.projekt-schliessen");
 
 	GMenu *sec_export = g_menu_new();
 	g_menu_append(sec_export, "Export als Dokument...", "win.export-odt");

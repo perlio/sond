@@ -118,13 +118,16 @@ gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
         return FALSE;
     }
 
+    /* Akten-Modus: zond öffnet genau dieses Projekt als eigene Instanz und lässt keinen Wechsel
+     * des Projekts zu (s. zond main.c, --akte-projekt) */
     work_dir = g_path_get_dirname(exe);
     argv[0] = (gchar*) exe;
-    argv[1] = (gchar*) project_file;
+    argv[1] = g_strdup_printf("--akte-projekt=%s", project_file);
 
     ok = g_spawn_async(work_dir, argv, NULL,
             pid ? G_SPAWN_DO_NOT_REAP_CHILD : G_SPAWN_DEFAULT, NULL, NULL, pid,
             error);
+    g_free(argv[1]);
     g_free(work_dir);
 
     return ok;
