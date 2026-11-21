@@ -722,6 +722,11 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 			G_TYPE_NONE, 0);
 
+	//auf der obersten Ebene sind von außen Einträge hinzugekommen (Import) und in den Baum eingefügt
+	fm_signals[SIGNAL_ROOT_ENTRIES_ADDED] = g_signal_new("root-entries-added",
+			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+			G_TYPE_NONE, 0);
+
 	//die Zähler "wird heruntergeladen" und "nicht synchron" im SeaDrive-Laufwerk
 	//haben sich geändert (beim Schließen: 0, 0)
 	fm_signals[SIGNAL_SEADRIVE_STATUS] = g_signal_new("seadrive-status",

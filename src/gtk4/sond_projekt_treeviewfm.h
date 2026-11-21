@@ -34,6 +34,7 @@
 #include "sond_treeviewfm.h"
 #include "../znd/dbase_zond.h"
 #include "../znd/sond_projekt_pflege.h"
+#include "../sond_eingang_cache.h"
 
 G_BEGIN_DECLS
 
@@ -69,6 +70,11 @@ typedef struct {
 	 * lief über store und work (zond: das Änderungskennzeichen des Projekts auf den Stand vor der
 	 * Aktion zurücksetzen, weil store schon geschrieben ist). Nullable. */
 	void (*tx_done)(gpointer data, gboolean dual);
+
+	/* Die lokale Nachschlagetabelle der Eingangsangaben (Stempel) des Projekts. Ohne Hook oder bei NULL
+	 * gibt es keine Eingangsangaben: Spalte ohne Werte, die Menüpunkte melden es. Den Cache besitzt die
+	 * Anwendung. Nullable. */
+	SondEingangCache* (*eingang_cache)(gpointer data);
 
 	gpointer data;
 } SondProjektHooks;

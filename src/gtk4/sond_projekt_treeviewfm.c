@@ -19,6 +19,8 @@
 #include "sond_projekt_treeviewfm.h"
 
 #include "sond_treeviewfm_private.h"
+#include "sond_eingang_dialog.h"
+#include "../sond_eingang_pflege.h"
 #include "../sond_log_and_error.h"
 #include "../tvfm/sond_tvfm_index_sync.h"
 
@@ -686,21 +688,394 @@ out:
 	g_ptr_array_unref(rows);
 }
 
+/* ---- Eingang (Stempel) ---- */
+
+static SondEingangCache* eingang_cache_of(SondProjektTreeviewFMPrivate *priv) {
+	return priv->hooks.eingang_cache ? priv->hooks.eingang_cache(priv->hooks.data) : NULL;
+}
+
+static GtkWindow* eingang_parent(SondTreeviewFM *tree) {
+	GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tree));
+
+	return GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL;
+}
+
+//Wirksames Eingangsdatum (JJJJMMTT) für die Spalte; -1, solange es keine Angaben gibt
+static gint vfunc_get_eingang(SondTreeviewFM *tree, gchar const *rel_path, gboolean is_dir) {
+	SondEingangCache *cache = eingang_cache_of(priv_of(tree));
+
+	return cache ? sond_eingang_cache_lookup(cache, rel_path, is_dir) : -1;
+}
+
+//Ein Eintrag des Dateisystems wurde gelöscht: seine Stempel (und die darunter) gelten nicht mehr
+static void vfunc_fs_entry_deleted(SondTreeviewFM *tree, gchar const *rel_path, gboolean is_dir) {
+	SondEingangCache *cache = eingang_cache_of(priv_of(tree));
+
+	(void) is_dir;
+
+	//still: ein Fehlschlag wird dort nur protokolliert
+	if (cache)
+		sond_eingang_pflege_geloescht(cache, sond_treeviewfm_get_root(tree), rel_path);
+}
+
+//Umbenannt: die Stempel (und die darunter) gehen auf den neuen Pfad mit
+static void vfunc_fs_entry_renamed(SondTreeviewFM *tree, gchar const *old_rel, gchar const *new_rel,
+		gboolean is_dir) {
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	SondEingangCache *cache = eingang_cache_of(priv);
+	GError *error = NULL;
+
+	(void) is_dir;
+
+	if (!cache || !old_rel || !new_rel)
+		return;
+
+	if (sond_eingang_pflege_umbenannt(cache, sond_treeviewfm_get_root(tree), old_rel, new_rel,
+			&error)) {
+		g_autofree gchar *text = g_strdup_printf("%s\n\nBitte mit \"Eingang setzen\" neu erfassen.",
+				error ? error->message : "unbekannter Fehler");
+
+		melden(priv, "Eingangsangaben konnten nicht auf den neuen Namen übertragen werden", text);
+		g_clear_error(&error);
+	}
+}
+
+/* Verschoben oder kopiert: die Stempel gehen mit bzw. werden mitkopiert. TRUE, wenn sich
+ * Eingangsangaben geändert haben (die Anzeige ist aufzufrischen). */
+static gboolean vfunc_fs_entry_moved(SondTreeviewFM *tree, gchar const *old_rel, gchar const *new_rel,
+		gboolean is_dir, gboolean copy) {
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	SondEingangCache *cache = eingang_cache_of(priv);
+	SondEingangVerschoben ergebnis = SOND_EINGANG_VERSCHOBEN_KEIN_HINWEIS;
+	GError *error = NULL;
+	gboolean geaendert = FALSE;
+	gchar const *grund = NULL;
+
+	if (!cache || !old_rel)
+		return FALSE;
+
+	geaendert = sond_eingang_pflege_verschoben(cache, sond_treeviewfm_get_root(tree), old_rel,
+			new_rel, is_dir, copy, &ergebnis, &error);
+	grund = error ? error->message : "unbekannter Fehler";
+
+	switch (ergebnis) {
+	case SOND_EINGANG_VERSCHOBEN_KOPIE_IN_CONTAINER:
+		melden(priv, "Eingang", "Die Kopie liegt in einem Container; dort gibt es keine "
+				"Eingangsangaben. Das Original behält seinen Eingang.");
+		break;
+	case SOND_EINGANG_VERSCHOBEN_IN_CONTAINER:
+		melden(priv, "Eingang", "Der Eintrag liegt jetzt in einem Container; dort gibt es keine "
+				"Eingangsangaben.");
+		break;
+	case SOND_EINGANG_VERSCHOBEN_FEHLER_AUFHEBEN:
+		melden(priv, "Eingangsangaben konnten nicht aufgehoben werden", grund);
+		break;
+	case SOND_EINGANG_VERSCHOBEN_FEHLER_UEBERTRAGEN: {
+		g_autofree gchar *text = g_strdup_printf("%s\n\nBitte mit \"Eingang setzen\" neu erfassen.",
+				grund);
+
+		melden(priv, "Eingangsangaben konnten nicht auf den neuen Ort übertragen werden", text);
+		break;
+	}
+	default:
+		break;
+	}
+	g_clear_error(&error);
+
+	return geaendert;
+}
+
+/* Auf der obersten Ebene sind Einträge hinzugekommen (Import, auch von einem anderen Rechner): die
+ * Zettel nachlesen, die dabei in .sond/eingang entstanden sind, und die Spalte auffrischen */
+static void on_root_entries_added(SondTreeviewFM *tree, gpointer data) {
+	SondEingangCache *cache = eingang_cache_of(priv_of(tree));
+	guint n_zettel = 0;
+
+	(void) data;
+
+	if (cache && !sond_eingang_cache_reload(cache, &n_zettel, NULL) && n_zettel > 0)
+		sond_treeviewfm_eingang_refresh(tree);
+}
+
+typedef struct {
+	SondTreeviewFM *tree;     //Referenz
+	GPtrArray *pfade;         //gchar*, relativ zur Wurzel
+	GArray *ordner;           //gboolean, parallel zu pfade
+	guint uebersprungen;      //Einträge in Containern
+} Auswahl;
+
+static void auswahl_init(Auswahl *a, SondTreeviewFM *tree) {
+	a->tree = g_object_ref(tree);
+	a->pfade = g_ptr_array_new_with_free_func(g_free);
+	a->ordner = g_array_new(FALSE, FALSE, sizeof(gboolean));
+	a->uebersprungen = 0;
+}
+
+static void auswahl_clear(Auswahl *a) {
+	g_clear_object(&a->tree);
+	g_clear_pointer(&a->pfade, g_ptr_array_unref);
+	g_clear_pointer(&a->ordner, g_array_unref);
+}
+
+//Markierte Einträge des Dateisystems sammeln; Einträge in Containern lassen sich nicht stempeln
+static void auswahl_holen(Auswahl *a) {
+	GPtrArray *rows = sond_treeview_get_selected_rows(SOND_TREEVIEW(a->tree));
+
+	for (guint i = 0; i < rows->len; i++) {
+		SondTVFMItem *item = gtk_tree_list_row_get_item(g_ptr_array_index(rows, i));
+		gchar *rel = NULL;
+		gboolean ist_ordner = FALSE;
+
+		if (!item)
+			continue;
+
+		if (sond_tvfm_item_fs_path(item, &rel, &ist_ordner)) {
+			g_ptr_array_add(a->pfade, rel);
+			g_array_append_val(a->ordner, ist_ordner);
+		} else
+			a->uebersprungen++;
+		g_object_unref(item);
+	}
+	g_ptr_array_unref(rows);
+}
+
+/* Zettel in die Akte schreiben und in die lokale Tabelle eintragen, danach die Spalte auffrischen */
+static gboolean zettel_ablegen(SondTreeviewFM *tree, SondEingangZettel *zettel) {
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	GError *error = NULL;
+	SondEingangAblegen ergebnis = sond_eingang_pflege_ablegen(eingang_cache_of(priv),
+			sond_treeviewfm_get_root(tree), zettel, &error);
+
+	if (ergebnis == SOND_EINGANG_ABLEGEN_NICHT_GESPEICHERT) {
+		melden(priv, "Eingangsangabe konnte nicht gespeichert werden",
+				error ? error->message : "unbekannter Fehler");
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	if (ergebnis == SOND_EINGANG_ABLEGEN_NICHT_UEBERNOMMEN) {
+		g_autofree gchar *text = g_strdup_printf("%s\n\nMit \"Neu einlesen\" erneut versuchen.",
+				error ? error->message : "unbekannter Fehler");
+
+		melden(priv, "Eingangsangabe gespeichert, aber nicht übernommen", text);
+		g_clear_error(&error);
+	}
+
+	sond_treeviewfm_eingang_refresh(tree);
+
+	return ergebnis == SOND_EINGANG_ABLEGEN_OK;
+}
+
+//Voraussetzungen jeder Eingang-Aktion, die schreibt: es gibt einen Cache, die Akte darf geändert werden
+static gboolean eingang_bereit(SondProjektTreeviewFMPrivate *priv, gboolean schreibt) {
+	GError *error = NULL;
+
+	if (!eingang_cache_of(priv)) {
+		melden(priv, "Eingang", "Für dieses Projekt sind keine Eingangsangaben verfügbar.");
+
+		return FALSE;
+	}
+
+	if (schreibt && priv->hooks.permit && !priv->hooks.permit(priv->hooks.data, &error)) {
+		melden(priv, "Eingang", error ? error->message : "Die Akte darf nicht geändert werden.");
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+static void eingang_setzen_fertig(gchar const *iso, gchar const *art, gpointer data) {
+	Auswahl *a = data;
+	SondEingangZettel *zettel = sond_eingang_zettel_new(g_get_user_name(), "manuell");
+
+	for (guint i = 0; i < a->pfade->len; i++)
+		sond_eingang_zettel_add(zettel, g_ptr_array_index(a->pfade, i),
+				g_array_index(a->ordner, gboolean, i), iso, art, NULL, 0);
+
+	zettel_ablegen(a->tree, zettel);
+	sond_eingang_zettel_free(zettel);
+	auswahl_clear(a);
+	g_free(a);
+}
+
+static void action_eingang_setzen(GSimpleAction *action, GVariant *parameter, gpointer data) {
+	SondTreeviewFM *tree = SOND_TREEVIEWFM(data);
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	Auswahl *a = NULL;
+	g_autofree gchar *zusammenfassung = NULL;
+	gint vorbelegung = 0;
+
+	(void) action;
+	(void) parameter;
+
+	if (!eingang_bereit(priv, TRUE))
+		return;
+
+	a = g_new0(Auswahl, 1);
+	auswahl_init(a, tree);
+	auswahl_holen(a);
+
+	if (a->pfade->len == 0) {
+		melden(priv, "Eingang setzen", "Bitte Dateien oder Ordner des Dateiverzeichnisses markieren. "
+				"Einträge in Containern (ZIP, E-Mail, PDF-Anhänge) lassen sich nicht stempeln.");
+		auswahl_clear(a);
+		g_free(a);
+
+		return;
+	}
+
+	if (a->pfade->len == 1)
+		zusammenfassung = g_strdup_printf("Eingang für %s", (gchar const*) g_ptr_array_index(a->pfade, 0));
+	else
+		zusammenfassung = g_strdup_printf("Eingang für %u markierte Einträge", a->pfade->len);
+	if (a->uebersprungen > 0) {
+		gchar *mit = g_strdup_printf("%s (%u Einträge in Containern werden übergangen)", zusammenfassung,
+				a->uebersprungen);
+
+		g_free(zusammenfassung);
+		zusammenfassung = mit;
+	}
+
+	//Vorbelegung: das bisher wirksame Datum des ersten Eintrags
+	vorbelegung = sond_eingang_cache_lookup(eingang_cache_of(priv), g_ptr_array_index(a->pfade, 0),
+			g_array_index(a->ordner, gboolean, 0));
+
+	sond_eingang_dialog_show(eingang_parent(tree), zusammenfassung, vorbelegung, eingang_setzen_fertig, a);
+}
+
+static void eingang_entfernen_antwort(GObject *source, GAsyncResult *result, gpointer data) {
+	Auswahl *a = data;
+	gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, NULL);
+
+	if (button == 1) {
+		SondEingangZettel *zettel = sond_eingang_zettel_new(g_get_user_name(), "manuell");
+
+		for (guint i = 0; i < a->pfade->len; i++)
+			sond_eingang_zettel_add_entfernen(zettel, g_ptr_array_index(a->pfade, i));
+
+		zettel_ablegen(a->tree, zettel);
+		sond_eingang_zettel_free(zettel);
+	}
+
+	auswahl_clear(a);
+	g_free(a);
+}
+
+static void action_eingang_entfernen(GSimpleAction *action, GVariant *parameter, gpointer data) {
+	SondTreeviewFM *tree = SOND_TREEVIEWFM(data);
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	SondEingangCache *cache = NULL;
+	Auswahl alle = { 0 };
+	Auswahl *eigene = NULL;
+	GtkAlertDialog *dialog = NULL;
+	gchar *text = NULL;
+	static gchar const *knoepfe[] = { "Abbrechen", "Entfernen", NULL };
+
+	(void) action;
+	(void) parameter;
+
+	if (!eingang_bereit(priv, TRUE))
+		return;
+	cache = eingang_cache_of(priv);
+
+	auswahl_init(&alle, tree);
+	auswahl_holen(&alle);
+
+	//nur Einträge mit eigenem Stempel; die übrigen erben ohnehin
+	eigene = g_new0(Auswahl, 1);
+	auswahl_init(eigene, tree);
+	for (guint i = 0; i < alle.pfade->len; i++)
+		if (sond_eingang_cache_has_own(cache, g_ptr_array_index(alle.pfade, i))) {
+			gboolean ordner = g_array_index(alle.ordner, gboolean, i);
+
+			g_ptr_array_add(eigene->pfade, g_strdup(g_ptr_array_index(alle.pfade, i)));
+			g_array_append_val(eigene->ordner, ordner);
+		}
+	auswahl_clear(&alle);
+
+	if (eigene->pfade->len == 0) {
+		melden(priv, "Eingang entfernen", "Für die markierten Einträge ist kein eigener Eingang gesetzt "
+				"(sie erben ihn von einem übergeordneten Ordner oder haben keinen).");
+		auswahl_clear(eigene);
+		g_free(eigene);
+
+		return;
+	}
+
+	text = g_strdup_printf("Eigenen Eingang von %u Eintrag/Einträgen entfernen? Sie erben danach den "
+			"Eingang des übergeordneten Ordners.", eigene->pfade->len);
+	dialog = gtk_alert_dialog_new("Eingang entfernen");
+	gtk_alert_dialog_set_detail(dialog, text);
+	gtk_alert_dialog_set_buttons(dialog, knoepfe);
+	gtk_alert_dialog_set_cancel_button(dialog, 0);
+	gtk_alert_dialog_set_default_button(dialog, 0);
+	gtk_alert_dialog_set_modal(dialog, TRUE);
+	gtk_alert_dialog_choose(dialog, eingang_parent(tree), NULL, eingang_entfernen_antwort, eigene);
+	g_object_unref(dialog);
+	g_free(text);
+}
+
+//Zettel nachlesen, die seit dem Öffnen dazugekommen sind (z.B. ein Import auf einem anderen Rechner)
+static void action_eingang_neu(GSimpleAction *action, GVariant *parameter, gpointer data) {
+	SondTreeviewFM *tree = SOND_TREEVIEWFM(data);
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	GError *error = NULL;
+	guint n_zettel = 0;
+	g_autofree gchar *text = NULL;
+
+	(void) action;
+	(void) parameter;
+
+	if (!eingang_bereit(priv, FALSE))
+		return;
+
+	if (sond_eingang_cache_reload(eingang_cache_of(priv), &n_zettel, &error)) {
+		melden(priv, "Eingänge neu einlesen fehlgeschlagen", error ? error->message : "unbekannter Fehler");
+		g_clear_error(&error);
+
+		return;
+	}
+
+	sond_treeviewfm_eingang_refresh(tree);
+
+	text = g_strdup_printf("%u neue(r) Zettel eingelesen.", n_zettel);
+	melden(priv, "Eingänge neu einlesen", text);
+}
+
 static void vfunc_setup_menu(SondTreeviewFM *self) {
 	static const GActionEntry entries[] = {
-		{ "section-aufloesen", action_aufloesen, NULL, NULL, NULL }
+		{ "section-aufloesen", action_aufloesen, NULL, NULL, NULL },
+		{ "eingang-setzen", action_eingang_setzen, NULL, NULL, NULL },
+		{ "eingang-entfernen", action_eingang_entfernen, NULL, NULL, NULL },
+		{ "eingang-neu", action_eingang_neu, NULL, NULL, NULL }
 	};
+	GMenu *menu = sond_treeview_get_menu(SOND_TREEVIEW(self));
 	GMenu *section = g_menu_new();
+	GMenu *sec_eingang = g_menu_new();
+	GMenu *sub_eingang = g_menu_new();
 
 	SOND_TREEVIEWFM_CLASS(sond_projekt_treeviewfm_parent_class)->setup_menu(self);
 
 	g_action_map_add_action_entries(sond_treeview_get_action_map(SOND_TREEVIEW(self)), entries,
 			G_N_ELEMENTS(entries), self);
 	sond_treeviewfm_register_write_action(self, "section-aufloesen");
+	sond_treeviewfm_register_write_action(self, "eingang-setzen");
+	sond_treeviewfm_register_write_action(self, "eingang-entfernen");
 
 	g_menu_append(section, "Abschnitt auflösen (Unterabschnitte behalten)", "tv.section-aufloesen");
-	g_menu_append_section(sond_treeview_get_menu(SOND_TREEVIEW(self)), NULL, G_MENU_MODEL(section));
+	g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
 	g_object_unref(section);
+
+	g_menu_append(sub_eingang, "Setzen ...", "tv.eingang-setzen");
+	g_menu_append(sub_eingang, "Entfernen", "tv.eingang-entfernen");
+	g_menu_append(sub_eingang, "Neu einlesen", "tv.eingang-neu");
+	g_menu_append_submenu(sec_eingang, "Eingang", G_MENU_MODEL(sub_eingang));
+	g_menu_append_section(menu, NULL, G_MENU_MODEL(sec_eingang));
+	g_object_unref(sub_eingang);
+	g_object_unref(sec_eingang);
 }
 
 void sond_projekt_treeviewfm_set_hooks(SondProjektTreeviewFM *self, SondProjektHooks const *hooks) {
@@ -748,6 +1123,10 @@ static void sond_projekt_treeviewfm_class_init(SondProjektTreeviewFMClass *klass
 	tclass->deter_background = vfunc_deter_background;
 	tclass->delete_section = vfunc_delete_section;
 	tclass->setup_menu = vfunc_setup_menu;
+	tclass->get_eingang = vfunc_get_eingang;
+	tclass->fs_entry_deleted = vfunc_fs_entry_deleted;
+	tclass->fs_entry_renamed = vfunc_fs_entry_renamed;
+	tclass->fs_entry_moved = vfunc_fs_entry_moved;
 	tclass->text_edited = vfunc_text_edited;
 }
 
@@ -762,4 +1141,5 @@ static void sond_projekt_treeviewfm_init(SondProjektTreeviewFM *self) {
 	g_signal_connect(self, "before-insert", G_CALLBACK(on_before_insert), NULL);
 	g_signal_connect(self, "after", G_CALLBACK(on_after), NULL);
 	g_signal_connect(self, "after-insert", G_CALLBACK(on_after_insert), NULL);
+	g_signal_connect(self, "root-entries-added", G_CALLBACK(on_root_entries_added), NULL);
 }

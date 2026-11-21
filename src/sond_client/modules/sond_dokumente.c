@@ -28,6 +28,7 @@
 #include "../../seadrive/sond_seadrive_core.h"
 #include "../../sond_zond_ctl.h"
 #include "../sond_zond_prozess.h"
+#include "../../sond_eingang_cache.h"
 #include "../../tvfm/sond_tvfm_status.h"
 #include "../../tvfm/sond_tvfm_unlock.h"
 #include "../sond_password_dialog.h"
@@ -70,6 +71,7 @@ typedef struct {
     gint64 projekt_mtime;      /* Stand der Datei beim letzten Öffnen */
     gint64 projekt_size;
     GtkWidget *sperre;         /* Hinweis, warum der Baum nichts ändern darf */
+    SondEingangCache *eingang_cache; /* lokale Tabelle der Eingangsangaben; NULL, wenn nicht verfügbar */
     DBaseZond *projekt_schreib; /* nur während eines Änderungsvorgangs offen */
     SondIndexCtx *index_schreib; /* dito */
 } DokData;
@@ -110,6 +112,7 @@ static void dok_free(gpointer data) {
     if (d->tree)
         g_object_remove_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
     sond_index_ctx_free(d->index_ctx);
+    sond_eingang_cache_free(d->eingang_cache);
     dbase_zond_free(d->projekt_db);
     dbase_zond_free(d->projekt_schreib);
     sond_index_ctx_free(d->index_schreib);
@@ -268,6 +271,33 @@ static void sperre_pruefen(DokData *d) {
     if (d->sperre) {
         gtk_label_set_text(GTK_LABEL(d->sperre), grund ? grund : "");
         gtk_widget_set_visible(d->sperre, grund != NULL);
+    }
+}
+
+/* Die lokale Tabelle der Eingangsangaben anlegen und die Zettel der Akte einlesen. Sie liegt lokal
+ * (nie im synchronisierten Projektordner), je Projektverzeichnis eine Datei. Ein Fehlschlag ist
+ * nicht kritisch: der Baum zeigt dann keine Eingangsangaben. */
+static void eingang_oeffnen(DokData *d) {
+    g_autofree gchar *hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, d->lib_dir, -1);
+    g_autofree gchar *dir = g_build_filename(g_get_user_data_dir(), "sond", "eingang", NULL);
+    g_autofree gchar *name = g_strconcat(hash, ".db", NULL);
+    g_autofree gchar *pfad = NULL;
+    GError *error = NULL;
+
+    g_mkdir_with_parents(dir, 0700);
+    pfad = g_build_filename(dir, name, NULL);
+
+    d->eingang_cache = sond_eingang_cache_open(pfad, d->lib_dir, &error);
+    if (!d->eingang_cache) {
+        g_warning("Eingangsangaben nicht verfügbar: %s", error ? error->message : "?");
+        g_clear_error(&error);
+
+        return;
+    }
+
+    if (sond_eingang_cache_reload(d->eingang_cache, NULL, &error)) {
+        g_warning("Zettel nicht vollständig eingelesen: %s", error ? error->message : "?");
+        g_clear_error(&error);
     }
 }
 
@@ -1255,6 +1285,10 @@ static void hook_write_end(gpointer data) {
     op_ende((DokData*) data);
 }
 
+static SondEingangCache* hook_eingang_cache(gpointer data) {
+    return ((DokData*) data)->eingang_cache;
+}
+
 static void hook_message(gpointer data, gchar const *title, gchar const *text) {
     meldung(GTK_WINDOW(((DokData*) data)->window), title, text);
 }
@@ -1416,7 +1450,8 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     {
         SondProjektHooks hooks = { .permit = hook_permit, .write_begin = hook_write_begin,
                 .write_end = hook_write_end, .dbase = pflege_dbase_von,
-                .index_ctx = pflege_index_von, .message = hook_message, .data = d };
+                .index_ctx = pflege_index_von, .message = hook_message,
+                .eingang_cache = hook_eingang_cache, .data = d };
 
         sond_projekt_treeviewfm_set_hooks(SOND_PROJEKT_TREEVIEWFM(d->tree), &hooks);
     }
@@ -1451,6 +1486,7 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     dateien_pruefen(d);
     d->index_timer = g_timeout_add_seconds(5, dateien_pruefen, d);
 
+    eingang_oeffnen(d);
     if (sond_treeviewfm_set_root(SOND_TREEVIEWFM(d->tree), d->lib_dir, &error)) {
         meldung(parent, "Verzeichnis nicht lesbar", error ? error->message : "unbekannt");
         g_clear_error(&error);

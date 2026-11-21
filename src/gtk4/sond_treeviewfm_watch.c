@@ -43,8 +43,8 @@
 
 /* Fügt Einträge, die auf der obersten Ebene von außen hinzugekommen sind, in den Baum
  * ein. Idempotent: vorhandene Zeilen bleiben unberührt. Löschen oder Umbenennen von
- * außen wird bewusst nicht nachgeführt. */
-static void root_add_new(SondTreeviewFM *self) {
+ * außen wird bewusst nicht nachgeführt. TRUE, wenn Einträge hinzukamen. */
+static gboolean root_add_new(SondTreeviewFM *self) {
 	SondTreeviewFMPrivate *priv = fm_get_priv(self);
 	SondLazyChildren *lazy = fm_lazy_from_model(sond_treeview_get_roots(SOND_TREEVIEW(self)));
 	SondTVFMItem *item_root = NULL;
@@ -52,8 +52,10 @@ static void root_add_new(SondTreeviewFM *self) {
 	GHashTable *known = NULL;
 	GError *error = NULL;
 
+	gboolean added = FALSE;
+
 	if (!priv->root || !lazy)
-		return;
+		return FALSE;
 
 	item_root = sond_tvfm_item_create(self, NULL, NULL);
 	if (sond_tvfm_item_load_children(item_root, &children, NULL, &error)) {
@@ -62,7 +64,7 @@ static void root_add_new(SondTreeviewFM *self) {
 		g_clear_error(&error);
 		g_object_unref(item_root);
 
-		return;
+		return FALSE;
 	}
 
 	known = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
@@ -77,13 +79,17 @@ static void root_add_new(SondTreeviewFM *self) {
 		SondTVFMItem *child = g_ptr_array_index(children, i);
 		gchar const *name = sond_tvfm_item_get_basename(child);
 
-		if (name && !g_hash_table_contains(known, name))
+		if (name && !g_hash_table_contains(known, name)) {
 			fm_lazy_insert(lazy, child);
+			added = TRUE;
+		}
 	}
 
 	g_hash_table_unref(known);
 	g_ptr_array_unref(children);
 	g_object_unref(item_root);
+
+	return added;
 }
 
 static gboolean root_monitor_timeout(gpointer data) {
@@ -91,7 +97,8 @@ static gboolean root_monitor_timeout(gpointer data) {
 	SondTreeviewFMPrivate *priv = fm_get_priv(self);
 
 	priv->root_monitor_timer = 0;
-	root_add_new(self);
+	if (root_add_new(self))
+		g_signal_emit(self, fm_signals[SIGNAL_ROOT_ENTRIES_ADDED], 0);
 
 	return G_SOURCE_REMOVE;
 }
