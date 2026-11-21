@@ -422,9 +422,19 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     Änderung) und führt Löschen, Verschieben und Kopieren im Dateibaum über sond_projekt_pflege
     nach (Projektdatei kurz schreibend, Index in derselben Transaktion; angebundene Einträge
     sind nicht löschbar; hat zond das Projekt offen, wird verweigert; ohne Projektdatei bleibt es
-    beim Index). Offen für den Client: GTK4-Klasse unter SondTreeviewFM mit Anbindungen im
-    Baum, Dialog "Eingang setzen". Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind
-    noch ungeplant.
+    beim Index). Die GTK4-Klasse SondProjektTreeviewFM (src/gtk4, unter SondTreeviewFM) kapselt
+    das für Client und später ein GTK4-zond: Anbindungen und Abschnitte im Baum (Anzeige,
+    Umbenennen, Löschen, Auflösen), Schreibpfad über sond_projekt_pflege (Hooks permit,
+    write_begin/_end, critical, tx_done), read_only, Überschreibschutz beim Verschieben, Eingang
+    (Spalte, Menü Setzen/Entfernen/Neu einlesen, Dialog sond_eingang_dialog, Nachführen bei
+    Umbenennen/Verschieben/Löschen; Nachlesen neuer Zettel per Signal root-entries-added des
+    Wurzel-Monitors, Konvention: Importe nur auf der Wurzel-Ebene). zond und Dokumentenfenster
+    einer Akte laufen nie gleichzeitig: zond im Akten-Modus (--akte-projekt, eigene Instanz,
+    Schließen beendet zond), der Client verfolgt die zond-PID (sond_zond_prozess, State-Datei)
+    und sperrt gegenseitig. Die Takte für Projekt-DB und Index im Dokumentenfenster bleiben
+    (Änderungen kommen per Synchronisierung). Offen: Index-Menü im Client, Öffnen von
+    Abschnitten mit Seitensprung (zond-Viewer im Client), echter Schreibschutz in zond.
+    Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
 ```
 
 ## Ideen
