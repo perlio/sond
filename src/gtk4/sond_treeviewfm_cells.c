@@ -576,6 +576,25 @@ static void name_cell_highlight(SondTreeviewFM *view, SondTVFMItem *item, GtkWid
 		gtk_widget_remove_css_class(label, HIT_CSS_CLASS);
 }
 
+static void name_changed_cb(SondTreeviewFM *view, gpointer label) {
+	SondTVFMItem *item = g_object_get_data(G_OBJECT(label), ITEM_KEY);
+	gchar *text = NULL;
+
+	if (!item)
+		return;
+
+	text = name_cell_text(view, item);
+	gtk_label_set_text(GTK_LABEL(label), text);
+	g_free(text);
+	name_cell_highlight(view, item, GTK_WIDGET(label));
+}
+
+void sond_treeviewfm_refresh_names(SondTreeviewFM *self) {
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+
+	g_signal_emit(self, fm_signals[SIGNAL_NAMES_CHANGED], 0);
+}
+
 static void name_setup(GtkSignalListItemFactory *factory, GtkListItem *listitem,
 		gpointer data) {
 	GtkWidget *expander = gtk_tree_expander_new();
@@ -636,6 +655,11 @@ static void name_bind(GtkSignalListItemFactory *factory, GtkListItem *listitem,
 	if (view) {
 		icon_refresh(view, icon, item);
 
+		//Text und Hervorhebung folgen Änderungen der Projekt-DB
+		g_object_set_data_full(G_OBJECT(label), ITEM_KEY, g_object_ref(item), g_object_unref);
+		g_signal_handlers_disconnect_by_data(view, label); //nie doppelt verbunden
+		g_signal_connect_object(view, "names-changed", G_CALLBACK(name_changed_cb), label, 0);
+
 		//das Symbol folgt Änderungen des Pin-Zustands
 		g_object_set_data_full(G_OBJECT(icon), ITEM_KEY, g_object_ref(item),
 				g_object_unref);
@@ -654,6 +678,7 @@ static void name_unbind(GtkSignalListItemFactory *factory, GtkListItem *listitem
 	GtkWidget *box = expander ?
 			gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander)) : NULL;
 	GtkWidget *icon = box ? gtk_widget_get_first_child(box) : NULL;
+	GtkWidget *label = box ? gtk_widget_get_last_child(box) : NULL;
 	SondTreeviewFM *view = factory_get_view(factory);
 
 	(void) data;
@@ -664,9 +689,14 @@ static void name_unbind(GtkSignalListItemFactory *factory, GtkListItem *listitem
 		return;
 	}
 
-	if (view)
+	if (view) {
 		g_signal_handlers_disconnect_by_data(view, icon);
+		if (label)
+			g_signal_handlers_disconnect_by_data(view, label);
+	}
 	g_object_set_data(G_OBJECT(icon), ITEM_KEY, NULL);
+	if (label)
+		g_object_set_data(G_OBJECT(label), ITEM_KEY, NULL);
 	g_clear_object(&view);
 }
 

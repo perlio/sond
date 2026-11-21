@@ -175,6 +175,11 @@ void sond_treeviewfm_eingang_refresh(SondTreeviewFM*);
 /* Die Offline-Spalte aller sichtbaren Zeilen neu lesen */
 void sond_treeviewfm_refresh_status(SondTreeviewFM*);
 
+/* Text und Hervorhebung der Namen aller sichtbaren Zeilen neu lesen (Abschnitte und Treffer
+ * nach geänderter Projekt-DB). Neue oder entfernte Abschnitte erscheinen erst nach erneutem
+ * Aufklappen. */
+void sond_treeviewfm_refresh_names(SondTreeviewFM*);
+
 /* Prüft vor Aktionen, die Dateien verändern (derzeit: Entsperren), ob das erlaubt ist (z.B. ob
  * die Schreibberechtigung für die Akte vorliegt, s. sond_akte_lease). FALSE mit error: die Aktion
  * unterbleibt, die Meldung wird angezeigt. Ohne Funktion ist alles erlaubt. */

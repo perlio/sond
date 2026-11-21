@@ -203,6 +203,10 @@ static void projekt_pruefen(DokData *d) {
             g_debug("Projektdatei nicht lesbar: %s", error ? error->message : "?");
         g_clear_error(&error);
     }
+
+    //Abschnitte und Treffer im Baum aus der neuen Projekt-DB lesen
+    if (d->tree)
+        sond_treeviewfm_refresh_names(SOND_TREEVIEWFM(d->tree));
 }
 
 /* Hat zond das Projekt offen? Maßgeblich ist die Steuerdatei zur Projektdatei (sie gilt auch, wenn
@@ -1147,7 +1151,10 @@ static SondIndexCtx* index_schreibend_oeffnen(DokData *d) {
 /* Datenbanken eines Änderungsvorgangs (before-* bis after): die Projektdatei schreibend und die
  * Index-DB. Die Pflege (sond_projekt_pflege) liest sie über diese Rückrufe. */
 static DBaseZond* pflege_dbase_von(gpointer data) {
-    return ((DokData*) data)->projekt_schreib;
+    DokData *d = data;
+
+    //während einer Aktion die schreibbare Verbindung, sonst die lesend gehaltene
+    return d->projekt_schreib ? d->projekt_schreib : d->projekt_db;
 }
 
 static SondIndexCtx* pflege_index_von(gpointer data) {

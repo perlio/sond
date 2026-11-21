@@ -18,6 +18,7 @@
 
 #include "sond_projekt_treeviewfm.h"
 
+#include "../sond_log_and_error.h"
 #include "../tvfm/sond_tvfm_index_sync.h"
 
 typedef struct {
@@ -91,6 +92,104 @@ static void melden(SondProjektTreeviewFMPrivate *priv, gchar const *title, gchar
 		priv->hooks.message(priv->hooks.data, title, text);
 	else
 		g_warning("%s: %s", title, text);
+}
+
+/* ---- Abschnitte (Anbindungen) ----
+ *
+ * Gelesen wird aus der Datenbank, die die Anwendung liefert (Client: die lesend gehaltene
+ * Projektdatei; zond: work). Fehlt sie, gibt es keine Abschnitte. */
+
+static SondProjektTreeviewFMPrivate* priv_of_item(SondTVFMItem *item) {
+	GObject *tree = G_OBJECT(sond_tvfm_item_get_stvfm(item));
+
+	return SOND_IS_PROJEKT_TREEVIEWFM(tree) ?
+			sond_projekt_treeviewfm_get_instance_private(SOND_PROJEKT_TREEVIEWFM(tree)) : NULL;
+}
+
+//Pflege des Baums, zu dem der Eintrag gehört, wenn eine Datenbank vorliegt, sonst NULL
+static SondProjektPflege* pflege_of_item(SondTVFMItem *item) {
+	SondProjektTreeviewFMPrivate *priv = priv_of_item(item);
+
+	return priv && priv->hooks.dbase && priv->hooks.dbase(priv->hooks.data) ? priv->pflege : NULL;
+}
+
+static gint vfunc_load_sections(SondTVFMItem *item, GPtrArray **arr_children, GError **error) {
+	g_autofree gchar *filepart = NULL;
+	g_autoptr(GPtrArray) sections = NULL;
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
+	SondProjektPflege *pflege = pflege_of_item(item);
+	gint rc = 0;
+
+	//nur PDFs haben Abschnitte
+	if (!pflege || !sfp || !SOND_IS_FILE_PART_PDF(sfp))
+		return 0;
+
+	filepart = sond_file_part_get_filepart(sfp);
+
+	//ohne arr_children: nur die Frage, ob es Abschnitte gibt (1/0)
+	if (!arr_children)
+		return sond_projekt_pflege_sections(pflege, filepart,
+				sond_tvfm_item_get_path_or_section(item), NULL, error);
+
+	rc = sond_projekt_pflege_sections(pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), &sections, error);
+	if (rc)
+		return -1;
+
+	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
+	for (guint i = 0; i < sections->len; i++) {
+		SondTVFMItem *child = sond_tvfm_item_create(sond_tvfm_item_get_stvfm(item), sfp,
+				g_ptr_array_index(sections, i));
+
+		sond_tvfm_item_set_icon_name(child, "anbindung");
+		g_ptr_array_add(*arr_children, child);
+	}
+
+	return 0;
+}
+
+static gboolean vfunc_has_sections(SondTVFMItem *item) {
+	GError *error = NULL;
+	gint rc = vfunc_load_sections(item, NULL, &error);
+
+	if (rc == -1) {
+		LOG_WARN("Konnte Abschnitte nicht laden: %s", error ? error->message : "?");
+		g_clear_error(&error);
+
+		return FALSE;
+	}
+
+	return rc == 1;
+}
+
+static gint vfunc_text_from_section(SondTVFMItem *item, gchar **text, GError **error) {
+	g_autofree gchar *filepart = sond_file_part_get_filepart(
+			sond_tvfm_item_get_sond_file_part(item));
+	SondProjektPflege *pflege = pflege_of_item(item);
+
+	if (!pflege) {
+		*text = g_strdup("");
+
+		return 0;
+	}
+
+	return sond_projekt_pflege_section_text(pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), text, error);
+}
+
+//Hervorhebung: ist die Datei bzw. der Abschnitt ganz in einer Anbindung enthalten?
+static gint vfunc_deter_background(SondTVFMItem *item, GError **error) {
+	SondProjektPflege *pflege = pflege_of_item(item);
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
+	g_autofree gchar *filepart = NULL;
+
+	if (!pflege || !sfp || sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_DIR)
+		return 0;
+
+	filepart = sond_file_part_get_filepart(sfp);
+
+	return sond_projekt_pflege_anbindung_volltreffer(pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), error);
 }
 
 static gboolean write_check_adapter(gpointer data, GError **error) {
@@ -380,7 +479,14 @@ static void sond_projekt_treeviewfm_finalize(GObject *object) {
 }
 
 static void sond_projekt_treeviewfm_class_init(SondProjektTreeviewFMClass *klass) {
+	SondTreeviewFMClass *tclass = SOND_TREEVIEWFM_CLASS(klass);
+
 	G_OBJECT_CLASS(klass)->finalize = sond_projekt_treeviewfm_finalize;
+
+	tclass->has_sections = vfunc_has_sections;
+	tclass->load_sections = vfunc_load_sections;
+	tclass->text_from_section = vfunc_text_from_section;
+	tclass->deter_background = vfunc_deter_background;
 }
 
 static void sond_projekt_treeviewfm_init(SondProjektTreeviewFM *self) {
