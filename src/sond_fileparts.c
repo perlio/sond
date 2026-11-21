@@ -1602,7 +1602,13 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 		gchar* full_new = root ? g_strconcat(root, "/", path_new, NULL)
 				: g_strdup(path_new);
 
-		if (!sond_rename(full_old, full_new, error))
+		//sond_rename() überschreibt ein vorhandenes Ziel: hier nie
+		if (sond_rename_target_taken(full_old, full_new)) {
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+					"\"%s\" existiert bereits", path_new);
+			rc = -1;
+		}
+		else if (!sond_rename(full_old, full_new, error))
 			rc = -1;
 
 		g_free(full_old);

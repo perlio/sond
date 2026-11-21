@@ -66,6 +66,15 @@ gboolean sond_mkdir(const gchar *path, GError **error);
 gboolean sond_exists(const gchar *path);
 
 /**
+ * Würde ein Umbenennen oder Verschieben von oldpath nach newpath ein vorhandenes anderes Ziel
+ * überschreiben? sond_rename() tut das (es räumt das Ziel weg); wer das nicht will, prüft vorher.
+ * Windows: ein Ziel, das sich nur in der Groß-/Kleinschreibung vom alten Pfad unterscheidet, ist
+ * dieselbe Datei und zählt nicht. Sonst (Dateisystem unterscheidet Groß-/Kleinschreibung):
+ * jedes vorhandene Ziel zählt.
+ */
+gboolean sond_rename_target_taken(const gchar *oldpath, const gchar *newpath);
+
+/**
  * Erstellt Verzeichnisse rekursiv (Windows: mit Long-Path-Support)
  */
 gboolean sond_mkdir_with_parents(const gchar *path, GError **error);

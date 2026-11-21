@@ -257,6 +257,20 @@ sond_exists(const gchar *path)
 }
 
 gboolean
+sond_rename_target_taken(const gchar *oldpath, const gchar *newpath)
+{
+    g_return_val_if_fail(oldpath != NULL && newpath != NULL, FALSE);
+
+#ifdef G_OS_WIN32
+    //NTFS unterscheidet die Schreibweise nicht: gleicher Name bis auf Groß-/Kleinschreibung ist dieselbe Datei
+    if (g_ascii_strcasecmp(oldpath, newpath) == 0)
+        return FALSE;
+#endif
+
+    return sond_exists(newpath);
+}
+
+gboolean
 sond_mkdir_with_parents(const gchar *path, GError **error)
 {
     g_return_val_if_fail(path != NULL, FALSE);

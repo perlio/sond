@@ -976,6 +976,14 @@ gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
 					stvfm_item_priv->path_or_section, NULL);
 			g_autofree gchar *abs_new = g_strconcat(root, "/", path_new, NULL);
 
+			//sond_rename() überschreibt ein vorhandenes Ziel: hier nie
+			if (sond_rename_target_taken(abs_old, abs_new)) {
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+						"\"%s\" existiert bereits", path_new);
+
+				return -1;
+			}
+
 			if (!sond_rename(abs_old, abs_new, error))
 				return -1;
 
