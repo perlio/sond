@@ -28,6 +28,7 @@
 #include "../sond_log_and_error.h"
 #include "../sond_fileparts.h"
 #include "../sond_file_helper.h"
+#include "../sond_renderer.h"
 #include "sond_seadrive_load_dialog.h"
 #include "../tvfm/sond_tvfm_load.h"
 #include "../tvfm/sond_tvfm_item.h"
@@ -524,9 +525,15 @@ void fm_action_delete(GSimpleAction *action, GVariant *parameter, gpointer data)
 gint fm_default_open_item(SondTreeviewFM *self, SondTVFMItem *item,
 		gboolean open_with, GError **error) {
 	gboolean is_dir = FALSE;
-	gchar *full = fm_item_full_path(self, item, &is_dir);
+	gchar *full = NULL;
 	gboolean ok = FALSE;
+	SondFilePart *sfp_viewer = sond_tvfm_item_get_sond_file_part(item);
 
+	//Eigener Viewer, wo es einen gibt; "Öffnen mit" und alles andere extern
+	if (!open_with && sfp_viewer && sond_renderer_can_render(sfp_viewer))
+		return sond_renderer_open_file_part(sfp_viewer, FALSE, error) ? -1 : 0;
+
+	full = fm_item_full_path(self, item, &is_dir);
 	if (!full) {
 		//Eintrag in einem Container (ZIP-Eintrag, PDF-Anhang, E-Mail-Teil): über seinen Filepart
 		SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);

@@ -912,29 +912,34 @@ gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 	return sond_render_with_term(input, sfp, title, NULL, -1, error);
 }
 
-/* Öffnet sfp im eigenen Viewer (Text, Bild, DOCX/ODT, E-Mail), sonst mit dem Standardprogramm
- * bzw. "Öffnen mit" (open_with erzwingt Letzteres). */
+/* Gibt es für sfp einen eigenen Viewer (Text außer CSV, Bild, ODT, DOCX, E-Mail)? */
+gboolean sond_renderer_can_render(SondFilePart* sfp) {
+	gchar const* mime = NULL;
+
+	if (!sfp)
+		return FALSE;
+	if (SOND_IS_FILE_PART_GMESSAGE(sfp))
+		return TRUE;
+	if (!SOND_IS_FILE_PART_LEAF(sfp))
+		return FALSE;
+
+	mime = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp));
+	if (!mime)
+		return FALSE;
+
+	return (g_str_has_prefix(mime, "text/") && g_strcmp0(mime, "text/csv")) ||
+			g_str_has_prefix(mime, "image/") ||
+			!g_strcmp0(mime, "application/vnd.oasis.opendocument.text") ||
+			!g_strcmp0(mime, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+}
+
+/* Öffnet sfp im eigenen Viewer, sonst mit dem Standardprogramm bzw. "Öffnen mit" (open_with
+ * erzwingt Letzteres). */
 gint sond_renderer_open_file_part(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
 	g_return_val_if_fail(sfp, -1);
 
-	//hier alle Varianten, in denen eigener Viewer geöffnet wird
-	if (!open_with &&
-			((SOND_IS_FILE_PART_LEAF(sfp) &&
-			((g_str_has_prefix(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "text/") &&
-			 g_strcmp0(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "text/csv")) ||
-			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "image/") ||
-			!g_strcmp0("application/vnd.oasis.opendocument.text",
-					sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp))) ||
-			!g_strcmp0("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-					sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp))))) ||
-					SOND_IS_FILE_PART_GMESSAGE(sfp)))
-	{
+	if (!open_with && sond_renderer_can_render(sfp)) {
 		GBytes* bytes = NULL;
 		gint rc = 0;
 
@@ -946,10 +951,7 @@ gint sond_renderer_open_file_part(SondFilePart* sfp, gboolean open_with,
 		g_bytes_unref(bytes);
 		if (rc)
 			return -1;
-	}/*
-	else if (!open_with && SOND_IS_FILE_PART_PDF(sfp)) {
-
-	}*/
+	}
 	else if (sond_file_part_open_external(sfp, open_with, error))
 		return -1;
 

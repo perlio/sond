@@ -19,4 +19,7 @@ gint sond_render_with_term(GBytes*, SondFilePart*, gchar const* title,
 /* Öffnet sfp im eigenen Viewer, wo es einen gibt, sonst extern (open_with: immer extern) */
 gint sond_renderer_open_file_part(SondFilePart*, gboolean open_with, GError**);
 
+/* Gibt es für sfp einen eigenen Viewer? */
+gboolean sond_renderer_can_render(SondFilePart*);
+
 #endif /* SRC_SOND_RENDERER_H_ */
