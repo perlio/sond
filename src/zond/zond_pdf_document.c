@@ -31,9 +31,6 @@
 #include "../znd/anbindung.h"
 #include "../znd/zond_error.h"
 
-//Fehlerdomäne, in beiden Builds (zond, viewer) vorhanden
-G_DEFINE_QUARK(zond-error-quark,zond_error)
-
 void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 	Anbindung anbindung_akt = { 0 };
 

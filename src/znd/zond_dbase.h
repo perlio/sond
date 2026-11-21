@@ -61,8 +61,8 @@ gint zond_dbase_create_db_maj_1(sqlite3*, GError**);
 
 ZondDBase* zond_dbase_new(const gchar*, gboolean, gboolean, GError**);
 
-/* ÷ffnet die Datenbank nur lesend: keine Journal-Korrektur, keine Indexanlage, keine
- * Versionsumstellung (falsche Version ist ein Fehler). Die Datei bleibt unver‰ndert. */
+/* √ñffnet die Datenbank nur lesend: keine Journal-Korrektur, keine Indexanlage, keine
+ * Versionsumstellung (falsche Version ist ein Fehler). Die Datei bleibt unver√§ndert. */
 ZondDBase* zond_dbase_new_readonly(const gchar*, GError**);
 
 void zond_dbase_close(ZondDBase*);

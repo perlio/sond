@@ -417,9 +417,14 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     auf Anbindungen und Abschnitte (Text, ID, Kinder, Löschen, Volltreffer) laufen über
     sond_projekt_pflege_section_*/_sections/_anbindung_volltreffer auf der Primärdatenbank
     (dbase_zond_primary(): work in zond, store im Client); zond_treeviewfm.c hält nur noch die
-    Anzeige. Die Pflegelogik ist damit aus zond_treeviewfm.c herausgelöst. Offen für den Client:
-    DB-Schicht (Lease, nur lesend öffnen), GTK4-Klasse unter SondTreeviewFM, Dialog "Eingang
-    setzen". Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
+    Anzeige. Die Pflegelogik ist damit aus zond_treeviewfm.c herausgelöst. Der Client
+    (sond_dokumente.c) hält die Projektdatei lesend (zond_dbase_new_readonly, Neuöffnen bei
+    Änderung) und führt Löschen, Verschieben und Kopieren im Dateibaum über sond_projekt_pflege
+    nach (Projektdatei kurz schreibend, Index in derselben Transaktion; angebundene Einträge
+    sind nicht löschbar; hat zond das Projekt offen, wird verweigert; ohne Projektdatei bleibt es
+    beim Index). Offen für den Client: GTK4-Klasse unter SondTreeviewFM mit Anbindungen im
+    Baum, Dialog "Eingang setzen". Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind
+    noch ungeplant.
 ```
 
 ## Ideen
