@@ -60,6 +60,16 @@ typedef struct {
 	//Meldung an den Nutzer (nullable: dann nur ins Log)
 	void (*message)(gpointer data, gchar const *title, gchar const *text);
 
+	/* Ein Commit ist gescheitert und nicht zurückzunehmen (Projektdatei und Dateien können
+	 * inkonsistent sein, die Fehlerdatei ist geschrieben). Die Anwendung soll das Projekt schließen und
+	 * sich beenden (zond). Nullable: dann nur eine Meldung über message. */
+	void (*critical)(gpointer data, gchar const *text);
+
+	/* Eine Aktion mit Transaktion ist abgeschlossen (Commit oder Rollback), vor write_end. dual: sie
+	 * lief über store und work (zond: das Änderungskennzeichen des Projekts auf den Stand vor der
+	 * Aktion zurücksetzen, weil store schon geschrieben ist). Nullable. */
+	void (*tx_done)(gpointer data, gboolean dual);
+
 	gpointer data;
 } SondProjektHooks;
 

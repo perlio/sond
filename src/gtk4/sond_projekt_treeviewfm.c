@@ -209,6 +209,10 @@ static gint vfunc_delete_section(SondTVFMItem *item, GError **error) {
 			sond_tvfm_item_get_path_or_section(item), error);
 }
 
+#define ONLY_STORE_TEXT "Die zu löschende Datei bzw. der Abschnitt ist noch in der " \
+		"Speicher-Datenbank vorhanden.\nBitte zuerst das Projekt speichern, bevor Sie die " \
+		"Datei bzw. den Abschnitt löschen."
+
 static gboolean write_check_adapter(gpointer data, GError **error) {
 	SondProjektTreeviewFMPrivate *priv = data;
 
@@ -245,6 +249,12 @@ static gint before_delete_section(SondProjektTreeviewFMPrivate *priv, SondTVFMIt
 
 	if (sond_projekt_pflege_check_delete(priv->pflege, filepart, FALSE, FALSE, section, &ref,
 			error) || ref != DBASE_ZOND_REF_NONE) {
+		if (ref == DBASE_ZOND_REF_ONLY_STORE && !(error && *error)) {
+			melden(priv, "Löschen nicht möglich", ONLY_STORE_TEXT);
+			priv->hooks.write_end(priv->hooks.data);
+
+			return 1;
+		}
 		if (ref != DBASE_ZOND_REF_NONE && error && !*error)
 			g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
 					"Der Abschnitt ist im Projekt angebunden und kann nicht gelöscht werden. "
@@ -314,6 +324,15 @@ static gint on_before_delete(SondTreeviewFM *tree, SondTVFMItem *item, gpointer 
 		//Ein angebundener Eintrag (oder ein angebundener Abkömmling) darf nicht gelöscht werden
 		if (sond_projekt_pflege_check_delete(priv->pflege, rel, ist_ordner, FALSE, NULL, &ref,
 				error) || ref != DBASE_ZOND_REF_NONE) {
+			if (ref == DBASE_ZOND_REF_ONLY_STORE && !(error && *error)) {
+				//in work schon entfernt, aber noch nicht gespeichert: überspringen
+				melden(priv, "Löschen nicht möglich", ONLY_STORE_TEXT);
+				priv->hooks.write_end(priv->hooks.data);
+				g_free(rel);
+				opctx_free(oc);
+
+				return 1;
+			}
 			if (ref != DBASE_ZOND_REF_NONE && error && !*error)
 				g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
 						"\"%s\" ist im Projekt angebunden und kann nicht gelöscht werden. "
@@ -496,12 +515,20 @@ static void on_after(SondTreeviewFM *tree, gboolean erfolg, gpointer ctx, gpoint
 		if (ergebnis == SOND_PROJEKT_TX_FEHLER)
 			melden(priv, "Speichern fehlgeschlagen", error ? error->message :
 					"Die Änderung wurde rückgängig gemacht. Bitte erneut versuchen.");
-		else if (ergebnis == SOND_PROJEKT_TX_KRITISCH)
-			melden(priv, "Kritischer Fehler beim Speichern",
-					"Projektdatei und Dateien können inkonsistent sein. Details stehen in "
+		else if (ergebnis == SOND_PROJEKT_TX_KRITISCH) {
+			gchar const *text = "Projektdatei und Dateien können inkonsistent sein. Details stehen in "
 					"einer Fehlerdatei im Projektordner (ZOND_FEHLER_*.txt). Bitte den "
-					"Dateibaum nicht weiter ändern.");
+					"Dateibaum nicht weiter ändern.";
+
+			if (priv->hooks.critical)
+				priv->hooks.critical(priv->hooks.data, text); //zond beendet sich hier
+			else
+				melden(priv, "Kritischer Fehler beim Speichern", text);
+		}
 		g_clear_error(&error);
+
+		if (priv->hooks.tx_done)
+			priv->hooks.tx_done(priv->hooks.data, oc->dual);
 	} else if (oc->op && erfolg) {
 		SondIndexCtx *idx = kontext_index_ctx(priv);
 

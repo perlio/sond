@@ -1378,8 +1378,9 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     //Baum
     d->tree = sond_projekt_treeviewfm_new();
     {
-        SondProjektHooks hooks = { hook_permit, hook_write_begin, hook_write_end,
-                pflege_dbase_von, pflege_index_von, hook_message, d };
+        SondProjektHooks hooks = { .permit = hook_permit, .write_begin = hook_write_begin,
+                .write_end = hook_write_end, .dbase = pflege_dbase_von,
+                .index_ctx = pflege_index_von, .message = hook_message, .data = d };
 
         sond_projekt_treeviewfm_set_hooks(SOND_PROJEKT_TREEVIEWFM(d->tree), &hooks);
     }
