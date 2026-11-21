@@ -52,6 +52,7 @@ typedef struct {
 	SondTreeviewFMWriteCheckFunc write_check;
 	gpointer write_check_data;
 	gchar *read_only;           //Grund, solange der Baum nichts ändern darf; sonst NULL
+	GPtrArray *write_actions;   //Namen weiterer ändernder Aktionen (von Unterklassen), g_free()
 #ifdef G_OS_WIN32
 	SondSeadriveWatcher *watcher; //nur bei einer Wurzel im SeaDrive-Laufwerk
 	guint refresh_idle;           //gebündelte Auffrischung der Symbole

@@ -439,6 +439,12 @@ gint sond_projekt_pflege_move(SondProjektPflege *pflege, SondProjektMove const *
  * Transaktionsrahmen
  * --------------------------------------------------------------------- */
 
+/* Transaktion über store und work (dual) oder nur über work? Ohne work (Client) gibt es nur den store:
+ * dann läuft auch eine Änderung "nur der Anbindungen" über ihn. */
+static gboolean tx_ueber_store(DBaseZond *dbase, gboolean dual) {
+	return dual || !dbase->zond_dbase_work;
+}
+
 gint sond_projekt_pflege_tx_begin(SondProjektPflege *pflege, gboolean dual, gboolean with_index,
 		GError **error) {
 	DBaseZond *dbase = pflege_dbase(pflege);
@@ -448,7 +454,8 @@ gint sond_projekt_pflege_tx_begin(SondProjektPflege *pflege, gboolean dual, gboo
 	if (with_index && sond_projekt_pflege_index_tx_begin(pflege, error))
 		return -1;
 
-	rc = dual ? dbase_zond_begin(dbase, error) : zond_dbase_begin(dbase->zond_dbase_work, error);
+	rc = tx_ueber_store(dbase, dual) ? dbase_zond_begin(dbase, error) :
+			zond_dbase_begin(dbase->zond_dbase_work, error);
 	if (rc) {
 		sond_projekt_pflege_index_tx_end(pflege);
 
@@ -580,7 +587,7 @@ SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gbo
 	GError *error_int = NULL;
 
 	if (!suc) {
-		if (dual)
+		if (tx_ueber_store(dbase, dual))
 			dbase_zond_rollback(dbase, &error_int);
 		else
 			zond_dbase_rollback(dbase->zond_dbase_work, &error_int);
@@ -610,7 +617,7 @@ SondProjektTxErgebnis sond_projekt_pflege_tx_ende(SondProjektPflege *pflege, gbo
 		}
 	}
 
-	if (dual ? dbase_zond_commit(dbase, &error_int) :
+	if (tx_ueber_store(dbase, dual) ? dbase_zond_commit(dbase, &error_int) :
 			zond_dbase_commit(dbase->zond_dbase_work, &error_int)) {
 		gboolean reverted = FALSE;
 		GError *error_revert = NULL;
@@ -845,6 +852,71 @@ gint sond_projekt_pflege_section_delete(SondProjektPflege *pflege, gchar const *
 	 * schon vorher verhindert (check_delete): für einen angebundenen Abschnitt wird das hier nie
 	 * erreicht. */
 	return zond_dbase_remove_node(anbindungen_db(pflege), ID, error) ? -1 : 0;
+}
+
+gint sond_projekt_pflege_section_angebunden(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, gboolean *angebunden, GError **error) {
+	ZondDBase *db = anbindungen_db(pflege);
+	gint ID = 0;
+	gint anbindung = 0;
+	gint kopie = 0;
+
+	*angebunden = FALSE;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID, error))
+		return -1;
+
+	if (ID == 0) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nAbschnitt nicht gefunden", __func__);
+
+		return -1;
+	}
+
+	if (zond_dbase_get_baum_inhalt_file_from_file_part(db, ID, &anbindung, error) ||
+			zond_dbase_get_baum_auswertung_copy(db, ID, &kopie, error))
+		return -1;
+
+	*angebunden = anbindung != 0 || kopie != 0;
+
+	return 0;
+}
+
+gint sond_projekt_pflege_section_aufloesen(SondProjektPflege *pflege, gchar const *filepart,
+		gchar const *section, GError **error) {
+	ZondDBase *db = anbindungen_db(pflege);
+	gint ID = 0;
+	gint anchor = 0;
+
+	if (sond_projekt_pflege_section_id(pflege, filepart, section, &ID, error))
+		return -1;
+
+	if (ID == 0) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nAbschnitt nicht gefunden", __func__);
+
+		return -1;
+	}
+
+	/* Kinder der Reihe nach hinter den Abschnitt setzen (immer das erste Kind, das jeweils nächste
+	 * folgt hinter dem eben verschobenen), dann den leeren Abschnitt entfernen */
+	anchor = ID;
+	while (1) {
+		gint child = 0;
+
+		if (zond_dbase_get_first_child(db, ID, &child, error))
+			return -1;
+
+		if (!child)
+			break;
+
+		if (zond_dbase_verschieben_knoten(db, child, anchor, FALSE, error))
+			return -1;
+
+		anchor = child;
+	}
+
+	return zond_dbase_remove_node(db, ID, error) ? -1 : 0;
 }
 
 gint sond_projekt_pflege_sections(SondProjektPflege *pflege, gchar const *filepart,

@@ -173,6 +173,17 @@ gint sond_projekt_pflege_section_set_text(SondProjektPflege*, gchar const *filep
 gint sond_projekt_pflege_section_delete(SondProjektPflege*, gchar const *filepart,
 		gchar const *section, GError **error);
 
+/* Ist der Abschnitt selbst angebunden (Anbindung oder Kopie im Bestandsverzeichnis verweist auf ihn)?
+ * *angebunden: TRUE ja. Anders als bei check_delete zählen Anbindungen von Unterabschnitten nicht. */
+gint sond_projekt_pflege_section_angebunden(SondProjektPflege*, gchar const *filepart,
+		gchar const *section, gboolean *angebunden, GError **error);
+
+/* Entfernt den Abschnitt, seine Unterabschnitte bleiben und rücken eine Ebene höher, in der Reihenfolge
+ * hinter die Stelle des Abschnitts (Gegenstück zu "Anbindung entfernen" in zond). Nach
+ * section_angebunden, innerhalb einer Transaktion des Aufrufers. */
+gint sond_projekt_pflege_section_aufloesen(SondProjektPflege*, gchar const *filepart,
+		gchar const *section, GError **error);
+
 /* Die Abschnitte direkt unter dem Eintrag (g_ptr_array_unref(), Elemente: gchar* section). Bei
  * sections NULL: nur die Frage, ob es welche gibt, Rückgabe dann 1 ja, 0 nein, -1 Fehler. */
 gint sond_projekt_pflege_sections(SondProjektPflege*, gchar const *filepart, gchar const *section,

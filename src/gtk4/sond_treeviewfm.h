@@ -194,6 +194,10 @@ void sond_treeviewfm_set_write_check(SondTreeviewFM*, SondTreeviewFMWriteCheckFu
  * zeigt den Grund an, der Baum selbst nicht. */
 void sond_treeviewfm_set_read_only(SondTreeviewFM*, gchar const *reason);
 
+/* Meldet eine weitere ändernde Aktion einer Unterklasse an (Name wie in der Aktionstabelle, ohne
+ * Präfix): sie wird mit set_read_only gesperrt und freigegeben. */
+void sond_treeviewfm_register_write_action(SondTreeviewFM*, gchar const *name);
+
 //Grund der Sperre oder NULL (nicht freigeben)
 gchar const* sond_treeviewfm_get_read_only(SondTreeviewFM*);
 

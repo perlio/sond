@@ -230,6 +230,28 @@ void sond_treeviewfm_set_read_only(SondTreeviewFM *self, gchar const *reason) {
 		if (action)
 			g_simple_action_set_enabled(G_SIMPLE_ACTION(action), !priv->read_only);
 	}
+	for (guint i = 0; priv->write_actions && i < priv->write_actions->len; i++) {
+		GAction *action = g_action_map_lookup_action(map, g_ptr_array_index(priv->write_actions, i));
+
+		if (action)
+			g_simple_action_set_enabled(G_SIMPLE_ACTION(action), !priv->read_only);
+	}
+}
+
+void sond_treeviewfm_register_write_action(SondTreeviewFM *self, gchar const *name) {
+	SondTreeviewFMPrivate *priv = NULL;
+	GAction *action = NULL;
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self) && name);
+	priv = sond_treeviewfm_get_instance_private(self);
+
+	if (!priv->write_actions)
+		priv->write_actions = g_ptr_array_new_with_free_func(g_free);
+	g_ptr_array_add(priv->write_actions, g_strdup(name));
+
+	action = g_action_map_lookup_action(sond_treeview_get_action_map(SOND_TREEVIEW(self)), name);
+	if (action)
+		g_simple_action_set_enabled(G_SIMPLE_ACTION(action), !priv->read_only);
 }
 
 gchar const* sond_treeviewfm_get_read_only(SondTreeviewFM *self) {
@@ -540,6 +562,8 @@ static void sond_treeviewfm_finalize(GObject *object) {
 	g_free(priv->search_text);
 	g_free(priv->root);
 	g_free(priv->read_only);
+	if (priv->write_actions)
+		g_ptr_array_unref(priv->write_actions);
 
 	G_OBJECT_CLASS(sond_treeviewfm_parent_class)->finalize(object);
 }

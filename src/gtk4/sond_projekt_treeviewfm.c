@@ -18,6 +18,7 @@
 
 #include "sond_projekt_treeviewfm.h"
 
+#include "sond_treeviewfm_private.h"
 #include "../sond_log_and_error.h"
 #include "../tvfm/sond_tvfm_index_sync.h"
 
@@ -192,10 +193,83 @@ static gint vfunc_deter_background(SondTVFMItem *item, GError **error) {
 			sond_tvfm_item_get_path_or_section(item), error);
 }
 
+//Abschnitt löschen (Haken des Baums, nach before-delete): in der offenen Transaktion
+static gint vfunc_delete_section(SondTVFMItem *item, GError **error) {
+	g_autofree gchar *filepart = sond_file_part_get_filepart(
+			sond_tvfm_item_get_sond_file_part(item));
+	SondProjektPflege *pflege = pflege_of_item(item);
+
+	if (!pflege) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Keine Projektdatei vorhanden");
+
+		return -1;
+	}
+
+	return sond_projekt_pflege_section_delete(pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), error);
+}
+
 static gboolean write_check_adapter(gpointer data, GError **error) {
 	SondProjektTreeviewFMPrivate *priv = data;
 
 	return priv->hooks.permit ? priv->hooks.permit(priv->hooks.data, error) : TRUE;
+}
+
+/* Abschnitt (Anbindung einer Datei) löschen: nur ohne Anbindung im Inhaltsbaum; die Transaktion läuft
+ * über die Projektdatei (Client) bzw. work (zond), Dateien und Index sind nicht berührt. */
+static gint before_delete_section(SondProjektTreeviewFMPrivate *priv, SondTVFMItem *item,
+		GError **error, gpointer *ctx) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
+	gchar const *section = sond_tvfm_item_get_path_or_section(item);
+	g_autofree gchar *filepart = NULL;
+	DBaseZondRef ref = DBASE_ZOND_REF_NONE;
+	OpCtx *oc = NULL;
+	gint modus = 0;
+
+	if (!sfp || !section)
+		return 0;
+
+	filepart = sond_file_part_get_filepart(sfp);
+
+	modus = priv->hooks.write_begin(priv->hooks.data, TRUE, error);
+	if (modus < 0)
+		return -1;
+
+	if (modus == 0) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"Es gibt keine Projektdatei, der Abschnitt kann nicht gelöscht werden.");
+		priv->hooks.write_end(priv->hooks.data);
+
+		return -1;
+	}
+
+	if (sond_projekt_pflege_check_delete(priv->pflege, filepart, FALSE, FALSE, section, &ref,
+			error) || ref != DBASE_ZOND_REF_NONE) {
+		if (ref != DBASE_ZOND_REF_NONE && error && !*error)
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+					"Der Abschnitt ist im Projekt angebunden und kann nicht gelöscht werden. "
+					"Bitte zuerst die Anbindung entfernen.");
+		priv->hooks.write_end(priv->hooks.data);
+
+		return -1;
+	}
+
+	oc = g_new0(OpCtx, 1);
+	{
+		SondProjektDelete del = { .path = filepart, .section = section };
+
+		if (sond_projekt_pflege_delete(priv->pflege, &del, &oc->dual, error)) {
+			priv->hooks.write_end(priv->hooks.data);
+			opctx_free(oc);
+
+			return -1;
+		}
+	}
+
+	oc->pflege = TRUE;
+	*ctx = oc;
+
+	return 0;
 }
 
 static gint on_before_delete(SondTreeviewFM *tree, SondTVFMItem *item, gpointer error_p,
@@ -209,6 +283,10 @@ static gint on_before_delete(SondTreeviewFM *tree, SondTVFMItem *item, gpointer 
 	OpCtx *oc = NULL;
 
 	(void) user_data;
+
+	if (priv->hooks.write_begin &&
+			sond_tvfm_item_get_item_type(item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
+		return before_delete_section(priv, item, error, ctx);
 
 	if (!priv->hooks.write_begin || !sond_tvfm_item_fs_path(item, &rel, &ist_ordner))
 		return 0; //Inhalt eines Containers: hier nicht unterstützt
@@ -444,6 +522,160 @@ static void on_after(SondTreeviewFM *tree, gboolean erfolg, gpointer ctx, gpoint
 	opctx_free(oc);
 }
 
+/* Umbenennen: bei einem Abschnitt der Text der Anbindung (in einer eigenen Transaktion), sonst wie
+ * im Dateibaum */
+static gint vfunc_text_edited(SondTreeviewFM *tree, SondTVFMItem *item, SondTVFMItem *parent,
+		gchar const *text_new, GError **error) {
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	g_autofree gchar *filepart = NULL;
+	SondProjektTxErgebnis ergebnis = SOND_PROJEKT_TX_OK;
+	gint modus = 0;
+
+	if (!priv->hooks.write_begin || sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
+		return SOND_TREEVIEWFM_CLASS(sond_projekt_treeviewfm_parent_class)->text_edited(tree, item,
+				parent, text_new, error);
+
+	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(item));
+
+	modus = priv->hooks.write_begin(priv->hooks.data, TRUE, error);
+	if (modus < 0)
+		return -1;
+
+	if (modus == 0) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"Es gibt keine Projektdatei, der Abschnitt kann nicht geändert werden.");
+		priv->hooks.write_end(priv->hooks.data);
+
+		return -1;
+	}
+
+	if (sond_projekt_pflege_tx_begin(priv->pflege, FALSE, FALSE, error)) {
+		priv->hooks.write_end(priv->hooks.data);
+
+		return -1;
+	}
+
+	if (sond_projekt_pflege_section_set_text(priv->pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), text_new, NULL, error)) {
+		sond_projekt_pflege_tx_ende(priv->pflege, FALSE, FALSE, sond_treeviewfm_get_root(tree),
+				NULL);
+		priv->hooks.write_end(priv->hooks.data);
+
+		return -1;
+	}
+
+	ergebnis = sond_projekt_pflege_tx_ende(priv->pflege, TRUE, FALSE,
+			sond_treeviewfm_get_root(tree), error);
+	priv->hooks.write_end(priv->hooks.data);
+
+	return ergebnis == SOND_PROJEKT_TX_OK ? 0 : -1;
+}
+
+/* Abschnitt auflösen: der markierte Abschnitt wird entfernt, seine Unterabschnitte bleiben und
+ * rücken an seine Stelle */
+static void action_aufloesen(GSimpleAction *action, GVariant *parameter, gpointer data) {
+	SondTreeviewFM *tree = SOND_TREEVIEWFM(data);
+	SondProjektTreeviewFMPrivate *priv = priv_of(tree);
+	SondTreeview *base = SOND_TREEVIEW(tree);
+	GPtrArray *rows = sond_treeview_get_selected_rows(base);
+	GtkTreeListRow *row = rows->len == 1 ? g_ptr_array_index(rows, 0) : NULL;
+	SondTVFMItem *item = row ? gtk_tree_list_row_get_item(row) : NULL;
+	SondLazyChildren *lazy = NULL;
+	g_autofree gchar *filepart = NULL;
+	g_autoptr(GPtrArray) children = NULL;
+	GError *error = NULL;
+	gboolean angebunden = FALSE;
+	gboolean ok = FALSE;
+	gint modus = 0;
+
+	(void) action;
+	(void) parameter;
+
+	if (!item || sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_LEAF_SECTION ||
+			!priv->hooks.write_begin) {
+		melden(priv, "Abschnitt auflösen", "Bitte genau einen Abschnitt markieren.");
+		goto out;
+	}
+
+	lazy = fm_lazy_from_model(sond_treeview_row_get_container(base, row));
+	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(item));
+
+	modus = priv->hooks.write_begin(priv->hooks.data, TRUE, &error);
+	if (modus < 0)
+		goto fehler;
+	if (modus == 0) {
+		g_set_error(&error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"Es gibt keine Projektdatei, der Abschnitt kann nicht geändert werden.");
+		goto fehler_end;
+	}
+
+	if (sond_projekt_pflege_section_angebunden(priv->pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), &angebunden, &error))
+		goto fehler_end;
+	if (angebunden) {
+		g_set_error(&error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+				"Der Abschnitt ist im Projekt angebunden. Bitte zuerst die Anbindung entfernen.");
+		goto fehler_end;
+	}
+
+	//die Unterabschnitte vorher lesen: sie bleiben als eigene Zeilen
+	if (sond_tvfm_item_load_children(item, &children, NULL, &error))
+		goto fehler_end;
+
+	if (sond_projekt_pflege_tx_begin(priv->pflege, FALSE, FALSE, &error))
+		goto fehler_end;
+	if (sond_projekt_pflege_section_aufloesen(priv->pflege, filepart,
+			sond_tvfm_item_get_path_or_section(item), &error)) {
+		sond_projekt_pflege_tx_ende(priv->pflege, FALSE, FALSE, sond_treeviewfm_get_root(tree), NULL);
+		goto fehler_end;
+	}
+	ok = sond_projekt_pflege_tx_ende(priv->pflege, TRUE, FALSE, sond_treeviewfm_get_root(tree),
+			&error) == SOND_PROJEKT_TX_OK;
+	priv->hooks.write_end(priv->hooks.data);
+
+	if (!ok)
+		goto fehler;
+
+	//Zeile durch ihre Unterabschnitte ersetzen
+	if (lazy) {
+		gint index = fm_lazy_index_of(lazy, item);
+
+		fm_lazy_remove(lazy, item);
+		for (guint i = 0; i < children->len; i++)
+			fm_lazy_insert_at(lazy, index >= 0 ? index + (gint) i : -1,
+					g_ptr_array_index(children, i));
+	}
+
+	goto out;
+
+fehler_end:
+	priv->hooks.write_end(priv->hooks.data);
+fehler:
+	melden(priv, "Abschnitt auflösen nicht möglich", error ? error->message : "unbekannt");
+	g_clear_error(&error);
+
+out:
+	g_clear_object(&item);
+	g_ptr_array_unref(rows);
+}
+
+static void vfunc_setup_menu(SondTreeviewFM *self) {
+	static const GActionEntry entries[] = {
+		{ "section-aufloesen", action_aufloesen, NULL, NULL, NULL }
+	};
+	GMenu *section = g_menu_new();
+
+	SOND_TREEVIEWFM_CLASS(sond_projekt_treeviewfm_parent_class)->setup_menu(self);
+
+	g_action_map_add_action_entries(sond_treeview_get_action_map(SOND_TREEVIEW(self)), entries,
+			G_N_ELEMENTS(entries), self);
+	sond_treeviewfm_register_write_action(self, "section-aufloesen");
+
+	g_menu_append(section, "Abschnitt auflösen (Unterabschnitte behalten)", "tv.section-aufloesen");
+	g_menu_append_section(sond_treeview_get_menu(SOND_TREEVIEW(self)), NULL, G_MENU_MODEL(section));
+	g_object_unref(section);
+}
+
 void sond_projekt_treeviewfm_set_hooks(SondProjektTreeviewFM *self, SondProjektHooks const *hooks) {
 	SondProjektTreeviewFMPrivate *priv = NULL;
 
@@ -487,6 +719,9 @@ static void sond_projekt_treeviewfm_class_init(SondProjektTreeviewFMClass *klass
 	tclass->load_sections = vfunc_load_sections;
 	tclass->text_from_section = vfunc_text_from_section;
 	tclass->deter_background = vfunc_deter_background;
+	tclass->delete_section = vfunc_delete_section;
+	tclass->setup_menu = vfunc_setup_menu;
+	tclass->text_edited = vfunc_text_edited;
 }
 
 static void sond_projekt_treeviewfm_init(SondProjektTreeviewFM *self) {
