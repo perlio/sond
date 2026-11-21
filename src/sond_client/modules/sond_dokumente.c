@@ -23,17 +23,15 @@
 #include "sond_import.h"
 #include "sond_module_akte.h"
 #include "sond_zond_start.h"
-#include "../../gtk4/sond_treeviewfm.h"
+#include "../../gtk4/sond_projekt_treeviewfm.h"
 #include "../../sond_client/sond_client.h"
 #include "../../seadrive/sond_seadrive_core.h"
 #include "../../sond_zond_ctl.h"
 #include "../../tvfm/sond_tvfm_status.h"
-#include "../../tvfm/sond_tvfm_index_sync.h"
 #include "../../tvfm/sond_tvfm_unlock.h"
 #include "../sond_password_dialog.h"
 #include "../../sond_index.h"
 #include "../../znd/dbase_zond.h"
-#include "../../znd/sond_projekt_pflege.h"
 
 typedef struct {
     gchar *lib_dir;
@@ -71,7 +69,6 @@ typedef struct {
     gint64 projekt_mtime;      /* Stand der Datei beim letzten Öffnen */
     gint64 projekt_size;
     GtkWidget *sperre;         /* Hinweis, warum der Baum nichts ändern darf */
-    SondProjektPflege *pflege;
     DBaseZond *projekt_schreib; /* nur während eines Änderungsvorgangs offen */
     SondIndexCtx *index_schreib; /* dito */
 } DokData;
@@ -94,7 +91,6 @@ static void dok_free(gpointer data) {
     dbase_zond_free(d->projekt_db);
     dbase_zond_free(d->projekt_schreib);
     sond_index_ctx_free(d->index_schreib);
-    sond_projekt_pflege_free(d->pflege);
     g_free(d->projekt_pfad);
     g_free(d->job_token);
     if (d->nachlauf_timer)
@@ -1158,16 +1154,6 @@ static SondIndexCtx* pflege_index_von(gpointer data) {
     return ((DokData*) data)->index_schreib;
 }
 
-static SondProjektPflege* pflege_holen(DokData *d) {
-    if (!d->pflege) {
-        SondProjektKontext kontext = { pflege_dbase_von, pflege_index_von, d };
-
-        d->pflege = sond_projekt_pflege_new(&kontext);
-    }
-
-    return d->pflege;
-}
-
 static void op_ende(DokData *d) {
     dbase_zond_free(d->projekt_schreib);
     d->projekt_schreib = NULL;
@@ -1211,299 +1197,35 @@ static gint projekt_modus(DokData *d, GError **error) {
     return 1;
 }
 
-/* Was nach einer erfolgreichen Dateioperation ohne Projektdatei im Index nachzuführen ist */
-typedef struct {
-    gchar *alt;       //projektrelativer Pfad vorher
-    gchar *neu;       //nachher (NULL beim Löschen)
-} IdxOp;
-
-//Kontext zwischen before-* und after
-typedef struct {
-    gboolean pflege;  //über sond_projekt_pflege (Transaktion offen)
-    gboolean dual;
-    IdxOp *op;        //sonst: nur der Index
-} OpCtx;
-
-static void idxop_free(IdxOp *op) {
-    if (!op)
-        return;
-    g_free(op->alt);
-    g_free(op->neu);
-    g_free(op);
+/* Hooks des Projekt-Dateibaums (s. gtk4/sond_projekt_treeviewfm.h): eine ändernde Aktion beginnt
+ * mit der Schreibberechtigung und öffnet Projektdatei und Index zum Schreiben, am Ende werden sie
+ * wieder geschlossen. */
+static gboolean hook_permit(gpointer data, GError **error) {
+    return schreibberechtigung_holen((DokData*) data, error);
 }
 
-static void opctx_free(OpCtx *oc) {
-    if (!oc)
-        return;
-    idxop_free(oc->op);
-    g_free(oc);
-}
-
-//Projektrelativer Zielpfad parent/base; FALSE, wenn das Ziel nicht im Dateisystem liegt
-static gboolean ziel_pfad(SondTVFMItem *parent, const gchar *base, gchar **neu) {
-    const gchar *eltern = NULL;
-
-    if (!parent || sond_tvfm_item_get_sond_file_part(parent))
-        return FALSE;
-
-    eltern = sond_tvfm_item_get_path_or_section(parent);
-    *neu = eltern ? g_strconcat(eltern, "/", base, NULL) : g_strdup(base);
-
-    return TRUE;
-}
-
-static gint on_before_delete(SondTreeviewFM *tree, SondTVFMItem *item, gpointer error_p,
-        gpointer ctx_p, gpointer user_data) {
-    DokData *d = user_data;
-    GError **error = error_p;
-    gpointer *ctx = ctx_p;
-    gchar *rel = NULL;
-    gboolean ist_ordner = FALSE;
+static gint hook_write_begin(gpointer data, gboolean project, GError **error) {
+    DokData *d = data;
     gint modus = 0;
-    OpCtx *oc = NULL;
 
-    (void) tree;
-
-    if (!sond_tvfm_item_fs_path(item, &rel, &ist_ordner))
-        return 0; //Inhalt eines Containers: hier nicht unterstützt
-
-    if (!schreibberechtigung_holen(d, error) || (modus = projekt_modus(d, error)) < 0) {
-        g_free(rel);
-
+    if (!schreibberechtigung_holen(d, error))
         return -1;
-    }
 
-    oc = g_new0(OpCtx, 1);
-
-    if (modus == 0) {
-        oc->op = g_new0(IdxOp, 1);
-        oc->op->alt = rel;
-        *ctx = oc;
-
-        return 0;
-    }
-
-    if (!op_beginnen(d, TRUE, error)) {
-        g_free(rel);
-        opctx_free(oc);
-
+    if (project && (modus = projekt_modus(d, error)) < 0)
         return -1;
-    }
 
-    {
-        DBaseZondRef ref = DBASE_ZOND_REF_NONE;
+    if (!op_beginnen(d, modus == 1, error))
+        return -1;
 
-        //Ein angebundener Eintrag (oder ein angebundener Abkömmling) darf nicht gelöscht werden
-        if (sond_projekt_pflege_check_delete(pflege_holen(d), rel, ist_ordner, FALSE, NULL,
-                &ref, error) || ref != DBASE_ZOND_REF_NONE) {
-            if (ref != DBASE_ZOND_REF_NONE && error && !*error)
-                g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-                        "\"%s\" ist im Projekt angebunden und kann nicht gelöscht werden. "
-                        "Bitte zuerst die Anbindung entfernen.", rel);
-            op_ende(d);
-            g_free(rel);
-            opctx_free(oc);
-
-            return -1;
-        }
-    }
-
-    {
-        SondProjektDelete del = { .path = rel };
-
-        if (sond_projekt_pflege_delete(pflege_holen(d), &del, &oc->dual, error)) {
-            op_ende(d);
-            g_free(rel);
-            opctx_free(oc);
-
-            return -1;
-        }
-    }
-
-    g_free(rel);
-    oc->pflege = TRUE;
-    *ctx = oc;
-
-    return 0;
+    return modus == 1 ? 1 : 0;
 }
 
-static gint on_before_move(SondTreeviewFM *tree, SondTVFMItem *item, SondTVFMItem *parent,
-        const gchar *base, gint index, gpointer error_p, gpointer ctx_p, gpointer user_data) {
-    DokData *d = user_data;
-    GError **error = error_p;
-    gpointer *ctx = ctx_p;
-    gchar *alt = NULL;
-    gchar *neu = NULL;
-    gint modus = 0;
-    OpCtx *oc = NULL;
-
-    (void) tree;
-
-    if (!sond_tvfm_item_fs_path(item, &alt, NULL) || !ziel_pfad(parent, base, &neu)) {
-        g_free(alt);
-
-        return 0; //nicht im Dateisystem: hier nicht unterstützt
-    }
-
-    if (!schreibberechtigung_holen(d, error) || (modus = projekt_modus(d, error)) < 0) {
-        g_free(alt);
-        g_free(neu);
-
-        return -1;
-    }
-
-    oc = g_new0(OpCtx, 1);
-
-    if (modus == 0) {
-        SondIndexCtx *idx = NULL;
-
-        //eine abdeckende Aussage am Ziel auflösen (außer beim Umbenennen an Ort und Stelle);
-        //schadet nicht, wenn die Dateioperation danach scheitert
-        if (index != -1 && (idx = index_schreibend_oeffnen(d))) {
-            GError *idx_error = NULL;
-
-            if (!sond_tvfm_index_sync_prepare_insert(idx, neu,
-                    sond_treeviewfm_get_root(SOND_TREEVIEWFM(d->tree)), &idx_error))
-                g_warning("Index: Abdeckung am Ziel nicht aufgelöst: %s",
-                        idx_error ? idx_error->message : "?");
-            g_clear_error(&idx_error);
-            sond_index_ctx_free(idx);
-        }
-
-        oc->op = g_new0(IdxOp, 1);
-        oc->op->alt = alt;
-        oc->op->neu = neu;
-        *ctx = oc;
-
-        return 0;
-    }
-
-    if (!op_beginnen(d, TRUE, error)) {
-        g_free(alt);
-        g_free(neu);
-        opctx_free(oc);
-
-        return -1;
-    }
-
-    {
-        SondProjektMove move = {
-            .prefix_old = alt,
-            .prefix_new = neu,
-            .project_dir = d->lib_dir,
-            .index_to = index,
-            .base_new = base
-        };
-
-        //Transaktion beginnen, Pfade in Projektdatei und Index umschreiben
-        if (sond_projekt_pflege_move(pflege_holen(d), &move, error)) {
-            op_ende(d);
-            g_free(alt);
-            g_free(neu);
-            opctx_free(oc);
-
-            return -1;
-        }
-    }
-
-    {
-        g_autofree gchar *alt_abs = g_strconcat(d->lib_dir, "/", alt, NULL);
-        g_autofree gchar *neu_abs = g_strconcat(d->lib_dir, "/", neu, NULL);
-
-        //physische Verschiebung: bei gescheitertem Commit wird sie zurückgenommen
-        sond_projekt_pflege_move_merken(d->pflege, alt_abs, neu_abs, TRUE);
-    }
-
-    //Wird der Eintrag aus seinem Verzeichnis genommen, kann dieses vollständig abgedeckt sein
-    sond_projekt_pflege_delete_merken(d->pflege,
-            (index != -1 && d->index_schreib) ? alt : NULL);
-
-    g_free(alt);
-    g_free(neu);
-    oc->pflege = TRUE;
-    oc->dual = TRUE;
-    *ctx = oc;
-
-    return 0;
+static void hook_write_end(gpointer data) {
+    op_ende((DokData*) data);
 }
 
-static gint on_before_insert(SondTreeviewFM *tree, SondTVFMItem *item, SondTVFMItem *parent,
-        const gchar *base, gint index, gpointer error_p, gpointer user_data) {
-    DokData *d = user_data;
-    GError **error = error_p;
-    gchar *neu = NULL;
-
-    (void) tree;
-    (void) item;
-    (void) index;
-
-    if (!ziel_pfad(parent, base, &neu))
-        return 0;
-
-    if (!schreibberechtigung_holen(d, error)) {
-        g_free(neu);
-
-        return -1;
-    }
-
-    //am Ziel entsteht neuer Inhalt: eine abdeckende Aussage auflösen (nur Index)
-    op_beginnen(d, FALSE, NULL);
-    sond_projekt_pflege_insert(pflege_holen(d), neu, d->lib_dir, NULL);
-    g_free(neu);
-
-    return 0;
-}
-
-static void on_after_insert(SondTreeviewFM *tree, gboolean erfolg, gpointer user_data) {
-    DokData *d = user_data;
-
-    (void) tree;
-
-    if (d->pflege)
-        sond_projekt_pflege_insert_ende(d->pflege, erfolg);
-    op_ende(d);
-}
-
-static void on_after(SondTreeviewFM *tree, gboolean erfolg, gpointer ctx, gpointer user_data) {
-    DokData *d = user_data;
-    OpCtx *oc = ctx;
-    SondIndexCtx *idx = NULL;
-    GError *error = NULL;
-
-    (void) tree;
-
-    if (!oc)
-        return;
-
-    if (oc->pflege) {
-        //Commit bzw. Rollback; bei gescheitertem Commit ist die Dateioperation zurückgenommen
-        SondProjektTxErgebnis ergebnis = sond_projekt_pflege_tx_ende(d->pflege, erfolg,
-                oc->dual, d->lib_dir, &error);
-
-        if (ergebnis == SOND_PROJEKT_TX_FEHLER)
-            meldung(GTK_WINDOW(d->window), "Speichern fehlgeschlagen",
-                    error ? error->message : "Die Änderung wurde rückgängig gemacht. "
-                    "Bitte erneut versuchen.");
-        else if (ergebnis == SOND_PROJEKT_TX_KRITISCH)
-            meldung(GTK_WINDOW(d->window), "Kritischer Fehler beim Speichern",
-                    "Projektdatei und Dateien können inkonsistent sein. Details stehen in "
-                    "einer Fehlerdatei im Projektordner (ZOND_FEHLER_*.txt). Bitte den "
-                    "Dateibaum nicht weiter ändern.");
-        g_clear_error(&error);
-        op_ende(d);
-    } else if (oc->op && erfolg && (idx = index_schreibend_oeffnen(d))) {
-        gboolean ok = oc->op->neu ?
-                sond_tvfm_index_sync_moved(idx, oc->op->alt, oc->op->neu, &error) :
-                sond_tvfm_index_sync_deleted(idx, oc->op->alt, &error);
-
-        if (!ok)
-            g_warning("Index nicht nachgeführt (%s): %s", oc->op->alt,
-                    error ? error->message : "?");
-        g_clear_error(&error);
-        sond_index_ctx_free(idx);
-    }
-
-    opctx_free(oc);
+static void hook_message(gpointer data, gchar const *title, gchar const *text) {
+    meldung(GTK_WINDOW(((DokData*) data)->window), title, text);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1517,10 +1239,6 @@ static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d) {
     memset(hooks, 0, sizeof(SondUnlockHooks));
     if (d->tree)
         sond_treeviewfm_unlock_hooks_init(SOND_TREEVIEWFM(d->tree), hooks);
-}
-
-static gboolean unlock_write_check(gpointer data, GError **error) {
-    return schreibberechtigung_holen((DokData*) data, error);
 }
 
 void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
@@ -1651,18 +1369,19 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     gtk_box_append(GTK_BOX(box), d->sperre);
 
     //Baum
-    d->tree = sond_treeviewfm_new();
+    d->tree = sond_projekt_treeviewfm_new();
+    {
+        SondProjektHooks hooks = { hook_permit, hook_write_begin, hook_write_end,
+                pflege_dbase_von, pflege_index_von, hook_message, d };
+
+        sond_projekt_treeviewfm_set_hooks(SOND_PROJEKT_TREEVIEWFM(d->tree), &hooks);
+    }
     gtk_widget_set_vexpand(d->tree, TRUE);
     gtk_box_append(GTK_BOX(box), d->tree);
     g_object_add_weak_pointer(G_OBJECT(d->tree), (gpointer*) &d->tree);
     g_signal_connect(d->tree, "seadrive-status", G_CALLBACK(on_seadrive_status), d);
 
     //Löschen, Verschieben, Umbenennen, Kopieren: Schreibberechtigung holen, Index nachführen
-    g_signal_connect(d->tree, "before-delete", G_CALLBACK(on_before_delete), d);
-    g_signal_connect(d->tree, "before-move", G_CALLBACK(on_before_move), d);
-    g_signal_connect(d->tree, "before-insert", G_CALLBACK(on_before_insert), d);
-    g_signal_connect(d->tree, "after", G_CALLBACK(on_after), d);
-    g_signal_connect(d->tree, "after-insert", G_CALLBACK(on_after_insert), d);
 
     //Kontextmenü: Auswahl zum Indizieren senden
     {
@@ -1676,9 +1395,6 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
         g_menu_append(sond_treeview_get_menu(basis),
                 "Zum Indizieren an den Server senden ...", "tv.index-senden");
     }
-
-    //Entsperren (Menüpunkt im Widget) verändert Dateien: Schreibberechtigung der Akte
-    sond_treeviewfm_set_write_check(SOND_TREEVIEWFM(d->tree), unlock_write_check, d);
 
     //Index-Symbole: Index-DB lesen und bei Änderungen neu öffnen
     d->index_pfad = g_build_filename(d->lib_dir, ".sond_index.db", NULL);
