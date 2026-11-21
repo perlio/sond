@@ -23,6 +23,7 @@
 
 #include "../misc.h"
 #include "../sond_fileparts.h"
+#include "../sond_renderer.h"
 #include "../sond_file_helper.h"
 #include "../gtk3/sond_treeview.h"
 #include "../sond_log_and_error.h"
@@ -3658,7 +3659,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 
 	//mit externem Programm oder mit renderer öffnen
 	if (open_with || (sfp && !SOND_IS_FILE_PART_PDF(sfp))) {//wenn kein pdf oder mit Programmauswahl zu öffnen:
-		rc = sond_file_part_open(sfp, open_with, error);
+		rc = sond_renderer_open_file_part(sfp, open_with, error);
 		g_object_unref(sfp);
 		if (rc)
 			return -1;

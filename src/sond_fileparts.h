@@ -187,11 +187,9 @@ gint sond_file_part_replace(SondFilePart*, GBytes*, GError**);
  * damit eine Anwendung die Kopie nicht stillschweigend als Original behandelt. */
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, gboolean read_only, GError**);
 
-gint sond_file_part_open(SondFilePart*, gboolean, GError**);
-
-/* Wie sond_file_part_open(), aber immer mit dem Standardprogramm bzw. "Öffnen mit" des
- * Betriebssystems (kein eigener Viewer, GTK-frei; Teile in Containern über eine schreibgeschützte
- * Temp-Datei). In sond_fileparts_open.c, nicht für sond_server. */
+/* Öffnet mit dem Standardprogramm bzw. "Öffnen mit" des Betriebssystems (kein eigener Viewer,
+ * GTK-frei; Teile in Containern über eine schreibgeschützte Temp-Datei). Der Öffnen-Weg mit
+ * eigenem Viewer ist sond_renderer_open_file_part() in sond_renderer.h. */
 gint sond_file_part_open_external(SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);

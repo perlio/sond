@@ -30,6 +30,7 @@
 #include "../sond_log_and_error.h"
 #include "../sond_result_view.h"
 #include "../sond_fileparts.h"
+#include "../sond_renderer.h"
 #include "../sond_file_helper.h"
 #include "../sond_index.h"
 #include "../sond_mime.h"
@@ -644,7 +645,7 @@ static gint sond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 	gint rc = 0;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
-	rc = sond_file_part_open(stvfm_item_priv->sond_file_part, open_with, error);
+	rc = sond_renderer_open_file_part(stvfm_item_priv->sond_file_part, open_with, error);
 	if (rc)
 		return -1;
 

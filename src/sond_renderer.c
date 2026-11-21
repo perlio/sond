@@ -3,25 +3,24 @@
  *
  *  Created on: 14.12.2025
  *      Author: pkrieger
+ *
+ * Viewer-Fenster für gerenderte Dokumente (Zoom, Pan, Suche, Navigation, Druck). Läuft unter GTK3
+ * und GTK4 aus derselben Quelle (sond_gtk_compat.h). Das Rendern selbst steckt in sond_render_doc.c.
  */
 
+#include "sond_renderer.h"
 
 #include <gtk/gtk.h>
 #include <cairo.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
+#include <stdio.h>
 
-#include "misc.h"
+#include "sond_gtk_compat.h"
+#include "sond_render_doc.h"
 #include "sond_log_and_error.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
 #include "sond_tmpfiles.h"
-#include "sond_gmessage_helper.h"
-#include "sond_text_extract.h"
-
-#define DEFAULT_RENDER_WIDTH 650
-
 
 typedef struct {
     cairo_surface_t *original_surface;
@@ -38,15 +37,14 @@ typedef struct {
     GtkWidget *zoom_label;
     GtkWidget *search_entry;
     GtkWidget *statusbar;
-    guint statusbar_context;
 
     char *searchable_text;
     GList *search_results;
     int current_search_index;
 
-    gboolean panning;
-    double pan_start_x;
-    double pan_start_y;
+    /* Pan mit der mittleren Maustaste */
+    double pan_start_h;
+    double pan_start_v;
 
     /* Navigation */
     SondFilePart *sfp;          /* aktuelle Datei, NULL wenn standalone */
@@ -55,31 +53,9 @@ typedef struct {
     GtkWidget *nav_label;
 } SurfaceViewer;
 
-typedef enum {
-    DOC_TYPE_UNKNOWN,
-    DOC_TYPE_HTML,
-    DOC_TYPE_ODT,
-    DOC_TYPE_DOCX,
-    DOC_TYPE_DOC,
-    DOC_TYPE_IMAGE,
-    DOC_TYPE_PLAIN,
-    DOC_TYPE_EML
-} DocumentType;
-
-typedef struct {
-    cairo_surface_t *surface;
-    int width;
-    int height;
-    char *searchable_text;
-    DocumentType type;
-} RenderedDocument;
-
-
 // Forward declarations
 static void update_display(SurfaceViewer *viewer);
 static void update_statusbar(SurfaceViewer *viewer, const char *message);
-static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width,
-        SondFilePart *sfp);
 
 // === NAVIGATION ===
 
@@ -138,41 +114,18 @@ static void update_nav_state(SurfaceViewer *viewer) {
     g_ptr_array_free(siblings, FALSE);
 }
 
-/**
- * Gibt ein RenderedDocument frei
- */
-void free_rendered_document(RenderedDocument *doc) {
-    if (!doc) return;
-
-    if (doc->surface) {
-        cairo_surface_destroy(doc->surface);
-    }
-    if (doc->searchable_text) {
-        g_free(doc->searchable_text);
-    }
-    g_free(doc);
-}
-
 /*
  * Lädt eine neue Datei in denselben Viewer.
  * Gibt TRUE zurück bei Erfolg.
+ *
+ * sond_file_part_get_bytes ist static, sond_file_part_open würde ein neues Fenster öffnen;
+ * deshalb der Umweg über eine tmp-Datei.
  */
 static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp) {
     GError *error = NULL;
     GBytes *bytes = NULL;
     RenderedDocument *rd = NULL;
 
-    /* Bytes der neuen Datei holen - sond_file_part_get_bytes ist static,
-     * wir rufen sond_file_part_open nicht auf (würde neues Fenster öffnen).
-     * Stattdessen schreiben wir in tmp, lesen zurück — oder wir nutzen
-     * den schon vorhandenen Pfad. Sauberer: wir exportieren eine
-     * Hilfsfunktion. Hier nutzen wir write_to_tmp_file als Brücke.
-     *
-     * Da sond_file_part_get_bytes intern static ist, umgehen wir das über
-     * sond_file_part_write_to_tmp_file + g_file_get_contents.
-     * Besser: Wir fügen sond_file_part_get_bytes_public hinzu — aber das
-     * würde weitere Headeränderungen bedeuten. Pragmatisch: tmp-Datei.
-     */
     gchar *tmp = sond_file_part_write_to_tmp_file(new_sfp, FALSE, &error);
     if (!tmp) {
         LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
@@ -193,11 +146,11 @@ static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp)
     g_free(tmp);
 
     bytes = g_bytes_new_take(data, len);
-    rd = render_document_from_bytes(bytes, 0, new_sfp);
+    rd = sond_render_doc_new(bytes, 0, new_sfp);
     g_bytes_unref(bytes);
 
     if (!rd) {
-        LOG_WARN("%s\nrender_document_from_bytes fehlgeschlagen", __func__);
+        LOG_WARN("%s\nRendern fehlgeschlagen", __func__);
         return FALSE;
     }
 
@@ -216,7 +169,7 @@ static gboolean navigate_to_sfp_do(SurfaceViewer *viewer, SondFilePart *new_sfp)
     if (viewer->search_results) { g_list_free(viewer->search_results); viewer->search_results = NULL; }
     viewer->current_search_index = 0;
 
-    free_rendered_document(rd);
+    sond_render_doc_free(rd);
 
     /* sfp aktualisieren */
     if (viewer->sfp) g_object_unref(viewer->sfp);
@@ -266,6 +219,7 @@ static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
 static void on_nav_prev(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
     GPtrArray *siblings = get_siblings(viewer->sfp);
+    (void) widget;
     if (!siblings) return;
 
     gint idx = find_sfp_index(siblings, viewer->sfp);
@@ -277,6 +231,7 @@ static void on_nav_prev(GtkWidget *widget, gpointer data) {
 static void on_nav_next(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
     GPtrArray *siblings = get_siblings(viewer->sfp);
+    (void) widget;
     if (!siblings) return;
 
     gint idx = find_sfp_index(siblings, viewer->sfp);
@@ -285,11 +240,10 @@ static void on_nav_next(GtkWidget *widget, gpointer data) {
     g_ptr_array_free(siblings, FALSE);
 }
 
-// === STATUSBAR ===
+// === STATUSZEILE ===
 
 static void update_statusbar(SurfaceViewer *viewer, const char *message) {
-    gtk_statusbar_pop(GTK_STATUSBAR(viewer->statusbar), viewer->statusbar_context);
-    gtk_statusbar_push(GTK_STATUSBAR(viewer->statusbar), viewer->statusbar_context, message);
+    gtk_label_set_text(GTK_LABEL(viewer->statusbar), message ? message : "");
 }
 
 // === ZOOM ===
@@ -311,6 +265,7 @@ static void update_display(SurfaceViewer *viewer) {
 
 static void on_zoom_in(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
     viewer->zoom_level *= 1.2;
     if (viewer->zoom_level > 5.0) viewer->zoom_level = 5.0;
     update_display(viewer);
@@ -319,6 +274,7 @@ static void on_zoom_in(GtkWidget *widget, gpointer data) {
 
 static void on_zoom_out(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
     viewer->zoom_level /= 1.2;
     if (viewer->zoom_level < 0.1) viewer->zoom_level = 0.1;
     update_display(viewer);
@@ -327,87 +283,60 @@ static void on_zoom_out(GtkWidget *widget, gpointer data) {
 
 static void on_zoom_fit(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
     viewer->zoom_level = 1.0;
     update_display(viewer);
     update_statusbar(viewer, "Zoom reset to 100%");
 }
 
-// === MOUSE WHEEL ZOOM ===
+// === MAUSRAD-ZOOM (Strg + Rad) ===
 
-static gboolean on_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer data) {
+static gboolean on_scroll(GtkEventControllerScroll *controller, gdouble dx, gdouble dy,
+        gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) dx;
 
-    if (event->state & GDK_CONTROL_MASK) {
-        if (event->direction == GDK_SCROLL_UP) {
-            on_zoom_in(NULL, viewer);
-        } else if (event->direction == GDK_SCROLL_DOWN) {
-            on_zoom_out(NULL, viewer);
-        }
-        return TRUE;
-    }
+    if (!(sond_compat_scroll_state(controller) & GDK_CONTROL_MASK) || dy == 0.0)
+        return FALSE;
 
-    return FALSE;
+    if (dy < 0.0)
+        on_zoom_in(NULL, viewer);
+    else
+        on_zoom_out(NULL, viewer);
+
+    return TRUE;
 }
 
-// === PAN (Middle Mouse) ===
+// === PAN (mittlere Maustaste) ===
 
-static gboolean on_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data) {
+static void on_drag_begin(GtkGestureDrag *gesture, gdouble x, gdouble y, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) gesture; (void) x; (void) y;
 
-    if (event->button == 2) {
-        viewer->panning = TRUE;
-        viewer->pan_start_x = event->x;
-        viewer->pan_start_y = event->y;
-
-        GdkWindow *gdk_window = gtk_widget_get_window(widget);
-        GdkCursor *cursor = gdk_cursor_new_for_display(
-            gdk_display_get_default(), GDK_FLEUR);
-        gdk_window_set_cursor(gdk_window, cursor);
-        g_object_unref(cursor);
-
-        return TRUE;
-    }
-
-    return FALSE;
+    viewer->pan_start_h = gtk_adjustment_get_value(
+            gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(viewer->scrolled)));
+    viewer->pan_start_v = gtk_adjustment_get_value(
+            gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(viewer->scrolled)));
+    sond_compat_widget_set_cursor(viewer->scrolled, "grabbing");
 }
 
-static gboolean on_button_release(GtkWidget *widget, GdkEventButton *event, gpointer data) {
+static void on_drag_update(GtkGestureDrag *gesture, gdouble dx, gdouble dy, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) gesture;
 
-    if (event->button == 2) {
-        viewer->panning = FALSE;
-
-        GdkWindow *gdk_window = gtk_widget_get_window(widget);
-        gdk_window_set_cursor(gdk_window, NULL);
-
-        return TRUE;
-    }
-
-    return FALSE;
+    gtk_adjustment_set_value(
+            gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(viewer->scrolled)),
+            viewer->pan_start_h - dx);
+    gtk_adjustment_set_value(
+            gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(viewer->scrolled)),
+            viewer->pan_start_v - dy);
 }
 
-static gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpointer data) {
+static void on_drag_end(GtkGestureDrag *gesture, gdouble dx, gdouble dy, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) gesture; (void) dx; (void) dy;
 
-    if (viewer->panning) {
-        double dx = event->x - viewer->pan_start_x;
-        double dy = event->y - viewer->pan_start_y;
-
-        GtkAdjustment *hadj = gtk_scrolled_window_get_hadjustment(
-            GTK_SCROLLED_WINDOW(viewer->scrolled));
-        GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(
-            GTK_SCROLLED_WINDOW(viewer->scrolled));
-
-        gtk_adjustment_set_value(hadj, gtk_adjustment_get_value(hadj) - dx);
-        gtk_adjustment_set_value(vadj, gtk_adjustment_get_value(vadj) - dy);
-
-        viewer->pan_start_x = event->x - dx;
-        viewer->pan_start_y = event->y - dy;
-
-        return TRUE;
-    }
-
-    return FALSE;
+    sond_compat_widget_set_cursor(viewer->scrolled, NULL);
 }
 
 // === FULLSCREEN ===
@@ -415,42 +344,16 @@ static gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpoin
 static void toggle_fullscreen(SurfaceViewer *viewer) {
     if (viewer->fullscreen) {
         gtk_window_unfullscreen(GTK_WINDOW(viewer->window));
-        gtk_widget_show(viewer->toolbar);
-        gtk_widget_show(viewer->statusbar);
+        gtk_widget_set_visible(viewer->toolbar, TRUE);
+        gtk_widget_set_visible(viewer->statusbar, TRUE);
         viewer->fullscreen = FALSE;
         update_statusbar(viewer, "Fullscreen off");
     } else {
         gtk_window_fullscreen(GTK_WINDOW(viewer->window));
-        gtk_widget_hide(viewer->toolbar);
-        gtk_widget_hide(viewer->statusbar);
+        gtk_widget_set_visible(viewer->toolbar, FALSE);
+        gtk_widget_set_visible(viewer->statusbar, FALSE);
         viewer->fullscreen = TRUE;
     }
-}
-
-static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
-    SurfaceViewer *viewer = (SurfaceViewer*)data;
-
-    if (event->keyval == GDK_KEY_F11) {
-        toggle_fullscreen(viewer);
-        return TRUE;
-    }
-
-    if (event->keyval == GDK_KEY_Escape && viewer->fullscreen) {
-        toggle_fullscreen(viewer);
-        return TRUE;
-    }
-
-    if (event->keyval == GDK_KEY_Left) {
-        on_nav_prev(NULL, viewer);
-        return TRUE;
-    }
-
-    if (event->keyval == GDK_KEY_Right) {
-        on_nav_next(NULL, viewer);
-        return TRUE;
-    }
-
-    return FALSE;
 }
 
 // === PRINT ===
@@ -459,6 +362,7 @@ static void draw_page_for_print(GtkPrintOperation *op, GtkPrintContext *context,
                                 gint page_nr, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
     cairo_t *cr = gtk_print_context_get_cairo_context(context);
+    (void) op; (void) page_nr;
 
     double page_width = gtk_print_context_get_width(context);
     double page_height = gtk_print_context_get_height(context);
@@ -474,6 +378,7 @@ static void draw_page_for_print(GtkPrintOperation *op, GtkPrintContext *context,
 
 static void on_print(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
 
     GtkPrintOperation *print = gtk_print_operation_new();
     gtk_print_operation_set_n_pages(print, 1);
@@ -487,8 +392,10 @@ static void on_print(GtkWidget *widget, gpointer data) {
         GTK_WINDOW(viewer->window), &error);
 
     if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
-        display_message(viewer->window, "Print error: ",
-                error ? error->message : "?", NULL);
+        gchar *text = g_strdup_printf("Print error: %s", error ? error->message : "?");
+
+        sond_compat_message(GTK_WINDOW(viewer->window), text);
+        g_free(text);
         g_clear_error(&error);
     } else {
         update_statusbar(viewer, "Document printed");
@@ -499,43 +406,55 @@ static void on_print(GtkWidget *widget, gpointer data) {
 
 // === PDF EXPORT ===
 
-static void on_export_pdf(GtkWidget *widget, gpointer data) {
-    SurfaceViewer *viewer = (SurfaceViewer*)data;
+static void export_pdf_to(gchar *filename, gpointer data) {
+    GtkWidget *window = data;
+    SurfaceViewer *viewer = g_object_get_data(G_OBJECT(window), "sond-viewer");
 
-    char *filename = filename_speichern(GTK_WINDOW(viewer->window),
-            "Save as PDF", "document.pdf");
-    if (!filename)
-        return;
+    /* Fenster während der Dateiauswahl geschlossen */
+    if (filename && viewer) {
+        GtkPrintOperation *print = gtk_print_operation_new();
+        GtkPrintSettings *settings = gtk_print_settings_new();
+        gchar *uri = g_filename_to_uri(filename, NULL, NULL);
+        GError *error = NULL;
+        GtkPrintOperationResult result;
 
-    GtkPrintOperation *print = gtk_print_operation_new();
-    gtk_print_operation_set_n_pages(print, 1);
-    gtk_print_operation_set_unit(print, GTK_UNIT_PIXEL);
+        gtk_print_operation_set_n_pages(print, 1);
+        gtk_print_operation_set_unit(print, GTK_UNIT_PIXEL);
+        gtk_print_settings_set(settings, GTK_PRINT_SETTINGS_OUTPUT_URI, uri);
+        gtk_print_operation_set_print_settings(print, settings);
+        g_signal_connect(print, "draw-page", G_CALLBACK(draw_page_for_print), viewer);
 
-    GtkPrintSettings *settings = gtk_print_settings_new();
-    gtk_print_settings_set(settings, GTK_PRINT_SETTINGS_OUTPUT_URI,
-                          g_filename_to_uri(filename, NULL, NULL));
-    gtk_print_operation_set_print_settings(print, settings);
+        result = gtk_print_operation_run(print, GTK_PRINT_OPERATION_ACTION_EXPORT,
+                GTK_WINDOW(viewer->window), &error);
 
-    g_signal_connect(print, "draw-page", G_CALLBACK(draw_page_for_print), viewer);
+        if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
+            gchar *text = g_strdup_printf("Export error: %s",
+                    error ? error->message : "Druckerfehler");
 
-    GError *error = NULL;
-    GtkPrintOperationResult result = gtk_print_operation_run(
-        print, GTK_PRINT_OPERATION_ACTION_EXPORT,
-        GTK_WINDOW(viewer->window), &error);
+            sond_compat_message(GTK_WINDOW(viewer->window), text);
+            g_free(text);
+            g_clear_error(&error);
+        } else {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Exported to %s", filename);
+            update_statusbar(viewer, msg);
+        }
 
-    if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
-        display_message(viewer->window, "Export error: ",
-                error ? error->message : "Druckerfehler", NULL);
-        g_clear_error(&error);
-    } else {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Exported to %s", filename);
-        update_statusbar(viewer, msg);
+        g_free(uri);
+        g_object_unref(settings);
+        g_object_unref(print);
     }
 
-    g_object_unref(settings);
-    g_object_unref(print);
     g_free(filename);
+    g_object_unref(window);
+}
+
+static void on_export_pdf(GtkWidget *widget, gpointer data) {
+    SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
+
+    sond_compat_save_file(GTK_WINDOW(viewer->window), "Save as PDF", "document.pdf",
+            export_pdf_to, g_object_ref(viewer->window));
 }
 
 // === SEARCH ===
@@ -606,7 +525,8 @@ static void show_search_result(SurfaceViewer *viewer) {
 
 static void on_search(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
-    const char *search_text = gtk_entry_get_text(GTK_ENTRY(viewer->search_entry));
+    const char *search_text = sond_compat_entry_get_text(GTK_ENTRY(viewer->search_entry));
+    (void) widget;
 
     if (search_text && *search_text) {
         find_all_occurrences(viewer, search_text);
@@ -616,6 +536,7 @@ static void on_search(GtkWidget *widget, gpointer data) {
 
 static void on_search_next(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
 
     if (viewer->search_results) {
         viewer->current_search_index++;
@@ -625,6 +546,7 @@ static void on_search_next(GtkWidget *widget, gpointer data) {
 
 static void on_search_prev(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
+    (void) widget;
 
     if (viewer->search_results) {
         viewer->current_search_index--;
@@ -634,6 +556,68 @@ static void on_search_prev(GtkWidget *widget, gpointer data) {
 
 static void on_search_activate(GtkEntry *entry, gpointer data) {
     on_search(GTK_WIDGET(entry), data);
+}
+
+// === TASTEN ===
+
+static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+        GdkModifierType state, gpointer data) {
+    SurfaceViewer *viewer = (SurfaceViewer*)data;
+    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(viewer->window));
+    (void) controller; (void) keycode;
+
+    if (state & GDK_CONTROL_MASK) {
+        switch (keyval) {
+        case GDK_KEY_plus: case GDK_KEY_equal: case GDK_KEY_KP_Add:
+            on_zoom_in(NULL, viewer);
+            return TRUE;
+        case GDK_KEY_minus: case GDK_KEY_KP_Subtract:
+            on_zoom_out(NULL, viewer);
+            return TRUE;
+        case GDK_KEY_0:
+            on_zoom_fit(NULL, viewer);
+            return TRUE;
+        case GDK_KEY_p:
+            on_print(NULL, viewer);
+            return TRUE;
+        case GDK_KEY_f:
+            if (viewer->search_entry) {
+                gtk_widget_grab_focus(viewer->search_entry);
+                return TRUE;
+            }
+            break;
+        default:
+            break;
+        }
+
+        return FALSE;
+    }
+
+    if (keyval == GDK_KEY_F11) {
+        toggle_fullscreen(viewer);
+        return TRUE;
+    }
+
+    if (keyval == GDK_KEY_Escape && viewer->fullscreen) {
+        toggle_fullscreen(viewer);
+        return TRUE;
+    }
+
+    /* Pfeile gehören dem Suchfeld, solange es den Fokus hat */
+    if (focus && GTK_IS_EDITABLE(focus))
+        return FALSE;
+
+    if (keyval == GDK_KEY_Left) {
+        on_nav_prev(NULL, viewer);
+        return TRUE;
+    }
+
+    if (keyval == GDK_KEY_Right) {
+        on_nav_next(NULL, viewer);
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 // === CLEANUP ===
@@ -655,42 +639,45 @@ static void cleanup_viewer(SurfaceViewer *viewer) {
 }
 
 static void on_window_destroy(GtkWidget *widget, gpointer data) {
+    g_object_set_data(G_OBJECT(widget), "sond-viewer", NULL);
     cleanup_viewer((SurfaceViewer*)data);
 }
 
-// === HAUPTFUNKTION ===
+// === ZEICHNEN ===
 
-// === DRAWING AREA CALLBACK ===
-static gboolean on_drawing_area_draw(GtkWidget *widget,
-        cairo_t *cr, gpointer data) {
+static void on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
-    if (!viewer->original_surface) return FALSE;
+    (void) area; (void) width; (void) height;
+
+    if (!viewer->original_surface) return;
 
     cairo_scale(cr, viewer->zoom_level, viewer->zoom_level);
     cairo_set_source_surface(cr, viewer->original_surface, 0, 0);
     cairo_paint(cr);
-
-    return FALSE;
 }
 
-/**
- * Erstellt ein Fenster mit Cairo Surface Viewer
- *
- * @param surface Cairo Surface zum Anzeigen (wird kopiert, Original kann danach freigegeben werden)
- * @param width Breite der Surface
- * @param height Höhe der Surface
- * @param title Fenstertitel (optional, NULL für Standard)
- * @param searchable_text Text zum Durchsuchen (optional, NULL wenn keine Suche gewünscht)
- * @return GTK Window Widget
+// === FENSTER ===
+
+static GtkWidget* toolbar_separator(void) {
+    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+
+    gtk_widget_set_margin_start(sep, 5);
+    gtk_widget_set_margin_end(sep, 5);
+
+    return sep;
+}
+
+/*
+ * Erstellt ein Fenster mit Cairo Surface Viewer. Die Surface geht in den Besitz des Viewers über.
+ * title: Fenstertitel; searchable_text: Text für die Suche (NULL: keine Suche).
  */
 static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int height,
                                const char *title, const char *searchable_text,
-                               SondFilePart *sfp) {
+                               SondFilePart *sfp, SurfaceViewer **out_viewer) {
     if (!surface) return NULL;
 
     SurfaceViewer *viewer = g_new0(SurfaceViewer, 1);
 
-    // Surface kopieren (damit Original freigegeben werden kann)
     viewer->original_surface = surface;
     viewer->original_width = width;
     viewer->original_height = height;
@@ -703,21 +690,26 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     }
 
     // GUI erstellen
-    viewer->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    viewer->window = sond_compat_window_new();
+    g_object_set_data(G_OBJECT(viewer->window), "sond-viewer", viewer);
     gtk_window_set_title(GTK_WINDOW(viewer->window), title ? title : "Surface Viewer");
     gtk_window_set_default_size(GTK_WINDOW(viewer->window),
                                width + 50,
                                height < 800 ? height + 100 : 800);
 
-    g_signal_connect(viewer->window, "key-press-event", G_CALLBACK(on_key_press), viewer);
     g_signal_connect(viewer->window, "destroy", G_CALLBACK(on_window_destroy), viewer);
+    sond_compat_add_key_handler(viewer->window, on_key_pressed, viewer);
+    sond_compat_add_scroll_handler(viewer->window, on_scroll, viewer);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_container_add(GTK_CONTAINER(viewer->window), vbox);
+    sond_compat_window_set_child(GTK_WINDOW(viewer->window), vbox);
 
     // Toolbar
     viewer->toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_box_pack_start(GTK_BOX(vbox), viewer->toolbar, FALSE, FALSE, 5);
+    gtk_widget_set_margin_top(viewer->toolbar, 5);
+    gtk_widget_set_margin_bottom(viewer->toolbar, 5);
+    gtk_widget_set_margin_start(viewer->toolbar, 5);
+    sond_compat_box_append(GTK_BOX(vbox), viewer->toolbar, FALSE);
 
     // Navigations-Buttons (Pfeil links/rechts)
     viewer->btn_prev = gtk_button_new_with_label("◀");
@@ -727,11 +719,10 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     g_signal_connect(viewer->btn_prev, "clicked", G_CALLBACK(on_nav_prev), viewer);
     g_signal_connect(viewer->btn_next, "clicked", G_CALLBACK(on_nav_next), viewer);
 
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->btn_prev, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->nav_label, FALSE, FALSE, 4);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->btn_next, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar),
-                      gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 10);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), viewer->btn_prev, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), viewer->nav_label, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), viewer->btn_next, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), toolbar_separator(), FALSE);
 
     // Zoom-Buttons
     GtkWidget *btn_zoom_in = gtk_button_new_with_label("Zoom +");
@@ -743,919 +734,153 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     g_signal_connect(btn_zoom_out, "clicked", G_CALLBACK(on_zoom_out), viewer);
     g_signal_connect(btn_zoom_fit, "clicked", G_CALLBACK(on_zoom_fit), viewer);
 
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_zoom_in, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_zoom_out, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_zoom_fit, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->zoom_label, FALSE, FALSE, 10);
-
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar),
-                      gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 10);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_zoom_in, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_zoom_out, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_zoom_fit, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), viewer->zoom_label, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), toolbar_separator(), FALSE);
 
     // Print & Export
     GtkWidget *btn_print = gtk_button_new_with_label("Print");
     GtkWidget *btn_pdf = gtk_button_new_with_label("Export PDF");
     g_signal_connect(btn_print, "clicked", G_CALLBACK(on_print), viewer);
     g_signal_connect(btn_pdf, "clicked", G_CALLBACK(on_export_pdf), viewer);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_print, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_pdf, FALSE, FALSE, 0);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_print, FALSE);
+    sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_pdf, FALSE);
 
     // Suche (nur wenn Text vorhanden)
     if (viewer->searchable_text) {
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar),
-                          gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 10);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), toolbar_separator(), FALSE);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), gtk_label_new("Search:"), FALSE);
 
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar), gtk_label_new("Search:"), FALSE, FALSE, 5);
         viewer->search_entry = gtk_entry_new();
-        gtk_entry_set_width_chars(GTK_ENTRY(viewer->search_entry), 15);
+        sond_compat_entry_set_width_chars(GTK_ENTRY(viewer->search_entry), 15);
         g_signal_connect(viewer->search_entry, "activate", G_CALLBACK(on_search_activate), viewer);
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->search_entry, FALSE, FALSE, 0);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), viewer->search_entry, FALSE);
 
         GtkWidget *btn_search = gtk_button_new_with_label("Find");
-        GtkWidget *btn_prev = gtk_button_new_with_label("◄");
-        GtkWidget *btn_next = gtk_button_new_with_label("►");
+        GtkWidget *btn_sprev = gtk_button_new_with_label("◄");
+        GtkWidget *btn_snext = gtk_button_new_with_label("►");
         g_signal_connect(btn_search, "clicked", G_CALLBACK(on_search), viewer);
-        g_signal_connect(btn_prev, "clicked", G_CALLBACK(on_search_prev), viewer);
-        g_signal_connect(btn_next, "clicked", G_CALLBACK(on_search_next), viewer);
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_search, FALSE, FALSE, 0);
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_prev, FALSE, FALSE, 0);
-        gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_next, FALSE, FALSE, 0);
+        g_signal_connect(btn_sprev, "clicked", G_CALLBACK(on_search_prev), viewer);
+        g_signal_connect(btn_snext, "clicked", G_CALLBACK(on_search_next), viewer);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_search, FALSE);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_sprev, FALSE);
+        sond_compat_box_append(GTK_BOX(viewer->toolbar), btn_snext, FALSE);
     }
 
-    // ScrolledWindow
-	viewer->scrolled = gtk_scrolled_window_new(NULL, NULL);
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(viewer->scrolled),
-								   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_box_pack_start(GTK_BOX(vbox), viewer->scrolled, TRUE, TRUE, 0);
+    // ScrolledWindow mit der Zeichenfläche
+    viewer->scrolled = sond_compat_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(viewer->scrolled),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    sond_compat_box_append(GTK_BOX(vbox), viewer->scrolled, TRUE);
 
-	// DrawingArea statt EventBox + GtkImage
-	viewer->image = gtk_drawing_area_new();
-	gtk_widget_set_size_request(viewer->image,
-								viewer->original_width,
-								viewer->original_height);
+    viewer->image = gtk_drawing_area_new();
+    gtk_widget_set_size_request(viewer->image, viewer->original_width, viewer->original_height);
+    sond_compat_drawing_area_set_draw_func(GTK_DRAWING_AREA(viewer->image), on_draw, viewer);
+    sond_compat_scrolled_window_set_child(GTK_SCROLLED_WINDOW(viewer->scrolled), viewer->image);
 
-	gtk_widget_set_events(viewer->image,
-						  GDK_SCROLL_MASK |
-						  GDK_BUTTON_PRESS_MASK |
-						  GDK_BUTTON_RELEASE_MASK |
-						  GDK_POINTER_MOTION_MASK);
+    /* Pan: am Scrollbereich, nicht an der Zeichenfläche, weil sich deren Koordinaten beim
+     * Verschieben mitbewegen */
+    {
+        GtkGesture *drag = sond_compat_add_drag(viewer->scrolled, 2);
 
-	g_signal_connect(viewer->image, "draw",
-					 G_CALLBACK(on_drawing_area_draw), viewer);
-	g_signal_connect(viewer->image, "scroll-event",
-					 G_CALLBACK(on_scroll_event), viewer);
-	g_signal_connect(viewer->image, "button-press-event",
-					 G_CALLBACK(on_button_press), viewer);
-	g_signal_connect(viewer->image, "button-release-event",
-					 G_CALLBACK(on_button_release), viewer);
-	g_signal_connect(viewer->image, "motion-notify-event",
-					 G_CALLBACK(on_motion_notify), viewer);
+        g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), viewer);
+        g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), viewer);
+        g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), viewer);
+    }
 
-	gtk_scrolled_window_add_with_viewport(
-			GTK_SCROLLED_WINDOW(viewer->scrolled), viewer->image);
-
-    // Statusbar
-    viewer->statusbar = gtk_statusbar_new();
-    viewer->statusbar_context = gtk_statusbar_get_context_id(
-        GTK_STATUSBAR(viewer->statusbar), "main");
-    gtk_box_pack_start(GTK_BOX(vbox), viewer->statusbar, FALSE, FALSE, 0);
+    // Statuszeile
+    viewer->statusbar = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(viewer->statusbar), 0.0f);
+    gtk_label_set_ellipsize(GTK_LABEL(viewer->statusbar), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_margin_start(viewer->statusbar, 5);
+    gtk_widget_set_margin_top(viewer->statusbar, 3);
+    gtk_widget_set_margin_bottom(viewer->statusbar, 3);
+    sond_compat_box_append(GTK_BOX(vbox), viewer->statusbar, FALSE);
     update_statusbar(viewer, "Ready");
 
-    // Tastenkombinationen
-#if GTK_MAJOR_VERSION < 4
-    GtkAccelGroup *accel_group = gtk_accel_group_new();
-    gtk_window_add_accel_group(GTK_WINDOW(viewer->window), accel_group);
-
-    gtk_widget_add_accelerator(btn_zoom_in, "clicked", accel_group,
-                              GDK_KEY_plus, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    gtk_widget_add_accelerator(btn_zoom_out, "clicked", accel_group,
-                              GDK_KEY_minus, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    gtk_widget_add_accelerator(btn_zoom_fit, "clicked", accel_group,
-                              GDK_KEY_0, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    gtk_widget_add_accelerator(btn_print, "clicked", accel_group,
-                              GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-
-    if (viewer->searchable_text) {
-        gtk_widget_add_accelerator(viewer->search_entry, "grab-focus", accel_group,
-                                  GDK_KEY_f, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    }
-#endif
-
-    gtk_widget_show_all(viewer->window);
+    sond_compat_window_present(GTK_WINDOW(viewer->window));
 
     /* Navigations-Zustand initial setzen */
     update_nav_state(viewer);
 
+    if (out_viewer)
+        *out_viewer = viewer;
+
     return viewer->window;
 }
 
-/* Obergrenze für den Text, der an Pango geht. Base64-kodierte Anhänge im
- * Rohtext (z.B. eine als Plaintext erkannte Mail) ergeben extrem lange,
- * leerzeichen-/umbruchpunktfreie "Wörter" - dafür brauchen Pango/HarfBuzz
- * beim Zeilenumbruch/Shaping pathologisch lange Zeit (pango_layout_get_
- * pixel_size()). Die max_height-Begrenzung weiter unten greift erst NACH
- * dieser Berechnung und schützt daher nicht davor. Der Text wird deshalb
- * hier hart gekappt, BEVOR er an Pango geht - zentral statt in den einzelnen
- * Aufrufern (render_html/_plain_text/_doc/...), damit alle einheitlich
- * geschützt sind. searchable_text bleibt bei allen Aufrufern der volle,
- * ungekappte Text (wie bei der max_height-Kappung, die ebenfalls nur die
- * Anzeige, nicht die Volltextsuche einschränkt). */
-#define SOND_RENDER_TEXT_MAX_CHARS 300000
-
-static cairo_surface_t* render_text_to_surface(
-        const char *text, PangoAttrList *attrs,
-        int width, int max_height,
-        int *out_height) {
-    gchar *truncated_copy = NULL;
-
-    if (text && g_utf8_strlen(text, -1) > SOND_RENDER_TEXT_MAX_CHARS) {
-        const gchar *cut = g_utf8_offset_to_pointer(text,
-                SOND_RENDER_TEXT_MAX_CHARS);
-        truncated_copy = g_strndup(text, cut - text);
-        text = truncated_copy;
-    }
-
-    /* Höhe berechnen */
-    cairo_surface_t *tmp = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t *tmp_cr = cairo_create(tmp);
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text, -1);
-    if (attrs) pango_layout_set_attributes(layout, attrs);
-    int pw, ph;
-    pango_layout_get_pixel_size(layout, &pw, &ph);
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp);
-
-    gboolean truncated = (ph > max_height) || (truncated_copy != NULL);
-    if (ph > max_height) ph = max_height;
-    int height = ph + 20;
-    if (out_height) *out_height = truncated ? max_height + 1 : height;
-
-    /* Rendern */
-    cairo_surface_t *surface = cairo_image_surface_create(
-            CAIRO_FORMAT_ARGB32, width, height);
-    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-        LOG_WARN("render_text_to_surface: cairo_image_surface_create "
-                 "fehlgeschlagen (width=%d height=%d): %s",
-                 width, height,
-                 cairo_status_to_string(cairo_surface_status(surface)));
-        cairo_surface_destroy(surface);
-        g_free(truncated_copy);
-        return NULL;
-    }
-
-    cairo_t *cr = cairo_create(surface);
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-	cairo_paint(cr);
-
-	if (truncated) {
-		cairo_set_source_rgb(cr, 0.8, 0.0, 0.0);
-		PangoLayout *hint = pango_cairo_create_layout(cr);
-		pango_layout_set_text(hint,
-				"[Darstellung abgeschnitten — Inhalt zu lang]", -1);
-		cairo_move_to(cr, 10, 10);
-		pango_cairo_show_layout(cr, hint);
-		g_object_unref(hint);
-	}
-
-	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-	layout = pango_cairo_create_layout(cr);
-	pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-	pango_layout_set_text(layout, text, -1);
-	if (attrs) pango_layout_set_attributes(layout, attrs);
-	cairo_move_to(cr, 10, truncated ? 30 : 10);
-	pango_cairo_show_layout(cr, layout);
-	g_object_unref(layout);
-
-	cairo_destroy(cr);
-    g_free(truncated_copy);
-    return surface;
-}
-
-// === TYPE DETECTION ===
-
-// === HTML RENDERING ===
-
-/*
- * Text-Extraktion kommt aus sond_text_extract.c - dieselbe Funktion, die
- * auch beim Indizieren verwendet wird. Nur so bleiben die char_pos-
- * Offsets aus der Indexsuche und der hier angezeigte Text konsistent
- * (siehe sond_text_extract.h).
- */
-static RenderedDocument* render_html(guchar const *buf, gsize size, int width) {
-    GPtrArray *segs = sond_text_extract_html(buf, size);
-    if (segs->len == 0) { g_ptr_array_unref(segs); return NULL; }
-
-    SondTextSegment *seg = g_ptr_array_index(segs, 0);
-
-    int height = 0;
-    cairo_surface_t *surface = render_text_to_surface(
-            seg->text, NULL, width, 30000, &height);
-    if (!surface) { g_ptr_array_unref(segs); return NULL; }
-
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = width;
-    result->height = height;
-    result->searchable_text = g_strdup(seg->text);
-    result->type = DOC_TYPE_HTML;
-
-    g_ptr_array_unref(segs);
-    return result;
-}
-
-// === IMAGE RENDERING ===
-
-static RenderedDocument* render_image(GBytes *bytes, int max_width) {
-    gsize len;
-    const guchar *data = g_bytes_get_data(bytes, &len);
-
-    GError *error = NULL;
-    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
-
-    if (!gdk_pixbuf_loader_write(loader, data, len, &error)) {
-    	LOG_WARN("Failed to load image: %s", error->message);
-        g_error_free(error);
-        g_object_unref(loader);
-        return NULL;
-    }
-
-    gdk_pixbuf_loader_close(loader, NULL);
-    GdkPixbuf *pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
-
-    if (!pixbuf) {
-        g_object_unref(loader);
-        return NULL;
-    }
-
-    int img_width = gdk_pixbuf_get_width(pixbuf);
-    int img_height = gdk_pixbuf_get_height(pixbuf);
-
-    // Skaliere wenn zu breit
-    double scale = 1.0;
-    if (img_width > max_width) {
-        scale = (double)max_width / img_width;
-    }
-
-    int display_width = (int)(img_width * scale);
-    int display_height = (int)(img_height * scale);
-
-    // Cairo Surface erstellen
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, display_width, display_height);
-    cairo_t *cr = cairo_create(surface);
-
-    // Weißer Hintergrund
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-
-    // Bild skalieren und zeichnen
-    if (scale != 1.0) {
-        cairo_scale(cr, scale, scale);
-    }
-
-    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
-    cairo_paint(cr);
-
-    cairo_destroy(cr);
-    g_object_unref(loader);
-
-    // RenderedDocument erstellen
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = display_width;
-    result->height = display_height;
-    result->searchable_text = g_strdup("[Image - No searchable text]");
-    result->type = DOC_TYPE_IMAGE;
-
-    return result;
-}
-
-
-// === ODT/DOCX RENDERING (Generisch) ===
-
-/*
- * Extraktion (ZIP/XML-Parsing) kommt aus sond_text_extract.c - dieselbe
- * Funktion, die auch beim Indizieren verwendet wird. out_attrs liefert
- * zusätzlich die Fett/Überschriften-Formatierung für die Anzeige, ohne
- * dass der Text dafür ein zweites Mal (potenziell abweichend) extrahiert
- * werden muss.
- */
-static RenderedDocument* render_office_document(GBytes *bytes,
-                                                 int width, DocumentType type) {
-    gsize len;
-    const guchar *data = g_bytes_get_data(bytes, &len);
-
-    PangoAttrList *attr_list = NULL;
-    GPtrArray *segs = (type == DOC_TYPE_ODT)
-            ? sond_text_extract_odt(data, len, &attr_list)
-            : sond_text_extract_docx(data, len, &attr_list);
-
-    if (segs->len == 0) {
-        LOG_WARN("render_office_document: Extraktion fehlgeschlagen (%s)",
-                type == DOC_TYPE_ODT ? "ODT" : "DOCX");
-        g_ptr_array_unref(segs);
-        if (attr_list) pango_attr_list_unref(attr_list);
-        return NULL;
-    }
-
-    SondTextSegment *seg = g_ptr_array_index(segs, 0);
-
-    int height = 0;
-    cairo_surface_t *surface = render_text_to_surface(
-            seg->text, attr_list, width, 30000, &height);
-    if (attr_list) pango_attr_list_unref(attr_list);
-    if (!surface) { g_ptr_array_unref(segs); return NULL; }
-
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = width;
-    result->height = height;
-    result->searchable_text = g_strdup(seg->text);
-    result->type = type;
-
-    g_ptr_array_unref(segs);
-    return result;
-}
-
-// === PLAIN TEXT RENDERING ===
-
-/*
- * Extraktion (Encoding-Korrektur + CRLF -> LF) kommt aus
- * sond_text_extract.c - dieselbe Funktion, die auch beim Indizieren
- * verwendet wird (siehe sond_text_extract.h). Vorher unterschied sich
- * diese Normalisierung von der beim Indizieren verwendeten, wodurch die
- * char_pos-Offsets aus der Indexsuche hier nicht mehr passten.
- */
-static RenderedDocument* render_plain_text(guchar const *data, gsize len, int width) {
-    GPtrArray *segs = sond_text_extract_plain(data, len);
-    if (segs->len == 0) { g_ptr_array_unref(segs); return NULL; }
-
-    SondTextSegment *seg = g_ptr_array_index(segs, 0);
-
-    int height = 0;
-    cairo_surface_t *surface = render_text_to_surface(
-            seg->text, NULL, width, 30000, &height);
-    if (!surface) { g_ptr_array_unref(segs); return NULL; }
-
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = width;
-    result->height = height;
-    result->searchable_text = g_strdup(seg->text);
-    result->type = DOC_TYPE_PLAIN;
-
-    g_ptr_array_unref(segs);
-    return result;
-}
-
-// === DOC RENDERING (Fallback) ===
-
-static RenderedDocument* render_doc(int width) {
-    GString *text = g_string_new("Microsoft Word DOC Format\n\n");
-    g_string_append(text, "Dieses Format (.doc) kann nicht direkt dargestellt werden.\n\n");
-    g_string_append(text, "Bitte konvertieren Sie die Datei in DOCX oder ODT.");
-
-    char *text_str = g_string_free(text, FALSE);
-    int height = 0;
-    cairo_surface_t *surface = render_text_to_surface(
-            text_str, NULL, width, 30000, &height);
-    if (!surface) { g_free(text_str); return NULL; }
-
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = width;
-    result->height = height;
-    result->searchable_text = text_str;
-    result->type = DOC_TYPE_DOC;
-    return result;
-}
-
-// === HAUPTFUNKTION ===
-
-/**
- * Rendert einen Dokument-Stream zu einer Cairo Surface
- *
- * @param bytes GBytes mit Dokumentdaten
- * @param render_width Gewünschte Breite (0 = Standard 650px)
- * @return RenderedDocument oder NULL bei Fehler
- */
-/*
- * Text (Header + Body) kommt komplett aus sond_text_extract.c
- * (sond_text_extract_gmessage) - dieselbe Funktion, die auch beim
- * Indizieren verwendet wird. Vorher bauten Indexer und Renderer den
- * E-Mail-Text getrennt und unterschiedlich formatiert auf (Indexer nur
- * Header ohne Body, Renderer Header+Body in anderer Reihenfolge), so
- * dass char_pos-Offsets aus der Indexsuche hier nie an der richtigen
- * Stelle landeten. Bild-Anhänge betreffen nur die Darstellung und werden
- * separat über sond_text_extract_gmessage_images() geholt.
- */
-static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
-    if (!bytes) return NULL;
-    if (width <= 0) width = DEFAULT_RENDER_WIDTH;
-
-    gsize len;
-    const guchar* data = g_bytes_get_data(bytes, &len);
-
-    GPtrArray *segs = sond_text_extract_gmessage(data, len);
-    if (segs->len == 0) {
-        LOG_WARN("render_gmessage: Extraktion fehlgeschlagen oder leere Nachricht");
-        g_ptr_array_unref(segs);
-        return NULL;
-    }
-    SondTextSegment *seg = g_ptr_array_index(segs, 0);
-    const gchar *full_text = seg->text;
-
-    /* ---- Bild-Parts holen und als Pixbufs vorbereiten ---- */
-    GPtrArray* images = sond_text_extract_gmessage_images(data, len);
-
-    GPtrArray* image_surfaces = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)cairo_surface_destroy);
-    GPtrArray* image_labels = g_ptr_array_new_with_free_func(g_free);
-
-    for (guint i = 0; i < images->len; i++) {
-        SondEmlImage* img = g_ptr_array_index(images, i);
-
-        GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
-        GError* perr = NULL;
-        gdk_pixbuf_loader_write(loader, img->image_data, img->image_len, &perr);
-        g_clear_error(&perr);
-        gdk_pixbuf_loader_close(loader, NULL);
-
-        GdkPixbuf* pb = gdk_pixbuf_loader_get_pixbuf(loader);
-        if (!pb) {
-            GdkPixbufAnimation* anim = gdk_pixbuf_loader_get_animation(loader);
-            G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-            if (anim)
-                pb = gdk_pixbuf_animation_get_static_image(anim);
-            G_GNUC_END_IGNORE_DEPRECATIONS
-        }
-        if (pb) {
-            int iw = gdk_pixbuf_get_width(pb);
-            int ih = gdk_pixbuf_get_height(pb);
-            double scale = 1.0;
-            if (iw > width - 20)
-                scale = (double)(width - 20) / iw;
-            int dw = (int)(iw * scale);
-            int dh = (int)(ih * scale);
-            cairo_surface_t* img_surf = cairo_image_surface_create(
-                    CAIRO_FORMAT_ARGB32, dw, dh);
-            cairo_t* ic = cairo_create(img_surf);
-            cairo_scale(ic, scale, scale);
-            gdk_cairo_set_source_pixbuf(ic, pb, 0, 0);
-            cairo_paint(ic);
-            cairo_destroy(ic);
-            g_ptr_array_add(image_surfaces, img_surf);
-            g_ptr_array_add(image_labels,
-                    img->filename
-                    ? g_strdup_printf("%s — %s", img->mime_type, img->filename)
-                    : g_strdup(img->mime_type));
-        } else {
-            LOG_WARN("%s\nBild-Part konnte nicht geladen werden: %s",
-                    __func__, img->mime_type ? img->mime_type : "?");
-        }
-        g_object_unref(loader);
-    }
-    g_ptr_array_unref(images);
-
-    /* ---- PangoAttrList für Header (fett + Monospace bis zur ersten
-     * Leerzeile) ---- */
-    const char* sep_pos = strstr(full_text, "\n\n");
-    guint header_end = sep_pos
-            ? (guint)(sep_pos - full_text)
-            : 0;
-
-    PangoAttrList* attrs = pango_attr_list_new();
-    if (header_end > 0) {
-        PangoAttribute* bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-        bold->start_index = 0;
-        bold->end_index   = header_end;
-        pango_attr_list_insert(attrs, bold);
-
-        PangoAttribute* mono = pango_attr_family_new("Monospace");
-        mono->start_index = 0;
-        mono->end_index   = header_end;
-        pango_attr_list_insert(attrs, mono);
-    }
-
-    /* ---- Text rendern ---- */
-    int height = 0;
-    cairo_surface_t* surface = render_text_to_surface(
-            full_text, attrs, width, 30000, &height);
-    pango_attr_list_unref(attrs);
-    if (!surface) {
-        g_ptr_array_unref(segs);
-        g_ptr_array_unref(image_surfaces);
-        g_ptr_array_unref(image_labels);
-        return NULL;
-    }
-
-    /* ---- Bilder unter Text anfügen ---- */
-    int total_height = height;
-    int img_gap = 12;
-
-    for (guint i = 0; i < image_surfaces->len; i++) {
-        cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
-        total_height += img_gap + 18 + img_gap
-                + cairo_image_surface_get_height(is);
-    }
-
-    if (image_surfaces->len > 0) {
-        if (total_height > 30000) total_height = 30000;
-
-        cairo_surface_t* combined = cairo_image_surface_create(
-                CAIRO_FORMAT_ARGB32, width, total_height);
-        if (cairo_surface_status(combined) != CAIRO_STATUS_SUCCESS) {
-            LOG_WARN("%s\ncombined surface fehlgeschlagen", __func__);
-            cairo_surface_destroy(combined);
-        } else {
-            cairo_t* cc = cairo_create(combined);
-            cairo_set_source_rgb(cc, 1.0, 1.0, 1.0);
-            cairo_paint(cc);
-
-            cairo_set_source_surface(cc, surface, 0, 0);
-            cairo_paint(cc);
-            cairo_surface_destroy(surface);
-
-            int y_off = height;
-            cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
-            for (guint i = 0; i < image_surfaces->len; i++) {
-                cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
-                const char* lbl = g_ptr_array_index(image_labels, i);
-                int iw = cairo_image_surface_get_width(is);
-                int ih = cairo_image_surface_get_height(is);
-
-                cairo_set_line_width(cc, 1.0);
-                cairo_move_to(cc, 10, y_off + img_gap / 2.0);
-                cairo_line_to(cc, width - 10, y_off + img_gap / 2.0);
-                cairo_stroke(cc);
-                y_off += img_gap;
-
-                PangoLayout* lbl_layout = pango_cairo_create_layout(cc);
-                pango_layout_set_text(lbl_layout, lbl, -1);
-                PangoAttrList* lbl_attrs = pango_attr_list_new();
-                PangoAttribute* lbl_bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-                lbl_bold->start_index = 0;
-                lbl_bold->end_index   = G_MAXUINT;
-                pango_attr_list_insert(lbl_attrs, lbl_bold);
-                pango_layout_set_attributes(lbl_layout, lbl_attrs);
-                pango_attr_list_unref(lbl_attrs);
-                cairo_move_to(cc, 10, y_off);
-                pango_cairo_show_layout(cc, lbl_layout);
-                g_object_unref(lbl_layout);
-                y_off += 18;
-
-                int x_off = (width - iw) / 2;
-                if (x_off < 0) x_off = 0;
-                cairo_set_source_surface(cc, is, x_off, y_off + img_gap / 2);
-                cairo_paint(cc);
-                y_off += img_gap + ih;
-
-                cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
-
-                if (y_off >= total_height) break;
-            }
-
-            cairo_destroy(cc);
-            surface = combined;
-            height  = total_height;
-        }
-    }
-
-    g_ptr_array_unref(image_surfaces);
-    g_ptr_array_unref(image_labels);
-
-    RenderedDocument* result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width   = width;
-    result->height  = height;
-    result->searchable_text = g_strdup(full_text);
-    result->type = DOC_TYPE_EML;
-
-    g_ptr_array_unref(segs);
-    return result;
-}
-
-static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width,
-        SondFilePart *sfp) {
-    if (!bytes) {
-    	LOG_WARN("Invalid bytes");
-        return NULL;
-    }
-
-    if (render_width <= 0) {
-        render_width = DEFAULT_RENDER_WIDTH;
-    }
-
-    /* Dokumenttyp: wenn sfp bekannt, direkt daraus ableiten */
-    DocumentType type;
-    if (sfp && SOND_IS_FILE_PART_GMESSAGE(sfp)) {
-        type = DOC_TYPE_EML;
-    } else if (sfp && (SOND_IS_FILE_PART_PDF(sfp) || SOND_IS_FILE_PART_ZIP(sfp))) {
-        type = DOC_TYPE_UNKNOWN; /* wird nicht hier gerendert */
-    } else if (sfp && SOND_IS_FILE_PART_LEAF(sfp)) {
-        /* MIME-Type des Leaf direkt auswerten — wurde bereits durch
-         * mime_guess_content_type (libmagic) korrekt bestimmt */
-        const gchar *mime = sond_file_part_leaf_get_mime_type(
-                SOND_FILE_PART_LEAF(sfp));
-        if (!mime)
-            type = DOC_TYPE_PLAIN;
-        else if (g_str_has_prefix(mime, "image/"))
-            type = DOC_TYPE_IMAGE;
-        else if (g_str_equal(mime, "text/html"))
-            type = DOC_TYPE_HTML;
-        else if (g_str_equal(mime, "application/vnd.oasis.opendocument.text"))
-            type = DOC_TYPE_ODT;
-        else if (g_str_equal(mime, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-            type = DOC_TYPE_DOCX;
-        else if (g_str_equal(mime, "application/msword"))
-            type = DOC_TYPE_DOC;
-        else if (g_str_equal(mime, "message/rfc822"))
-            type = DOC_TYPE_EML;
-        else if (g_str_has_prefix(mime, "text/"))
-            type = DOC_TYPE_PLAIN;
-        else
-            type = DOC_TYPE_PLAIN; /* unbekannt → als Text darstellen */
-    } else {
-        /* kein sfp — sollte nicht vorkommen, Fallback: Plain */
-        type = DOC_TYPE_PLAIN;
-    }
-
-    RenderedDocument *result = NULL;
-
-    // Je nach Typ rendern
-    switch (type) {
-    case DOC_TYPE_HTML: {
-        gsize len;
-        const guchar *data = g_bytes_get_data(bytes, &len);
-        /* Encoding-Erkennung (UTF-8 / <meta charset> / windows-1252-
-         * Fallback) passiert in sond_text_extract_html() - identisch
-         * zur Indizierung. */
-        result = render_html(data, len, render_width);
-        break;
-    }
-    case DOC_TYPE_IMAGE:
-            result = render_image(bytes, render_width);
-            break;
-
-        case DOC_TYPE_ODT:
-        case DOC_TYPE_DOCX:
-            result = render_office_document(bytes, render_width, type);
-            break;
-
-        case DOC_TYPE_DOC:
-            result = render_doc(render_width);
-            break;
-
-        case DOC_TYPE_PLAIN:
-        case DOC_TYPE_UNKNOWN:
-        default: {
-            gsize len;
-            const guchar *data = g_bytes_get_data(bytes, &len);
-            result = render_plain_text(data, len, render_width);
-            break;
-        }
-
-        case DOC_TYPE_EML:
-            result = render_gmessage(bytes, render_width);
-            break;
-    }
-
-    return result;
-}
-
-/**
- * Typ als String zurückgeben
- */
-const char* document_type_string(DocumentType type) {
-    switch (type) {
-        case DOC_TYPE_HTML: return "HTML";
-        case DOC_TYPE_ODT: return "ODT";
-        case DOC_TYPE_DOCX: return "DOCX";
-        case DOC_TYPE_DOC: return "DOC (Legacy)";
-        case DOC_TYPE_IMAGE: return "Image";
-        case DOC_TYPE_PLAIN: return "Plain Text";
-        case DOC_TYPE_EML: return "E-Mail";
-        case DOC_TYPE_UNKNOWN:
-        default: return "Unknown";
-    }
-}
-
-/* =========================================================================
- * HIGHLIGHT-RENDERING
- * ======================================================================= */
-
-/* Faltet einen Text für die Suche: je Zeichen Zerlegung (NFD) ohne die
- * kombinierenden Akzent-Zeichen, dann Casefold (ü -> u, ß -> ss, Ä -> a).
- * Mit out_map (optional) kommt zu jedem Byte des Ergebnisses das
- * Byte-Offset des Originalzeichens, aus dem es stammt (zu verwenden mit
- * g_free(); text_len wird nicht angehängt, die Länge ist strlen(Ergebnis)).
- * Rückgabe: neu alloziert. */
-static gchar*
-fold_for_search(gchar const *text, gsize text_len, gsize **out_map) {
-    GString *out = g_string_new(NULL);
-    GArray  *map = out_map ? g_array_new(FALSE, FALSE, sizeof(gsize)) : NULL;
-    gchar const *end = text + text_len;
-
-    for (gchar const *p = text; p < end; ) {
-        gchar const *next = g_utf8_next_char(p);
-        gchar *nfd = NULL;
-        GString *plain = g_string_new(NULL);
-        gchar *folded = NULL;
-        gsize off = (gsize)(p - text);
-
-        if (next > end)
-            next = end;
-
-        nfd = g_utf8_normalize(p, (gssize)(next - p), G_NORMALIZE_NFD);
-        for (gchar const *q = nfd ? nfd : ""; *q; q = g_utf8_next_char(q)) {
-            gunichar c = g_utf8_get_char(q);
-
-            if (g_unichar_combining_class(c) == 0)
-                g_string_append_unichar(plain, c);
-        }
-        g_free(nfd);
-
-        folded = g_utf8_casefold(plain->str, (gssize) plain->len);
-        g_string_free(plain, TRUE);
-        g_string_append(out, folded);
-        for (gsize i = 0; map && i < strlen(folded); i++)
-            g_array_append_val(map, off);
-        g_free(folded);
-
-        p = next;
-    }
-
-    if (out_map)
-        *out_map = (gsize*) g_array_free(map, FALSE);
-
-    return g_string_free(out, FALSE);
-}
-
-/*
- * Rendert wie render_document_from_bytes, übergibt aber zusätzlich
- * einen Highlight-Term und eine Byte-Position im Flat-Text des Dokuments.
- * Der Term wird im Pango-Layout gelb hinterlegt; der Viewer scrollt beim
- * Öffnen zur ersten Fundstelle.
- *
- * char_pos_in_doc  – Byte-Offset im extrahierten searchable_text
- *                    (wie er vom Index gespeichert wird).
- *                    -1  → einfach zum ersten Vorkommen von term springen.
- *
- * WICHTIG: sfp muss durchgereicht werden, sonst kann
- * render_document_from_bytes() den Dokumenttyp nicht bestimmen und
- * rendert JEDES Dokument (auch HTML/DOCX/ODT/E-Mail) als Rohtext - dann
- * stimmt weder die Darstellung noch der char_pos-Offset (das war vorher
- * der Fall: sfp wurde hier fest auf NULL gesetzt).
- */
-static RenderedDocument *
-render_document_with_highlight(GBytes *bytes, SondFilePart *sfp, int render_width,
-        const char *term, int char_pos_in_doc,
-        int *out_highlight_y)
+/* Scrollt nach dem Anzeigen zur Trefferposition. Die Bereichsgröße steht erst nach dem
+ * ersten Layout fest, deshalb mit wenigen Wiederholungen. */
+typedef struct {
+    GtkWidget *scrolled;
+    int y;
+    int tries;
+} HighlightScroll;
+
+static gboolean scroll_to_highlight_idle(gpointer data)
 {
-    if (!bytes || !term || !*term) return NULL;
-    if (render_width <= 0) render_width = DEFAULT_RENDER_WIDTH;
-
-    /* Erst normal rendern um den searchable_text zu bekommen */
-    RenderedDocument *rd = render_document_from_bytes(bytes, render_width, sfp);
-    if (!rd) return NULL;
-    if (!rd->searchable_text) return rd; /* kein Text → unverändert zurück */
-
-    /* ---------------------------------------------------------------
-     * Trefferposition im searchable_text bestimmen
-     * ------------------------------------------------------------- */
-    const char *text    = rd->searchable_text;
-    gsize       text_len = strlen(text);
-
-    /* Groß-/Kleinschreibung und Akzente ignorieren (wie die Volltextsuche:
-     * "Munchen" findet "München"): beide Seiten gefaltet. Die Länge ändert
-     * sich dabei (ß -> ss, ü -> u), deshalb merkt sich text_map zu jedem
-     * Byte des gefalteten Textes die Position im Original. */
-    gsize *text_map = NULL;
-    char  *text_cf  = fold_for_search(text, text_len, &text_map);
-    char  *term_cf  = fold_for_search(term, strlen(term), NULL);
-    gsize  cf_len   = strlen(text_cf);
-    gsize  term_cf_len = strlen(term_cf);
-
-    /* Startposition: ab char_pos_in_doc (Byte-Offset im Originaltext, wie im
-     * Index gespeichert), sonst erstes Vorkommen */
-    const char *hit = NULL;
-    if (term_cf_len > 0) {
-        gsize from = 0;
-
-        if (char_pos_in_doc >= 0) {
-            while (from < cf_len && text_map[from] < (gsize) char_pos_in_doc)
-                from++;
-            hit = strstr(text_cf + from, term_cf);
-        }
-        if (!hit) /* Fallback: erstes Vorkommen */
-            hit = strstr(text_cf, term_cf);
-    }
-
-    if (!hit) {
-        g_free(text_cf);
-        g_free(term_cf);
-        g_free(text_map);
-        if (out_highlight_y) *out_highlight_y = 0;
-        return rd;
-    }
-
-    /* zurück ins Original: Anfang des ersten und Ende des letzten Zeichens
-     * des Treffers */
-    gsize cf_start  = (gsize)(hit - text_cf);
-    gsize cf_last   = cf_start + term_cf_len - 1;
-    gsize cf_after  = cf_last + 1;
-    while (cf_after < cf_len && text_map[cf_after] == text_map[cf_last])
-        cf_after++;
-    gsize byte_start = text_map[cf_start];
-    gsize byte_end   = (cf_after < cf_len) ? text_map[cf_after] : text_len;
-    g_free(text_cf);
-    g_free(term_cf);
-    g_free(text_map);
-
-    /* ---------------------------------------------------------------
-     * Surface neu mit Highlight-Attribut rendern
-     * Wir bauen ein Pango-Layout auf dem original searchable_text
-     * mit einem gelben Background-Attribut an byte_start..byte_end.
-     * ------------------------------------------------------------- */
-    int width  = rd->width;
-    int height = rd->height;
-
-    cairo_surface_t *surface = cairo_image_surface_create(
-            CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t *cr = cairo_create(surface);
-
-    /* Weißer Hintergrund */
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    PangoLayout *layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text, -1);
-
-    /* Gelbes Highlight-Attribut */
-    PangoAttrList *attrs = pango_attr_list_new();
-    PangoAttribute *bg = pango_attr_background_new(
-            0xFFFF, 0xEE00, 0x0000); /* RGB16: gelb */
-    bg->start_index = (guint)byte_start;
-    bg->end_index   = (guint)byte_end;
-    pango_attr_list_insert(attrs, bg);
-    pango_layout_set_attributes(layout, attrs);
-    pango_attr_list_unref(attrs);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    /* Y-Position des Treffers für Scroll ermitteln */
-    if (out_highlight_y) {
-        PangoRectangle rect = {0};
-        int idx = (int)byte_start;
-        pango_layout_index_to_pos(layout, idx, &rect);
-        *out_highlight_y = (int)(rect.y / PANGO_SCALE) + 10; /* +10 Rand */
-    }
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
-
-    /* Alte Surface ersetzen */
-    cairo_surface_destroy(rd->surface);
-    rd->surface = surface;
-
-    return rd;
-}
-
-/* Scrollt den SurfaceViewer nach dem Anzeigen zur Y-Position */
-static gboolean
-scroll_to_highlight_idle(gpointer data)
-{
-    gpointer *pair  = (gpointer *) data;
-    GtkWidget *scrolled = GTK_WIDGET(pair[0]);
-    int        y        = GPOINTER_TO_INT(pair[1]);
-    g_free(pair);
-
-    GtkAdjustment *vadj =
-            gtk_scrolled_window_get_vadjustment(
-                    GTK_SCROLLED_WINDOW(scrolled));
+    HighlightScroll *hs = data;
+    GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(
+            GTK_SCROLLED_WINDOW(hs->scrolled));
     double upper = gtk_adjustment_get_upper(vadj);
     double page  = gtk_adjustment_get_page_size(vadj);
-    double target = (double)y - page / 3.0; /* Treffer im oberen Drittel */
-    if (target < 0) target = 0;
+
+    if (upper - page <= 0.0 && hs->tries++ < 20)
+        return G_SOURCE_CONTINUE;
+
+    double target = (double)hs->y - page / 3.0; /* Treffer im oberen Drittel */
     if (target > upper - page) target = upper - page;
     if (target < 0) target = 0;
     gtk_adjustment_set_value(vadj, target);
 
+    g_object_unref(hs->scrolled);
+    g_free(hs);
+
     return G_SOURCE_REMOVE;
+}
+
+// === API ===
+
+static gint show_rendered(RenderedDocument *rd, SondFilePart *sfp, gchar const *title,
+        int highlight_y, GError **error)
+{
+    const char *window_title = title ? title
+            : (sfp ? sond_file_part_get_path(sfp)
+                   : sond_render_doc_type_string(rd->type));
+    SurfaceViewer *viewer = NULL;
+    GtkWidget *win = show_surface_viewer(rd->surface, rd->width, rd->height,
+            window_title, rd->searchable_text, sfp, &viewer);
+
+    rd->surface = NULL;
+    sond_render_doc_free(rd);
+
+    if (!win) {
+        if (error) *error = g_error_new(SOND_ERROR, 0,
+                "%s\nFenster konnte nicht erstellt werden", __func__);
+        return -1;
+    }
+
+    if (highlight_y > 0) {
+        HighlightScroll *hs = g_new(HighlightScroll, 1);
+
+        hs->scrolled = g_object_ref(viewer->scrolled);
+        hs->y = highlight_y;
+        hs->tries = 0;
+        g_idle_add(scroll_to_highlight_idle, hs);
+    }
+
+    return 0;
 }
 
 gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
         gchar const *title, gchar const *term,
         gint char_pos_in_doc, GError **error)
 {
+    int highlight_y = 0;
+    RenderedDocument *rd = NULL;
+
     if (!input) {
         if (error) *error = g_error_new(SOND_ERROR, 0,
                 "%s\nKein Eingabe-Stream", __func__);
@@ -1668,14 +893,10 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
         return -1;
     }
 
-    int highlight_y = 0;
-    RenderedDocument *rd;
-
     if (term && *term)
-        rd = render_document_with_highlight(input, sfp, 0, term,
-                char_pos_in_doc, &highlight_y);
+        rd = sond_render_doc_new_with_term(input, sfp, 0, term, char_pos_in_doc, &highlight_y);
     else
-        rd = render_document_from_bytes(input, 0, sfp);
+        rd = sond_render_doc_new(input, 0, sfp);
 
     if (!rd) {
         if (error) *error = g_error_new(SOND_ERROR, 0,
@@ -1683,84 +904,54 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
         return -1;
     }
 
-    const char *window_title = title ? title
-            : (sfp ? sond_file_part_get_path(sfp)
-                   : document_type_string(rd->type));
-
-    GtkWidget *win = show_surface_viewer(rd->surface, rd->width, rd->height,
-            window_title, rd->searchable_text, sfp);
-    rd->surface = NULL;
-    free_rendered_document(rd);
-
-    if (!win) {
-        if (error) *error = g_error_new(SOND_ERROR, 0,
-                "%s\nFenster konnte nicht erstellt werden", __func__);
-        return -1;
-    }
-
-    /* Zur Trefferposition scrollen (nach dem ersten GTK-Durchlauf) */
-    if (highlight_y > 0) {
-        /* ScrolledWindow aus dem Viewer-Fenster holen:
-         * Aufbau: window > vbox > scrolled (2. Kind) */
-        GtkWidget *vbox     = gtk_bin_get_child(GTK_BIN(win));
-        GtkWidget *scrolled = NULL;
-        if (vbox) {
-            GList *children = gtk_container_get_children(GTK_CONTAINER(vbox));
-            if (children && children->next)
-                scrolled = GTK_WIDGET(children->next->data);
-            g_list_free(children);
-        }
-        if (scrolled) {
-            gpointer *pair = g_new(gpointer, 2);
-            pair[0] = scrolled;
-            pair[1] = GINT_TO_POINTER(highlight_y);
-            g_idle_add(scroll_to_highlight_idle, pair);
-        }
-    }
-
-    return 0;
+    return show_rendered(rd, sfp, title, highlight_y, error);
 }
-
-// === EML RENDERING ===
 
 gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 		GError** error) {
-	RenderedDocument* rd = NULL;
-	GtkWidget* widget = NULL;
-	const char* window_title = NULL;
+	return sond_render_with_term(input, sfp, title, NULL, -1, error);
+}
 
-	if (g_bytes_get_size(input) == 0) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nDatei ist leer", __func__);
+/* Öffnet sfp im eigenen Viewer (Text, Bild, DOCX/ODT, E-Mail), sonst mit dem Standardprogramm
+ * bzw. "Öffnen mit" (open_with erzwingt Letzteres). */
+gint sond_renderer_open_file_part(SondFilePart* sfp, gboolean open_with,
+		GError** error) {
+	g_return_val_if_fail(sfp, -1);
 
+	//hier alle Varianten, in denen eigener Viewer geöffnet wird
+	if (!open_with &&
+			((SOND_IS_FILE_PART_LEAF(sfp) &&
+			((g_str_has_prefix(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "text/") &&
+			 g_strcmp0(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "text/csv")) ||
+			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "image/") ||
+			!g_strcmp0("application/vnd.oasis.opendocument.text",
+					sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp))) ||
+			!g_strcmp0("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+					sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp))))) ||
+					SOND_IS_FILE_PART_GMESSAGE(sfp)))
+	{
+		GBytes* bytes = NULL;
+		gint rc = 0;
+
+		bytes = sond_file_part_get_bytes(sfp, error);
+		if (!bytes)
+			return -1;
+
+		rc = sond_render(bytes, sfp, NULL, error);
+		g_bytes_unref(bytes);
+		if (rc)
+			return -1;
+	}/*
+	else if (!open_with && SOND_IS_FILE_PART_PDF(sfp)) {
+
+	}*/
+	else if (sond_file_part_open_external(sfp, open_with, error))
 		return -1;
-	}
-
-	rd = render_document_from_bytes(input, 0, sfp);
-	if (!rd) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nStream konnte nicht gerendert werden", __func__);
-
-		return -1;
-	}
-
-	if (title)
-		window_title = title;
-	else if (sfp)
-		window_title = sond_file_part_get_path(sfp);
-	else
-		window_title = document_type_string(rd->type);
-
-	widget = show_surface_viewer(rd->surface, rd->width, rd->height,
-			window_title, rd->searchable_text, sfp);
-	rd->surface = NULL;
-	free_rendered_document(rd);
-	if (!widget) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nStream konnte nicht gerendert werden", __func__);
-
-		return -1;
-	}
 
 	return 0;
 }

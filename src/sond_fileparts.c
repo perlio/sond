@@ -4195,3 +4195,42 @@ void sond_file_part_leaf_set_mime_type(SondFilePartLeaf* sfp_leaf, gchar const* 
 
 	return;
 }
+
+/* Öffnet mit dem Standardprogramm bzw. "Öffnen mit" des Betriebssystems, ohne eigenen Viewer
+ * (GTK-frei). Teile in Containern über eine schreibgeschützte Temp-Datei. */
+gint sond_file_part_open_external(SondFilePart* sfp, gboolean open_with,
+		GError** error) {
+	g_autofree gchar* path = NULL;
+
+	g_return_val_if_fail(sfp, -1);
+
+	if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
+		path = g_strconcat(SOND_FILE_PART_CLASS(
+				g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
+				"/", sond_file_part_get_path(sfp), NULL);
+	else { //Datei in zip/pdf/gmessage
+		path = sond_file_part_write_to_tmp_file(sfp, TRUE, error);
+		if (!path)
+			return -1;
+	}
+
+	if (!sond_open(path, open_with, error)) {
+		if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
+			GError* error_rem = NULL;
+
+			if (!sond_tmp_remove(path, &error_rem)) {
+				LOG_WARN("Datei '%s' konnte nicht gelöscht werden: %s",
+						path, error_rem ? error_rem->message : "(kein Fehler gesetzt)");
+				g_clear_error(&error_rem);
+			}
+		}
+
+		return -1;
+	}
+
+	//Kopie aus einem Container: löschen, sobald keine Anwendung sie mehr hält
+	if (sond_file_part_get_parent(sfp))
+		sond_tmp_register(path);
+
+	return 0;
+}
