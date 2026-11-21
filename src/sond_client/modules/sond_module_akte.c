@@ -30,6 +30,7 @@
 #include "sond_akte_lease.h"
 #include "sond_dokumente.h"
 #include "../sond_module.h"
+#include "../sond_zond_prozess.h"
 #include "../../sond_zond_ctl.h"
 #include "../../sond_akte_name.h"
 
@@ -144,6 +145,7 @@ static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *res
 static void akte_search_result_free(AkteSearchResult *result);
 static GPtrArray* search_akten_by_property(SondModuleAktePrivate *priv, const gchar *key, const gchar *search_term, GError **error);
 static void update_action_widgets(SondModuleAktePrivate *priv);
+static gchar* aktuelle_lib_name(SondModuleAktePrivate *priv);
 static void lease_refresh(SondModuleAktePrivate *priv, gboolean ask_server);
 static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
                                            guint lfd_nr, guint year, GError **error);
@@ -375,10 +377,30 @@ static gboolean akte_ist_abgelegt(SondModuleAktePrivate *priv) {
  * Server nicht zu erreichen ist. Import und zond brauchen nur die gewählte
  * Akte und das SeaDrive-Laufwerk; bei einer abgelegten Akte sind beide gesperrt
  * (erst reaktivieren). */
+//Start oder Ende von zond bzw. des Dokumentenfensters einer Akte
+static void on_exklusiv_geaendert(gpointer data) {
+    update_action_widgets(data);
+}
+
+//Library-Name der gewählten Akte (z.B. "2026-1"), NULL ohne Auswahl (g_free())
+static gchar* aktuelle_lib_name(SondModuleAktePrivate *priv) {
+    guint lfd_nr = 0;
+    guint year = 0;
+
+    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
+        return NULL;
+
+    return sond_module_akte_library_name(lfd_nr, year);
+}
+
 static void update_action_widgets(SondModuleAktePrivate *priv) {
     gboolean gewaehlt = sond_client_get_current_akte(priv->client, NULL, NULL);
     gboolean arbeit = gewaehlt && !akte_ist_abgelegt(priv);
     AkteState st = priv->state;
+    g_autofree gchar *lib = arbeit ? aktuelle_lib_name(priv) : NULL;
+    //zond und das Dokumentenfenster einer Akte laufen nie gleichzeitig
+    gboolean doku_offen = lib && sond_dokumente_is_open(lib);
+    gboolean zond_laeuft = lib && sond_zond_prozess_laeuft(lib);
 
     gtk_widget_set_sensitive(priv->btn_neue_akte,
             st == AKTE_STATE_INITIAL || st == AKTE_STATE_AUSGEWAEHLT);
@@ -386,9 +408,16 @@ static void update_action_widgets(SondModuleAktePrivate *priv) {
     gtk_widget_set_sensitive(priv->btn_import,
             arbeit && st != AKTE_STATE_CREATING);
     gtk_widget_set_sensitive(priv->btn_zond,
-            arbeit && st != AKTE_STATE_CREATING && !priv->lease_wait_source);
+            arbeit && st != AKTE_STATE_CREATING && !priv->lease_wait_source && !doku_offen);
+    gtk_widget_set_tooltip_text(priv->btn_zond, doku_offen ?
+            "Das Dokumentenfenster dieser Akte ist geöffnet. Bitte zuerst schließen." :
+            "Die Projektdatei der gewählten Akte in zond öffnen");
     gtk_widget_set_sensitive(priv->btn_dokumente,
-            arbeit && st != AKTE_STATE_CREATING);
+            arbeit && st != AKTE_STATE_CREATING && !zond_laeuft);
+    gtk_widget_set_tooltip_text(priv->btn_dokumente, zond_laeuft ?
+            "zond hat diese Akte geöffnet. Bitte zond zuerst beenden." :
+            "Das Dokumentenverzeichnis der Akte zeigen, z. B. um Dateien dauerhaft "
+            "offline verfügbar zu machen");
 
     //"Bearbeiten": solange die Akte gewählt oder nur gesperrt angezeigt wird
     gtk_widget_set_sensitive(priv->btn_break_lock,
@@ -3573,6 +3602,9 @@ static void akte_abort_cb(GtkWidget *module, gpointer user_data) {
 static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     SondModuleAktePrivate *priv = (SondModuleAktePrivate *) user_data;
 
+    sond_zond_prozess_set_func(NULL, NULL);
+    sond_dokumente_set_func(NULL, NULL);
+
     //Abbruch, falls das Fenster nicht über "Schließen" ging (sonst ist er schon gelaufen)
     sond_module_abort(widget);
 
@@ -4376,6 +4408,18 @@ static void on_dokumente_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         return;
 
     {
+        g_autofree gchar *lib = sond_module_akte_library_name(lfd_nr, year);
+
+        if (sond_zond_prozess_laeuft(lib)) {
+            show_error_dialog(priv->main_widget, "Dokumente nicht verfügbar",
+                    "zond hat diese Akte geöffnet. Bitte zond zuerst beenden.");
+            update_action_widgets(priv);
+
+            return;
+        }
+    }
+
+    {
         gchar *lease_name = lease_current_name(priv);
         gint64 akte_id = lease_name ? lease_current_akte_id(priv, lease_name) : 0;
 
@@ -4408,6 +4452,14 @@ static void start_zond(SondModuleAktePrivate *priv, gboolean force_ro) {
         return;
 
     lib_name = sond_module_akte_library_name(lfd_nr, year);
+
+    //zond und das Dokumentenfenster einer Akte laufen nie gleichzeitig
+    if (sond_dokumente_is_open(lib_name)) {
+        show_error_dialog(priv->main_widget, "zond kann nicht gestartet werden",
+                "Das Dokumentenfenster dieser Akte ist geöffnet. Bitte zuerst schließen.");
+        update_action_widgets(priv);
+        goto out;
+    }
 
     root = sond_client_find_seadrive_root(priv->client, &error);
     if (!root) {
@@ -4450,13 +4502,17 @@ static void start_zond(SondModuleAktePrivate *priv, gboolean force_ro) {
         goto out;
     }
 
-    if (!sond_zond_start_pid(exe, project, &pid, &error))
+    if (!sond_zond_start_pid(exe, project, &pid, &error)) {
         show_error_dialog(priv->main_widget, "zond konnte nicht gestartet werden",
                 error ? error->message : "unbekannt");
-    else if (zugriff == LEASE_ZUGRIFF_SCHREIBEN && akte_id > 0)
-        sond_akte_lease_note_zond_started(priv->lease, akte_id, pid);
-    else
-        g_spawn_close_pid(pid);
+    } else {
+        //jeden Start verfolgen (auch den schreibgeschützten): das sperrt das Dokumentenfenster
+        sond_zond_prozess_merken(lib_name, pid);
+        if (zugriff == LEASE_ZUGRIFF_SCHREIBEN && akte_id > 0)
+            sond_akte_lease_note_zond_started(priv->lease, akte_id, pid);
+        else
+            g_spawn_close_pid(pid);
+    }
 
 out:
     g_clear_error(&error);
@@ -4659,6 +4715,11 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
      * beim Zerstoeren des Widgets - s. on_main_box_destroy(). */
     g_signal_connect(main_box, "destroy", G_CALLBACK(on_main_box_destroy), priv);
     sond_module_set_abort(main_box, akte_abort_cb, priv);
+
+    //Start und Ende von zond bzw. des Dokumentenfensters: Schaltflächen nachführen
+    sond_zond_prozess_set_func(on_exklusiv_geaendert, priv);
+    sond_dokumente_set_func(on_exklusiv_geaendert, priv);
+    sond_zond_prozess_wiederfinden();
 
     /* Initial State setzen */
     set_akte_state(priv, AKTE_STATE_INITIAL);

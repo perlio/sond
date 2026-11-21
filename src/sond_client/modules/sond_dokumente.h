@@ -44,6 +44,13 @@ G_BEGIN_DECLS
 void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
         guint lfd_nr, guint year, const gchar *bezeichnung, gint64 akte_id);
 
+/* Ist das Dokumentenfenster der Akte (Library-Name wie "2026-1") offen? Es läuft nie zusammen mit
+ * zond für dieselbe Akte. */
+gboolean sond_dokumente_is_open(const gchar *lib_name);
+
+//Rückruf, wenn ein Dokumentenfenster geöffnet oder geschlossen wurde; func NULL entfernt ihn
+void sond_dokumente_set_func(void (*func)(gpointer), gpointer data);
+
 G_END_DECLS
 
 #endif /* SOND_DOKUMENTE_H */

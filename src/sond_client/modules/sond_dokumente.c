@@ -27,6 +27,7 @@
 #include "../../sond_client/sond_client.h"
 #include "../../seadrive/sond_seadrive_core.h"
 #include "../../sond_zond_ctl.h"
+#include "../sond_zond_prozess.h"
 #include "../../tvfm/sond_tvfm_status.h"
 #include "../../tvfm/sond_tvfm_unlock.h"
 #include "../sond_password_dialog.h"
@@ -73,8 +74,29 @@ typedef struct {
     SondIndexCtx *index_schreib; /* dito */
 } DokData;
 
+//offene Dokumentenfenster: Library-Name -> Fenster
+static GHashTable *offene_fenster = NULL;
+static void (*offen_func)(gpointer) = NULL;
+static gpointer offen_data = NULL;
+
+gboolean sond_dokumente_is_open(const gchar *lib_name) {
+    return lib_name && offene_fenster && g_hash_table_contains(offene_fenster, lib_name);
+}
+
+void sond_dokumente_set_func(void (*func)(gpointer), gpointer data) {
+    offen_func = func;
+    offen_data = data;
+}
+
 static void dok_free(gpointer data) {
     DokData *d = data;
+
+    if (d->lib_name && sond_dokumente_is_open(d->lib_name) &&
+            g_hash_table_lookup(offene_fenster, d->lib_name) == (gpointer) d->window) {
+        g_hash_table_remove(offene_fenster, d->lib_name);
+        if (offen_func)
+            offen_func(offen_data);
+    }
 
     if (d->index_timer)
         g_source_remove(d->index_timer);
@@ -209,11 +231,15 @@ static void projekt_pruefen(DokData *d) {
         sond_treeviewfm_refresh_names(SOND_TREEVIEWFM(d->tree));
 }
 
-/* Hat zond das Projekt offen? Maßgeblich ist die Steuerdatei zur Projektdatei (sie gilt auch, wenn
- * zond nicht vom Client gestartet wurde); dazu die vom Client gestarteten Prozesse. */
+/* Hat zond das Projekt offen? Die vom Client gestarteten Prozesse gelten als verlässlich, sie
+ * sperren schon das Öffnen des Fensters. Zusätzlich als Sicherheitsnetz (zond am Client vorbei
+ * gestartet) die Steuerdatei zur Projektdatei. */
 static gboolean zond_laeuft(DokData *d) {
     SondZondCtlState st = { 0 };
     gboolean laeuft = FALSE;
+
+    if (d->lib_name && sond_zond_prozess_laeuft(d->lib_name))
+        return TRUE;
 
     if (d->projekt_pfad) {
         sond_zond_ctl_read_state(d->projekt_pfad, &st);
@@ -225,9 +251,10 @@ static gboolean zond_laeuft(DokData *d) {
             sond_akte_lease_zond_open(d->lease, d->akte_id));
 }
 
-/* Solange zond das Projekt offen hat oder ein Index-Job läuft, darf der Baum nichts ändern (die
- * Aktionen sind ausgegraut). Fehlt dagegen nur die Schreibberechtigung, bleibt er bedienbar: sie
- * wird bei der Aktion geholt. */
+/* Solange ein Index-Job läuft, darf der Baum nichts ändern (die Aktionen sind ausgegraut). Fehlt
+ * dagegen nur die Schreibberechtigung, bleibt er bedienbar: sie wird bei der Aktion geholt. zond kann
+ * nicht gleichzeitig laufen (der Client öffnet dieses Fenster nur, wenn für die Akte kein zond
+ * läuft); die Prüfung vor jeder Aktion (projekt_modus) bleibt als Sicherheitsnetz. */
 static void sperre_pruefen(DokData *d) {
     gchar const *grund = NULL;
 
@@ -236,9 +263,6 @@ static void sperre_pruefen(DokData *d) {
 
     if (d->job_token)
         grund = "Ein Index-Job läuft. Solange er läuft, sind keine Änderungen möglich.";
-    else if (zond_laeuft(d))
-        grund = "zond hat das Projekt geöffnet. Bitte zond schließen, um Änderungen im "
-                "Dateibaum zu machen.";
 
     sond_treeviewfm_set_read_only(SOND_TREEVIEWFM(d->tree), grund);
     if (d->sperre) {
@@ -1258,6 +1282,18 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     GtkWidget *kopf = NULL;
     GtkWidget *label = NULL;
 
+    //schon offen: nach vorn holen
+    {
+        g_autofree gchar *name = sond_module_akte_library_name(lfd_nr, year);
+        GtkWidget *offen = offene_fenster ? g_hash_table_lookup(offene_fenster, name) : NULL;
+
+        if (offen) {
+            gtk_window_present(GTK_WINDOW(offen));
+
+            return;
+        }
+    }
+
     root = sond_client_find_seadrive_root(client, &error);
     if (!root) {
         meldung(parent, "SeaDrive nicht gefunden", error ? error->message : "unbekannt");
@@ -1444,5 +1480,10 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
 
     //DokData lebt mit dem Fenster
     g_object_set_data_full(G_OBJECT(d->window), "sond-dok", d, dok_free);
+    if (!offene_fenster)
+        offene_fenster = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    g_hash_table_insert(offene_fenster, g_strdup(d->lib_name), d->window);
+    if (offen_func)
+        offen_func(offen_data);
     gtk_window_present(GTK_WINDOW(d->window));
 }
