@@ -914,7 +914,7 @@ static GdkContentProvider* dnd_prepare(GtkDragSource *source, double x, double y
 	(void) y;
 	(void) data;
 
-	if (!view || !item) {
+	if (!view || !item || sond_treeviewfm_get_read_only(view)) {
 		g_clear_object(&item);
 
 		return NULL;
@@ -992,9 +992,14 @@ static gboolean ctrl_pressed(GtkEventController *controller) {
 
 static GdkDragAction dnd_motion(GtkDropTarget *target, double x, double y,
 		gpointer data) {
+	SondTreeviewFM *view = dnd_view_of(GTK_EVENT_CONTROLLER(target));
+
 	(void) x;
 	(void) y;
 	(void) data;
+
+	if (!view || sond_treeviewfm_get_read_only(view))
+		return 0;
 
 	dnd_copy = ctrl_pressed(GTK_EVENT_CONTROLLER(target));
 
@@ -1040,7 +1045,7 @@ static gboolean dnd_drop(GtkDropTarget *target, const GValue *value, double x, d
 	(void) y;
 	(void) data;
 
-	if (!view || !row || !items || dnd_view != view)
+	if (!view || !row || !items || dnd_view != view || sond_treeviewfm_get_read_only(view))
 		return FALSE;
 
 	if ((drag && gdk_drag_get_selected_action(drag) == GDK_ACTION_COPY) ||

@@ -183,6 +183,15 @@ typedef gboolean (*SondTreeviewFMWriteCheckFunc)(gpointer user_data, GError **er
 void sond_treeviewfm_set_write_check(SondTreeviewFM*, SondTreeviewFMWriteCheckFunc func,
 		gpointer user_data);
 
+/* Sperrt alle ändernden Aktionen des Baums (Ausschneiden, Einfügen, Neues Verzeichnis, Umbenennen,
+ * Löschen, Dauerhaft entsperren, Ziehen und Ablegen); Kopieren und Öffnen bleiben. reason ist der
+ * Grund in Worten (z.B. "zond hat das Projekt geöffnet"), NULL hebt die Sperre auf. Die Anwendung
+ * zeigt den Grund an, der Baum selbst nicht. */
+void sond_treeviewfm_set_read_only(SondTreeviewFM*, gchar const *reason);
+
+//Grund der Sperre oder NULL (nicht freigeben)
+gchar const* sond_treeviewfm_get_read_only(SondTreeviewFM*);
+
 /* Entfernt den Passwortschutz der markierten ZIP-Einträge und PDFs dauerhaft (Menüpunkt
  * "Dauerhaft entsperren"): Bestätigung, Passwortabfragen, Ergebnismeldung. Die Dateien werden
  * dabei verändert. */

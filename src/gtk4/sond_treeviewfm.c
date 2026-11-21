@@ -208,6 +208,39 @@ static void update_pin_actions(SondTreeviewFM *self) {
 	}
 }
 
+void sond_treeviewfm_set_read_only(SondTreeviewFM *self, gchar const *reason) {
+	SondTreeviewFMPrivate *priv = NULL;
+	GActionMap *map = NULL;
+	static const gchar *names[] = { "cut", "paste", "paste-same", "paste-child", "mkdir-same",
+			"mkdir-child", "rename", "delete", "unlock" };
+
+	g_return_if_fail(SOND_IS_TREEVIEWFM(self));
+	priv = sond_treeviewfm_get_instance_private(self);
+
+	if (!g_strcmp0(priv->read_only, reason))
+		return;
+
+	g_free(priv->read_only);
+	priv->read_only = g_strdup(reason);
+
+	map = sond_treeview_get_action_map(SOND_TREEVIEW(self));
+	for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+		GAction *action = g_action_map_lookup_action(map, names[i]);
+
+		if (action)
+			g_simple_action_set_enabled(G_SIMPLE_ACTION(action), !priv->read_only);
+	}
+}
+
+gchar const* sond_treeviewfm_get_read_only(SondTreeviewFM *self) {
+	SondTreeviewFMPrivate *priv = NULL;
+
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), NULL);
+	priv = sond_treeviewfm_get_instance_private(self);
+
+	return priv->read_only;
+}
+
 gint sond_treeviewfm_set_root(SondTreeviewFM *self, const gchar *root,
 		GError **error) {
 	SondTreeviewFMPrivate *priv = NULL;
@@ -506,6 +539,7 @@ static void sond_treeviewfm_finalize(GObject *object) {
 #endif
 	g_free(priv->search_text);
 	g_free(priv->root);
+	g_free(priv->read_only);
 
 	G_OBJECT_CLASS(sond_treeviewfm_parent_class)->finalize(object);
 }

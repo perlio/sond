@@ -51,6 +51,7 @@ typedef struct {
 	GtkColumnViewColumn *column_eingang; //nur mit Vfunc get_eingang
 	SondTreeviewFMWriteCheckFunc write_check;
 	gpointer write_check_data;
+	gchar *read_only;           //Grund, solange der Baum nichts ändern darf; sonst NULL
 #ifdef G_OS_WIN32
 	SondSeadriveWatcher *watcher; //nur bei einer Wurzel im SeaDrive-Laufwerk
 	guint refresh_idle;           //gebündelte Auffrischung der Symbole

@@ -26,6 +26,7 @@
 #include "../../gtk4/sond_treeviewfm.h"
 #include "../../sond_client/sond_client.h"
 #include "../../seadrive/sond_seadrive_core.h"
+#include "../../sond_zond_ctl.h"
 #include "../../tvfm/sond_tvfm_status.h"
 #include "../../tvfm/sond_tvfm_index_sync.h"
 #include "../../tvfm/sond_tvfm_unlock.h"
@@ -69,6 +70,7 @@ typedef struct {
     gchar *projekt_pfad;
     gint64 projekt_mtime;      /* Stand der Datei beim letzten Öffnen */
     gint64 projekt_size;
+    GtkWidget *sperre;         /* Hinweis, warum der Baum nichts ändern darf */
     SondProjektPflege *pflege;
     DBaseZond *projekt_schreib; /* nur während eines Änderungsvorgangs offen */
     SondIndexCtx *index_schreib; /* dito */
@@ -207,8 +209,47 @@ static void projekt_pruefen(DokData *d) {
     }
 }
 
+/* Hat zond das Projekt offen? Maßgeblich ist die Steuerdatei zur Projektdatei (sie gilt auch, wenn
+ * zond nicht vom Client gestartet wurde); dazu die vom Client gestarteten Prozesse. */
+static gboolean zond_laeuft(DokData *d) {
+    SondZondCtlState st = { 0 };
+    gboolean laeuft = FALSE;
+
+    if (d->projekt_pfad) {
+        sond_zond_ctl_read_state(d->projekt_pfad, &st);
+        laeuft = st.running;
+        sond_zond_ctl_state_clear(&st);
+    }
+
+    return laeuft || (d->lease && d->akte_id > 0 &&
+            sond_akte_lease_zond_open(d->lease, d->akte_id));
+}
+
+/* Solange zond das Projekt offen hat oder ein Index-Job läuft, darf der Baum nichts ändern (die
+ * Aktionen sind ausgegraut). Fehlt dagegen nur die Schreibberechtigung, bleibt er bedienbar: sie
+ * wird bei der Aktion geholt. */
+static void sperre_pruefen(DokData *d) {
+    gchar const *grund = NULL;
+
+    if (!d->tree)
+        return;
+
+    if (d->job_token)
+        grund = "Ein Index-Job läuft. Solange er läuft, sind keine Änderungen möglich.";
+    else if (zond_laeuft(d))
+        grund = "zond hat das Projekt geöffnet. Bitte zond schließen, um Änderungen im "
+                "Dateibaum zu machen.";
+
+    sond_treeviewfm_set_read_only(SOND_TREEVIEWFM(d->tree), grund);
+    if (d->sperre) {
+        gtk_label_set_text(GTK_LABEL(d->sperre), grund ? grund : "");
+        gtk_widget_set_visible(d->sperre, grund != NULL);
+    }
+}
+
 static gboolean dateien_pruefen(gpointer data) {
     projekt_pruefen(data);
+    sperre_pruefen(data);
 
     return index_pruefen(data);
 }
@@ -1159,7 +1200,7 @@ static gint projekt_modus(DokData *d, GError **error) {
     if (!g_file_test(d->projekt_pfad, G_FILE_TEST_EXISTS))
         return 0;
 
-    if (sond_akte_lease_zond_open(d->lease, d->akte_id)) {
+    if (zond_laeuft(d)) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_BUSY,
                 "zond hat das Projekt dieser Akte geöffnet. Bitte zond schließen, "
                 "danach kann der Dateibaum geändert werden.");
@@ -1600,6 +1641,14 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     label = gtk_label_new("Nur die Projektdateien (Projektdatei, Index) offline verfügbar machen");
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
     gtk_grid_attach(GTK_GRID(kopf), label, 1, 1, 1, 1);
+
+    //Hinweis auf eine Sperre des Baums (zond offen, Index-Job)
+    d->sperre = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(d->sperre), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(d->sperre), TRUE);
+    gtk_widget_add_css_class(d->sperre, "warning");
+    gtk_widget_set_visible(d->sperre, FALSE);
+    gtk_box_append(GTK_BOX(box), d->sperre);
 
     //Baum
     d->tree = sond_treeviewfm_new();
