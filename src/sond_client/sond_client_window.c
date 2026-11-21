@@ -43,6 +43,8 @@ static void on_module_button_clicked(GtkButton *button, SondClientWindow *window
     
     if (module_name) {
         gtk_stack_set_visible_child_name(GTK_STACK(window->main_stack), module_name);
+        if (!g_strcmp0(module_name, "akte"))
+            sond_module_akte_focus_entry(window->module_akte);
     }
 }
 

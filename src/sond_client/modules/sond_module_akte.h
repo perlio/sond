@@ -36,6 +36,14 @@ G_BEGIN_DECLS
 GtkWidget* sond_module_akte_new(SondClient *client);
 
 /**
+ * sond_module_akte_focus_entry:
+ * @module: das Widget aus sond_module_akte_new()
+ *
+ * Setzt den Fokus auf das Auswahlfeld (Registernummer), sofern es aktiv ist.
+ */
+void sond_module_akte_focus_entry(GtkWidget *module);
+
+/**
  * sond_module_akte_find_by_regnr:
  * @client: SondClient
  * @lfd_nr: Laufende Nummer

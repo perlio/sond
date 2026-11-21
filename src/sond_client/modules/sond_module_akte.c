@@ -4665,3 +4665,11 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
 
     return main_box;
 }
+
+void sond_module_akte_focus_entry(GtkWidget *module) {
+    SondModuleAktePrivate *priv = g_object_get_data(G_OBJECT(module), "priv");
+
+    //Entry ist nur im Anfangszustand aktiv; sonst bleibt der Fokus, wo er ist
+    if (priv && gtk_widget_get_sensitive(priv->regnr_entry))
+        gtk_widget_grab_focus(priv->regnr_entry);
+}

@@ -327,6 +327,7 @@ LoginResult* sond_login_dialog_show(GtkWindow *parent,
     
     /* Letzten Username laden und vorschlagen */
     gchar *last_username = load_last_username();
+    gboolean username_vorbelegt = last_username && *last_username;
     if (last_username) {
         gtk_editable_set_text(GTK_EDITABLE(data.username_entry), last_username);
         g_free(last_username);
@@ -364,7 +365,10 @@ LoginResult* sond_login_dialog_show(GtkWindow *parent,
     
     /* Dialog zeigen */
     gtk_window_present(GTK_WINDOW(dialog));
-    
+
+    /* Ist der Benutzername schon vorgeschlagen, fehlt nur noch das Passwort */
+    gtk_widget_grab_focus(username_vorbelegt ? data.password_entry : data.username_entry);
+
     /* Modal Event Loop */
     data.loop = g_main_loop_new(NULL, FALSE);
     g_main_loop_run(data.loop);
