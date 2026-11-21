@@ -348,7 +348,10 @@ GListModel* fm_create_children(SondTreeview *base, gpointer object) {
 
 	(void) base;
 
-	if (item_priv->type != SOND_TVFM_ITEM_TYPE_DIR || !item_priv->has_children)
+	//Blätter und Abschnitte haben Kinder, wenn die Anwendung Abschnitte (Anbindungen) liefert
+	if (!item_priv->has_children || (item_priv->type != SOND_TVFM_ITEM_TYPE_DIR &&
+			item_priv->type != SOND_TVFM_ITEM_TYPE_LEAF &&
+			item_priv->type != SOND_TVFM_ITEM_TYPE_LEAF_SECTION))
 		return NULL;
 
 	//keine Ein-/Ausgabe hier, die Kinder werden erst beim Aufklappen gelesen
