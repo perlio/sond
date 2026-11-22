@@ -268,6 +268,8 @@ static void viewer_dd_signale_verbinden(PdfViewer *pv) {
 				G_CALLBACK(cb_viewer_part_dirty_changed), pv);
 		g_signal_connect(dd->zpdfd_part, "annot-changed",
 				G_CALLBACK(cb_viewer_part_annot_changed), pv);
+		g_signal_connect(dd->zpdfd_part, "page-changed",
+				G_CALLBACK(cb_viewer_part_page_changed), pv);
 	}
 
 	return;
@@ -290,6 +292,11 @@ void viewer_part_praesentieren(PdfViewerSession *session, ZPDFDPart *zpdfd_part)
 
 //vor dem Freigeben der DisplayedDocuments aufrufen
 void viewer_dd_signale_trennen(PdfViewer *pv) {
+	if (pv->idle_layout) {
+		g_source_remove(pv->idle_layout);
+		pv->idle_layout = 0;
+	}
+
 	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
 		g_signal_handlers_disconnect_by_data(dd->zpdfd_part, pv);
 

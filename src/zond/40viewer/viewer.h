@@ -157,6 +157,7 @@ typedef struct _Pdf_Viewer {
 	GArray *arr_rendered;
 	GMutex mutex_arr_rendered;
 	guint idle_source;
+	guint idle_layout; //geplanter Neuaufbau des Layouts (seiten.c)
 	gint count_active_thread;
 
 	PageQuad highlight;

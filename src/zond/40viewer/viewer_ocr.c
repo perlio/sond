@@ -375,8 +375,9 @@ static void seiten_ocr_einpflegen(PdfViewer *pv, PdfDocumentPage *pdf_document_p
 
 	pdf_document_page->thread &= 2;
 
-	//Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
-	viewer_foreach(pv, pdf_document_page, NULL, NULL);
+	//Damit speichern angeht
+	zond_pdf_document_notify_page_changed(pdf_document_page->document, pdf_document_page,
+			ZPDFD_PART_CHANGE_OCR, NULL);
 }
 
 /* TODO (geplant): Auswahl des OCR-Modus, analog "Index erstellen".

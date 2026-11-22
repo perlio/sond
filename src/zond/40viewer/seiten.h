@@ -20,6 +20,10 @@ GPtrArray* seiten_abfrage_seiten(PdfViewer*, const gchar *title, gint *winkel,
  * angepasst): neu laden, Journal-Eintrag, Anzeige. winkel: -90, 90 oder 180. */
 void seiten_drehung_nachfuehren(PdfViewer*, PdfDocumentPage*, gint winkel);
 
+//Handler von "page-changed" der Abschnitte des Viewers
+void cb_viewer_part_page_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page, gint art,
+		gpointer daten, gpointer data);
+
 void cb_pv_seiten_loeschen(GtkMenuItem*, gpointer);
 
 void cb_pv_seiten_einfuegen(GtkMenuItem*, gpointer);

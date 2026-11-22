@@ -264,17 +264,39 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 	return arr_document_pages;
 }
 
-static void seiten_refresh_layouts(GPtrArray *arr_pv) {
-	for (gint i = 0; i < arr_pv->len; i++) {
-		PdfViewer *pv = g_ptr_array_index(arr_pv, i);
+//Layout neu aufbauen, wenn es als geändert gemerkt ist
+static void seiten_refresh_layout(PdfViewer *pv) {
+	if (g_object_get_data(G_OBJECT(pv->layout), "dirty")) {
+		viewer_refresh_layout(pv, 0);
+		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
 
-		if (g_object_get_data(G_OBJECT(pv->layout), "dirty")) {
-			viewer_refresh_layout(pv, 0);
-			g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
-
-			g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
-		}
+		g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
 	}
+
+	return;
+}
+
+static void seiten_refresh_layouts(GPtrArray *arr_pv) {
+	for (gint i = 0; i < arr_pv->len; i++)
+		seiten_refresh_layout(g_ptr_array_index(arr_pv, i));
+
+	return;
+}
+
+static gboolean cb_seiten_layout_idle(gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+
+	pv->idle_layout = 0;
+	if (pv->dd) //Datei im eigenständigen Viewer kann inzwischen geschlossen sein
+		seiten_refresh_layout(pv);
+
+	return G_SOURCE_REMOVE;
+}
+
+//Neuaufbau des Layouts einmalig im Idle einplanen, wenn es als geändert gemerkt ist
+static void seiten_layout_planen(PdfViewer *pv) {
+	if (!pv->idle_layout && g_object_get_data(G_OBJECT(pv->layout), "dirty"))
+		pv->idle_layout = g_idle_add(cb_seiten_layout_idle, pv);
 
 	return;
 }
@@ -421,7 +443,8 @@ void seiten_drehung_nachfuehren(PdfViewer *pv, PdfDocumentPage *pdf_document_pag
 	entry.rotate.winkel = winkel;
 	g_array_append_val(arr_journal, entry);
 
-	viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach, GINT_TO_POINTER(winkel));
+	zond_pdf_document_notify_page_changed(pdf_document_page->document, pdf_document_page,
+			ZPDFD_PART_CHANGE_ROTATED, GINT_TO_POINTER(winkel));
 }
 
 static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
@@ -470,8 +493,6 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 
 		return;
 	}
-
-	seiten_refresh_layouts(pv->session->arr_pv);
 
 	return;
 }
@@ -725,6 +746,47 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
 
 	return 1;
+}
+
+/* Handler von "page-changed" der Abschnitte des Viewers: sucht die Viewer-Seite des Abschnitts und
+ * führt die Änderung nach. Drehen und OCR laufen schon hierüber, Löschen und Einfügen noch über
+ * viewer_foreach. */
+void cb_viewer_part_page_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page, gint art,
+		gpointer daten, gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+	ViewerPageNew *viewer_page = NULL;
+	gint page_pv = 0;
+
+	for (gint i = 0; i < pv->arr_pages->len; i++) {
+		ViewerPageNew *viewer_page_loop = g_ptr_array_index(pv->arr_pages, i);
+
+		if (viewer_page_loop->pdf_document_page == pdf_document_page
+				&& viewer_page_loop->dd->zpdfd_part == zpdfd_part) {
+			viewer_page = viewer_page_loop;
+			page_pv = i;
+
+			break;
+		}
+	}
+
+	if (!viewer_page)
+		return;
+
+	switch (art) {
+	case ZPDFD_PART_CHANGE_ROTATED:
+		seiten_drehen_foreach(pv, viewer_page, page_pv, daten);
+		zpdfd_part_set_dirty(zpdfd_part, TRUE);
+		break;
+	case ZPDFD_PART_CHANGE_OCR:
+		zpdfd_part_set_dirty(zpdfd_part, TRUE);
+		break;
+	default:
+		break;
+	}
+
+	seiten_layout_planen(pv);
+
+	return;
 }
 
 static void cb_pv_seiten_entry(GtkEntry *entry, gpointer button_datei) {

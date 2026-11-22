@@ -1141,7 +1141,7 @@ static void zond_pdf_part_class_init(ZPDFDPartClass *klass) {
 
 	part_signals[PART_PAGE_CHANGED] = g_signal_new("page-changed",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-			G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_INT);
+			G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_INT, G_TYPE_POINTER);
 	part_signals[PART_ANNOT_CHANGED] = g_signal_new("annot-changed",
 			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 			G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
@@ -1203,12 +1203,12 @@ static GPtrArray* zond_pdf_document_parts_der_seite(ZondPdfDocument *zond_pdf_do
 }
 
 void zond_pdf_document_notify_page_changed(ZondPdfDocument *zond_pdf_document,
-		PdfDocumentPage *pdf_document_page, ZPDFDPartChange art) {
+		PdfDocumentPage *pdf_document_page, ZPDFDPartChange art, gpointer data) {
 	GPtrArray *arr = zond_pdf_document_parts_der_seite(zond_pdf_document, pdf_document_page);
 
 	for (guint i = 0; i < arr->len; i++)
 		g_signal_emit(g_ptr_array_index(arr, i), part_signals[PART_PAGE_CHANGED], 0,
-				pdf_document_page, (gint) art);
+				pdf_document_page, (gint) art, data);
 	g_ptr_array_unref(arr);
 
 	return;

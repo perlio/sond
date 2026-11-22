@@ -196,8 +196,8 @@ gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
 
 /* Signale eines Abschnitts (ZPDFDPart):
- *   "page-changed" (PdfDocumentPage*, ZPDFDPartChange): Seite des Abschnitts gedreht, gelöscht,
- *                  eingefügt oder per OCR verändert
+ *   "page-changed" (PdfDocumentPage*, ZPDFDPartChange, gpointer data): Seite des Abschnitts gedreht
+ *                  (data: Winkel), gelöscht, eingefügt oder per OCR verändert
  *   "annot-changed" (PdfDocumentPage*, Annot*): Annotation einer Seite des Abschnitts geändert
  *   "dirty-changed": dirty hat sich geändert
  * Gesendet werden sie vom Dokument über die zond_pdf_document_notify_*-Funktionen an alle
@@ -212,7 +212,8 @@ gboolean zpdfd_part_wird_angezeigt(ZPDFDPart*);
 //Setzt dirty; sendet "dirty-changed" nur bei einer Änderung
 void zpdfd_part_set_dirty(ZPDFDPart*, gboolean);
 
-void zond_pdf_document_notify_page_changed(ZondPdfDocument*, PdfDocumentPage*, ZPDFDPartChange);
+void zond_pdf_document_notify_page_changed(ZondPdfDocument*, PdfDocumentPage*, ZPDFDPartChange,
+		gpointer data);
 
 void zond_pdf_document_notify_annot_changed(ZondPdfDocument*, PdfDocumentPage*, Annot*);
 
