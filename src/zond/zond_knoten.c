@@ -471,3 +471,141 @@ gint zond_knoten_neuer_link(ZondDBase *dbase, gint anchor_id, gboolean child, gi
 
 	return 0;
 }
+
+gint zond_knoten_datei_wurzel_anlegen(ZondDBase *dbase, gchar const *file_part,
+		gchar const *basename_item, gchar const *icon_name, gint *file_root, GError **error) {
+	gchar const *basename = NULL;
+	gint file_root_int = 0;
+
+	if (basename_item)
+		basename = basename_item;
+	else {
+		basename = g_strrstr(file_part, "/");
+		if (basename)
+			basename++; //der Teil nach dem letzten "/"
+		else
+			basename = file_part;
+	}
+
+	if (zond_dbase_create_file_root(dbase, file_part, icon_name, basename, NULL,
+			&file_root_int, error))
+		return -1;
+
+	if (file_root)
+		*file_root = file_root_int;
+
+	return 0;
+}
+
+gint zond_knoten_datei_anlegen(ZondDBase *dbase, gchar const *file_part, gchar const *section,
+		gchar const *label, gchar const *icon_name, gint *file_id, gboolean *angebunden,
+		GError **error) {
+	gint id = 0;
+
+	*angebunden = FALSE;
+
+	if (zond_dbase_get_section(dbase, file_part, section, &id, error))
+		return -1;
+
+	if (!id) { //Datei noch nicht in zond_dbase
+		if (section) { //kann nicht sein!
+			LOG_WARN("%s: Datei nicht in Datenbank, Abschnitt aber schon", __func__);
+
+			return 1;
+		}
+
+		if (zond_knoten_datei_wurzel_anlegen(dbase, file_part, label, icon_name, &id, error))
+			return -1;
+	} else { //nur wenn in der Datenbank, dann möglicherweise im Inhaltsbaum angebunden
+		gint baum_inhalt_file = 0;
+
+		if (zond_dbase_find_baum_inhalt_file(dbase, id, &baum_inhalt_file, NULL, NULL, error))
+			return -1;
+
+		*angebunden = baum_inhalt_file != 0;
+	}
+
+	*file_id = id;
+
+	return 0;
+}
+
+gint zond_knoten_untergeordnete_aufloesen(ZondDBase *dbase, gint file_id, gint *anchor_id,
+		gboolean *child, ZondKnotenFrage frage, gpointer data, GError **error) {
+	gboolean gefragt = FALSE;
+
+	do {
+		gint baum_inhalt_file = 0;
+
+		if (zond_dbase_get_first_baum_inhalt_file_child(dbase, file_id, &baum_inhalt_file,
+				NULL, error))
+			return -1;
+
+		if (!baum_inhalt_file)
+			break;
+
+		if (!gefragt) {
+			if (!frage(data))
+				return 1;
+
+			gefragt = TRUE;
+		}
+
+		//Prüfen, ob man sich den Anker löschen würde
+		if (baum_inhalt_file == *anchor_id) {
+			gint older_sibling = 0;
+
+			//child kann nicht TRUE sein, sonst würde in die Datei eingefügt, was verboten ist;
+			//also der ältere Geschwisterknoten
+			if (zond_dbase_get_older_sibling(dbase, baum_inhalt_file, &older_sibling, error))
+				return -1;
+
+			//sonst der Elternknoten
+			if (!older_sibling) {
+				gint parent = 0;
+
+				if (zond_dbase_get_parent(dbase, baum_inhalt_file, &parent, error))
+					return -1;
+
+				/* parent stammt vom Knoten baum_inhalt_file, der gleich gelöscht wird. Ist
+				 * dieser selbst beschädigt (parent_ID <= 0, Altlast aus einer früheren Version),
+				 * würde die Beschädigung unbemerkt auf den neuen Anker übergehen und beim
+				 * nächsten zond_dbase_insert_node() weitergegeben. Lieber jetzt abbrechen,
+				 * bevor etwas geändert wird. */
+				if (parent <= 0) {
+					if (error)
+						*error = g_error_new(ZOND_ERROR, 0, "%s\n"
+								"Anbindungs-Knoten %d ist beschädigt "
+								"(parent_ID=%d) - Anbinden abgebrochen",
+								__func__, baum_inhalt_file, parent);
+
+					return -1;
+				}
+
+				*anchor_id = parent;
+				*child = TRUE;
+			} else
+				*anchor_id = older_sibling;
+		}
+
+		//die Anbindung des Teils entfernen
+		if (zond_dbase_remove_node(dbase, baum_inhalt_file, error))
+			return -1;
+	} while (1);
+
+	return 0;
+}
+
+gint zond_knoten_anbindung_einfuegen(ZondDBase *dbase, gint anchor_id, gboolean child,
+		gint file_id, gint *id, GError **error) {
+	gint node_id_new = zond_dbase_insert_node(dbase, anchor_id, child,
+			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, file_id, NULL, NULL, NULL, NULL, NULL, error);
+
+	if (node_id_new == -1)
+		return -1;
+
+	if (id)
+		*id = node_id_new;
+
+	return 0;
+}

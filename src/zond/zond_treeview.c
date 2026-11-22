@@ -972,121 +972,43 @@ static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 }
 
 gint zond_treeview_insert_file_part_in_db(Projekt *zond, gchar const *file_part,
-		gchar const* basename_item, gchar const *icon_name, gint *file_root,
+		gchar const *basename_item, gchar const *icon_name, gint *file_root,
 		GError **error) {
-	gint rc = 0;
-	gchar const *basename = NULL;
-	gint file_root_int = 0;
+	return zond_knoten_datei_wurzel_anlegen(zond->proj.dbase_zond->zond_dbase_work,
+			file_part, basename_item, icon_name, file_root, error);
+}
 
-	if (basename_item)
-		basename = basename_item;
-	else {
-		basename = g_strrstr(file_part, "/");
-		if (basename)
-			basename++; //basename ist der Teil nach dem letzten "/"
-		else
-			basename = file_part;
-	}
+typedef struct {
+	ZondTreeview *ztv;
+	InfoWindow *info_window;
+} ChildishCtx;
 
-	rc = zond_dbase_create_file_root(zond->proj.dbase_zond->zond_dbase_work,
-			file_part, icon_name, basename, NULL, &file_root_int, error);
-	if (rc)
-		return -1;
+//Rückfrage, ob schon angebundene Teile der Datei hinzugezogen werden sollen
+static gboolean zond_treeview_childish_frage(gpointer data) {
+	ChildishCtx *ctx = data;
+	gint resp = 0;
 
-	if (file_root)
-		*file_root = file_root_int;
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ctx->ztv);
 
-	return 0;
+	info_window_set_message(ctx->info_window, "...Abschnitt bereits angebunden");
+
+	resp = abfrage_frage(ztv_priv->zond->win.app_window,
+			"Mindestens ein Teil des PDF ist bereits angebunden",
+			"Abschnitt hinzuziehen?", NULL);
+
+	return resp == GTK_RESPONSE_YES;
 }
 
 static gint zond_treeview_remove_childish_anbindungen(ZondTreeview *ztv,
 		InfoWindow *info_window, gint ID, gint *anchor_id, gboolean *child,
 		Anbindung *anbindung, GError **error) {
-	gint resp = 0;
+	ChildishCtx ctx = { ztv, info_window };
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	do {
-		gint rc = 0;
-		gint baum_inhalt_file = 0;
-
-		rc = zond_dbase_get_first_baum_inhalt_file_child(
-				ztv_priv->zond->proj.dbase_zond->zond_dbase_work, ID,
-				&baum_inhalt_file, NULL, error);
-		if (rc)
-			return -1;
-
-		if (!baum_inhalt_file)
-			break;
-
-		//noch nicht gefrägt gehabt?!
-		if (!resp) {
-			info_window_set_message(info_window,
-					"...Abschnitt bereits angebunden");
-
-			resp = abfrage_frage(ztv_priv->zond->win.app_window,
-					"Mindestens ein Teil des PDF ist bereits angebunden",
-					"Abschnitt hinzuziehen?", NULL);
-			if (resp != GTK_RESPONSE_YES)
-				return 1;
-		}
-
-		//Prüfen, ob man sich die anchor_id löschen würde...
-		if (baum_inhalt_file == *anchor_id) {
-			gint rc = 0;
-			gint older_sibling = 0;
-
-			//kann ja nicht child == TRUE sein, weil dann würde ja in Datei eingefügt, was sowieso verboten ist
-			//also dann older sibling
-			rc = zond_dbase_get_older_sibling(
-					ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-					baum_inhalt_file, &older_sibling, error);
-			if (rc)
-				return -1;
-
-					//sonst parent
-			if (!older_sibling) {
-				gint rc = 0;
-				gint parent = 0;
-
-				rc = zond_dbase_get_parent(
-						ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-						baum_inhalt_file, &parent, error);
-				if (rc)
-					return -1;
-
-				/* parent stammt vom Knoten baum_inhalt_file, der gleich
-				 * gelöscht wird - ist dieser Knoten selbst schon beschädigt
-				 * (parent_ID<=0, z.B. Altlast aus einer früheren, mittlerweile
-				 * behobenen Version), würde die Beschädigung hier unbemerkt
-				 * auf den neuen Ankerpunkt übertragen und beim nächsten
-				 * zond_dbase_insert_node() weitergegeben/vervielfältigt.
-				 * Lieber jetzt sauber abbrechen, bevor irgendetwas
-				 * geändert/gelöscht wird. */
-				if (parent <= 0) {
-					if (error)
-						*error = g_error_new(ZOND_ERROR, 0, "%s\n"
-								"Anbindungs-Knoten %d ist beschädigt "
-								"(parent_ID=%d) - Anbinden abgebrochen",
-								__func__, baum_inhalt_file, parent);
-
-					return -1;
-				}
-
-				*anchor_id = parent;
-				*child = TRUE;
-			} else
-				*anchor_id = older_sibling;
-		}
-
-		//BAUM_INHALT_PDF_ABSCHNITT löschen
-		rc = zond_dbase_remove_node(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-				baum_inhalt_file, error);
-		if (rc)
-			return -1;
-	} while (1);
-
-	return 0;
+	return zond_knoten_untergeordnete_aufloesen(
+			ztv_priv->zond->proj.dbase_zond->zond_dbase_work, ID, anchor_id, child,
+			zond_treeview_childish_frage, &ctx, error);
 }
 
 /** Fehler: -1
@@ -1122,7 +1044,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	gint rc = 0;
 	SondFilePart *sfp = NULL;
 	gchar* info_text = NULL;
-	gint baum_inhalt_file = 0;
+	gboolean angebunden = FALSE;
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
@@ -1154,56 +1076,31 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	while (gtk_events_pending())
 		gtk_main_iteration();
 
-	rc = zond_dbase_get_section(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-			filepart, section, &ID_file_part, error);
-	if (rc)
-		return -1;
+	{
+		/* Für die synthetischen Marker-Knoten "Message"/"Pagetree" liefert dies den echten
+		 * Dateinamen (in BAUM_FS bleibt die Anzeige unverändert); für alle anderen Knoten
+		 * eine Kopie von display_name. */
+		gchar *anbinden_label = sond_tvfm_item_get_anbinden_label(stvfm_item);
 
-	if (!ID_file_part) { //Datei noch nicht in zond_dbase
-		gint rc = 0;
-
-		if (section) { //kann nicht sein!
-			LOG_WARN("%s: Datei nicht in Datenbank, Abschnitt aber schon",
-					__func__);
-
-			return 0;
-		}
-
-		//Datei in zond_dbase einfügen
-		{
-			gchar *anbinden_label = NULL;
-
-			/* Für die synthetischen Marker-Knoten "Message"/"Pagetree"
-			 * liefert dies den echten Dateinamen (in BAUM_FS bleibt die
-			 * Anzeige unverändert); für alle anderen Knoten eine Kopie
-			 * von display_name. */
-			anbinden_label = sond_tvfm_item_get_anbinden_label(stvfm_item);
-
-			rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
-					anbinden_label,
-					sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, error);
-			g_free(anbinden_label);
-			if (rc)
-				return -1;
-		}
+		rc = zond_knoten_datei_anlegen(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
+				filepart, section, anbinden_label,
+				sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, &angebunden,
+				error);
+		g_free(anbinden_label);
 	}
-	else { //nur wenn in db, dann möglicherweise in baum_inhalt
-		//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden
-		rc = zond_dbase_find_baum_inhalt_file(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-				ID_file_part, &baum_inhalt_file, NULL, NULL, error);
-		if (rc)
-			return -1;
+	if (rc == -1)
+		return -1;
+	else if (rc == 1)
+		return 0; //Abschnitt einer Datei, die es nicht gibt: kann nicht sein
 
-		if (baum_inhalt_file) {
-			gchar* message = NULL;
+	if (angebunden) {
+		gchar* message = NULL;
 
-			message = g_strdup_printf("filepart '%s' bereits angebunden",
-					filepart);
-			info_window_set_message(info_window, message);
-			g_free(message);
+		message = g_strdup_printf("filepart '%s' bereits angebunden", filepart);
+		info_window_set_message(info_window, message);
+		g_free(message);
 
-			return 0; //Wenn angebunden: nix machen
-		}
+		return 0; //Wenn angebunden: nix machen
 	}
 
 	//etwaige untergeordnete Anbindungen heranholen, falls gewünscht
@@ -1216,11 +1113,8 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 
 	//Anker-Knoten: bewusst ohne icon_name/node_text/text - siehe Erklärung
 	//im Funktionskommentar oben. Belegt nur die Position im knoten-Baum.
-	new_node_id = zond_dbase_insert_node(
-			ztv_priv->zond->proj.dbase_zond->zond_dbase_work, anchor_id, child,
-			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, ID_file_part, NULL, NULL,
-			NULL, NULL, NULL, error);
-	if (new_node_id == -1)
+	if (zond_knoten_anbindung_einfuegen(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
+			anchor_id, child, ID_file_part, &new_node_id, error))
 		return -1;
 
 	//Angezeigt wird ID_file_part (nicht new_node_id!) - dessen icon_name/
@@ -1358,11 +1252,9 @@ static gint zond_treeview_anbinden_item(ZondTreeview *ztv,
 
 		basename = sond_tvfm_item_get_display_name(stvfm_item);
 
-		anchor_id_dir = zond_dbase_insert_node(
-				ztv_priv->zond->proj.dbase_zond->zond_dbase_work, anchor_id, child,
-				ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name, basename,
-				NULL, &error);
-		if (anchor_id_dir == -1) {
+		rc = zond_knoten_neuer_punkt(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
+				anchor_id, child, icon_name, basename, &anchor_id_dir, &error);
+		if (rc) {
 			zond_treeview_anbinden_error_message(info_window, stvfm_item,
 					"Fehler Anbindung filepart '%s':\n%s", error);
 

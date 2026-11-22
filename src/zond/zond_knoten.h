@@ -133,6 +133,35 @@ gint zond_knoten_kopie_anlegen(ZondDBase *dbase, ZondKopie const *kopie, gint an
 gint zond_knoten_neuer_link(ZondDBase *dbase, gint anchor_id, gboolean child, gint ziel_id,
 		gint *id, GError **error);
 
+/* Legt die Wurzel einer Datei (FILE_PART) an. basename_item: Anzeigename, NULL: der Teil von
+ * file_part nach dem letzten "/". Die ID kommt in *file_root. 0 oder -1. */
+gint zond_knoten_datei_wurzel_anlegen(ZondDBase *dbase, gchar const *file_part,
+		gchar const *basename_item, gchar const *icon_name, gint *file_root, GError **error);
+
+/* Vorbereitung zum Anbinden von file_part (und section): Die ID der Datei (bzw. des Abschnitts)
+ * kommt in *file_id; gibt es sie noch nicht, wird sie angelegt (label, icon_name). *angebunden:
+ * ist sie schon im Inhaltsbaum angebunden? 0: weiter, 1: nicht anbindbar (Abschnitt einer Datei,
+ * die es nicht gibt), -1: Fehler. */
+gint zond_knoten_datei_anlegen(ZondDBase *dbase, gchar const *file_part, gchar const *section,
+		gchar const *label, gchar const *icon_name, gint *file_id, gboolean *angebunden,
+		GError **error);
+
+/* Frage, ob schon angebundene Teile der Datei in die neue Anbindung gezogen werden sollen. TRUE:
+ * ja. Wird höchstens einmal gerufen. */
+typedef gboolean (*ZondKnotenFrage)(gpointer data);
+
+/* Nimmt die schon angebundenen Teile der Datei file_id heraus (BAUM_INHALT_FILE-Zeilen, die auf
+ * Abschnitte von ihr zeigen), nach der Frage. Zeigt *anchor_id auf eine davon, rückt der Anker
+ * vor (*anchor_id, *child). 0: erledigt, 1: der Nutzer will nicht, -1: Fehler. */
+gint zond_knoten_untergeordnete_aufloesen(ZondDBase *dbase, gint file_id, gint *anchor_id,
+		gboolean *child, ZondKnotenFrage frage, gpointer data, GError **error);
+
+/* Legt den Anker einer Anbindung (BAUM_INHALT_FILE) an: unter anchor_id (child) oder dahinter,
+ * mit Verweis auf die Datei file_id. Er trägt selbst keinen Text und wird nie angezeigt, er belegt
+ * nur die Stelle im Baum. Die ID kommt in *id. 0 oder -1. */
+gint zond_knoten_anbindung_einfuegen(ZondDBase *dbase, gint anchor_id, gboolean child,
+		gint file_id, gint *id, GError **error);
+
 G_END_DECLS
 
 #endif /* ZOND_KNOTEN_H_INCLUDED */
