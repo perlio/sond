@@ -988,6 +988,17 @@ static GBytes* sond_file_part_zip_read_entry(SondFilePartZip* sfp_zip,
 	return bytes;
 }
 
+/* Voller Pfad einer Datei im Dateisystem: ist path_root gesetzt (Dateibaum in zond), sind die Pfade
+ * root-relativ, sonst (z.B. eigenständiger Viewer) stehen sie schon vollständig da. */
+static gchar* sond_file_part_fs_path(gchar const *path) {
+	gchar const *root = SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
+
+	if (root)
+		return g_strconcat(root, "/", path, NULL);
+
+	return g_strdup(path);
+}
+
 /*
  * Liest Bytes aus dem Quell-Kontext von 'path' in 'sfp_parent'.
  * sfp_parent == NULL: Filesystem
@@ -1399,8 +1410,7 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 		gchar* path = NULL;
 		SondFilePartPrivate* sfp_priv = sond_file_part_get_instance_private(sfp);
 
-		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sfp_priv->path, NULL);
+		path = sond_file_part_fs_path(sfp_priv->path);
 		res = sond_remove(path, error);
 		g_free(path);
 		if (!res)
@@ -1467,8 +1477,7 @@ gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
 		gchar* filename_tmp = NULL;
 		gboolean suc = FALSE;
 
-		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sond_file_part_get_path(sfp), NULL);
+		filename = sond_file_part_fs_path(sond_file_part_get_path(sfp));
 
 		/* Erst in eine temporäre Datei im selben Verzeichnis schreiben (garantiert
 		 * dasselbe Volume für den abschließenden rename) und die Originaldatei
@@ -1668,8 +1677,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 	if (!sfp) { //Datei im Filesystem
 		gchar* path = NULL;
 
-		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(
-				SOND_TYPE_FILE_PART))->path_root, "/", filename, NULL);
+		path = sond_file_part_fs_path(filename);
 
 		if (sond_exists(path)) {
 			g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
@@ -2345,9 +2353,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 
 		/* Filesystem, nur lesend: direkt über zip_open. Long-Path-Support
 		 * kommt über sond_fopen() (s.u.), das ist bereits erledigt. */
-		gchar* full_path = g_strconcat(
-				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sond_file_part_get_path(SOND_FILE_PART(sfp_zip)), NULL);
+		gchar* full_path = sond_file_part_fs_path(sond_file_part_get_path(SOND_FILE_PART(sfp_zip)));
 		FILE* f = sond_fopen(full_path, "rb", error);
 		g_free(full_path);
 		if (!f)
@@ -3028,9 +3034,7 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 		/* Filesystem: Long-Path-Support via sond_pdf_open_file - seekable,
 		 * daher unabhängig davon geeignet, ob doc verändert wird oder
 		 * nicht (s. Doc-Kommentar oben) */
-		gchar* full_path = g_strconcat(
-				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", path, NULL);
+		gchar* full_path = sond_file_part_fs_path(path);
 		stream = sond_pdf_open_file(ctx, full_path, error);
 		g_free(full_path);
 		if (!stream)
@@ -3886,9 +3890,7 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 
 	if (!sfp_parent && !persist) {
 		/* Filesystem: direkt über GMimeStream, ohne Zwischenpuffer */
-		gchar* full_path = g_strconcat(
-				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sond_file_part_get_path(SOND_FILE_PART(sfp_gmessage)), NULL);
+		gchar* full_path = sond_file_part_fs_path(sond_file_part_get_path(SOND_FILE_PART(sfp_gmessage)));
 		FILE* f = sond_fopen(full_path, "rb", error);
 		g_free(full_path);
 		if (!f)
@@ -4205,9 +4207,7 @@ gint sond_file_part_open_external(SondFilePart* sfp, gboolean open_with,
 	g_return_val_if_fail(sfp, -1);
 
 	if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
-		path = g_strconcat(SOND_FILE_PART_CLASS(
-				g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sond_file_part_get_path(sfp), NULL);
+		path = sond_file_part_fs_path(sond_file_part_get_path(sfp));
 	else { //Datei in zip/pdf/gmessage
 		path = sond_file_part_write_to_tmp_file(sfp, TRUE, error);
 		if (!path)
