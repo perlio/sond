@@ -276,13 +276,6 @@ static void seiten_refresh_layout(PdfViewer *pv) {
 	return;
 }
 
-static void seiten_refresh_layouts(GPtrArray *arr_pv) {
-	for (gint i = 0; i < arr_pv->len; i++)
-		seiten_refresh_layout(g_ptr_array_index(arr_pv, i));
-
-	return;
-}
-
 static gboolean cb_seiten_layout_idle(gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -500,38 +493,6 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 /*
  **      Seiten löschen
  */
-static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
-		gint page_pv, gpointer data) {
-	GtkTreeIter iter = { 0 };
-
-	//highlights und Markierungen Text löschen
-	pv->highlight.page[0] = -1;
-	pv->text_occ.index_act = -1;
-	//page_act mit zurücksetzen - Seitennummern verschieben sich durch das
-	//Löschen, arr_quad/page_act könnten sich sonst auf die falsche Seite
-	//beziehen
-	pv->text_occ.page_act = -1;
-	viewer_text_search_cancel(pv);
-	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-
-	viewer_close_thread_pool_and_transfer(pv);
-
-	if (viewer_page->image_page)
-		gtk_widget_destroy(viewer_page->image_page);
-
-	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird g_freed!
-
-	viewer_get_iter_thumb(pv, page_pv, &iter);
-
-	gtk_list_store_remove(GTK_LIST_STORE(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(pv->tree_thumb))), &iter);
-
-	//pv muß neues layout haben!
-	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
-
-	return 1;
-}
-
 /* Kann nicht scheitern (kein Rückgabewert/GError**, im Unterschied zu
  * seiten_anbindung()) - Seiten werden hier immer entweder gelöscht oder
  * (letzte verbliebene Seite der Datei) übersprungen, beides ohne
@@ -564,53 +525,21 @@ static void seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page) {
 		pdf_document_page->deleted = TRUE; //als zu löschend markieren
 		page_deleted = TRUE;
 
-		//Seite wird aus pv->arr_pages gelöscht
-		viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
-				NULL);
-
 		arr_journal = zond_pdf_document_get_arr_journal(pdf_document_page->document);
 
 		entry.pdf_document_page = pdf_document_page;
 		entry.type = JOURNAL_TYPE_PAGE_DELETED;
 
 		g_array_append_val(arr_journal, entry);
+
+		//Abschnitte, die die Seite umfassen, nehmen sie aus ihren Viewern
+		zond_pdf_document_notify_page_changed(pdf_document_page->document, pdf_document_page,
+				ZPDFD_PART_CHANGE_DELETED, NULL);
 	}
 
 	if (page_deleted) {
-		seiten_refresh_layouts(pv->session->arr_pv);
-
 		gtk_tree_selection_unselect_all(
 				gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)));
-
-		/* Ein oder mehrere geöffnete Viewer können durch das Löschen jetzt
-		 * keine einzige Seite mehr anzeigen (der komplette angezeigte
-		 * Abschnitt wurde leergelöscht) - so ein Viewer ist kein sinnvoller
-		 * Zustand mehr und wird geschlossen. viewer_schliessen() statt
-		 * viewer_save_and_close(): kein "Speichern?"-Dialog nötig, weil die
-		 * Journal-Einträge (inkl. dieser Löschung) am zond_pdf_document
-		 * hängen, nicht am Viewer-Fenster - sie bleiben erhalten und werden
-		 * beim nächsten Speichern über irgendeinen anderen offenen Viewer
-		 * (oder das Projekt) auf diesem Dokument ohnehin berücksichtigt.
-		 * Rückwärts iterieren, weil viewer_schliessen() seinen pv per
-		 * g_ptr_array_remove_fast() aus arr_pv entfernt (tauscht das letzte
-		 * Element in die Lücke - Vorwärtsiteration würde das nachgerückte
-		 * Element überspringen).
-		 *
-		 * Das kann auch den hier übergebenen pv selbst schließen (und
-		 * freigeben) - beide Aufrufer (cb_pv_seiten_loeschen()/
-		 * cb_seiten_ausschneiden()) fassen pv danach nicht mehr an, das ist
-		 * also unkritisch. Über cb_pv_seiten_loeschen() (mit vorgeschalteter
-		 * seiten_anbindung()-Prüfung) dürfte das für den aufrufenden pv
-		 * praktisch nicht vorkommen, so lange dessen dd über eine noch
-		 * bestehende Anbindung geöffnet wurde; cb_seiten_ausschneiden() ruft
-		 * seiten_anbindung() dagegen gar nicht auf, dort ist dieser Fall
-		 * für den aufrufenden pv also durchaus real erreichbar. */
-		for (gint p = (gint) pv->session->arr_pv->len - 1; p >= 0; p--) {
-			PdfViewer *pv_test = g_ptr_array_index(pv->session->arr_pv, p);
-
-			if (pv_test->arr_pages->len == 0)
-				viewer_schliessen(pv_test);
-		}
 	}
 
 	return;
@@ -650,8 +579,6 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 
 	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
-	//seiten_loeschen() kann pv selbst geschlossen haben (s. dortiger
-	//Kommentar) - pv wird deshalb hier bewusst nicht mehr angefasst
 
 	return;
 }
@@ -748,9 +675,45 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	return 1;
 }
 
+//Seite aus dem Viewer nehmen (Seitenfläche, Vorschau, Suche); das Layout wird gemerkt, nicht neu aufgebaut
+static void seiten_viewer_seite_entfernen(PdfViewer *pv, ViewerPageNew *viewer_page, gint page_pv) {
+	GtkTreeIter iter = { 0 };
+
+	//Markierungen und Textsuche zurücksetzen; die Seitennummern verschieben sich
+	pv->highlight.page[0] = -1;
+	pv->text_occ.index_act = -1;
+	pv->text_occ.page_act = -1;
+	viewer_text_search_cancel(pv);
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+
+	viewer_close_thread_pool_and_transfer(pv);
+
+	if (viewer_page->image_page)
+		gtk_widget_destroy(viewer_page->image_page);
+
+	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird g_freed!
+
+	viewer_get_iter_thumb(pv, page_pv, &iter);
+	gtk_list_store_remove(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(pv->tree_thumb))),
+			&iter);
+
+	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
+
+	return;
+}
+
+static gboolean cb_seiten_schliessen_idle(gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+
+	pv->idle_schliessen = 0;
+	if (pv->arr_pages->len == 0)
+		viewer_schliessen(pv);
+
+	return G_SOURCE_REMOVE;
+}
+
 /* Handler von "page-changed" der Abschnitte des Viewers: sucht die Viewer-Seite des Abschnitts und
- * führt die Änderung nach. Drehen und OCR laufen schon hierüber, Löschen und Einfügen noch über
- * viewer_foreach. */
+ * führt die Änderung nach. Bei INSERTED ist daten ein DataInsert, die Seite die Bezugsseite. */
 void cb_viewer_part_page_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page, gint art,
 		gpointer daten, gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
@@ -779,6 +742,17 @@ void cb_viewer_part_page_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_pa
 		break;
 	case ZPDFD_PART_CHANGE_OCR:
 		zpdfd_part_set_dirty(zpdfd_part, TRUE);
+		break;
+	case ZPDFD_PART_CHANGE_DELETED:
+		seiten_viewer_seite_entfernen(pv, viewer_page, page_pv);
+		zpdfd_part_set_dirty(zpdfd_part, TRUE);
+		//ein Viewer ohne Seiten ist sinnlos; im Signal selbst nicht schließen, daher im Idle
+		if (pv->arr_pages->len == 0 && !pv->idle_schliessen)
+			pv->idle_schliessen = g_idle_add(cb_seiten_schliessen_idle, pv);
+		break;
+	case ZPDFD_PART_CHANGE_INSERTED:
+		if (seiten_einfuegen_foreach(pv, viewer_page, page_pv, daten))
+			zpdfd_part_set_dirty(zpdfd_part, TRUE);
 		break;
 	default:
 		break;
@@ -980,11 +954,9 @@ static void seiten_einfuegen_ausfuehren(PdfViewer *pv, ViewerPageNew *viewer_pag
 	entry.pages_inserted.zpdfd_part = zpdfd_part_ref(viewer_page->dd->zpdfd_part);
 
 	//viewer_page->pdf_document_page ist - wenn nicht Einfügen nach letzter Seite -
-	//im zond_pdf_document nach hinten gerutscht
-	viewer_foreach(pv, viewer_page->pdf_document_page,
-			seiten_einfuegen_foreach, &data_insert); //seiten_einfügen_foreach gibt nie Fehler zurück
-
-	seiten_refresh_layouts(pv->session->arr_pv);
+	//im zond_pdf_document nach hinten gerutscht; die Abschnitte, die sie umfassen, fügen ein
+	zond_pdf_document_notify_page_changed(viewer_page->dd->zpdfd_part->zond_pdf_document,
+			viewer_page->pdf_document_page, ZPDFD_PART_CHANGE_INSERTED, &data_insert);
 
 	//erste eingefügte Seite!
 	entry.pdf_document_page =
@@ -1140,8 +1112,6 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 	g_array_unref(arr_page_pv);
 	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
-	//seiten_loeschen() kann pv selbst geschlossen haben (s. dortiger
-	//Kommentar) - pv wird deshalb hier bewusst nicht mehr angefasst.
 	//Anders als cb_pv_seiten_loeschen() wird vorher keine
 	//seiten_anbindung()-Prüfung gemacht - "Ausschneiden" kann also auch
 	//Seiten entfernen, die Anbindungen tragen. Falls das nicht gewollt

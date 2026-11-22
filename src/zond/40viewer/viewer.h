@@ -158,6 +158,7 @@ typedef struct _Pdf_Viewer {
 	GMutex mutex_arr_rendered;
 	guint idle_source;
 	guint idle_layout; //geplanter Neuaufbau des Layouts (seiten.c)
+	guint idle_schliessen; //geplantes Schließen, wenn keine Seite mehr da ist (seiten.c)
 	gint count_active_thread;
 
 	PageQuad highlight;
@@ -206,9 +207,5 @@ void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
  * viewer_search.h */
 
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
-
-void viewer_foreach(PdfViewer*, PdfDocumentPage*,
-		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),
-		gpointer);
 
 #endif // VIEWER_H_INCLUDED

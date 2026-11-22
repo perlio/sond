@@ -296,6 +296,10 @@ void viewer_dd_signale_trennen(PdfViewer *pv) {
 		g_source_remove(pv->idle_layout);
 		pv->idle_layout = 0;
 	}
+	if (pv->idle_schliessen) {
+		g_source_remove(pv->idle_schliessen);
+		pv->idle_schliessen = 0;
+	}
 
 	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
 		g_signal_handlers_disconnect_by_data(dd->zpdfd_part, pv);
@@ -384,41 +388,6 @@ void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry) {
 	}
 
 	gtk_widget_grab_focus(pv->layout);
-
-	return;
-}
-
-void viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
-		gint (*cb_foreach_pv)(PdfViewer*, ViewerPageNew*, gint,
-				gpointer), gpointer data) {
-	for (gint p = 0; p < pdfv->session->arr_pv->len; p++) {
-		gboolean dirty = FALSE;
-
-		PdfViewer *pv_vergleich = g_ptr_array_index(pdfv->session->arr_pv, p);
-
-		for (gint i = 0; i < pv_vergleich->arr_pages->len; i++) {
-			ViewerPageNew* viewer_page = NULL;
-			DisplayedDocument* dd = NULL;
-
-			viewer_page = g_ptr_array_index(pv_vergleich->arr_pages, i);
-			dd = viewer_page->dd;
-
-			if (pdf_document_page == viewer_page->pdf_document_page) {
-				if (cb_foreach_pv) {
-					gint rc = 0;
-
-					rc = cb_foreach_pv(pv_vergleich, viewer_page, i, data);
-					if (rc) dirty = TRUE;
-				} else dirty = TRUE;
-
-				if (dirty) //auch dd auf dirty setzen; "dirty-changed" schaltet den Speichern-Knopf
-					zpdfd_part_set_dirty(dd->zpdfd_part, TRUE);
-
-				break;
-			}
-		}
-
-	}
 
 	return;
 }

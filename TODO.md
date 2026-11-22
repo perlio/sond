@@ -101,7 +101,7 @@ Status: offen (Voraussetzung: GTK4-Gegenstücke)
 
 ### #257 Viewer weiter aufräumen
 
-Status: Stufe 1 erledigt, Stufe 2 offen (Plan steht, noch nicht begonnen)
+Status: Stufe 1 erledigt, Stufe 2 umgesetzt (Schritte 1 bis 5), Test durch den Nutzer steht aus
 
 ```text
  Stufe 1 (erledigt, Verhalten unverändert): lange Funktionen aufgeteilt: viewer_do_save_dd,
@@ -118,21 +118,14 @@ Status: Stufe 1 erledigt, Stufe 2 offen (Plan steht, noch nicht begonnen)
  Entscheidung: Die Signale gehen von den Abschnitten (Parts) aus, ausgelöst vom Dokument. Das
  Dokument geht über seine Parts, jeder betroffene Part sendet (Filter: Seite im Bereich, an den
  Randseiten Annotation im Zuschnitt). Der Viewer abonniert die Parts seiner dd-Kette.
- Schritte:
- 0 Testfälle: zwei Viewer auf demselben PDF, zwei Abschnitte mit Überlappung an einer Randseite,
-   Abschnitt neben dem ganzen Dokument.
- 1 ZPDFDPart wird ein kleines GObject (ref/drop werden g_object_ref/unref). Signale page-changed
-   (Seite, Art: Drehen, Löschen, Einfügen, OCR), annot-changed, dirty-changed, closing. Im Dokument
-   zond_pdf_document_notify_*. Noch ohne Abonnenten, die alten Wege laufen weiter.
- 2 Dirty und Speichern-Knopf über dirty-changed; document_reset_dirty und die Schleife in
-   viewer_save.c entfallen.
- 3 Annotationen: viewer_annot_foreach_changed wird Handler von annot-changed; annot_verschiebung_
-   pruefen läuft über die Parts des Dokuments statt über arr_pv.
- 4 Seiten (Drehen, OCR, Löschen, Einfügen): die Callbacks in seiten.c und viewer_ocr.c werden
-   Handler von page-changed, je Callback ein Commit; seiten_refresh_layouts wird ein einmaliges
-   Neuaufbauen im Idle nach allen Handlern.
- 5 viewer_foreach entfällt; arr_pv bleibt für "zuletzt geöffneter Viewer" (Indexsuche), "Fenster
-   zum Dokument" (zond_treeview) und "alle schließen" (project.c).
+ Umgesetzt (Schritte 1 bis 5): ZPDFDPart ist ein GObject mit den Signalen page-changed (Drehen,
+ Löschen, Einfügen, OCR), annot-changed und dirty-changed; das Dokument verteilt über
+ zond_pdf_document_notify_*. Der Viewer abonniert die Abschnitte seiner dd-Kette
+ (viewer_dd_signale_verbinden/_trennen). Dirty und Speichern-Knopf, Annotationen, Drehen, OCR,
+ Löschen und Einfügen laufen über Handler (seiten.c, viewer_annot.c, viewer.c); viewer_foreach und
+ seiten_refresh_layouts sind entfallen, das Layout wird im Idle neu aufgebaut, leere Viewer
+ schließen im Idle. arr_pv bleibt für "zuletzt geöffneter Viewer" (Indexsuche), "Fenster zum
+ Dokument" (zond_treeview) und "alle schließen" (project.c).
  Heikel: Der auslösende Viewer wird heute selbst mitaktualisiert, die Handler müssen das auch für
  ihn tun. Das Schließen eines Viewers (letzte Seite eines Abschnitts gelöscht) nur im Idle, nicht
  im Signal. Beim Einfügen zuerst die Abschnittsgrenzen anpassen (seiten_einfuegen_foreach), dann
