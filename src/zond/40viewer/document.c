@@ -214,40 +214,30 @@ gboolean document_has_dirty(PdfViewer* pv) {
 	return FALSE;
 }
 
-/* dirty-Status aller Abschnitte aller offenen Viewer neu aus dem Journal
- * herleiten. */
+/* dirty-Status aller Abschnitte der Dokumente, die der Viewer anzeigt, neu aus dem Journal
+ * herleiten (auch die Abschnitte in anderen Viewern: das Journal gehört zum Dokument). */
 void document_reset_dirty(PdfViewer* pdfv) {
-	for (guint i = 0; i < pdfv->session->arr_pv->len; i++) {
-		PdfViewer* pdfv_test = NULL;
-		DisplayedDocument* dd = NULL;
+	DisplayedDocument* dd = pdfv->dd;
 
-		pdfv_test = g_ptr_array_index(pdfv->session->arr_pv, i);
-		dd = pdfv_test->dd;
+	do {
+		GPtrArray* arr_parts = zond_pdf_document_get_arr_parts(dd->zpdfd_part->zond_pdf_document);
+		GArray* arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
 
-		do {
-			GArray* arr_journal = NULL;
+		for (guint i = 0; i < arr_parts->len; i++) {
+			ZPDFDPart* zpdfd_part = g_ptr_array_index(arr_parts, i);
 			gboolean in_dd = FALSE;
 
-			arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-
 			for (guint u = 0; u < arr_journal->len; u++) {
-				JournalEntry entry = { 0 };
+				JournalEntry entry = g_array_index(arr_journal, JournalEntry, u);
 
-				entry = g_array_index(arr_journal, JournalEntry, u);
-
-				in_dd = document_entry_in_dd(&entry, dd->zpdfd_part);
+				in_dd = document_entry_in_dd(&entry, zpdfd_part);
 				if (in_dd)
 					break;
 			}
 
-			if (!in_dd)
-				dd->zpdfd_part->dirty = FALSE;
-			else
-				dd->zpdfd_part->dirty = TRUE;
-
-			dd = dd->next;
-		} while (dd);
-	}
+			zpdfd_part_set_dirty(zpdfd_part, in_dd);
+		}
+	} while ((dd = dd->next));
 
 	return;
 }

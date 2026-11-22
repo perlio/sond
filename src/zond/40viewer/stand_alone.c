@@ -112,6 +112,7 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 	gtk_layout_set_size(GTK_LAYOUT(pv->layout), 0, 0);
 
 	if (pv->dd) {
+		viewer_dd_signale_trennen(pv);
 		document_free_displayed_documents(pv->dd);
 		pv->dd = NULL;
 	}

@@ -190,6 +190,9 @@ void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
 void viewer_schliessen(PdfViewer*);
 
+//Abonnement der Abschnitte (dirty-changed) beenden, vor document_free_displayed_documents()
+void viewer_dd_signale_trennen(PdfViewer*);
+
 /* viewer_save_dirty_dds()/viewer_save_and_close(): siehe viewer_save.h */
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);

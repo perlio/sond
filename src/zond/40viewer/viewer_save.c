@@ -480,23 +480,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 	pdf_viewer_session_save_done(pdfv->session, pdfv);
 
-	/* dirty-Status aller dd's alle offenen pvs einmalig aus dem (jetzt
-	 * bereinigten) Journal neu herleiten. document_reset_dirty() geht
-	 * dafür intern ohnehin schon über pdfv->session->arr_pv, also über ALLE
-	 * offenen pvs - das Ergebnis hängt gar nicht vom übergebenen pdfv ab.
-	 * Ein einziger Aufruf genügt daher (vorher wurde hier dieselbe,
-	 * für alle pvs identische Arbeit pro offenem pv redundant wiederholt). */
+	/* dirty-Status aller Abschnitte der gespeicherten Dokumente aus dem (jetzt bereinigten)
+	 * Journal neu herleiten; über "dirty-changed" schalten die Viewer ihren Speichern-Knopf. */
 	document_reset_dirty(pdfv);
-
-	//Bei allen sauberen pvs Speichern insensitiv
-	for (gint i = 0; i < pdfv->session->arr_pv->len; i++) {
-		PdfViewer *pdfv_test = NULL;
-
-		pdfv_test = g_ptr_array_index(pdfv->session->arr_pv, i);
-
-		if (!document_has_dirty(pdfv_test))
-			gtk_widget_set_sensitive(pdfv_test->button_speichern, FALSE);
-	}
 
 	return 0;
 }

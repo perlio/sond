@@ -248,11 +248,42 @@ void viewer_springen_zu_pos_pdf_idle(PdfViewer *pv, PdfPos pdf_pos,
 	return;
 }
 
+//Speichern-Knopf ist aktiv, wenn ein angezeigter Abschnitt geändert ist
+static void viewer_speichern_aktualisieren(PdfViewer *pv) {
+	gtk_widget_set_sensitive(pv->button_speichern, document_has_dirty(pv));
+
+	return;
+}
+
+static void cb_viewer_part_dirty_changed(ZPDFDPart *zpdfd_part, gpointer data) {
+	viewer_speichern_aktualisieren((PdfViewer*) data);
+
+	return;
+}
+
+//Abschnitte des Viewers abonnieren
+static void viewer_dd_signale_verbinden(PdfViewer *pv) {
+	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
+		g_signal_connect(dd->zpdfd_part, "dirty-changed",
+				G_CALLBACK(cb_viewer_part_dirty_changed), pv);
+
+	return;
+}
+
+//vor dem Freigeben der DisplayedDocuments aufrufen
+void viewer_dd_signale_trennen(PdfViewer *pv) {
+	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
+		g_signal_handlers_disconnect_by_data(dd->zpdfd_part, pv);
+
+	return;
+}
+
 void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		gint index) {
 	PdfPos pdf_pos = { page, index };
 
 	pv->dd = dd;
+	viewer_dd_signale_verbinden(pv);
 
 	viewer_create_layout(pv);
 
@@ -262,8 +293,7 @@ void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
 
 	//Test, ob in Viewer "schmutzige" dds angezeigt werden sollen - dann speichern-icon aktiv
-	if (document_has_dirty(pv))
-		gtk_widget_set_sensitive(pv->button_speichern, TRUE);
+	viewer_speichern_aktualisieren(pv);
 
 	gtk_widget_grab_focus(pv->layout);
 
@@ -291,6 +321,8 @@ void viewer_schliessen(PdfViewer *pv) {
 	g_clear_object(&pv->cursor_vtext);
 	g_clear_object(&pv->cursor_grab);
 	g_clear_object(&pv->cursor_annot);
+
+	viewer_dd_signale_trennen(pv);
 
 	gtk_widget_destroy(pv->vf);
 
@@ -354,15 +386,13 @@ void viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 					if (rc) dirty = TRUE;
 				} else dirty = TRUE;
 
-				if (dirty) //auch dd auf dirty setzen
-					dd->zpdfd_part->dirty = TRUE;
+				if (dirty) //auch dd auf dirty setzen; "dirty-changed" schaltet den Speichern-Knopf
+					zpdfd_part_set_dirty(dd->zpdfd_part, TRUE);
 
 				break;
 			}
 		}
 
-		if (dirty) //gilt für's pv
-			gtk_widget_set_sensitive(pv_vergleich->button_speichern, TRUE);
 	}
 
 	return;

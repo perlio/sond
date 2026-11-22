@@ -982,6 +982,14 @@ zond_pdf_document_get_arr_journal(ZondPdfDocument const *self) {
 	return priv->arr_journal;
 }
 
+GPtrArray*
+zond_pdf_document_get_arr_parts(ZondPdfDocument const *self) {
+	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
+			(ZondPdfDocument*) self);
+
+	return priv->arr_zpdf_parts;
+}
+
 PdfDocumentPage*
 zond_pdf_document_get_pdf_document_page(ZondPdfDocument *self, gint page_doc) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);

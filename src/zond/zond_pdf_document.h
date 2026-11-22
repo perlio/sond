@@ -173,6 +173,9 @@ GPtrArray* zond_pdf_document_get_arr_pages(ZondPdfDocument const*);
 
 GArray* zond_pdf_document_get_arr_journal(ZondPdfDocument const*);
 
+//Alle Abschnitte (ZPDFDPart*) des Dokuments, auch die in fremden Viewern; keine neue ref
+GPtrArray* zond_pdf_document_get_arr_parts(ZondPdfDocument const*);
+
 PdfDocumentPage* zond_pdf_document_get_pdf_document_page(ZondPdfDocument*, gint);
 
 gint zond_pdf_document_get_number_of_pages(ZondPdfDocument*);
