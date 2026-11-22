@@ -6112,3 +6112,27 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Verweisen auf misc.c/misc.h nachgezogen. Geprüft: Syntax aller 38 geänderten Dateien (GTK3),
  Client-Build (GTK4, baut misc_stdlib.c), zond und viewer gebaut und getestet.
 ```
+
+## OCR: Drehung im Journal, Wörter in Leserichtung (22.11.2026)
+
+```text
+ Fehler 1: Hielt Tesseract (OSD) eine Seite für falsch ausgerichtet, drehte sond_ocr_osd() sie selbst
+ (pdf_page_rotate auf dem Seitenobjekt im offenen Dokument) und legte den Textlayer für die
+ gedrehte Seite an. Die Drehung blieb ohne Journal-Eintrag und ging beim Speichern verloren:
+ Seite im Querformat, OCR-Text im Hochformat, auch bei wiederholtem "Neu OCRen". Jetzt liest
+ cb_pv_seiten_ocr /Rotate vor und nach der OCR jeder Seite und führt die Differenz wie eine
+ Drehung im Viewer nach (neu seiten_drehung_nachfuehren() in seiten.c, aus seiten_drehen
+ herausgezogen: Seite neu laden, Journal-Eintrag JOURNAL_TYPE_ROTATE, Layout kippen), auch wenn die
+ OCR danach scheitert. Schon falsch gespeicherte Seiten bleiben, "Neu OCRen" speichert sie richtig.
+ Fehler 2: Beim Markieren und Kopieren fehlten Zeilen in der Mitte, andere Programme zeigten
+ dasselbe. MuPDF wählt nach der Reihenfolge der Zeichen im Stream (von Start- bis Endzeichen), die
+ OCR schrieb die Wörter in der Reihenfolge der Layout-Analyse von Tesseract (PSM_AUTO), und die
+ liefert Blöcke nicht immer von oben nach unten (Messung an einer Testseite: zwei Sprünge nach
+ oben; PSM_SINGLE_COLUMN ordnet richtig, erkennt aber weniger Zeilen, deshalb nicht übernommen).
+ tesseract_to_content_stream() sammelt jetzt die Wörter, ordnet die Textzeilen (ocr_zeilen_ordnen:
+ von oben nach unten, gleich hohe Zeilen von links nach rechts, auffällig hohe Zeilen allein; bei
+ erkannten Spalten, ocr_mehrspaltig, bleibt die Reihenfolge von Tesseract) und schreibt sie in
+ dieser Reihenfolge. Schon OCRte Seiten brauchen "Neu OCRen", indizierte danach neues Indizieren.
+ Ausserdem: seiten_ocr_font meldet den Fehler von pdf_to_num jetzt mit Text, ein bei gescheiterter
+ OCR übernommener Buffer wird freigegeben.
+```

@@ -106,7 +106,8 @@ Status: offen
 ```text
  Stufe 1: lange Funktionen aufteilen. Erledigt: viewer_do_save_dd (320 Zeilen, jetzt rund 60,
  dazu viewer_save_seite_vorbereiten, _eintrag, _journal_einpflegen, _annots_loeschen,
- _journal_bereinigen, _buchfuehrung_nachziehen). Offen (über 120 Zeilen): cb_pv_seiten_ocr (314),
+ _journal_bereinigen, _buchfuehrung_nachziehen) und cb_pv_seiten_ocr (314 Zeilen, jetzt 139, dazu
+ seiten_ocr_seite_laden, _modus, _font, _ausfuehren, _einpflegen). Offen (über 120 Zeilen):
  viewer_einrichten_fenster (269), viewer_handle_layout_motion_notify (219),
  viewer_highlight_at_char_pos (185), viewer_handle_button_press (172),
  viewer_annot_handle_release_clicked_annot (162), cb_pv_seiten_einfuegen (158),
