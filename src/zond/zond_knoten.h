@@ -82,6 +82,25 @@ gint zond_knoten_neuer_punkt(ZondDBase *dbase, gint anchor_id, gboolean child,
 gint zond_knoten_verschieben(ZondDBase *dbase, gint node_id, gboolean in_inhalt,
 		gint anchor_id, gboolean child, gint *moved_id, GError **error);
 
+/* Zeigt von außerhalb ein Link auf den Knoten node_id oder einen Nachkommen? Dann würde das
+ * Löschen per Kaskade den Link und dessen jüngere Geschwister mitreißen. 2: ja, 0: nein,
+ * -1: Fehler. Muss vor jeder Änderung an Baum oder Datenbank stehen. */
+gint zond_knoten_extern_verlinkt(ZondDBase *dbase, gint node_id, GError **error);
+
+/* Prüft, ob der Knoten node_id (kein Strukturpunkt, im Inhaltsbaum) gelöscht werden darf, und
+ * welche Zeile dabei tatsächlich gelöscht wird: für einen angebundenen FILE_PART seine Anbindung
+ * (*baum_inhalt_file, sonst 0). 0: löschen, 1: nicht löschen (als Copy angebunden oder kopiert),
+ * 2: extern verlinkt, -1: Fehler. */
+gint zond_knoten_loeschpruefung(ZondDBase *dbase, gint node_id, gint type,
+		gint *baum_inhalt_file, GError **error);
+
+/* Löst den Knoten node_id auf, in einer Transaktion: die Kinder rücken an seine Stelle, bei einem
+ * angebundenen FILE_PART werden sie zu eigenen Anbindungen, dann wird er (bzw. seine Anbindung)
+ * entfernt. *baum_inhalt_file: die Anbindungszeile, falls er angebunden war, sonst 0. 0: erledigt,
+ * 1: nicht aufgelöst (als Copy angebunden), -1: Fehler. */
+gint zond_knoten_aufloesen(ZondDBase *dbase, gint node_id, gint type, gint *baum_inhalt_file,
+		GError **error);
+
 G_END_DECLS
 
 #endif /* ZOND_KNOTEN_H_INCLUDED */

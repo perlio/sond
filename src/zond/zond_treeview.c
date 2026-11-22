@@ -2185,24 +2185,6 @@ static gboolean zond_treeview_node_still_linked(GtkTreeIter *iter) {
 	return FALSE;
 }
 
-/* Wie zond_treeview_node_still_linked(), aber über die Datenbank und für den
- ganzen Teilbaum ab node_id: zeigt von außerhalb ein Link auf einen Nachkommen,
- würde das Löschen per Kaskade den Link und dessen jüngere Geschwister mitreißen.
- Rückgabe 2 wie bei node_still_linked(), -1 bei Fehler, sonst 0. Muss vor
- jeder Änderung an Baum oder Datenbank stehen. */
-static gint zond_treeview_check_external_links(Projekt *zond, gint node_id,
-		GError **error) {
-	gint rc = 0;
-	gboolean found = FALSE;
-
-	rc = zond_dbase_has_external_links(zond->proj.dbase_zond->zond_dbase_work,
-			node_id, &found, error);
-	if (rc)
-		return -1;
-
-	return (found) ? 2 : 0;
-}
-
 static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
@@ -2242,14 +2224,13 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 
 	//Links auf Nachkommen (BAUM_INHALT: s. unten, dort hängt es vom Knotentyp ab)
 	if (tree_view != zond->trees.treeview[BAUM_INHALT]) {
-		rc = zond_treeview_check_external_links(zond, node_id, error);
+		rc = zond_knoten_extern_verlinkt(zond->proj.dbase_zond->zond_dbase_work, node_id, error);
 		if (rc)
 			return rc;
 	}
 
 	if (tree_view == zond->trees.treeview[BAUM_INHALT]) {
 		gint rc = 0;
-		gint baum_auswertung_copy = 0;
 		gint baum_inhalt_file = 0;
 		gint type = 0;
 		gchar *file_part = NULL;
@@ -2264,7 +2245,7 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 			gint num_children = 0;
 
 			//vor dem Löschen der ersten Kinder prüfen, nicht erst mittendrin
-			rc = zond_treeview_check_external_links(zond, node_id, error);
+			rc = zond_knoten_extern_verlinkt(zond->proj.dbase_zond->zond_dbase_work, node_id, error);
 			if (rc)
 				return rc;
 
@@ -2286,6 +2267,12 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 				else if (rc)
 					return rc; //rc == 2: Kind noch gelinkt, s.o. - durchreichen
 			}
+
+			//Kinder, die nicht gelöscht wurden (als Copy angebunden), halten den Punkt: sonst
+			//risse das Löschen sie per Kaskade mit
+			if (gtk_tree_model_iter_has_child(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)), iter))
+				return 0;
 		}
 		else {
 			rc = zond_treeviewfm_section_visible(
@@ -2296,45 +2283,18 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 			if (rc == -1)
 				return -1;
 
-			rc = zond_dbase_get_baum_auswertung_copy(
-					zond->proj.dbase_zond->zond_dbase_work, node_id,
-					&baum_auswertung_copy, error);
-			if (rc)
+			rc = zond_knoten_loeschpruefung(zond->proj.dbase_zond->zond_dbase_work, node_id,
+					type, &baum_inhalt_file, error);
+			if (rc == -1)
 				return -1;
-
-			if (baum_auswertung_copy)
+			else if (rc == 1) //als Copy angebunden oder kopiert: nicht löschen
 				return 0;
+			else if (rc)
+				return rc; //rc == 2: extern verlinkt
 
-			//Prüfen, ob mitzulöschendes Kind von PDF_ABSCHNITT als BAUM_AUSWERTUNG_COPY angebunden ist
-			if (type == ZOND_DBASE_TYPE_FILE_PART) {
-				gint rc = 0;
-				gboolean copied = FALSE;
-
-				rc = zond_dbase_is_file_part_copied(
-						zond->proj.dbase_zond->zond_dbase_work, node_id, &copied,
-						error);
-				if (rc)
-					return -1;
-
-				if (copied)
-					return 0;
-			}
-
-			//Wenn node_id ein pdf_abschnitt ist, der über baum_inhalt_file angebunden ist,
-			//dann soll letzterer gelöscht werden, also die Anbindung im Baum_inhalt
-			rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-					zond->proj.dbase_zond->zond_dbase_work, node_id, &baum_inhalt_file,
-					error);
-			if (rc)
-				return -1;
-
+			//die tatsächlich gelöschte Zeile: bei angebundenem Abschnitt seine Anbindung
 			if (baum_inhalt_file)
 				node_id = baum_inhalt_file;
-
-			//node_id ist jetzt der Knoten, der tatsächlich gelöscht wird
-			rc = zond_treeview_check_external_links(zond, node_id, error);
-			if (rc)
-				return rc;
 
 			//wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
 			if (!baum_inhalt_file && visible)
@@ -2413,12 +2373,8 @@ static gint zond_treeview_selection_entfernen_anbindung_foreach(
 	gint rc = 0;
 	gint node_id = 0;
 	gint type = 0;
-	gint id_anchor = 0;
 	gint baum_inhalt_file = 0;
 	gint id_parent = 0;
-	gint (*fp_relative)(ZondDBase*, gint, gint*,
-			GError**) = zond_dbase_get_first_child;
-	gint relative = 0;
 	gchar *file_part = NULL;
 	gchar *section = NULL;
 	GtkTreeIter iter_fm = { 0 };
@@ -2467,86 +2423,12 @@ static gint zond_treeview_selection_entfernen_anbindung_foreach(
 	} else
 		g_free(file_part);
 
-	if (type != ZOND_DBASE_TYPE_BAUM_STRUKT) {
-		gint rc = 0;
-		gint baum_auswertung_copy = 0;
-
-		//Test, ob als Copy angebunden
-		rc = zond_dbase_get_baum_auswertung_copy(
-				zond->proj.dbase_zond->zond_dbase_work, node_id,
-				&baum_auswertung_copy, error);
-		if (rc)
-			return -1;
-
-		//dann nicht löschen
-		if (baum_auswertung_copy)
-			return 0;
-
-		//Test, ob direkt angebunden
-		rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-				zond->proj.dbase_zond->zond_dbase_work, node_id, &baum_inhalt_file,
-				error);
-		if (rc)
-			return -1;
-	}
-
-	rc = zond_dbase_begin(zond->proj.dbase_zond->zond_dbase_work, error);
-	if (rc)
+	rc = zond_knoten_aufloesen(zond->proj.dbase_zond->zond_dbase_work, node_id, type,
+			&baum_inhalt_file, error);
+	if (rc == -1)
 		return -1;
-
-	if (baum_inhalt_file)
-		id_anchor = baum_inhalt_file;
-	else
-		id_anchor = node_id;
-
-	do {
-		gint rc = 0;
-
-		rc = fp_relative(zond->proj.dbase_zond->zond_dbase_work, node_id, &relative,
-				error);
-		if (rc)
-			ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
-
-		if (relative == 0)
-			break;
-
-		if (baum_inhalt_file) {
-			gint node_inserted = 0;
-
-			node_inserted = zond_dbase_insert_node(
-					zond->proj.dbase_zond->zond_dbase_work, id_anchor, FALSE,
-					ZOND_DBASE_TYPE_BAUM_INHALT_FILE, relative, NULL, NULL,
-					NULL, NULL, NULL, error);
-			if (node_inserted == -1)
-				ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
-
-			//wenn baum_inhalt_file, dann werden die Kinder von node_id nicht verschoben
-			//dann müssen ab dem zweiten Durchgang die jüngeren Geschwister durchgegangen werden
-			fp_relative = zond_dbase_get_younger_sibling;
-			//und jüngeres Geschwister des ersten Kindes
-			node_id = relative;
-
-			id_anchor = node_inserted;
-		} else {
-			//kind verschieben
-			rc = zond_dbase_verschieben_knoten(
-					zond->proj.dbase_zond->zond_dbase_work, relative, id_anchor,
-					FALSE, error);
-			if (rc)
-				ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
-
-			id_anchor = relative;
-		}
-	} while (1);
-
-	rc = zond_dbase_remove_node(zond->proj.dbase_zond->zond_dbase_work,
-			(baum_inhalt_file) ? baum_inhalt_file : node_id, error);
-	if (rc)
-		ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
-
-	rc = zond_dbase_commit(zond->proj.dbase_zond->zond_dbase_work, error);
-	if (rc)
-		ERROR_ROLLBACK_Z(zond->proj.dbase_zond->zond_dbase_work)
+	else if (rc == 1) //als Copy angebunden: nicht entfernen
+		return 0;
 
 	//Im Baum jedenfalls Punkt löschen und Kinder an die Stelle setzen
 	zond_tree_store_kill_parent(iter);

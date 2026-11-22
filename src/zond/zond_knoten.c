@@ -226,3 +226,125 @@ gint zond_knoten_verschieben(ZondDBase *dbase, gint node_id, gboolean in_inhalt,
 
 	return 0;
 }
+
+gint zond_knoten_extern_verlinkt(ZondDBase *dbase, gint node_id, GError **error) {
+	gboolean found = FALSE;
+
+	if (zond_dbase_has_external_links(dbase, node_id, &found, error))
+		return -1;
+
+	return found ? 2 : 0;
+}
+
+gint zond_knoten_loeschpruefung(ZondDBase *dbase, gint node_id, gint type,
+		gint *baum_inhalt_file, GError **error) {
+	gint baum_auswertung_copy = 0;
+	gint rc = 0;
+
+	*baum_inhalt_file = 0;
+
+	if (zond_dbase_get_baum_auswertung_copy(dbase, node_id, &baum_auswertung_copy, error))
+		return -1;
+
+	if (baum_auswertung_copy)
+		return 1;
+
+	//Prüfen, ob mitzulöschendes Kind von PDF_ABSCHNITT als BAUM_AUSWERTUNG_COPY angebunden ist
+	if (type == ZOND_DBASE_TYPE_FILE_PART) {
+		gboolean copied = FALSE;
+
+		if (zond_dbase_is_file_part_copied(dbase, node_id, &copied, error))
+			return -1;
+
+		if (copied)
+			return 1;
+	}
+
+	//Ist node_id ein Abschnitt, der über baum_inhalt_file angebunden ist, wird letztere
+	//gelöscht, also die Anbindung im Inhaltsbaum
+	if (zond_dbase_get_baum_inhalt_file_from_file_part(dbase, node_id, baum_inhalt_file,
+			error))
+		return -1;
+
+	if (*baum_inhalt_file)
+		node_id = *baum_inhalt_file;
+
+	//node_id ist jetzt der Knoten, der tatsächlich gelöscht wird
+	rc = zond_knoten_extern_verlinkt(dbase, node_id, error);
+
+	return rc;
+}
+
+gint zond_knoten_aufloesen(ZondDBase *dbase, gint node_id, gint type, gint *baum_inhalt_file_out,
+		GError **error) {
+	gint baum_inhalt_file = 0;
+	gint id_anchor = 0;
+	gint (*fp_relative)(ZondDBase*, gint, gint*, GError**) = zond_dbase_get_first_child;
+	gint relative = 0;
+
+	if (baum_inhalt_file_out)
+		*baum_inhalt_file_out = 0;
+
+	if (type != ZOND_DBASE_TYPE_BAUM_STRUKT) {
+		gint baum_auswertung_copy = 0;
+
+		//Test, ob als Copy angebunden: dann nicht aufgelöst
+		if (zond_dbase_get_baum_auswertung_copy(dbase, node_id, &baum_auswertung_copy, error))
+			return -1;
+
+		if (baum_auswertung_copy)
+			return 1;
+
+		//Test, ob direkt angebunden
+		if (zond_dbase_get_baum_inhalt_file_from_file_part(dbase, node_id, &baum_inhalt_file,
+				error))
+			return -1;
+	}
+
+	if (zond_dbase_begin(dbase, error))
+		return -1;
+
+	id_anchor = baum_inhalt_file ? baum_inhalt_file : node_id;
+
+	do {
+		if (fp_relative(dbase, node_id, &relative, error))
+			ERROR_ROLLBACK_Z(dbase)
+
+		if (relative == 0)
+			break;
+
+		if (baum_inhalt_file) {
+			gint node_inserted = zond_dbase_insert_node(dbase, id_anchor, FALSE,
+					ZOND_DBASE_TYPE_BAUM_INHALT_FILE, relative, NULL, NULL, NULL, NULL, NULL,
+					error);
+
+			if (node_inserted == -1)
+				ERROR_ROLLBACK_Z(dbase)
+
+			//wenn baum_inhalt_file, dann werden die Kinder von node_id nicht verschoben;
+			//ab dem zweiten Durchgang sind die jüngeren Geschwister dran
+			fp_relative = zond_dbase_get_younger_sibling;
+			//und zwar die des ersten Kindes
+			node_id = relative;
+
+			id_anchor = node_inserted;
+		} else {
+			//Kind verschieben
+			if (zond_dbase_verschieben_knoten(dbase, relative, id_anchor, FALSE, error))
+				ERROR_ROLLBACK_Z(dbase)
+
+			id_anchor = relative;
+		}
+	} while (1);
+
+	if (zond_dbase_remove_node(dbase, baum_inhalt_file ? baum_inhalt_file : node_id, error))
+		ERROR_ROLLBACK_Z(dbase)
+
+	if (zond_dbase_commit(dbase, error))
+		ERROR_ROLLBACK_Z(dbase)
+
+	if (baum_inhalt_file_out)
+		*baum_inhalt_file_out = baum_inhalt_file;
+
+	return 0;
+}
