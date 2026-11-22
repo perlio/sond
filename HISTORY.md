@@ -6068,3 +6068,33 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  PDF-Abfrage. Beim manuellen Start Hinweis auf die Windows-UserChoice für .pdf.
  Kein Speicherleck in project_create_dbase_zond() (path ist g_autofree).
 ```
+
+## Seitenzählung: Platte, live und angezeigt (22.11.2026) (#261)
+
+```text
+ Fehler: Wurde eine Seite gelöscht und gespeichert und danach hinter ihr eine Anbindung
+ angelegt, stand deren Seitenzahl um die Zahl der gelöschten Seiten zu hoch im Text und im
+ Abschnitt (auch nach Neustart sprang zond auf die falsche Seite). Ursache: Der Viewer zählt
+ live (gelöschte Seiten bleiben als Karteileichen im Seitenfeld, eingefügte zählen schon mit),
+ Datenbank, Index und Dateibaum zählen wie die Datei auf der Platte; die Umrechnung fehlte oder
+ war unvollständig:
+ - anbindung_aktualisieren (Platte zu live) rechnete nur eingefügte, nicht die gespeichert
+   gelöschten Seiten ein und verglich die Lage der Anbindung nie mit der Einfügestelle (jede
+   Anbindung wuchs oder wanderte mit, anbindung_orig blieb seit jeher unbelegt). Jetzt über die
+   Plattenseiten; eingefügte Randseiten gehören zur Anbindung, wenn sie einen Teil umfasst
+   oder ihm gleicht (im Viewer eines Abschnitts eingefügte Seiten sind in dem Abschnitt).
+ - anbindung_korrigieren (live zu Platte nach dem Speichern) zog gelöschte Seiten nicht ab,
+   die Abschnitte in der Datenbank hinter einer gelöschten Seite wurden nie kleiner.
+ - anbindung_get_sichtbar neu (Zählung ohne gelöschte Seiten, wie im Viewer angezeigt).
+ - zond_anbindung_erzeugen: Abschnitt und Einfügestelle in Plattenzählung (anbindung_get_orig),
+   der Text der Anbindung in der angezeigten Zählung.
+ - Index (viewer_host.c): Seitenzahlen in Plattenzählung (Löschen und Umnummerieren, OCR-Seite
+   verwerfen, "Rest retten" beim Einfügen); die Heuristik für die Dateiabdeckung zählt nach
+   dem Speichern durch (Karteileichen, im Teil gelöschte und fremde eingefügte Seiten zählen
+   nicht), statt Live-Positionen zu vergleichen.
+ Geprüft in einem Testrahmen (Seitenfeld mit Flags inserted, deleted, on_disk_deleted gegen
+ eine Referenz aus Seitenlisten): feste Szenarien (Löschen, Speichern, Neustart, Teil außerhalb,
+ frühere und neue Löschung, Phantom-Seiten) und rund 114.000 Zufallsprüfungen ohne Abweichung;
+ im laufenden zond bestätigt. Schon falsch angelegte Anbindungen und ein bereits verschobener
+ Index bleiben, wie sie sind (Anbindung neu anlegen).
+```

@@ -2,7 +2,7 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #261.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #262.
 
 ## Inhalt
 
@@ -104,8 +104,17 @@ Status: offen (Voraussetzung: GTK4-Gegenstücke)
 Status: offen
 
 ```text
- Lange Funktionen (viewer_do_save_dd rund 320 Zeilen u. a.) aufteilen. Stufe 2: Modell-
- Signale statt arr_pv.
+ Stufe 1: lange Funktionen aufteilen. Erledigt: viewer_do_save_dd (320 Zeilen, jetzt rund 60,
+ dazu viewer_save_seite_vorbereiten, _eintrag, _journal_einpflegen, _annots_loeschen,
+ _journal_bereinigen, _buchfuehrung_nachziehen). Offen (über 120 Zeilen): cb_pv_seiten_ocr (314),
+ viewer_einrichten_fenster (269), viewer_handle_layout_motion_notify (219),
+ viewer_highlight_at_char_pos (185), viewer_handle_button_press (172),
+ viewer_annot_handle_release_clicked_annot (162), cb_pv_seiten_einfuegen (158),
+ viewer_render_page (136). Verhalten jeweils unverändert, nur im laufenden zond prüfbar.
+ Stufe 2: Modell-Signale statt arr_pv: ZondPdfDocument sendet Signale (Seiten geändert,
+ Annotation geändert, Dokument schließt), die Viewer abonnieren; zwölf Stellen laufen heute über
+ arr_pv (seiten_refresh_layouts, document.c, viewer_save.c, viewer_annot.c, project.c,
+ zond_treeview.c); arr_pv bliebe nur für "zuletzt geöffneter Viewer" und das Schließen.
 ```
 
 ### #258 Kleine Altlasten
