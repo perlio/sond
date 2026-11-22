@@ -560,12 +560,63 @@ static gint viewer_render_display_list(fz_context *ctx,
 	return 0;
 }
 
-void viewer_render_page(gpointer data, gpointer user_data) {
+//Antwort des Workers für den Hauptthread bereitstellen
+static void render_antwort_anhaengen(PdfViewer *pv, RenderResponse *render_response) {
+	g_mutex_lock(&pv->mutex_arr_rendered);
+	g_array_append_val(pv->arr_rendered, *render_response);
+	g_mutex_unlock(&pv->mutex_arr_rendered);
+
+	return;
+}
+
+/* Führt die über thread_data angeforderten Schritte der Reihe nach aus (1 Seite laden, 2 Displayliste,
+ * 4 Textseite, 8 Pixmap, 16 Vorschaubild). Liefert 0 oder den Fehlercode des gescheiterten Schritts
+ * (2 bis 6). */
+static gint render_schritte(PdfViewer *pv, ViewerPageNew *viewer_page, fz_context *ctx,
+		gint thread_data, GError **error) {
 	gint rc = 0;
+
+	if (thread_data & 1) {
+		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
+		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, ctx, error);
+		zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
+		if (rc == -1)
+			return 2;
+	}
+
+	if (thread_data & 2) {
+		rc = viewer_render_display_list(ctx, viewer_page->pdf_document_page, error);
+		if (rc == -1)
+			return 3;
+	}
+
+	if (thread_data & 4) {
+		rc = viewer_render_stext_page_from_display_list(ctx, viewer_page->pdf_document_page, error);
+		if (rc == -1)
+			return 4;
+	}
+
+	if (thread_data & 8) {
+		rc = viewer_render_pixmap(ctx, viewer_page, pv->zoom, error);
+		if (rc == -1)
+			return 5;
+	}
+
+	if (thread_data & 16) {
+		rc = viewer_render_thumb(ctx, viewer_page, error);
+		if (rc == -1)
+			return 6;
+	}
+
+	return 0;
+}
+
+void viewer_render_page(gpointer data, gpointer user_data) {
 	GError *error = NULL;
 	ViewerPageNew *viewer_page = NULL;
 	fz_context *ctx = NULL;
 	gint thread_data = 0;
+	gint fehler = 0;
 	RenderResponse render_response = { 0 };
 
 	PdfViewer *pv = (PdfViewer*) user_data;
@@ -581,117 +632,20 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 		render_response.error = 1;
 		render_response.error_message = g_strdup_printf(
 				"Bei Aufruf %s:\nfz_clone_context: Out of memory", __func__);
-
-		g_mutex_lock(&pv->mutex_arr_rendered);
-		g_array_append_val(pv->arr_rendered, render_response);
-		g_mutex_unlock(&pv->mutex_arr_rendered);
+		render_antwort_anhaengen(pv, &render_response);
 
 		return;
 	}
 
-	if (thread_data & 1) {
-		gint rc = 0;
-
-		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, ctx, &error);
-		zond_pdf_document_mutex_unlock(
-				viewer_page->pdf_document_page->document);
-		if (rc == -1) {
-			render_response.error = 2;
-			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", error->message, NULL);
-			g_error_free(error);
-
-			g_mutex_lock(&pv->mutex_arr_rendered);
-			g_array_append_val(pv->arr_rendered, render_response);
-			g_mutex_unlock(&pv->mutex_arr_rendered);
-
-			fz_drop_context(ctx);
-
-			return;
-		}
+	fehler = render_schritte(pv, viewer_page, ctx, thread_data, &error);
+	if (fehler) {
+		render_response.error = fehler;
+		render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
+				":\n", error->message, NULL);
+		g_error_free(error);
 	}
 
-	if (thread_data & 2) {
-		rc = viewer_render_display_list(ctx, viewer_page->pdf_document_page, &error);
-		if (rc == -1) {
-			render_response.error = 3;
-			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", error->message, NULL);
-			g_error_free(error);
-
-			g_mutex_lock(&pv->mutex_arr_rendered);
-			g_array_append_val(pv->arr_rendered, render_response);
-			g_mutex_unlock(&pv->mutex_arr_rendered);
-
-			fz_drop_context(ctx);
-
-			return;
-		}
-	}
-
-	if (thread_data & 4) {
-		rc = viewer_render_stext_page_from_display_list(ctx,
-				viewer_page->pdf_document_page, &error);
-		if (rc == -1) {
-			render_response.error = 4;
-			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", error->message, NULL);
-			g_error_free(error);
-
-			g_mutex_lock(&pv->mutex_arr_rendered);
-			g_array_append_val(pv->arr_rendered, render_response);
-			g_mutex_unlock(&pv->mutex_arr_rendered);
-
-			fz_drop_context(ctx);
-
-			return;
-		}
-	}
-
-	if (thread_data & 8) {
-		gint rc = 0;
-
-		rc = viewer_render_pixmap(ctx, viewer_page, pv->zoom, &error);
-		if (rc == -1) {
-			render_response.error = 5;
-			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", error->message, NULL);
-			g_error_free(error);
-
-			g_mutex_lock(&pv->mutex_arr_rendered);
-			g_array_append_val(pv->arr_rendered, render_response);
-			g_mutex_unlock(&pv->mutex_arr_rendered);
-
-			fz_drop_context(ctx);
-
-			return;
-		}
-	}
-
-	if (thread_data & 16) {
-		gint rc = 0;
-
-		rc = viewer_render_thumb(ctx, viewer_page, &error);
-		if (rc == -1) {
-			render_response.error = 6;
-			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", error->message, NULL);
-			g_error_free(error);
-
-			g_mutex_lock(&pv->mutex_arr_rendered);
-			g_array_append_val(pv->arr_rendered, render_response);
-			g_mutex_unlock(&pv->mutex_arr_rendered);
-
-			fz_drop_context(ctx);
-
-			return;
-		}
-	}
-
-	g_mutex_lock(&pv->mutex_arr_rendered);
-	g_array_append_val(pv->arr_rendered, render_response);
-	g_mutex_unlock(&pv->mutex_arr_rendered);
+	render_antwort_anhaengen(pv, &render_response);
 
 	fz_drop_context(ctx);
 
