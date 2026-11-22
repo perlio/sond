@@ -494,6 +494,12 @@ Status: zurückgestellt (Vorarbeit: viewer_einrichten_fenster ist in Hilfsfunkti
  GTK4: GtkLayout, show_all und Container-API fehlen dort; die Zeichenfläche müsste ersetzt
  werden (der GTK4-Viewer im Client macht das bereits eigenständig). Siehe auch die Idee
  viewer_host GTK-frei.
+ Verzeichnis: Der Viewer (zond/40viewer) baut auch als eigenständige Anwendung (make viewer) und
+ hängt nur an zond/zond_pdf_document.[ch] und znd/, nicht an zond selbst. Beim Schritt B
+ zond_pdf_document und 40viewer zusammen aus zond/ herauslösen (z. B. nach src/viewer/);
+ viewer_host bleibt in zond/ als zond-Seite der Schnittstelle. Dann Makefile (Ziel viewer und
+ zond) und rund 40 Includes anpassen. Früher lohnt der Umzug nicht, solange zond_pdf_document
+ in zond/ bleibt.
 ```
 
 ## Ideen
