@@ -44,8 +44,17 @@ typedef struct _Pdf_Document_Page {
 	gboolean on_disk_deleted;
 } PdfDocumentPage;
 
-typedef struct _ZPDFD_Part {
-	gint ref;
+/* Abschnitt eines Dokuments (von mehreren Viewern geteilt). Ein GObject, damit Viewer die Signale
+ * ihrer Abschnitte abonnieren können; die Felder sind öffentlich. */
+#define ZOND_TYPE_PDF_PART zond_pdf_part_get_type( )
+GType zond_pdf_part_get_type(void);
+
+typedef struct _ZPDFD_PartClass {
+	GObjectClass parent_class;
+} ZPDFDPartClass;
+
+struct _ZPDFD_Part {
+	GObject parent;
 	ZondPdfDocument *zond_pdf_document;
 	gboolean has_anbindung;
 	PdfDocumentPage* first_page;
@@ -53,7 +62,15 @@ typedef struct _ZPDFD_Part {
 	PdfDocumentPage* last_page;
 	gint last_index;
 	gboolean dirty;
-} ZPDFDPart;
+};
+
+/* Art der Änderung für das Signal "page-changed" */
+typedef enum _ZPDFD_Part_Change {
+	ZPDFD_PART_CHANGE_ROTATED,
+	ZPDFD_PART_CHANGE_DELETED,
+	ZPDFD_PART_CHANGE_INSERTED,
+	ZPDFD_PART_CHANGE_OCR
+} ZPDFDPartChange;
 
 typedef struct _Annot_Text_Markup {
 	GArray *arr_quads;
@@ -174,6 +191,24 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint, ZPDFDPart*,
 gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 
 void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
+
+/* Signale eines Abschnitts (ZPDFDPart):
+ *   "page-changed" (PdfDocumentPage*, ZPDFDPartChange): Seite des Abschnitts gedreht, gelöscht,
+ *                  eingefügt oder per OCR verändert
+ *   "annot-changed" (PdfDocumentPage*, Annot*): Annotation einer Seite des Abschnitts geändert
+ *   "dirty-changed": dirty hat sich geändert
+ * Gesendet werden sie vom Dokument über die zond_pdf_document_notify_*-Funktionen an alle
+ * Abschnitte, die die Seite umfassen. */
+
+//Liegt die Seite im Seitenbereich des Abschnitts (Randseiten eingeschlossen)?
+gboolean zpdfd_part_umfasst_seite(ZPDFDPart*, PdfDocumentPage*);
+
+//Setzt dirty; sendet "dirty-changed" nur bei einer Änderung
+void zpdfd_part_set_dirty(ZPDFDPart*, gboolean);
+
+void zond_pdf_document_notify_page_changed(ZondPdfDocument*, PdfDocumentPage*, ZPDFDPartChange);
+
+void zond_pdf_document_notify_annot_changed(ZondPdfDocument*, PdfDocumentPage*, Annot*);
 
 void zpdfd_part_drop(ZPDFDPart*);
 
