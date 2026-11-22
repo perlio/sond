@@ -352,12 +352,82 @@ static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 	return 0;
 }
 
+/* Führt den Zustand nach einer Drehung der Seite nach: /Rotate im Seitenobjekt ist schon geändert
+ * und pdf_document_page->rotate gesetzt. Seite neu laden, Anzeige-Daten verwerfen, Journal-Eintrag
+ * (damit die Drehung beim Speichern in die Datei kommt), Layout der Viewer anpassen. Gilt für
+ * das Drehen im Viewer wie für die Drehung, die die OCR selbst vornimmt. winkel: -90, 90 oder 180. */
+void seiten_drehung_nachfuehren(PdfViewer *pv, PdfDocumentPage *pdf_document_page, gint winkel) {
+	GError *error = NULL;
+	JournalEntry entry = { 0 };
+	GArray* arr_journal = NULL;
+	gint rc = 0;
+
+	viewer_render_wait_for_transfer(pdf_document_page);
+
+	/* War die Seite noch nie geladen (kein page, kein display_list/
+	 * stext_page/arr_annots - lazy load), gibt es hier nichts zu
+	 * invalidieren: /Rotate steht bereits im pdf_obj, und beim späteren
+	 * ersten Rendern wird die Seite ganz normal frisch geladen und liest
+	 * die Rotation dann schon korrekt. Nur wenn die Seite schon geladen
+	 * war, muss sie neu geladen werden, weil pdf_page_rotate() nur den
+	 * pdf_obj ändert, nicht ein bereits geladenes pdf_page-Objekt. */
+	if (pdf_document_page->page) {
+		fz_drop_display_list(
+				zond_pdf_document_get_ctx(pdf_document_page->document),
+				pdf_document_page->display_list);
+		pdf_document_page->display_list = NULL;
+
+		fz_drop_stext_page(
+				zond_pdf_document_get_ctx(pdf_document_page->document),
+				pdf_document_page->stext_page);
+		pdf_document_page->stext_page = NULL;
+
+		/* altes arr_annots freigeben (mit Free-Func je Element) - danach
+		 * legt zond_pdf_document_load_page() ein neues an. Nur hier
+		 * nötig: dort wird sie sonst nur beim erstmaligen Laden
+		 * aufgerufen, wo arr_annots ohnehin noch NULL ist.
+		 * page und arr_annots werden immer zusammen in
+		 * zond_pdf_document_load_page() gesetzt - da wir hier bereits
+		 * wissen, dass page gesetzt ist, ist es auch arr_annots. */
+		g_ptr_array_unref(pdf_document_page->arr_annots);
+		pdf_document_page->arr_annots = NULL;
+
+		rc = zond_pdf_document_load_page(pdf_document_page,
+				zond_pdf_document_get_ctx(pdf_document_page->document), &error);
+		if (rc) {
+			/* page/display_list/stext_page/arr_annots wurden oben bereits
+			 * verworfen, page ist jetzt NULL (zond_pdf_document_load_page()
+			 * setzt das bei einem gescheiterten Reload) - Flags müssen das
+			 * widerspiegeln, sonst hält der Renderer die Seite fälschlich
+			 * für geladen und griffe auf page (NULL) zu. Diese eine Seite
+			 * bleibt ungedreht (physisch/im pdf_obj zwar schon rotiert,
+			 * aber ohne Journal-Eintrag - geht beim nächsten Speichern
+			 * wieder verloren). */
+			pdf_document_page->thread &= ~(2 | 4 | 8);
+
+			LOG_WARN("Seite %i konnte nach Drehung nicht neu geladen werden: %s",
+					pdf_document_page->page_akt + 1, error->message);
+			g_clear_error(&error);
+
+			return;
+		}
+	}
+
+	pdf_document_page->thread &= 2;
+
+	arr_journal = zond_pdf_document_get_arr_journal(pdf_document_page->document);
+	entry.pdf_document_page = pdf_document_page;
+	entry.type = JOURNAL_TYPE_ROTATE;
+	entry.rotate.winkel = winkel;
+	g_array_append_val(arr_journal, entry);
+
+	viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach, GINT_TO_POINTER(winkel));
+}
+
 static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		gint winkel, GError **error) {
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		gint rc = 0;
-		JournalEntry entry = { 0 };
-		GArray* arr_journal = NULL;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
@@ -368,70 +438,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		if (rc == -1)
 			return -1;
 
-		viewer_render_wait_for_transfer(pdf_document_page);
-
-		/* War die Seite noch nie geladen (kein page, kein display_list/
-		 * stext_page/arr_annots - lazy load), gibt es hier nichts zu
-		 * invalidieren: seiten_drehen_pdf() hat /Rotate bereits im pdf_obj
-		 * gesetzt, und beim späteren ersten Rendern wird die Seite ganz
-		 * normal frisch geladen und liest die Rotation dann schon korrekt.
-		 * Nur wenn die Seite schon geladen war, muss sie neu geladen werden,
-		 * weil pdf_page_rotate() nur den pdf_obj ändert, nicht ein bereits
-		 * geladenes pdf_page-Objekt. */
-		if (pdf_document_page->page) {
-			fz_drop_display_list(
-					zond_pdf_document_get_ctx(pdf_document_page->document),
-					pdf_document_page->display_list);
-			pdf_document_page->display_list = NULL;
-
-			fz_drop_stext_page(
-					zond_pdf_document_get_ctx(pdf_document_page->document),
-					pdf_document_page->stext_page);
-			pdf_document_page->stext_page = NULL;
-
-			/* altes arr_annots freigeben (mit Free-Func je Element) - danach
-			 * legt zond_pdf_document_load_page() ein neues an. Nur hier
-			 * nötig: dort wird sie sonst nur beim erstmaligen Laden
-			 * aufgerufen, wo arr_annots ohnehin noch NULL ist.
-			 * page und arr_annots werden immer zusammen in
-			 * zond_pdf_document_load_page() gesetzt - da wir hier bereits
-			 * wissen, dass page gesetzt ist, ist es auch arr_annots. */
-			g_ptr_array_unref(pdf_document_page->arr_annots);
-			pdf_document_page->arr_annots = NULL;
-
-			rc = zond_pdf_document_load_page(pdf_document_page,
-					zond_pdf_document_get_ctx(pdf_document_page->document), error);
-			if (rc) {
-				/* page/display_list/stext_page/arr_annots wurden oben bereits
-				 * verworfen, page ist jetzt NULL (zond_pdf_document_load_page()
-				 * setzt das bei einem gescheiterten Reload) - Flags müssen das
-				 * widerspiegeln, sonst hält der Renderer die Seite fälschlich
-				 * für geladen und griffe auf page (NULL) zu. Diese eine Seite
-				 * bleibt ungedreht (physisch/im pdf_obj zwar schon rotiert,
-				 * aber ohne Journal-Eintrag - geht beim nächsten Speichern
-				 * wieder verloren); mit den übrigen ausgewählten Seiten wird
-				 * fortgefahren. */
-				pdf_document_page->thread &= ~(2 | 4 | 8);
-
-				LOG_WARN("Seite %i konnte nach Drehung nicht neu geladen werden: %s",
-						pdf_document_page->page_akt + 1, (*error)->message);
-				g_clear_error(error);
-
-				continue;
-			}
-		}
-
-		pdf_document_page->thread &= 2;
-
-		arr_journal = zond_pdf_document_get_arr_journal(
-				pdf_document_page->document);
-		entry.pdf_document_page = pdf_document_page;
-		entry.type = JOURNAL_TYPE_ROTATE;
-		entry.rotate.winkel = winkel;
-		g_array_append_val(arr_journal, entry);
-
-		viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
-				GINT_TO_POINTER(winkel));
+		seiten_drehung_nachfuehren(pv, pdf_document_page, winkel);
 	}
 
 	return 0;
