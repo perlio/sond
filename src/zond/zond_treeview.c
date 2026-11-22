@@ -44,6 +44,7 @@
 #include "10init/headerbar.h"
 
 #include "../znd/dbase_zond.h"
+#include "zond_knoten.h"
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
@@ -61,38 +62,10 @@ G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeview, zond_treeview, SOND_TYPE_TREEVIEW)
 
 static gint zond_treeview_get_root(ZondTreeview *ztv, gint node_id, gint *root,
 		GError **error) {
-	gint rc = 0;
-	gint type = 0;
-
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	rc = zond_dbase_get_type_and_link(
-			ztv_priv->zond->proj.dbase_zond->zond_dbase_work, node_id, &type, NULL,
-			error);
-	if (rc)
-		return -1;
-
-	if (type == ZOND_DBASE_TYPE_FILE_PART) {
-		gint rc = 0;
-		gint baum_inhalt_file = 0;
-
-		//prüfen, ob angebundener file_part
-		rc = zond_dbase_find_baum_inhalt_file(
-				ztv_priv->zond->proj.dbase_zond->zond_dbase_work, node_id,
-				&baum_inhalt_file, NULL, NULL, error);
-		if (rc)
-			return -1;
-
-		if (baum_inhalt_file)
-			node_id = baum_inhalt_file;
-	}
-
-	rc = zond_dbase_get_tree_root(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-			node_id, root, error);
-	if (rc)
-		return -1;
-
-	return 0;
+	return zond_knoten_get_root(ztv_priv->zond->proj.dbase_zond->zond_dbase_work, node_id,
+			root, error);
 }
 
 static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
@@ -743,48 +716,6 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 	return;
 }
 
-static gint zond_treeview_check_anchor_id(Projekt *zond,
-		GtkTreeIter *iter_anchor, gint *anchor_id, gboolean child,
-		GError **error) {
-	gint rc = 0;
-	gint type = 0;
-	gint baum_inhalt_file = 0;
-	gint file_part_angebunden = 0;
-
-	if (*anchor_id == 0) {
-		LOG_WARN("%s: anchor_id == 0", __func__);
-
-		return 0;
-	}
-
-	rc = zond_dbase_get_type_and_link(zond->proj.dbase_zond->zond_dbase_work,
-			*anchor_id, &type, NULL, error);
-	if (rc)
-		return -1;
-
-	if (type == ZOND_DBASE_TYPE_FILE_PART) {
-		gint rc = 0;
-
-		rc = zond_dbase_find_baum_inhalt_file(
-				zond->proj.dbase_zond->zond_dbase_work, *anchor_id, &baum_inhalt_file,
-				&file_part_angebunden, NULL, error);
-		if (rc)
-			return -1;
-
-		if (baum_inhalt_file) { //anchor ist angebunden
-			if (*anchor_id != file_part_angebunden || child) {//nicht unmittelbar, sondern Vorfahren
-				*anchor_id = 0;
-
-				return 1; //child egal
-			}
-			else
-				*anchor_id = baum_inhalt_file;
-		}
-	}
-
-	return 0;
-}
-
 gint zond_treeview_get_anchor(Projekt *zond, gint baum, gboolean* child,
 		GtkTreeIter *iter_cursor, GtkTreeIter *iter_anchor,
 		gint *anchor_id, gboolean* in_link, GError **error) {
@@ -860,8 +791,8 @@ gint zond_treeview_get_anchor(Projekt *zond, gint baum, gboolean* child,
 									&iter_anchor_intern)), &iter_anchor_intern,
 					2, anchor_id, -1);
 
-			rc = zond_treeview_check_anchor_id(zond, &iter_anchor_intern, anchor_id,
-					*child, error);
+			rc = zond_knoten_anker_pruefen(zond->proj.dbase_zond->zond_dbase_work,
+					anchor_id, *child, error);
 			if (rc == -1)
 				return -1;
 		} else
@@ -934,7 +865,7 @@ gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 	if (rc == -1)
 		return -1;
 
-	if (rc == 1) { //defekter Eintrag übersprungen (s. zond_treeview_load_node)
+	if (rc == 1) { //defekter Eintrag übersprungen (s. zond_knoten_get_children)
 		if (with_younger_siblings) {
 			gint younger_sibling = 0;
 			gint rc_y = 0;
@@ -4144,74 +4075,6 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 	return ztv;
 }
 
-static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
-		GtkTreeIter *iter_anchor, gboolean child, GtkTreeIter *iter_inserted,
-		gint anchor_id, gint *node_id_inserted, GError **error) {
-	gint type = 0;
-	gint link = 0;
-	gint rc = 0;
-	GtkTreeIter iter_new = { 0 };
-
-	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
-
-	rc = zond_dbase_get_type_and_link(
-			ztv_priv->zond->proj.dbase_zond->zond_dbase_work, node_id, &type, &link,
-			error);
-	if (rc)
-		return -1;
-
-	if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) {
-		gint rc = 0;
-
-		rc = zond_treeview_walk_tree(ztv, FALSE, link, iter_anchor, child,
-				&iter_new, node_id, NULL, zond_treeview_insert_file_parts,
-				error);
-		if (rc) {
-			/* Defekter Eintrag (z.B. Anbindung auf eine Datei, die es in der
-			 * Datenbank nicht gibt): nicht anzeigen, aber das Projekt trotzdem
-			 * laden, damit die Prüfung (Extras, Datenbank prüfen) den Fehler
-			 * zeigen und beheben kann. */
-			LOG_WARN("%s: Anbindung %d wird nicht angezeigt: %s", __func__,
-					node_id, (error && *error) ? (*error)->message : "?");
-			if (error)
-				g_clear_error(error);
-
-			return 1;
-		}
-	}
-	else //eigentlich nur link, copy oder strukt...
-	{
-		gchar *icon_name = NULL;
-		gchar *node_text = NULL;
-
-		zond_tree_store_insert(iter_anchor, child, &iter_new);
-
-		if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
-			icon_name = g_strdup_printf("%d", node_id); //head_nr wird hier gespeichert
-			node_id = link * -1;
-		}
-		else {
-			gint rc = 0;
-
-			rc = zond_dbase_get_node(
-					ztv_priv->zond->proj.dbase_zond->zond_dbase_work, node_id, NULL,
-					NULL, NULL, NULL, &icon_name, &node_text, NULL, error);
-			if (rc)
-				return -1;
-		}
-
-		zond_tree_store_set(&iter_new, icon_name, node_text, node_id);
-
-		g_free(icon_name);
-		g_free(node_text);
-	}
-
-	if (iter_inserted)
-		*iter_inserted = iter_new;
-
-	return 0;
-}
-
 static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter, GError **error) {
 	gchar *icon_name = NULL;
@@ -4323,33 +4186,85 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 	return 0;
 }
 
+/* Lädt die Kinder von parent_id (Anzeige-ID) ebenenweise unter iter_parent in den Baum. Links
+ * werden mit negativem Ziel und der Link-Nummer im Icon-Feld eingetragen und danach von
+ * zond_treeview_insert_links_foreach() aufgelöst. */
+static gint zond_treeview_load_children(ZondTreeview *ztv, gint parent_id,
+		GtkTreeIter *iter_parent, GError **error) {
+	GPtrArray *nodes = NULL;
+	GtkTreeIter iter_prev = { 0 };
+	gboolean have_prev = FALSE;
+
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+
+	if (zond_knoten_get_children(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
+			parent_id, &nodes, error))
+		return -1;
+
+	for (guint i = 0; i < nodes->len; i++) {
+		ZondKnoten *node = g_ptr_array_index(nodes, i);
+		GtkTreeIter iter_new = { 0 };
+
+		if (have_prev)
+			zond_tree_store_insert(&iter_prev, FALSE, &iter_new);
+		else
+			zond_tree_store_insert(iter_parent, TRUE, &iter_new);
+
+		if (node->type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
+			gchar *head_nr = g_strdup_printf("%d", node->head_nr);
+
+			zond_tree_store_set(&iter_new, head_nr, NULL, node->id * -1);
+			g_free(head_nr);
+		} else {
+			zond_tree_store_set(&iter_new, node->icon_name, node->node_text, node->id);
+
+			if (node->has_children && zond_treeview_load_children(ztv, node->id,
+					&iter_new, error)) {
+				if (node->type != ZOND_DBASE_TYPE_BAUM_INHALT_FILE) {
+					g_ptr_array_unref(nodes);
+
+					return -1;
+				}
+
+				/* Defekte Anbindung (Fehler in der Datei darunter): nicht anzeigen, das
+				 * Projekt aber trotzdem laden, damit die Prüfung (Extras, Datenbank prüfen)
+				 * den Fehler zeigen und beheben kann. */
+				LOG_WARN("%s: Anbindung %d wird nicht angezeigt: %s", __func__,
+						node->db_id, (error && *error) ? (*error)->message : "?");
+				if (error)
+					g_clear_error(error);
+				zond_tree_store_remove(&iter_new);
+
+				continue;
+			}
+		}
+
+		iter_prev = iter_new;
+		have_prev = TRUE;
+	}
+
+	g_ptr_array_unref(nodes);
+
+	return 0;
+}
+
 gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
-	gint first_child = 0;
 	gint rc = 0;
 	gint root = 0;
 	GtkTreeIter iter_root = { 0 };
 	ZondTreeStore *tree_store = NULL;
-
-	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
 	tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
 
 	zond_tree_store_clear(tree_store);
 
 	root = zond_tree_store_get_root(tree_store);
-	rc = zond_dbase_get_first_child(ztv_priv->zond->proj.dbase_zond->zond_dbase_work,
-			root, &first_child, error);
-	if (rc)
-		return -1;
-	else if (first_child == 0)
-		return 0; //Baum leer
 
 	//Baum ist noch leer - kein echter Anker-Iter vorhanden, also einen auf
 	//die Wurzel des tree_store konstruieren (siehe zond_tree_store_insert).
 	zond_tree_store_iter_init_root(tree_store, &iter_root);
 
-	rc = zond_treeview_walk_tree(ztv, TRUE, first_child, &iter_root, TRUE, NULL,
-			root, NULL, zond_treeview_load_node, error);
+	rc = zond_treeview_load_children(ztv, root, &iter_root, error);
 	if (rc)
 		return -1;
 
