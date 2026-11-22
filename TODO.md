@@ -101,21 +101,44 @@ Status: offen (Voraussetzung: GTK4-Gegenstücke)
 
 ### #257 Viewer weiter aufräumen
 
-Status: offen
+Status: Stufe 1 erledigt, Stufe 2 offen (Plan steht, noch nicht begonnen)
 
 ```text
- Stufe 1: lange Funktionen aufteilen. Erledigt: viewer_do_save_dd (320 Zeilen, jetzt rund 60,
- dazu viewer_save_seite_vorbereiten, _eintrag, _journal_einpflegen, _annots_loeschen,
- _journal_bereinigen, _buchfuehrung_nachziehen) und cb_pv_seiten_ocr (314 Zeilen, jetzt 139, dazu
- seiten_ocr_seite_laden, _modus, _font, _ausfuehren, _einpflegen). Offen (über 120 Zeilen):
- viewer_einrichten_fenster (269), viewer_handle_layout_motion_notify (219),
- viewer_highlight_at_char_pos (185), viewer_handle_button_press (172),
- viewer_annot_handle_release_clicked_annot (162), cb_pv_seiten_einfuegen (158),
- viewer_render_page (136). Verhalten jeweils unverändert, nur im laufenden zond prüfbar.
- Stufe 2: Modell-Signale statt arr_pv: ZondPdfDocument sendet Signale (Seiten geändert,
- Annotation geändert, Dokument schließt), die Viewer abonnieren; zwölf Stellen laufen heute über
- arr_pv (seiten_refresh_layouts, document.c, viewer_save.c, viewer_annot.c, project.c,
- zond_treeview.c); arr_pv bliebe nur für "zuletzt geöffneter Viewer" und das Schließen.
+ Stufe 1 (erledigt, Verhalten unverändert): lange Funktionen aufgeteilt: viewer_do_save_dd,
+ cb_pv_seiten_ocr, viewer_einrichten_fenster, viewer_handle_layout_motion_notify,
+ viewer_highlight_at_char_pos, viewer_handle_button_press,
+ viewer_annot_handle_release_clicked_annot (dazu der gemeinsame Helfer
+ viewer_annot_rect_im_fenster), cb_pv_seiten_einfuegen, viewer_render_page.
+ Stufe 2: Signale statt arr_pv. Heute geht der Viewer über session->arr_pv (rund 30 Stellen) in
+ alle anderen Viewer hinein: viewer_foreach (Drehen, Löschen, Einfügen, Annotation, OCR),
+ seiten_refresh_layouts, document_reset_dirty und Speichern-Knopf (viewer_save.c),
+ annot_verschiebung_pruefen (viewer_annot.c), project.c, zond_treeview.c, zond_indexsuche.c.
+ Befund: ZondPdfDocument führt arr_zpdf_parts selbst und kennt damit alle Abschnitte; ZPDFDPart
+ ist eine Struktur mit Referenzzähler und wird von mehreren Viewern geteilt; dirty steht am Part.
+ Entscheidung: Die Signale gehen von den Abschnitten (Parts) aus, ausgelöst vom Dokument. Das
+ Dokument geht über seine Parts, jeder betroffene Part sendet (Filter: Seite im Bereich, an den
+ Randseiten Annotation im Zuschnitt). Der Viewer abonniert die Parts seiner dd-Kette.
+ Schritte:
+ 0 Testfälle: zwei Viewer auf demselben PDF, zwei Abschnitte mit Überlappung an einer Randseite,
+   Abschnitt neben dem ganzen Dokument.
+ 1 ZPDFDPart wird ein kleines GObject (ref/drop werden g_object_ref/unref). Signale page-changed
+   (Seite, Art: Drehen, Löschen, Einfügen, OCR), annot-changed, dirty-changed, closing. Im Dokument
+   zond_pdf_document_notify_*. Noch ohne Abonnenten, die alten Wege laufen weiter.
+ 2 Dirty und Speichern-Knopf über dirty-changed; document_reset_dirty und die Schleife in
+   viewer_save.c entfallen.
+ 3 Annotationen: viewer_annot_foreach_changed wird Handler von annot-changed; annot_verschiebung_
+   pruefen läuft über die Parts des Dokuments statt über arr_pv.
+ 4 Seiten (Drehen, OCR, Löschen, Einfügen): die Callbacks in seiten.c und viewer_ocr.c werden
+   Handler von page-changed, je Callback ein Commit; seiten_refresh_layouts wird ein einmaliges
+   Neuaufbauen im Idle nach allen Handlern.
+ 5 viewer_foreach entfällt; arr_pv bleibt für "zuletzt geöffneter Viewer" (Indexsuche), "Fenster
+   zum Dokument" (zond_treeview) und "alle schließen" (project.c).
+ Heikel: Der auslösende Viewer wird heute selbst mitaktualisiert, die Handler müssen das auch für
+ ihn tun. Das Schließen eines Viewers (letzte Seite eines Abschnitts gelöscht) nur im Idle, nicht
+ im Signal. Beim Einfügen zuerst die Abschnittsgrenzen anpassen (seiten_einfuegen_foreach), dann
+ Layout. Signale aus Threads (OCR, Rendern) nur im Hauptthread senden. Getestet wird jeweils mit
+ zwei offenen Viewern auf demselben PDF (Löschen, Einfügen, Drehen, OCR, Annotation, Speichern,
+ Schließen). Ein einbettbares Viewer-Widget (#262, Schritt D) setzt diese Stufe voraus.
 ```
 
 ### #258 Kleine Altlasten
