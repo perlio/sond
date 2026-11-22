@@ -128,6 +128,11 @@ gint zond_knoten_kopie_vorbereiten(ZondDBase *dbase, gint node_id, ZondKopie *ko
 gint zond_knoten_kopie_anlegen(ZondDBase *dbase, ZondKopie const *kopie, gint anchor_id,
 		gboolean child, gint *id, GError **error);
 
+/* Legt einen Link (BAUM_AUSWERTUNG_LINK) auf den Knoten ziel_id an: unter anchor_id (child) oder
+ * dahinter. Die neue ID (die Link-Nummer) kommt in *id. 0 oder -1. */
+gint zond_knoten_neuer_link(ZondDBase *dbase, gint anchor_id, gboolean child, gint ziel_id,
+		gint *id, GError **error);
+
 G_END_DECLS
 
 #endif /* ZOND_KNOTEN_H_INCLUDED */

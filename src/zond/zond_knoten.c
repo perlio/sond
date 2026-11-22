@@ -436,12 +436,29 @@ gint zond_knoten_kopie_anlegen(ZondDBase *dbase, ZondKopie const *kopie, gint an
 	gint node_id_new = 0;
 
 	if (kopie->type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK)
-		node_id_new = zond_dbase_insert_node(dbase, anchor_id, child, kopie->type,
-				kopie->link, NULL, NULL, NULL, NULL, NULL, error);
-	else
-		node_id_new = zond_dbase_insert_node(dbase, anchor_id, child, kopie->type,
-				kopie->link, NULL, NULL, kopie->icon_name, kopie->node_text, kopie->text,
-				error);
+		return zond_knoten_neuer_link(dbase, anchor_id, child, kopie->link, id, error);
+
+	node_id_new = zond_dbase_insert_node(dbase, anchor_id, child, kopie->type,
+			kopie->link, NULL, NULL, kopie->icon_name, kopie->node_text, kopie->text,
+			error);
+
+	if (node_id_new == -1) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	if (id)
+		*id = node_id_new;
+
+	return 0;
+}
+
+gint zond_knoten_neuer_link(ZondDBase *dbase, gint anchor_id, gboolean child, gint ziel_id,
+		gint *id, GError **error) {
+	gint node_id_new = zond_dbase_insert_node(dbase, anchor_id, child,
+			ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, ziel_id, NULL, NULL, NULL, NULL, NULL,
+			error);
 
 	if (node_id_new == -1) {
 		g_prefix_error(error, "%s\n", __func__);

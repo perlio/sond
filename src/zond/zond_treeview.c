@@ -1943,12 +1943,8 @@ static gint zond_treeview_paste_clipboard_as_link_foreach(
 			2, &node_id, -1);
 
 	//node ID, auf den link zeigen soll
-	node_id_new = zond_dbase_insert_node(
-			s_selection->zond->proj.dbase_zond->zond_dbase_work,
-			s_selection->anchor_id, s_selection->child,
-			ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, node_id, NULL, NULL, NULL,
-			NULL, NULL, error);
-	if (node_id_new < 0)
+	if (zond_knoten_neuer_link(s_selection->zond->proj.dbase_zond->zond_dbase_work,
+			s_selection->anchor_id, s_selection->child, node_id, &node_id_new, error))
 		return -1;
 
 	//zond_tree_store_insert_link() löst iter selbst intern auf den echten
