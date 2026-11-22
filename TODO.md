@@ -122,10 +122,13 @@ Status: offen
 Status: offen
 
 ```text
- - 99conv/test.c samt Menü "test" und Make-Ziel test entfernen.
- - Stillgelegte Chat-Dateien (zond_chat, sond_chat) prüfen.
- - misc.h umbenennen/aufteilen.
- - Tests für tvfm, anbindung, dbase_zond fehlen (src/tests).
+ - 99conv/test.c samt Menü "test" und Make-Ziel test: bewusst belassen (Entscheidung 22.11.2026).
+ - Stillgelegte Chat-Dateien (zond_chat, sond_chat): bewusst belassen (Entscheidung 22.11.2026).
+ - Tests fehlen für tvfm und anbindung (src/tests; dbase_zond hat inzwischen welche). Vorschlag:
+   die Testrahmen aus der Arbeit am 22.11.2026 übernehmen (Seitenzählung, sond_projekt_pflege,
+   zond_knoten). Für die Zählung die Rechenlogik aus zond_pdf_document.c in ein kleines
+   GTK-freies Modul in zond/ ziehen (z. B. zond/anbindung_zaehlung.[ch]), damit der echte
+   Code getestet wird und nicht eine ausgeschnittene Kopie.
 ```
 
 ## Zurückgestellt

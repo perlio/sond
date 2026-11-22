@@ -6098,3 +6098,17 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  im laufenden zond bestätigt. Schon falsch angelegte Anbindungen und ein bereits verschobener
  Index bleiben, wie sie sind (Anbindung neu anlegen).
 ```
+
+## misc.h und misc.c aufgeteilt (22.11.2026) (#258)
+
+```text
+ misc.h/misc.c sind weg. Neu: gtk3/sond_dialoge.[ch] (my_dialog_run, display_message,
+ dialog_with_buttons, abfrage_frage, filename_speichern/_oeffnen, result_listbox_new),
+ gtk3/sond_info_window.[ch] (InfoWindow, info_window_*), gtk3/sond_wait_cursor.[ch]
+ (wait_cursor_*); add_string und string_to_guint (GTK-frei) liegen jetzt in misc_stdlib.[ch].
+ Der Code ist unverändert verschoben. Die Mini-Typdefinitionen in misc.h und die nie definierte
+ Deklaration show_html_window entfallen. 32 Dateien binden nur noch die Header ein, deren
+ Symbole sie benutzen (relative Pfade), Makefile (zond, viewer) angepasst, Kommentare mit
+ Verweisen auf misc.c/misc.h nachgezogen. Geprüft: Syntax aller 38 geänderten Dateien (GTK3),
+ Client-Build (GTK4, baut misc_stdlib.c), zond und viewer gebaut und getestet.
+```
