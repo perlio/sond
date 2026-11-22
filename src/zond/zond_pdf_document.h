@@ -206,6 +206,9 @@ void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
 //Liegt die Seite im Seitenbereich des Abschnitts (Randseiten eingeschlossen)?
 gboolean zpdfd_part_umfasst_seite(ZPDFDPart*, PdfDocumentPage*);
 
+//Hat ein Viewer den Abschnitt abonniert (zeigt ihn also an)?
+gboolean zpdfd_part_wird_angezeigt(ZPDFDPart*);
+
 //Setzt dirty; sendet "dirty-changed" nur bei einer Änderung
 void zpdfd_part_set_dirty(ZPDFDPart*, gboolean);
 

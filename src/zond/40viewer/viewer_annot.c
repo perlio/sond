@@ -80,6 +80,26 @@ static gint viewer_annot_foreach_changed(PdfViewer *pv, ViewerPageNew* viewer_pa
 	return 1;
 }
 
+//Handler von "annot-changed" der Abschnitte des Viewers: Seite des Abschnitts neu darstellen lassen
+void cb_viewer_part_annot_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page,
+		gpointer annot, gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+
+	for (gint i = 0; i < pv->arr_pages->len; i++) {
+		ViewerPageNew *viewer_page = g_ptr_array_index(pv->arr_pages, i);
+
+		if (viewer_page->pdf_document_page == pdf_document_page
+				&& viewer_page->dd->zpdfd_part == zpdfd_part) {
+			if (viewer_annot_foreach_changed(pv, viewer_page, i, annot)) //sichtbar geändert
+				zpdfd_part_set_dirty(zpdfd_part, TRUE);
+
+			break;
+		}
+	}
+
+	return;
+}
+
 static gint viewer_annot_delete(PdfDocumentPageAnnot *pdf_document_page_annot,
 		GError** error) {
 	fz_context *ctx = NULL;
@@ -148,8 +168,8 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error) {
 	viewer_page->pdf_document_page->display_list = NULL;
 	viewer_page->pdf_document_page->thread &= 10; //4 löschen
 
-	viewer_foreach(pv, viewer_page->pdf_document_page,
-			viewer_annot_foreach_changed, &pv->clicked_annot->annot);
+	zond_pdf_document_notify_annot_changed(viewer_page->pdf_document_page->document,
+			viewer_page->pdf_document_page, &pv->clicked_annot->annot);
 
 	pv->clicked_annot = NULL;
 
@@ -289,19 +309,19 @@ gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 
 	//soll nur in sämtlichen betroffenen viewern Speichern aktivieren
 	//ansonsten muß nichts gemacht werden
-	viewer_foreach(pdfv, pdf_document_page_annot->pdf_document_page,
-			viewer_annot_foreach_changed, &entry.annot_changed.annot_after);
+	zond_pdf_document_notify_annot_changed(pdf_document_page_annot->pdf_document_page->document,
+			pdf_document_page_annot->pdf_document_page, &entry.annot_changed.annot_after);
 
 	return 0;
 }
 
-static gboolean viewer_annot_check_diff(DisplayedDocument* dd,
+static gboolean viewer_annot_check_diff(ZPDFDPart* zpdfd_part,
 		PdfDocumentPage *pdf_document_page, fz_rect rect_old,
 		fz_rect rect_new) {
 	fz_rect crop = pdf_document_page->rect;
 
-	if (pdf_document_page != dd->zpdfd_part->first_page &&
-			pdf_document_page != dd->zpdfd_part->last_page) return FALSE;
+	if (pdf_document_page != zpdfd_part->first_page &&
+			pdf_document_page != zpdfd_part->last_page) return FALSE;
 
 	/* Obere Grenze (first_index) nur, wenn diese Seite die ERSTE des dd
 	 * ist, untere (last_index) nur, wenn sie die LETZTE ist - bei einer
@@ -310,10 +330,10 @@ static gboolean viewer_annot_check_diff(DisplayedDocument* dd,
 	 * beiden Rollen, bleibt die jeweils andere Grenze auf dem vollen
 	 * Seitenrand (crop ist oben schon mit pdf_document_page->rect
 	 * vorbelegt). */
-	if (pdf_document_page == dd->zpdfd_part->first_page)
-		crop.y0 = dd->zpdfd_part->first_index;
-	if (pdf_document_page == dd->zpdfd_part->last_page)
-		crop.y1 = dd->zpdfd_part->last_index;
+	if (pdf_document_page == zpdfd_part->first_page)
+		crop.y0 = zpdfd_part->first_index;
+	if (pdf_document_page == zpdfd_part->last_page)
+		crop.y1 = zpdfd_part->last_index;
 
 	if (fz_is_valid_rect(fz_intersect_rect(rect_old, crop)) !=
 			fz_is_valid_rect(fz_intersect_rect(rect_new, crop)))
@@ -419,31 +439,32 @@ static gint annot_verschiebung_holen(PdfViewer *pv, ViewerPageNew **viewer_page,
 	return 0;
 }
 
-/* Prüfen, ob die Verschiebung dazu führt, dass die Annotation in einem anderen geöffneten
- * Abschnitt erscheint oder verschwindet; dann wird das alte Rechteck wiederhergestellt. */
+/* Prüfen, ob die Verschiebung dazu führt, dass die Annotation in einem anderen angezeigten
+ * Abschnitt des Dokuments erscheint oder verschwindet; dann wird das alte Rechteck
+ * wiederhergestellt. */
 static gint annot_verschiebung_pruefen(PdfViewer *pv, ViewerPageNew *viewer_page,
 		fz_rect rect_old, GError **error) {
-	for (gint i = 0; i < pv->session->arr_pv->len; i++) {
-		DisplayedDocument *dd = NULL;
+	GPtrArray *arr_parts = zond_pdf_document_get_arr_parts(
+			viewer_page->pdf_document_page->document);
 
-		PdfViewer *pv_loop = g_ptr_array_index(pv->session->arr_pv, i);
-		dd = pv_loop->dd;
-		do {
-			if (viewer_annot_check_diff(dd, viewer_page->pdf_document_page, rect_old,
-					pv->clicked_annot->annot.annot_text.rect)) {
-				pv->clicked_annot->annot.annot_text.rect = rect_old;
+	for (guint i = 0; i < arr_parts->len; i++) {
+		ZPDFDPart *zpdfd_part = g_ptr_array_index(arr_parts, i);
 
-				//Fenster hervorholen
-				gtk_window_present(GTK_WINDOW(pv_loop->vf));
+		if (!zpdfd_part_wird_angezeigt(zpdfd_part))
+			continue;
 
-				if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
-						"%s\nAnnotation würde in geöffnetem Abschnitt entfernt oder hinzugefügt\n\n"
-						"Bitte Abschnitt schließen und erneut versuchen", __func__);
+		if (viewer_annot_check_diff(zpdfd_part, viewer_page->pdf_document_page, rect_old,
+				pv->clicked_annot->annot.annot_text.rect)) {
+			pv->clicked_annot->annot.annot_text.rect = rect_old;
 
-				return -1;
-			}
+			viewer_part_praesentieren(pv->session, zpdfd_part); //Fenster hervorholen
 
-		} while ((dd = dd->next) != NULL);
+			if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+					"%s\nAnnotation würde in geöffnetem Abschnitt entfernt oder hinzugefügt\n\n"
+					"Bitte Abschnitt schließen und erneut versuchen", __func__);
+
+			return -1;
+		}
 	}
 
 	return 0;
@@ -484,8 +505,8 @@ static gint annot_verschiebung_uebernehmen(PdfViewer *pv, ViewerPageNew *viewer_
 	viewer_page->pdf_document_page->display_list = NULL;
 	viewer_page->pdf_document_page->thread &= 10;
 
-	viewer_foreach(pv, viewer_page->pdf_document_page, viewer_annot_foreach_changed,
-			&entry.annot_changed.annot_after);
+	zond_pdf_document_notify_annot_changed(viewer_page->pdf_document_page->document,
+			viewer_page->pdf_document_page, &entry.annot_changed.annot_after);
 
 	return 0;
 }
@@ -683,8 +704,8 @@ gint viewer_annot_create(ViewerPageNew *viewer_page, GError **error) {
 	viewer_page->pdf_document_page->display_list = NULL;
 	viewer_page->pdf_document_page->thread &= 10;
 
-	viewer_foreach(viewer_page->pdfv, viewer_page->pdf_document_page,
-			viewer_annot_foreach_changed, &annot);
+	zond_pdf_document_notify_annot_changed(viewer_page->pdf_document_page->document,
+			viewer_page->pdf_document_page, &annot);
 
 	entry.pdf_document_page = viewer_page->pdf_document_page;
 	entry.type = JOURNAL_TYPE_ANNOT_CREATED;

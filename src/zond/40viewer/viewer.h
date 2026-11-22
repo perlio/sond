@@ -26,6 +26,7 @@ typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkAdjustment GtkAdjustment;
 typedef struct _GSettings GSettings;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
+typedef struct _ZPDFD_Part ZPDFDPart;
 typedef struct _Pdf_Document_Page_Annot PdfDocumentPageAnnot;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef int gint;
@@ -190,8 +191,11 @@ void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
 void viewer_schliessen(PdfViewer*);
 
-//Abonnement der Abschnitte (dirty-changed) beenden, vor document_free_displayed_documents()
+//Abonnement der Abschnitte beenden, vor document_free_displayed_documents()
 void viewer_dd_signale_trennen(PdfViewer*);
+
+//Fenster eines Viewers, der den Abschnitt anzeigt, nach vorn holen
+void viewer_part_praesentieren(PdfViewerSession*, ZPDFDPart*);
 
 /* viewer_save_dirty_dds()/viewer_save_and_close(): siehe viewer_save.h */
 

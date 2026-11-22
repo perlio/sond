@@ -31,6 +31,9 @@ gint viewer_annot_do_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
 void viewer_annot_rect_im_fenster(PdfViewer *pv, ViewerPageNew *viewer_page, fz_rect rect,
 		GdkRectangle *gdk_rectangle);
 
+void cb_viewer_part_annot_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page,
+		gpointer annot, gpointer data);
+
 gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv, ViewerPageNew* viewer_page,
 		PdfPunkt pdf_punkt, GError** error);
 

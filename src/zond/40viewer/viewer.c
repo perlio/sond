@@ -263,9 +263,27 @@ static void cb_viewer_part_dirty_changed(ZPDFDPart *zpdfd_part, gpointer data) {
 
 //Abschnitte des Viewers abonnieren
 static void viewer_dd_signale_verbinden(PdfViewer *pv) {
-	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
+	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next) {
 		g_signal_connect(dd->zpdfd_part, "dirty-changed",
 				G_CALLBACK(cb_viewer_part_dirty_changed), pv);
+		g_signal_connect(dd->zpdfd_part, "annot-changed",
+				G_CALLBACK(cb_viewer_part_annot_changed), pv);
+	}
+
+	return;
+}
+
+void viewer_part_praesentieren(PdfViewerSession *session, ZPDFDPart *zpdfd_part) {
+	for (guint i = 0; i < session->arr_pv->len; i++) {
+		PdfViewer *pv = g_ptr_array_index(session->arr_pv, i);
+
+		for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
+			if (dd->zpdfd_part == zpdfd_part) {
+				gtk_window_present(GTK_WINDOW(pv->vf));
+
+				return;
+			}
+	}
 
 	return;
 }

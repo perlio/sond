@@ -1171,6 +1171,10 @@ gboolean zpdfd_part_umfasst_seite(ZPDFDPart *zpdfd_part, PdfDocumentPage *pdf_do
 			&& pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt;
 }
 
+gboolean zpdfd_part_wird_angezeigt(ZPDFDPart *zpdfd_part) {
+	return g_signal_has_handler_pending(zpdfd_part, part_signals[PART_ANNOT_CHANGED], 0, TRUE);
+}
+
 void zpdfd_part_set_dirty(ZPDFDPart *zpdfd_part, gboolean dirty) {
 	if (zpdfd_part->dirty == dirty)
 		return;
