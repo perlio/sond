@@ -6,7 +6,7 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #263.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #257, #258
+Offen: #245, #247, #254, #255, #256, #258
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -97,41 +97,6 @@ Status: offen (Voraussetzung: GTK4-Gegenstücke)
  im Kern, seadrive_gtk3 nutzt sie). Zond und seadrive_gtk3 sind noch nicht umgestellt; der
  Zustandscode des GTK3-Ladedialogs ist bis dahin doppelt (Kern und seadrive_gtk3.c). Reste dort: sond_seadrive_is_offline,
  sond_treeviewfm_seadrive_item_dehydrated.
-```
-
-### #257 Viewer weiter aufräumen
-
-Status: Stufe 1 erledigt, Stufe 2 umgesetzt (Schritte 1 bis 5), Test durch den Nutzer steht aus
-
-```text
- Stufe 1 (erledigt, Verhalten unverändert): lange Funktionen aufgeteilt: viewer_do_save_dd,
- cb_pv_seiten_ocr, viewer_einrichten_fenster, viewer_handle_layout_motion_notify,
- viewer_highlight_at_char_pos, viewer_handle_button_press,
- viewer_annot_handle_release_clicked_annot (dazu der gemeinsame Helfer
- viewer_annot_rect_im_fenster), cb_pv_seiten_einfuegen, viewer_render_page.
- Stufe 2: Signale statt arr_pv. Heute geht der Viewer über session->arr_pv (rund 30 Stellen) in
- alle anderen Viewer hinein: viewer_foreach (Drehen, Löschen, Einfügen, Annotation, OCR),
- seiten_refresh_layouts, document_reset_dirty und Speichern-Knopf (viewer_save.c),
- annot_verschiebung_pruefen (viewer_annot.c), project.c, zond_treeview.c, zond_indexsuche.c.
- Befund: ZondPdfDocument führt arr_zpdf_parts selbst und kennt damit alle Abschnitte; ZPDFDPart
- ist eine Struktur mit Referenzzähler und wird von mehreren Viewern geteilt; dirty steht am Part.
- Entscheidung: Die Signale gehen von den Abschnitten (Parts) aus, ausgelöst vom Dokument. Das
- Dokument geht über seine Parts, jeder betroffene Part sendet (Filter: Seite im Bereich, an den
- Randseiten Annotation im Zuschnitt). Der Viewer abonniert die Parts seiner dd-Kette.
- Umgesetzt (Schritte 1 bis 5): ZPDFDPart ist ein GObject mit den Signalen page-changed (Drehen,
- Löschen, Einfügen, OCR), annot-changed und dirty-changed; das Dokument verteilt über
- zond_pdf_document_notify_*. Der Viewer abonniert die Abschnitte seiner dd-Kette
- (viewer_dd_signale_verbinden/_trennen). Dirty und Speichern-Knopf, Annotationen, Drehen, OCR,
- Löschen und Einfügen laufen über Handler (seiten.c, viewer_annot.c, viewer.c); viewer_foreach und
- seiten_refresh_layouts sind entfallen, das Layout wird im Idle neu aufgebaut, leere Viewer
- schließen im Idle. arr_pv bleibt für "zuletzt geöffneter Viewer" (Indexsuche), "Fenster zum
- Dokument" (zond_treeview) und "alle schließen" (project.c).
- Heikel: Der auslösende Viewer wird heute selbst mitaktualisiert, die Handler müssen das auch für
- ihn tun. Das Schließen eines Viewers (letzte Seite eines Abschnitts gelöscht) nur im Idle, nicht
- im Signal. Beim Einfügen zuerst die Abschnittsgrenzen anpassen (seiten_einfuegen_foreach), dann
- Layout. Signale aus Threads (OCR, Rendern) nur im Hauptthread senden. Getestet wird jeweils mit
- zwei offenen Viewern auf demselben PDF (Löschen, Einfügen, Drehen, OCR, Annotation, Speichern,
- Schließen). Ein einbettbares Viewer-Widget (#262, Schritt D) setzt diese Stufe voraus.
 ```
 
 ### #258 Kleine Altlasten
@@ -524,8 +489,8 @@ Status: zurückgestellt (Vorarbeit: viewer_einrichten_fenster ist in Hilfsfunkti
  Schritte: A Hauptbereich als Container liefern, Fenster nur Hülle; C Kopfzeile als Leiste des
  Widgets, Kürzel über Controller, Cursor vom Layout, Schließen als Anfrage nach außen;
  B pv->vf in pv->widget (Kern) und pv->fenster (optional) teilen, Elternfenster über Helfer;
- D Callbacks von arr_pv auf Signale umstellen (Stufe 2 in #257), nur nötig, wenn mehrere
- Viewer gleichzeitig eingebettet werden. Empfehlung: A und C, dann B.
+ D (Callbacks von arr_pv auf Signale, Stufe 2 in #257) ist erledigt (HISTORY.md). Empfehlung:
+ A und C, dann B.
  GTK4: GtkLayout, show_all und Container-API fehlen dort; die Zeichenfläche müsste ersetzt
  werden (der GTK4-Viewer im Client macht das bereits eigenständig). Siehe auch die Idee
  viewer_host GTK-frei.

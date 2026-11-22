@@ -6136,3 +6136,25 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Ausserdem: seiten_ocr_font meldet den Fehler von pdf_to_num jetzt mit Text, ein bei gescheiterter
  OCR übernommener Buffer wird freigegeben.
 ```
+
+## Viewer aufgeräumt: lange Funktionen, Signale statt arr_pv (22.11.2026) (#257)
+
+```text
+ Stufe 1 (Verhalten unverändert): lange Funktionen aufgeteilt: viewer_do_save_dd,
+ cb_pv_seiten_ocr, viewer_einrichten_fenster, viewer_handle_layout_motion_notify,
+ viewer_highlight_at_char_pos, viewer_handle_button_press,
+ viewer_annot_handle_release_clicked_annot (dazu der Helfer viewer_annot_rect_im_fenster),
+ cb_pv_seiten_einfuegen, viewer_render_page.
+ Stufe 2: Signale statt arr_pv. ZPDFDPart ist ein GObject mit den Signalen page-changed (Drehen,
+ Löschen, Einfügen, OCR), annot-changed und dirty-changed; ZondPdfDocument verteilt über
+ zond_pdf_document_notify_* an die Abschnitte, die die Seite umfassen. Der Viewer abonniert die
+ Abschnitte seiner dd-Kette (viewer_dd_signale_verbinden/_trennen). Dirty und Speichern-Knopf,
+ Annotationen, Drehen, OCR, Löschen und Einfügen laufen über Handler (seiten.c, viewer_annot.c,
+ viewer.c); viewer_foreach, seiten_refresh_layouts und document_reset_dirty über arr_pv entfallen.
+ Das Layout wird einmalig im Idle neu aufgebaut, leere Viewer schließen im Idle. Nebeneffekt: die
+ Drehung durch die OCR baut das Layout jetzt neu auf. arr_pv bleibt für "zuletzt geöffneter
+ Viewer" (Indexsuche), "Fenster zum Dokument" (zond_treeview) und "alle schließen" (project.c).
+ Außerdem: sond_file_part_fs_path (Pfad im Dateisystem auch ohne path_root, behebt "Ungültige
+ UTF-8 Kodierung" beim Speichern im eigenständigen Viewer). Getestet mit zwei Viewern auf
+ demselben PDF (Abschnitt neben ganzem Dokument): keine Fehler.
+```
