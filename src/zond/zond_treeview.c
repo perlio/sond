@@ -21,7 +21,9 @@
 #include <gtk/gtk.h>
 #include <glib-object.h>
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../gtk3/sond_info_window.h"
+#include "../misc_stdlib.h"
 #include "../sond_fileparts.h"
 #include "../sond_renderer.h"
 #include "../sond_file_helper.h"
@@ -1066,7 +1068,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	 * allerletzten Element passiert. Pumpt außerdem anstehende Events -
 	 * insbesondere das "clicked"-Signal des Abbrechen-Buttons
 	 * (cb_abbrechen_clicked -> gtk_dialog_response -> cb_info_window_
-	 * response setzt info_window->cancel, misc.c), das ohne diese Pumpe
+	 * response setzt info_window->cancel, gtk3/sond_info_window.c), das ohne diese Pumpe
 	 * nie verarbeitet wird und der Button dadurch faktisch wirkungslos
 	 * bleibt. Der eigentliche Abbruch erfolgt weiterhin über die
 	 * bestehende Prüfung von *(info_window->cancel) am Anfang von

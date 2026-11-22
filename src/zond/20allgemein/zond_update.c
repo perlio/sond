@@ -28,7 +28,9 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
+#include "../../gtk3/sond_info_window.h"
+#include "../../misc_stdlib.h"
 #include "../../misc_stdlib.h"
 #include "../zond_init.h"
 #include "../../zond_version.h"

@@ -315,7 +315,7 @@ static magic_t g_magic = NULL;
  * Architektur nie gleichzeitig (Indizieren blockiert das Hauptfenster über
  * ein modales Info-Window, das erst schließt, wenn der Hintergrund-Thread
  * wirklich fertig ist - s. Kommentar bei cb_info_window_delete_event(),
- * misc.c). Ein Lazy-Init pro Thread (GPrivate) war keine Lösung (SIGSEGV,
+ * gtk3/sond_info_window.c). Ein Lazy-Init pro Thread (GPrivate) war keine Lösung (SIGSEGV,
  * vermutlich weil zwei Threads gleichzeitig zum ersten Mal hätten laden
  * können); die einmalige, einzelthreadige Initialisierung schließt das aus.
  *

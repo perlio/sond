@@ -21,7 +21,8 @@
 #include <gtk/gtk.h>
 #include <glib.h>
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../gtk3/sond_info_window.h"
 #include "../sond_index.h"
 #include "../sond_chat.h"
 #include "../sond_result_view.h"

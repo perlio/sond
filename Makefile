@@ -34,7 +34,7 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(SRC_DIRS)/zond/zond_installer.c, \
 	$(shell find $(SRC_DIRS)/zond -name '*.c') \
 	$(shell find $(SRC_DIRS)/znd -name '*.c')) \
-	$(SRC_DIRS)/icons.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
+	$(SRC_DIRS)/icons.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/gtk3/sond_dialoge.c $(SRC_DIRS)/gtk3/sond_info_window.c $(SRC_DIRS)/gtk3/sond_wait_cursor.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/gtk3/sond_treeview.c $(SRC_DIRS)/gtk3/sond_treeviewfm.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_preflight.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_render_doc.c $(SRC_DIRS)/sond_gtk_compat.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
@@ -61,7 +61,7 @@ SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c \
 	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_render_doc.c $(SRC_DIRS)/sond_gtk_compat.c\
 	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/znd/anbindung.c $(SRC_DIRS)/znd/zond_error.c $(SRC_DIRS)/sond_ocr.c \
-	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
+	$(SRC_DIRS)/gtk3/sond_dialoge.c $(SRC_DIRS)/gtk3/sond_info_window.c $(SRC_DIRS)/gtk3/sond_wait_cursor.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_text_extract.c \
 	$(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_tmpfiles.c
 CFLAGS += $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
 	libxml-2.0)

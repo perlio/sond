@@ -29,7 +29,7 @@
 #include <gdk/gdkwin32.h>
 #endif // __WIN32
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
 #include "../misc_stdlib.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"

@@ -26,7 +26,8 @@
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 #include "../../sond_process_file.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
+#include "../../misc_stdlib.h"
 #include "../../misc_stdlib.h"
 
 

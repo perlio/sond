@@ -25,7 +25,8 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
+#include "../../gtk3/sond_info_window.h"
 #include "../../misc_stdlib.h"
 
 #include "../zond_pdf_document.h"
@@ -204,7 +205,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 						 * nur diese Seite. Dieselbe cancel-Flag wie beim
 						 * Abbrechen-Button des InfoWindow setzen (s.
 						 * cb_abbrechen_clicked()/cb_info_window_delete_event()
-						 * in misc.c) - konsistent mit dem übrigen
+						 * in gtk3/sond_info_window.c) - konsistent mit dem übrigen
 						 * Abbruch-Mechanismus, auch wenn hier noch kein
 						 * Hintergrund-Task für diese Seite läuft. Diese
 						 * Seite wurde noch nicht angefasst (weder

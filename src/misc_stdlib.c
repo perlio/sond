@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <gio/gio.h>
 
 #ifdef _WIN32
@@ -140,3 +141,33 @@ get_exe_dir(void) {
 	return strdup(exe_dir); //ohne /
 }
 
+gchar* add_string(gchar *old_string, gchar *add_string) {
+	gchar *new_string = NULL;
+
+	if (old_string)
+		new_string = g_strconcat(old_string, add_string, NULL);
+	else
+		new_string = g_strdup(add_string);
+	g_free(old_string);
+	g_free(add_string);
+
+	return new_string;
+}
+
+gint string_to_guint(const gchar *string, guint *zahl) {
+	gboolean is_guint = TRUE;
+	if (!strlen(string))
+		is_guint = FALSE;
+	gint i = 0;
+	while (i < (gint) strlen(string) && is_guint) {
+		if (!isdigit((int) *(string + i)))
+			is_guint = FALSE;
+		i++;
+	}
+
+	if (is_guint) {
+		*zahl = atoi(string);
+		return 0;
+	} else
+		return -1;
+}

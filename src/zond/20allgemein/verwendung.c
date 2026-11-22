@@ -29,7 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
 #include "../zond_init.h"
 #include "../../znd/zond_dbase.h"
 #include "../zond_tree_store.h"

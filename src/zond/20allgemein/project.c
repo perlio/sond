@@ -30,7 +30,8 @@
 #include "../../sond_process_file.h"
 #include "../../sond_password.h"
 #include "../../sond_zond_ctl.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
+#include "../../gtk3/sond_info_window.h"
 
 #include "../zond_init.h"
 #include "../../znd/zond_dbase.h"
@@ -1287,7 +1288,7 @@ static gint project_confirm_switch(Projekt *zond) {
 
 /*
  * filepart_oeffnen(): container-bewusste Alternative zu filename_oeffnen()
- * (misc.c) - der normale GTK-Dateiauswahldialog (GtkFileChooserDialog)
+ * (gtk3/sond_dialoge.c) - der normale GTK-Dateiauswahldialog (GtkFileChooserDialog)
  * kann nicht in einen noch nicht entpackten Container (ZIP etc.)
  * hinabsteigen. Eine vorherige Markierung im Dateiverzeichnis wäre keine
  * Alternative: die Selektion in BAUM_FS geht verloren, sobald im
@@ -1426,7 +1427,7 @@ gint project_load(Projekt* zond, GError** error) {
 	 * (typischerweise nur eine Handvoll Fallakten-Ordner) ist ein deutlich
 	 * günstigerer Startpunkt für den Dateiauswahldialog als das zufällige
 	 * aktuelle Arbeitsverzeichnis (s. ausführlichen Kommentar an
-	 * filename_oeffnen(), misc.c). */
+	 * filename_oeffnen(), gtk3/sond_dialoge.c). */
 	{
 		gchar const *dir_ref = zond->proj.project_dir ?
 				zond->proj.project_dir : zond->app.last_project_dir;

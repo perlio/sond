@@ -3,7 +3,8 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
-#include "../../misc.h"
+#include "../../gtk3/sond_info_window.h"
+#include "../../misc_stdlib.h"
 
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"

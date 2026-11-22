@@ -25,7 +25,7 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../misc.h"
+#include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_ocr.h"

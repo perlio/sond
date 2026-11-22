@@ -21,7 +21,7 @@
 #include <gtk/gtk.h>
 #include <stdio.h>
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
 #include "../sond_log_and_error.h"
 #include "../gtk3/sond_treeview.h"
 #include "../gtk3/sond_treeviewfm.h"

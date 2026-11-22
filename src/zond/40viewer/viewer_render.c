@@ -6,7 +6,7 @@
 #include "../../sond_log_and_error.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_pdf_helper.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
 
 #include "../zond_pdf_document.h"
 

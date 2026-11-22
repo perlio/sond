@@ -26,7 +26,9 @@
 #include <windows.h>
 #endif
 
-#include "../misc.h"
+#include "sond_dialoge.h"
+#include "sond_info_window.h"
+#include "sond_wait_cursor.h"
 #include "../sond_log_and_error.h"
 #include "../sond_result_view.h"
 #include "../sond_fileparts.h"

@@ -38,7 +38,7 @@ void section_free(gpointer data) {
 #define nelem(x) (sizeof(x) / sizeof((x)[0]))
 #endif
 
-//Hängt add an old an und gibt beide frei (wie add_string() in misc.c, das GTK braucht)
+//Hängt add an old an und gibt beide frei (wie add_string() in misc_stdlib.c; hier lokal, damit zond_dbase.c keine weitere Datei braucht)
 static gchar* message_append(gchar *old, gchar *add) {
 	gchar *result = old ? g_strconcat(old, add, NULL) : g_strdup(add);
 

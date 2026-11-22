@@ -20,7 +20,7 @@
 #include <sqlite3.h>
 
 #include "../../sond_log_and_error.h"
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
 #include "../../znd/zond_dbase.h"
 #include "../zond_treeview.h"
 #include "../zond_treeviewfm.h"

@@ -23,7 +23,8 @@
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../gtk3/sond_wait_cursor.h"
 #include "../sond_index.h"
 #include "../sond_mime.h"
 #include "../sond_result_view.h"

@@ -19,7 +19,7 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
 #include "../../sond_log_and_error.h"
 #include "../../gtk3/sond_treeview.h"
 #include "../../sond_file_helper.h"

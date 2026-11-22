@@ -32,7 +32,7 @@
 #include "../sond_file_helper.h"
 #include "../sond_log_and_error.h"
 #include "../sond_mime.h"
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
 
 //CfGetPlaceholderInfo (geladen in sond_seadrive_core.c)
 typedef HRESULT (WINAPI *PFN_CfGetPlaceholderInfo)(

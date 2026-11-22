@@ -3,7 +3,8 @@
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
 #include "../sond_fileparts.h"
 #include "../sond_index.h"
 #include "../sond_pdf_helper.h"

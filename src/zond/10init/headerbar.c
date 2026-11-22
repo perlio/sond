@@ -23,7 +23,10 @@
 #include <glib/gstdio.h>
 #include <tesseract/capi.h>
 
-#include "../../misc.h"
+#include "../../gtk3/sond_dialoge.h"
+#include "../../gtk3/sond_info_window.h"
+#include "../../gtk3/sond_wait_cursor.h"
+#include "../../misc_stdlib.h"
 #include "../../sond_ocr.h"
 #include "../../sond_fileparts.h"
 #include "../../gtk3/sond_treeview.h"

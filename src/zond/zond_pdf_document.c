@@ -21,7 +21,6 @@
 #include <glib/gstdio.h>
 #include <glib-object.h>
 
-#include "../misc.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"

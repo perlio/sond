@@ -19,7 +19,6 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_log_and_error.h"
-#include "../../misc.h"
 
 #include "../zond_pdf_document.h"
 

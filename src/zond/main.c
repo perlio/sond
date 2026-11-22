@@ -22,7 +22,7 @@
 #include <stdio.h> /* _setmaxstdio() */
 #endif
 
-#include "../misc.h"
+#include "../gtk3/sond_dialoge.h"
 #include "../sond_log_and_error.h"
 #include "zond_init.h"
 #include "20allgemein/project.h"

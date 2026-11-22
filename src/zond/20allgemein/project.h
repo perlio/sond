@@ -77,7 +77,7 @@ gboolean project_arbeitskopie_uebernehmen(gchar const *project,
 gboolean project_arbeitskopie_sichern(gchar const *project,
 		gchar const *path_tmp, gchar **path_neu, GError **error);
 
-/* Container-bewusste Alternative zu filename_oeffnen() (misc.c) - öffnet
+/* Container-bewusste Alternative zu filename_oeffnen() (gtk3/sond_dialoge.c) - öffnet
  * einen modalen Dialog mit einem eigenen, frischen Dateiverzeichnis-Baum
  * (ZondTreeviewFM), der - anders als der normale GTK-Dateiauswahldialog -
  * auch in ZIP-Archive hinabsteigen kann. s. ausführlichen Kommentar an

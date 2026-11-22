@@ -23,7 +23,6 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../misc.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 
