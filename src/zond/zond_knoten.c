@@ -18,7 +18,10 @@
 
 #include "zond_knoten.h"
 
+#include <string.h>
+
 #include "../sond_log_and_error.h"
+#include "../znd/zond_error.h"
 
 void zond_knoten_free(ZondKnoten *node) {
 	if (!node)
@@ -345,6 +348,109 @@ gint zond_knoten_aufloesen(ZondDBase *dbase, gint node_id, gint type, gint *baum
 
 	if (baum_inhalt_file_out)
 		*baum_inhalt_file_out = baum_inhalt_file;
+
+	return 0;
+}
+
+//Wurzel-IDs der beiden Bäume in der Datenbank (BAUM_INHALT, BAUM_AUSWERTUNG in zond_init.h)
+#define WURZEL_INHALT 1
+#define WURZEL_AUSWERTUNG 2
+
+void zond_knoten_kopie_clear(ZondKopie *kopie) {
+	g_clear_pointer(&kopie->icon_name, g_free);
+	g_clear_pointer(&kopie->node_text, g_free);
+	g_clear_pointer(&kopie->text, g_free);
+}
+
+gint zond_knoten_kopie_vorbereiten(ZondDBase *dbase, gint node_id, ZondKopie *kopie,
+		GError **error) {
+	gint type = 0;
+	gint link = 0;
+
+	memset(kopie, 0, sizeof(ZondKopie));
+
+	if (zond_dbase_get_node(dbase, node_id, &type, &link, NULL, NULL, &kopie->icon_name,
+			&kopie->node_text, &kopie->text, error))
+		return -1;
+
+	//Verschachtelter Link (Kind eines kopierten Punktes): bleibt Link auf dasselbe Ziel
+	if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
+		gint root = 0;
+
+		zond_knoten_kopie_clear(kopie);
+
+		if (zond_knoten_get_root(dbase, link, &root, error))
+			return -1;
+
+		if (root != WURZEL_INHALT && root != WURZEL_AUSWERTUNG) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nLink-Ziel (Knoten %d) hat keine gültige "
+						"Baum-Wurzel (root=%d)", __func__, link, root);
+
+			return -1;
+		}
+
+		kopie->type = ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK;
+		kopie->link = link;
+		kopie->link_root = root;
+
+		return 0;
+	}
+
+	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT) {
+		kopie->type = ZOND_DBASE_TYPE_BAUM_STRUKT;
+
+		return 0;
+	}
+
+	kopie->type = ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY;
+	kopie->link = (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY
+			|| type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) ? link : node_id;
+
+	/* BAUM_INHALT_FILE ist der reine Anker der Anbindung und trägt selbst kein icon_name/
+	 * node_text/text. Angezeigt werden muss die verlinkte, dauerhafte file_part-Zeile, sonst
+	 * bleibt die Kopie unbeschriftet. */
+	if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) {
+		zond_knoten_kopie_clear(kopie);
+
+		if (zond_dbase_get_node(dbase, link, NULL, NULL, NULL, NULL, &kopie->icon_name,
+				&kopie->node_text, &kopie->text, error)) {
+			zond_knoten_kopie_clear(kopie);
+
+			return -1;
+		}
+
+		if (zond_dbase_get_first_child(dbase, link, &kopie->erstes_kind, error)) {
+			zond_knoten_kopie_clear(kopie);
+
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+gint zond_knoten_kopie_anlegen(ZondDBase *dbase, ZondKopie const *kopie, gint anchor_id,
+		gboolean child, gint *id, GError **error) {
+	gint node_id_new = 0;
+
+	if (kopie->type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK)
+		node_id_new = zond_dbase_insert_node(dbase, anchor_id, child, kopie->type,
+				kopie->link, NULL, NULL, NULL, NULL, NULL, error);
+	else
+		node_id_new = zond_dbase_insert_node(dbase, anchor_id, child, kopie->type,
+				kopie->link, NULL, NULL, kopie->icon_name, kopie->node_text, kopie->text,
+				error);
+
+	if (node_id_new == -1) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	if (id)
+		*id = node_id_new;
 
 	return 0;
 }

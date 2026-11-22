@@ -101,6 +101,33 @@ gint zond_knoten_loeschpruefung(ZondDBase *dbase, gint node_id, gint type,
 gint zond_knoten_aufloesen(ZondDBase *dbase, gint node_id, gint type, gint *baum_inhalt_file,
 		GError **error);
 
+/* Eine zu kopierende Zeile der Auswertung: was die Kopie in der Datenbank wird und was die
+ * Anzeige dafür braucht. */
+typedef struct {
+	gint type;        //neuer Typ: BAUM_STRUKT, BAUM_AUSWERTUNG_COPY oder BAUM_AUSWERTUNG_LINK
+	gint link;        //Copy: Quelle (Anzeige-ID), Link: Ziel
+	gint link_root;   //nur Link: Wurzel-ID des Baums, in dem das Ziel steht
+	gchar *icon_name; //nur Strukturpunkt und Copy
+	gchar *node_text;
+	gchar *text;
+	gint erstes_kind; //nur Copy einer Anbindung: erstes Kind der Datei (ihre Abschnitte werden
+	                  //mitkopiert), sonst 0
+} ZondKopie;
+
+void zond_knoten_kopie_clear(ZondKopie *kopie);
+
+/* Liest die Quelle node_id und bestimmt, was daraus wird (ändert nichts): ein Strukturpunkt bleibt
+ * einer, ein Link bleibt Link auf dasselbe Ziel (ein verschachtelter Link würde als Copy
+ * unbeschriftet und ohne Kinder), alles andere wird eine Copy. Bei einer Anbindung kommen Icon und
+ * Text von der verlinkten Datei, nicht vom Anker. 0 oder -1. */
+gint zond_knoten_kopie_vorbereiten(ZondDBase *dbase, gint node_id, ZondKopie *kopie,
+		GError **error);
+
+/* Legt die vorbereitete Kopie unter anchor_id (child) oder dahinter an. Die neue ID kommt in *id.
+ * 0 oder -1. */
+gint zond_knoten_kopie_anlegen(ZondDBase *dbase, ZondKopie const *kopie, gint anchor_id,
+		gboolean child, gint *id, GError **error);
+
 G_END_DECLS
 
 #endif /* ZOND_KNOTEN_H_INCLUDED */
