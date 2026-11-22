@@ -2,12 +2,12 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #262.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #263.
 
 ## Inhalt
 
 Offen: #245, #247, #254, #255, #256, #257, #258
-Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
 ## Offen
@@ -480,6 +480,39 @@ Status: Phase 1 erledigt; Phasen 2 bis 5 zurückgestellt (erst mit der Umstellun
  rund 7500 Zeilen mit modalen Dialogen).
  Ort: zond/, nicht znd/ (der Client zeigt diese Bäume nicht; wer so tief einsteigen will,
  öffnet zond).
+```
+
+### #262 Viewer als einbettbares Widget
+
+Status: zurückgestellt (Vorarbeit: viewer_einrichten_fenster ist in Hilfsfunktionen zerlegt)
+
+```text
+ Ziel: Der Viewer soll wahlweise in ein Toplevel-Fenster oder anderswo eingebettet werden
+ können. Heute ist pv->vf ein GtkWindow und zugleich Kern und Hülle.
+ Hindernisse:
+ 1. pv->vf wird an rund 45 Stellen als Elternfenster benutzt (display_message, Dialoge,
+    Dateiauswahl, Druckdialog, info_window_open, gtk_window_present, gtk_application_add_window).
+    Als Widget: Toplevel über gtk_widget_get_toplevel, bzw. ein Helfer viewer_parent(pv).
+ 2. Die Kopfzeile ist die Titelleiste des Fensters (gtk_window_set_titlebar), Seiten- und
+    Suchfeld liegen darin. Im Widget: eigene Leiste, die der Embedder auch in seine
+    Titelleiste setzen kann.
+ 3. Tastenkürzel (Strg+C, Strg+X) hängen an der AccelGroup des Fensters; im Widget über
+    Controller/Shortcuts.
+ 4. Cursor über pv->gdk_window (GDK-Fenster des Toplevels, viewer_mouse.c, viewer_ui.c);
+    besser vom Layout (GTK3: gtk_widget_get_window(layout), GTK4: gtk_widget_set_cursor).
+ 5. Fenstersignale delete-event (Schließen mit Speichern) und motion-notify-event gehören in
+    die Hülle bzw. auf das Layout; der Kern bietet stattdessen "darf geschlossen werden?"
+    (viewer_save_and_close ist vorhanden, muss nur vom Fenster gelöst werden).
+ 6. Lebenszyklus: gtk_widget_destroy(pv->vf) in viewer.c und der Weak-Pointer args->vf in
+    viewer.c hängen am Fenster; besser an der Session.
+ Schritte: A Hauptbereich als Container liefern, Fenster nur Hülle; C Kopfzeile als Leiste des
+ Widgets, Kürzel über Controller, Cursor vom Layout, Schließen als Anfrage nach außen;
+ B pv->vf in pv->widget (Kern) und pv->fenster (optional) teilen, Elternfenster über Helfer;
+ D Callbacks von arr_pv auf Signale umstellen (Stufe 2 in #257), nur nötig, wenn mehrere
+ Viewer gleichzeitig eingebettet werden. Empfehlung: A und C, dann B.
+ GTK4: GtkLayout, show_all und Container-API fehlen dort; die Zeichenfläche müsste ersetzt
+ werden (der GTK4-Viewer im Client macht das bereits eigenständig). Siehe auch die Idee
+ viewer_host GTK-frei.
 ```
 
 ## Ideen

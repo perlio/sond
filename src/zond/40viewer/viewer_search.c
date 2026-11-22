@@ -101,24 +101,195 @@ static gint search_hit_cb(fz_context *ctx, void *opaque,
 	return 0; //weitersuchen
 }
 
+//ViewerPage zu page_nr (page_akt) suchen; liefert den Index in arr_pages in page_idx
+static ViewerPageNew* highlight_seite_finden(PdfViewer *pv, gint page_nr, gint *page_idx) {
+	for (guint i = 0; i < pv->arr_pages->len; i++) {
+		ViewerPageNew *vp = g_ptr_array_index(pv->arr_pages, i);
+
+		if (vp->pdf_document_page->page_akt == page_nr) {
+			*page_idx = (gint) i;
+
+			return vp;
+		}
+	}
+
+	return NULL;
+}
+
+//alle Treffer des Terms auf der Seite sammeln (ohne Groß-/Kleinschreibung)
+static GArray* highlight_treffer_sammeln(fz_context *ctx, fz_stext_page *stext, gint page_nr,
+		gchar const *term) {
+	SearchHitData hit_data;
+
+	hit_data.hits = g_array_new(FALSE, TRUE, sizeof(GArray *));
+
+	fz_try(ctx) {
+		fz_search_stext_page_cb(ctx, stext, term,
+				(fz_search_callback_fn *) search_hit_cb, &hit_data);
+	}
+	fz_catch(ctx) {
+		LOG_WARN("Suche in Seite %i fehlgeschlagen: %s", page_nr, fz_caught_message(ctx));
+	}
+
+	return hit_data.hits;
+}
+
+static void highlight_treffer_freigeben(GArray *hits) {
+	for (guint h = 0; h < hits->len; h++)
+		g_array_free(g_array_index(hits, GArray *, h), TRUE);
+	g_array_free(hits, TRUE);
+
+	return;
+}
+
+//Zeichen am Offset des flachen Seitentexts (map des Flat-Texts); NULL, wenn nicht zu bestimmen
+static fz_stext_char* highlight_zeichen_an_pos(fz_context *ctx, fz_stext_page *stext,
+		gint char_pos_in_page) {
+	fz_stext_position *map = NULL;
+	fz_buffer *flat_buf = NULL;
+	fz_stext_char *target_ch = NULL;
+
+	fz_try(ctx) {
+		flat_buf = fz_new_buffer_from_flattened_stext_page(ctx, stext, FZ_TEXT_FLATTEN_ALL, &map);
+	}
+	fz_catch(ctx) {
+		flat_buf = NULL;
+		map = NULL;
+	}
+
+	if (map && flat_buf) {
+		unsigned char *flat_data = NULL;
+		//Länge aus fz_buffer_storage(), nicht strlen(): Puffer ist nicht
+		//terminiert und kann NUL-Bytes enthalten (Glyphen ohne Unicode)
+		gsize flat_len = fz_buffer_storage(ctx, flat_buf, &flat_data);
+
+		if (flat_data) {
+			gint safe_pos = (char_pos_in_page < (gint) flat_len)
+					? char_pos_in_page : (gint) flat_len - 1;
+
+			//Offset nicht mitten in einem UTF-8-Zeichen
+			while (safe_pos > 0 && (flat_data[safe_pos] & 0xC0) == 0x80)
+				safe_pos--;
+
+			if (safe_pos >= 0) {
+				gsize char_idx = fz_runeidx((gchar *) flat_data, (gchar *) flat_data + safe_pos);
+
+				target_ch = map[char_idx].ch;
+			}
+		}
+	}
+
+	if (flat_buf) fz_drop_buffer(ctx, flat_buf);
+	if (map) fz_free(ctx, map); //map ist separat alloziert
+
+	return target_ch;
+}
+
+/* Treffer zu einem Zeichen: der, in dessen Viereck der Mittelpunkt des Zeichens liegt (je Quad,
+ * nicht Vereinigungsbox: Treffer können mehrzeilig sein), sonst der mit dem nächstgelegenen Quad. */
+static GArray* highlight_treffer_zu_zeichen(GArray *hits, fz_stext_char *target_ch) {
+	GArray *chosen_hit = NULL;
+	fz_quad cq = target_ch->quad;
+	fz_point center = { (cq.ul.x + cq.lr.x) / 2, (cq.ul.y + cq.lr.y) / 2 };
+
+	for (guint h = 0; h < hits->len && !chosen_hit; h++) {
+		GArray *hit = g_array_index(hits, GArray *, h);
+
+		for (guint q = 0; q < hit->len; q++)
+			if (fz_is_point_inside_quad(center, g_array_index(hit, fz_quad, q))) {
+				chosen_hit = hit;
+				break;
+			}
+	}
+
+	//Fallback: Treffer mit nächstgelegenem Quad
+	if (!chosen_hit) {
+		float best_dist = 1e30f;
+
+		for (guint h = 0; h < hits->len; h++) {
+			GArray *hit = g_array_index(hits, GArray *, h);
+
+			for (guint q = 0; q < hit->len; q++) {
+				fz_quad hq = g_array_index(hit, fz_quad, q);
+				float dx = hq.ll.x - target_ch->origin.x;
+				float dy = hq.ll.y - target_ch->origin.y;
+				float dist = dx * dx + dy * dy;
+
+				if (dist < best_dist) {
+					best_dist = dist;
+					chosen_hit = hit;
+				}
+			}
+		}
+	}
+
+	return chosen_hit;
+}
+
+//Treffer über char_pos_in_page bestimmen; ohne Ergebnis der erste Treffer
+static GArray* highlight_treffer_wahlen(fz_context *ctx, fz_stext_page *stext, GArray *hits,
+		gint char_pos_in_page) {
+	GArray *chosen_hit = NULL;
+	fz_stext_char *target_ch = highlight_zeichen_an_pos(ctx, stext, char_pos_in_page);
+
+	if (target_ch)
+		chosen_hit = highlight_treffer_zu_zeichen(hits, target_ch);
+
+	//Fallback, falls die map-Methode nichts ergab: ersten Treffer nehmen
+	if (!chosen_hit && hits->len > 0)
+		chosen_hit = g_array_index(hits, GArray *, 0);
+
+	return chosen_hit;
+}
+
+//Quads des Treffers beschnitten in pv->highlight schreiben und dorthin springen
+static void highlight_treffer_anzeigen(PdfViewer *pv, ViewerPageNew *viewer_page, gint page_idx,
+		GArray *chosen_hit) {
+	//erste Quad (unbeschnitten) für den Sprung merken
+	fz_quad first_quad = g_array_index(chosen_hit, fz_quad, 0);
+	gint n_quads = 0;
+
+	pv->highlight.page[0] = -1;
+	for (guint q = 0; q < chosen_hit->len && n_quads < 999; q++) {
+		fz_quad quad    = g_array_index(chosen_hit, fz_quad, q);
+		fz_rect r       = fz_rect_from_quad(quad);
+		fz_rect cropped = fz_intersect_rect(viewer_page->crop, r);
+
+		if (!fz_is_empty_rect(cropped)) {
+			cropped = fz_translate_rect(cropped, -viewer_page->crop.x0, -viewer_page->crop.y0);
+			pv->highlight.quad[n_quads] = fz_quad_from_rect(cropped);
+			pv->highlight.page[n_quads] = page_idx;
+			n_quads++;
+		}
+	}
+	pv->highlight.page[n_quads] = -1;
+
+	if (n_quads > 0) {
+		//als Idle-Sprung: viewer_display_document() plant beim ersten Öffnen
+		//schon einen zum Seitenanfang ein, der sonst unseren überschriebe
+		PdfPos pdf_pos = { 0 };
+
+		pdf_pos.seite = page_idx;
+		pdf_pos.index = (gint) first_quad.ul.y;
+		viewer_springen_zu_pos_pdf_idle(pv, pdf_pos, 40.0);
+
+		gtk_widget_queue_draw(pv->layout);
+	}
+
+	return;
+}
+
 void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		gint char_pos_in_page, gchar const *term) {
 	ViewerPageNew *viewer_page = NULL;
 	gint page_idx = -1;
+	GArray *hits = NULL;
+	GArray *chosen_hit = NULL;
 
 	if (!term || !*term)
 		return;
 
-	//ViewerPage zu page_nr (page_akt) suchen
-	for (guint i = 0; i < pv->arr_pages->len; i++) {
-		ViewerPageNew *vp = g_ptr_array_index(pv->arr_pages, i);
-		if (vp->pdf_document_page->page_akt == page_nr) {
-			viewer_page = vp;
-			page_idx = (gint) i;
-			break;
-		}
-	}
-
+	viewer_page = highlight_seite_finden(pv, page_nr, &page_idx);
 	if (!viewer_page || page_idx < 0)
 		return;
 
@@ -132,8 +303,7 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		GError *error = NULL;
 		gint rc = 0;
 
-		rc = viewer_render_stext_page_fast(ctx,
-				viewer_page->pdf_document_page, &error);
+		rc = viewer_render_stext_page_fast(ctx, viewer_page->pdf_document_page, &error);
 		if (rc) {
 			g_clear_error(&error);
 			return;
@@ -142,150 +312,19 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 
 	fz_stext_page *stext = viewer_page->pdf_document_page->stext_page;
 
-	//alle Treffer des Terms auf der Seite sammeln (ohne Groß-/Kleinschreibung)
-	SearchHitData hit_data;
-	hit_data.hits = g_array_new(FALSE, TRUE, sizeof(GArray *));
-
-	fz_try(ctx) {
-		fz_search_stext_page_cb(ctx, stext, term,
-				(fz_search_callback_fn *) search_hit_cb, &hit_data);
-	}
-	fz_catch(ctx) {
-		LOG_WARN("Suche in Seite %i fehlgeschlagen: %s", page_nr,
-				fz_caught_message(ctx));
-	}
-
-	if (hit_data.hits->len == 0) {
-		g_array_free(hit_data.hits, TRUE);
+	hits = highlight_treffer_sammeln(ctx, stext, page_nr, term);
+	if (hits->len == 0) {
+		g_array_free(hits, TRUE);
 		return;
 	}
 
-	//Treffer über char_pos_in_page bestimmen: map des Flat-Texts liefert das
-	//Zeichen am Offset, gewählt wird der Treffer, der es enthält
-	GArray *chosen_hit = NULL;
+	chosen_hit = highlight_treffer_wahlen(ctx, stext, hits, char_pos_in_page);
+	if (chosen_hit)
+		highlight_treffer_anzeigen(pv, viewer_page, page_idx, chosen_hit);
 
-	fz_stext_position *map = NULL;
-	fz_buffer *flat_buf = NULL;
+	highlight_treffer_freigeben(hits);
 
-	fz_try(ctx) {
-		flat_buf = fz_new_buffer_from_flattened_stext_page(
-				ctx, stext, FZ_TEXT_FLATTEN_ALL, &map);
-	}
-	fz_catch(ctx) {
-		flat_buf = NULL;
-		map = NULL;
-	}
-
-	if (map && flat_buf) {
-		unsigned char *flat_data = NULL;
-		//Länge aus fz_buffer_storage(), nicht strlen(): Puffer ist nicht
-		//terminiert und kann NUL-Bytes enthalten (Glyphen ohne Unicode)
-		gsize flat_len = fz_buffer_storage(ctx, flat_buf, &flat_data);
-		if (flat_data) {
-			gint safe_pos = (char_pos_in_page < (gint) flat_len)
-					? char_pos_in_page : (gint) flat_len - 1;
-
-			//Offset nicht mitten in einem UTF-8-Zeichen
-			while (safe_pos > 0 && (flat_data[safe_pos] & 0xC0) == 0x80)
-				safe_pos--;
-
-			if (safe_pos >= 0) {
-				gsize char_idx = fz_runeidx((gchar *) flat_data,
-						(gchar *) flat_data + safe_pos);
-				fz_stext_char *target_ch = map[char_idx].ch;
-
-				if (target_ch) {
-					//Mittelpunkt des Zeichens in einem Quad des Treffers?
-					//(je Quad, nicht Vereinigungsbox: Treffer können mehrzeilig sein)
-					fz_quad cq = target_ch->quad;
-					fz_point center = { (cq.ul.x + cq.lr.x) / 2,
-							(cq.ul.y + cq.lr.y) / 2 };
-
-					for (guint h = 0; h < hit_data.hits->len && !chosen_hit; h++) {
-						GArray *hit = g_array_index(hit_data.hits, GArray *, h);
-
-						for (guint q = 0; q < hit->len; q++)
-							if (fz_is_point_inside_quad(center,
-									g_array_index(hit, fz_quad, q))) {
-								chosen_hit = hit;
-								break;
-							}
-					}
-
-					//Fallback: Treffer mit nächstgelegenem Quad
-					if (!chosen_hit) {
-						float best_dist = 1e30f;
-
-						for (guint h = 0; h < hit_data.hits->len; h++) {
-							GArray *hit = g_array_index(hit_data.hits, GArray *, h);
-
-							for (guint q = 0; q < hit->len; q++) {
-								fz_quad hq = g_array_index(hit, fz_quad, q);
-								float dx = hq.ll.x - target_ch->origin.x;
-								float dy = hq.ll.y - target_ch->origin.y;
-								float dist = dx * dx + dy * dy;
-
-								if (dist < best_dist) {
-									best_dist = dist;
-									chosen_hit = hit;
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if (flat_buf) fz_drop_buffer(ctx, flat_buf);
-	if (map) fz_free(ctx, map); //map ist separat alloziert
-
-	//Fallback, falls die map-Methode nichts ergab: ersten Treffer nehmen
-	if (!chosen_hit && hit_data.hits->len > 0)
-		chosen_hit = g_array_index(hit_data.hits, GArray *, 0);
-
-	if (!chosen_hit) {
-		for (guint h = 0; h < hit_data.hits->len; h++)
-			g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
-		g_array_free(hit_data.hits, TRUE);
-		return;
-	}
-
-	//erste Quad (unbeschnitten) für den Sprung merken
-	fz_quad first_quad = g_array_index(chosen_hit, fz_quad, 0);
-
-	//Quads des Treffers beschnitten in pv->highlight schreiben
-	pv->highlight.page[0] = -1;
-	gint n_quads = 0;
-	for (guint q = 0; q < chosen_hit->len && n_quads < 999; q++) {
-		fz_quad quad    = g_array_index(chosen_hit, fz_quad, q);
-		fz_rect r       = fz_rect_from_quad(quad);
-		fz_rect cropped = fz_intersect_rect(viewer_page->crop, r);
-		if (!fz_is_empty_rect(cropped)) {
-			cropped = fz_translate_rect(cropped,
-					-viewer_page->crop.x0, -viewer_page->crop.y0);
-			pv->highlight.quad[n_quads] = fz_quad_from_rect(cropped);
-			pv->highlight.page[n_quads] = page_idx;
-			n_quads++;
-		}
-	}
-	pv->highlight.page[n_quads] = -1;
-
-	for (guint h = 0; h < hit_data.hits->len; h++)
-		g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
-	g_array_free(hit_data.hits, TRUE);
-
-	if (n_quads > 0) {
-		//als Idle-Sprung: viewer_display_document() plant beim ersten Öffnen
-		//schon einen zum Seitenanfang ein, der sonst unseren überschriebe
-		PdfPos pdf_pos = { 0 };
-
-		pdf_pos.seite = page_idx;
-		pdf_pos.index = (gint) first_quad.ul.y;
-		viewer_springen_zu_pos_pdf_idle(pv, pdf_pos, 40.0);
-
-		gtk_widget_queue_draw(pv->layout);
-	}
+	return;
 }
 
 //Hilfsstruct für den Seitentext-Suchlauf in viewer_handle_text_search()

@@ -781,40 +781,8 @@ static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 	return res;
 }
 
-void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
-	PdfViewer *pv = (PdfViewer*) data;
-	gint ret = 0;
-	gint rc = 0;
-	guint pos = 0;
-	pdf_document *doc_merge = NULL;
-	GError *error = NULL;
-	ViewerPageNew* viewer_page = NULL;
-	JournalEntry entry = { 0 };
-	gint page_doc = 0;
-	gint count = 0;
-	DataInsert data_insert = { 0 };
-	SondFilePart* sfp = NULL;
-
-	if (pv->dd->next) {
-		display_message(pv->vf,
-				"Virtuelles PDF -\n\n"
-						"Einfügen noch nicht implementiert",
-				NULL);
-
-		return;
-	}
-
-	ret = seiten_abfrage_seitenzahl(pv, &pos);
-	if (ret == -1)
-		return;
-
-	if (pos > pv->arr_pages->len)
-		pos = pv->arr_pages->len;
-	//kein "if (pos < 0) pos = 0;" mehr - pos ist guint, kann nie negativ sein
-
-	viewer_page = g_ptr_array_index(pv->arr_pages, (pos == pv->arr_pages->len) ? pos - 1 : pos);
-
-	//verschiedene Tests...
+//Einfügen vor der ersten oder nach der letzten Seite nur, wenn der Abschnitt am Rand der Seite liegt
+static gboolean seiten_einfuegen_pos_pruefen(PdfViewer *pv, guint pos, ViewerPageNew *viewer_page) {
 	if (pos == 0) {
 		if (viewer_page->dd->zpdfd_part->first_index != 0) {
 			display_message(pv->vf,
@@ -822,7 +790,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 							"Einfügen vor erster Seite daher nicht möglich",
 					NULL);
 
-			return;
+			return FALSE;
 		}
 	}
 	else if (pos == pv->arr_pages->len) {
@@ -830,57 +798,68 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			display_message(pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
 					"Einfügen nach Ende eines Abschnitts daher nicht möglich", NULL);
 
-			return;
+			return FALSE;
 		}
 	}
 
-	//komplette Datei wird eingefügt
-	if (ret == 1) {
-		gchar *path_merge = NULL;
+	return TRUE;
+}
 
-		//Datei auswählen
-		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
+//Datei wählen, laden und als PDF öffnen; NULL bei Abbruch oder Fehler (Meldung ist ausgegeben)
+static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart **sfp) {
+	gchar *path_merge = NULL;
+	pdf_document *doc_merge = NULL;
+	GError *error = NULL;
 
-		//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
-		if (path_merge && !pdf_viewer_session_load_file(pv->session,
-				GTK_WINDOW(pv->vf), path_merge)) {
-			g_free(path_merge);
+	//Datei auswählen
+	path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
 
-			return;
-		}
-
-		sfp = sond_file_part_from_filepart(path_merge, &error);
+	//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
+	if (path_merge && !pdf_viewer_session_load_file(pv->session,
+			GTK_WINDOW(pv->vf), path_merge)) {
 		g_free(path_merge);
-		if (!sfp) {
-			display_message(pv->vf, "Datei einfügen\n\n", error->message, NULL);
-			g_error_free(error);
 
-			return;
-		}
+		return NULL;
+	}
 
-		if (!SOND_IS_FILE_PART_PDF(sfp)) {
-			display_message(pv->vf, "Keine PDF-Datei", NULL);
-			g_object_unref(sfp);
+	*sfp = sond_file_part_from_filepart(path_merge, &error);
+	g_free(path_merge);
+	if (!*sfp) {
+		display_message(pv->vf, "Datei einfügen\n\n", error->message, NULL);
+		g_error_free(error);
 
-			return;
-		}
+		return NULL;
+	}
 
-		doc_merge = sond_file_part_pdf_open_document(pv->session->ctx,
-				SOND_FILE_PART_PDF(sfp), TRUE, &error);
-		if (!doc_merge) {
-			display_message(pv->vf, "Datei einfügen\n\n"
-					"Einzufügende Datei konnte nicht geöffnet werden:\n",
-					error->message, NULL);
-			g_error_free(error);
-			g_object_unref(sfp);
+	if (!SOND_IS_FILE_PART_PDF(*sfp)) {
+		display_message(pv->vf, "Keine PDF-Datei", NULL);
+		g_object_unref(*sfp);
+		*sfp = NULL;
 
-			return;
-		}
-	} else if (ret == 2)
-		doc_merge = pdf_keep_document(pv->session->ctx, pv->session->pv_clip); //Clipboard
+		return NULL;
+	}
 
+	doc_merge = sond_file_part_pdf_open_document(pv->session->ctx,
+			SOND_FILE_PART_PDF(*sfp), TRUE, &error);
+	if (!doc_merge) {
+		display_message(pv->vf, "Datei einfügen\n\n"
+				"Einzufügende Datei konnte nicht geöffnet werden:\n",
+				error->message, NULL);
+		g_error_free(error);
+		g_object_unref(*sfp);
+		*sfp = NULL;
+
+		return NULL;
+	}
+
+	return doc_merge;
+}
+
+//Seitenzahl der Quelle; bei Fehler werden Quelle und SondFilePart freigegeben
+static gint seiten_einfuegen_zaehlen(PdfViewer *pv, pdf_document *doc_merge, SondFilePart *sfp,
+		gint ret, gint *count) {
 	fz_try(pv->session->ctx)
-		count = pdf_count_pages(pv->session->ctx, doc_merge);
+		*count = pdf_count_pages(pv->session->ctx, doc_merge);
 	fz_catch( pv->session->ctx) {
 		gchar* err_message = NULL;
 
@@ -892,8 +871,21 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		display_message(pv->vf, "Einfügen nicht möglich\n\n", err_message, NULL);
 		g_free(err_message);
 
-		return;
+		return -1;
 	}
+
+	return 0;
+}
+
+/* Seiten ins Dokument einfügen, die Viewer-Seiten ergänzen, Layouts aktualisieren und ins Journal
+ * eintragen. Gibt Quelldokument und SondFilePart frei; bei Fehler wird der Viewer geschlossen. */
+static void seiten_einfuegen_ausfuehren(PdfViewer *pv, ViewerPageNew *viewer_page, guint pos,
+		pdf_document *doc_merge, SondFilePart *sfp, gint ret, gint count) {
+	gint rc = 0;
+	gint page_doc = 0;
+	GError *error = NULL;
+	JournalEntry entry = { 0 };
+	DataInsert data_insert = { 0 };
 
 	page_doc = viewer_page->pdf_document_page->page_akt;
 	if (pos == pv->arr_pages->len) page_doc++;
@@ -937,6 +929,54 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			zond_pdf_document_get_pdf_document_page(viewer_page->dd->zpdfd_part->zond_pdf_document, page_doc);
 
 	g_array_append_val(zond_pdf_document_get_arr_journal(viewer_page->dd->zpdfd_part->zond_pdf_document), entry);
+
+	return;
+}
+
+void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+	gint ret = 0;
+	guint pos = 0;
+	pdf_document *doc_merge = NULL;
+	ViewerPageNew* viewer_page = NULL;
+	gint count = 0;
+	SondFilePart* sfp = NULL;
+
+	if (pv->dd->next) {
+		display_message(pv->vf,
+				"Virtuelles PDF -\n\n"
+						"Einfügen noch nicht implementiert",
+				NULL);
+
+		return;
+	}
+
+	ret = seiten_abfrage_seitenzahl(pv, &pos);
+	if (ret == -1)
+		return;
+
+	if (pos > pv->arr_pages->len)
+		pos = pv->arr_pages->len;
+	//kein "if (pos < 0) pos = 0;" mehr - pos ist guint, kann nie negativ sein
+
+	viewer_page = g_ptr_array_index(pv->arr_pages, (pos == pv->arr_pages->len) ? pos - 1 : pos);
+
+	//verschiedene Tests...
+	if (!seiten_einfuegen_pos_pruefen(pv, pos, viewer_page))
+		return;
+
+	//komplette Datei wird eingefügt
+	if (ret == 1) {
+		doc_merge = seiten_einfuegen_quelle_datei(pv, &sfp);
+		if (!doc_merge)
+			return;
+	} else if (ret == 2)
+		doc_merge = pdf_keep_document(pv->session->ctx, pv->session->pv_clip); //Clipboard
+
+	if (seiten_einfuegen_zaehlen(pv, doc_merge, sfp, ret, &count))
+		return;
+
+	seiten_einfuegen_ausfuehren(pv, viewer_page, pos, doc_merge, sfp, ret, count);
 
 	return;
 }

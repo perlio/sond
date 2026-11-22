@@ -474,14 +474,19 @@ void viewer_ui_recreate_tree_thumb(PdfViewer *pv) {
 }
 
 // UI-Aufbau-Funktion
-static void viewer_einrichten_fenster(PdfViewer *pv) {
-	pv->vf = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_default_size(GTK_WINDOW(pv->vf), VIEWER_WIDTH, VIEWER_HEIGHT);
+/* Widgets, die beim Aufbau des Fensters entstehen und erst beim Verbinden der Signale gebraucht
+ * werden (der Rest steht in PdfViewer). */
+typedef struct {
+	GtkWidget *button_thumb;
+	GtkWidget *button_print;
+	GtkWidget *button_highlight;
+	GtkWidget *button_underline;
+	GtkWidget *button_paint;
+	GtkAdjustment *vadj_thumb;
+} ViewerFensterWidgets;
 
-	GtkAccelGroup *accel_group = gtk_accel_group_new();
-	gtk_window_add_accel_group(GTK_WINDOW(pv->vf), accel_group);
-
-	// Menu
+//Menü der Seiten- und Textfunktionen; liefert den Menüknopf für die Werkzeugleiste
+static GtkWidget* viewer_ui_menu_erzeugen(PdfViewer *pv, GtkAccelGroup *accel_group) {
 	pv->item_kopieren = gtk_menu_item_new_with_label("Seiten kopieren");
 	gtk_widget_add_accelerator(pv->item_kopieren, "activate", accel_group,
 			GDK_KEY_c, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
@@ -525,14 +530,58 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	GtkWidget *button_menu_viewer = gtk_menu_button_new();
 	gtk_menu_button_set_popup(GTK_MENU_BUTTON(button_menu_viewer), menu_viewer);
 
-	// Headerbar
+	return button_menu_viewer;
+}
+
+//Kopfzeile des Fensters mit den Feldern für Seite und Textsuche
+static void viewer_ui_kopfzeile_erzeugen(PdfViewer *pv) {
 	pv->headerbar = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(pv->headerbar), TRUE);
 	gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(pv->headerbar), TRUE);
 	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(pv->headerbar), ":minimize,maximize,close");
 	gtk_window_set_titlebar(GTK_WINDOW(pv->vf), pv->headerbar);
 
-	// Toolbar
+	pv->entry = gtk_entry_new();
+	gtk_entry_set_input_purpose(GTK_ENTRY(pv->entry), GTK_INPUT_PURPOSE_DIGITS);
+	gtk_entry_set_width_chars(GTK_ENTRY(pv->entry), 9);
+
+	pv->label_anzahl = gtk_label_new("");
+
+	GtkWidget *box_seiten = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_pack_start(GTK_BOX(box_seiten), pv->entry, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_seiten), pv->label_anzahl, FALSE, FALSE, 0);
+	GtkWidget *frame_seiten = gtk_frame_new("Seiten");
+	gtk_container_add(GTK_CONTAINER(frame_seiten), box_seiten);
+
+	// Textsuche
+	pv->button_vorher = gtk_button_new_from_icon_name("go-previous", GTK_ICON_SIZE_SMALL_TOOLBAR);
+	pv->entry_search = gtk_entry_new();
+	gtk_entry_set_width_chars(GTK_ENTRY(pv->entry_search), 15);
+	pv->button_nachher = gtk_button_new_from_icon_name("go-next", GTK_ICON_SIZE_SMALL_TOOLBAR);
+	pv->check_diakritika = gtk_check_button_new_with_label("ä=a");
+	gtk_widget_set_tooltip_text(pv->check_diakritika,
+			"Umlaute und Akzente beim Suchen ignorieren");
+	pv->label_search = gtk_label_new("");
+	gtk_widget_set_margin_start(pv->label_search, 6);
+	gtk_style_context_add_class(gtk_widget_get_style_context(pv->label_search),
+			"dim-label");
+
+	GtkWidget *box_text = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->button_vorher, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->entry_search, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->button_nachher, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->label_search, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box_text), pv->check_diakritika, FALSE, FALSE, 0);
+	GtkWidget *frame_search = gtk_frame_new("Text suchen");
+	gtk_container_add(GTK_CONTAINER(frame_search), box_text);
+
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(pv->headerbar), frame_seiten);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(pv->headerbar), frame_search);
+}
+
+//Werkzeugleiste links: Menü, Speichern, Drucken, Vorschau, Auswahlwerkzeuge, Zoom, Anbindung
+static GtkWidget* viewer_ui_toolbox_erzeugen(PdfViewer *pv, GtkWidget *button_menu_viewer,
+		ViewerFensterWidgets *w) {
 	GtkWidget *button_thumb = gtk_toggle_button_new();
 	GtkWidget *image_thumb = gtk_image_new_from_icon_name("go-next", GTK_ICON_SIZE_BUTTON);
 	gtk_button_set_image(GTK_BUTTON(button_thumb), image_thumb);
@@ -592,45 +641,18 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	if (pv->button_anbindung)
 		gtk_box_pack_start(GTK_BOX(vbox_tools), pv->button_anbindung, FALSE, FALSE, 0);
 
-	// Box mit Eingabemöglichkeiten
-	pv->entry = gtk_entry_new();
-	gtk_entry_set_input_purpose(GTK_ENTRY(pv->entry), GTK_INPUT_PURPOSE_DIGITS);
-	gtk_entry_set_width_chars(GTK_ENTRY(pv->entry), 9);
+	w->button_thumb = button_thumb;
+	w->button_print = button_print;
+	w->button_highlight = button_highlight;
+	w->button_underline = button_underline;
+	w->button_paint = button_paint;
 
-	pv->label_anzahl = gtk_label_new("");
+	return vbox_tools;
+}
 
-	GtkWidget *box_seiten = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(box_seiten), pv->entry, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box_seiten), pv->label_anzahl, FALSE, FALSE, 0);
-	GtkWidget *frame_seiten = gtk_frame_new("Seiten");
-	gtk_container_add(GTK_CONTAINER(frame_seiten), box_seiten);
-
-	// Textsuche
-	pv->button_vorher = gtk_button_new_from_icon_name("go-previous", GTK_ICON_SIZE_SMALL_TOOLBAR);
-	pv->entry_search = gtk_entry_new();
-	gtk_entry_set_width_chars(GTK_ENTRY(pv->entry_search), 15);
-	pv->button_nachher = gtk_button_new_from_icon_name("go-next", GTK_ICON_SIZE_SMALL_TOOLBAR);
-	pv->check_diakritika = gtk_check_button_new_with_label("ä=a");
-	gtk_widget_set_tooltip_text(pv->check_diakritika,
-			"Umlaute und Akzente beim Suchen ignorieren");
-	pv->label_search = gtk_label_new("");
-	gtk_widget_set_margin_start(pv->label_search, 6);
-	gtk_style_context_add_class(gtk_widget_get_style_context(pv->label_search),
-			"dim-label");
-
-	GtkWidget *box_text = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(box_text), pv->button_vorher, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box_text), pv->entry_search, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box_text), pv->button_nachher, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box_text), pv->label_search, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box_text), pv->check_diakritika, FALSE, FALSE, 0);
-	GtkWidget *frame_search = gtk_frame_new("Text suchen");
-	gtk_container_add(GTK_CONTAINER(frame_search), box_text);
-
-	gtk_header_bar_pack_start(GTK_HEADER_BAR(pv->headerbar), frame_seiten);
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(pv->headerbar), frame_search);
-
-	// layout
+//Seitenfläche mit Bildlauf und die Vorschau der Seiten, dazu die Werkzeugleiste, im Fenster
+static void viewer_ui_hauptbereich_erzeugen(PdfViewer *pv, GtkWidget *vbox_tools,
+		ViewerFensterWidgets *w) {
 	pv->layout = gtk_layout_new(NULL, NULL);
 	gtk_widget_set_can_focus(pv->layout, TRUE);
 	gtk_widget_add_events(pv->layout, GDK_POINTER_MOTION_MASK);
@@ -662,7 +684,11 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 
 	gtk_container_add(GTK_CONTAINER(pv->vf), hbox);
 
-	// Popover für Annot-Inhalte
+	w->vadj_thumb = vadj_thumb;
+}
+
+//Popovers für den Inhalt einer Annotation und das Bearbeiten des Texts
+static void viewer_ui_popovers_erzeugen(PdfViewer *pv) {
 	pv->annot_pop = gtk_popover_new(pv->layout);
 	pv->annot_label = gtk_label_new(NULL);
 	gtk_widget_show(pv->annot_label);
@@ -677,10 +703,10 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_popover_set_modal(GTK_POPOVER(pv->annot_pop_edit), TRUE);
 	g_signal_connect(pv->annot_pop_edit, "closed",
 			G_CALLBACK(cb_viewer_annot_edit_closed), pv);
+}
 
-	gtk_widget_show_all(pv->vf);
-	gtk_widget_hide(pv->swindow_tree);
-
+//Mauszeiger des Viewers (das Fenster muss angezeigt sein)
+static void viewer_ui_cursor_erzeugen(PdfViewer *pv) {
 	pv->gdk_window = gtk_widget_get_window(pv->vf);
 	GdkDisplay *display = gdk_window_get_display(pv->gdk_window);
 	pv->cursor_default = gdk_cursor_new_from_name(display, "default");
@@ -688,8 +714,11 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	pv->cursor_vtext = gdk_cursor_new_from_name(display, "vertical-text");
 	pv->cursor_grab = gdk_cursor_new_from_name(display, "grab");
 	pv->cursor_annot = gdk_cursor_new_from_name(display, "pointer");
+}
 
-	// Signale Menu
+/* Verbindet die Signale. Erst nach dem Anzeigen des Fensters: Beim Anzeigen ändern sich die
+ * Bildlauf-Bereiche, dabei sollen die Handler noch nicht laufen. */
+static void viewer_ui_signale_verbinden(PdfViewer *pv, ViewerFensterWidgets *w) {
 	g_signal_connect(pv->item_kopieren, "activate", G_CALLBACK(cb_seiten_kopieren), pv);
 	g_signal_connect(pv->item_ausschneiden, "activate", G_CALLBACK(cb_seiten_ausschneiden), pv);
 	g_signal_connect(pv->item_loeschen, "activate", G_CALLBACK(cb_pv_seiten_loeschen), pv);
@@ -712,19 +741,19 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 
 	// Signale Toolbox
 	g_signal_connect(pv->button_speichern, "clicked", G_CALLBACK(cb_pv_speichern), pv);
-	g_signal_connect(button_print, "clicked", G_CALLBACK(cb_viewer_render_print), pv);
-	g_signal_connect(button_thumb, "toggled", G_CALLBACK(cb_tree_thumb), pv);
+	g_signal_connect(w->button_print, "clicked", G_CALLBACK(cb_viewer_render_print), pv);
+	g_signal_connect(w->button_thumb, "toggled", G_CALLBACK(cb_tree_thumb), pv);
 	g_signal_connect(pv->button_zeiger, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
-	g_signal_connect(button_highlight, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
-	g_signal_connect(button_underline, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
-	g_signal_connect(button_paint, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
+	g_signal_connect(w->button_highlight, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
+	g_signal_connect(w->button_underline, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
+	g_signal_connect(w->button_paint, "toggled", G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer)pv);
 	if (pv->button_anbindung)
 		g_signal_connect(pv->button_anbindung, "clicked",
 				G_CALLBACK(cb_viewer_loeschen_anbindung_button_clicked), pv);
 
 	g_signal_connect_swapped(pv->v_adj, "value-changed",
 			G_CALLBACK(cb_viewer_render_visible_pages), pv);
-	g_signal_connect_swapped(vadj_thumb, "value-changed",
+	g_signal_connect_swapped(w->vadj_thumb, "value-changed",
 			G_CALLBACK(cb_viewer_render_visible_thumbs), pv);
 
 	g_signal_connect(pv->layout, "button-press-event",
@@ -741,6 +770,30 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 
 	g_signal_connect_swapped(pv->vf, "delete-event",
 			G_CALLBACK(viewer_save_and_close), (gpointer)pv);
+}
+
+static void viewer_einrichten_fenster(PdfViewer *pv) {
+	ViewerFensterWidgets w = { 0 };
+	GtkWidget *button_menu_viewer = NULL;
+	GtkWidget *vbox_tools = NULL;
+
+	pv->vf = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_default_size(GTK_WINDOW(pv->vf), VIEWER_WIDTH, VIEWER_HEIGHT);
+
+	GtkAccelGroup *accel_group = gtk_accel_group_new();
+	gtk_window_add_accel_group(GTK_WINDOW(pv->vf), accel_group);
+
+	button_menu_viewer = viewer_ui_menu_erzeugen(pv, accel_group);
+	viewer_ui_kopfzeile_erzeugen(pv);
+	vbox_tools = viewer_ui_toolbox_erzeugen(pv, button_menu_viewer, &w);
+	viewer_ui_hauptbereich_erzeugen(pv, vbox_tools, &w);
+	viewer_ui_popovers_erzeugen(pv);
+
+	gtk_widget_show_all(pv->vf);
+	gtk_widget_hide(pv->swindow_tree);
+
+	viewer_ui_cursor_erzeugen(pv);
+	viewer_ui_signale_verbinden(pv, &w);
 
 	return;
 }

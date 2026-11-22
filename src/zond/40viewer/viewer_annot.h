@@ -28,6 +28,9 @@ gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 gint viewer_annot_do_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
 		Annot annot, GError** error);
 
+void viewer_annot_rect_im_fenster(PdfViewer *pv, ViewerPageNew *viewer_page, fz_rect rect,
+		GdkRectangle *gdk_rectangle);
+
 gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv, ViewerPageNew* viewer_page,
 		PdfPunkt pdf_punkt, GError** error);
 

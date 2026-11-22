@@ -212,6 +212,192 @@ void viewer_set_cursor(PdfViewer *pv, gint rc,
 	return;
 }
 
+//Anfang und Ende einer Markierung in Leserichtung ordnen (Seite, dann y, dann x)
+static void motion_markierung_ordnen(PdfViewer *pv, PdfPunkt pdf_punkt, PdfPunkt *von,
+		PdfPunkt *bis) {
+	if (pv->click_pdf_punkt.seite < pdf_punkt.seite) {
+		*von = pv->click_pdf_punkt;
+		*bis = pdf_punkt;
+	} else if (pv->click_pdf_punkt.seite > pdf_punkt.seite) {
+		*von = pdf_punkt;
+		*bis = pv->click_pdf_punkt;
+	} else //gleiche Seite
+	{
+		if (pv->click_pdf_punkt.punkt.y < pdf_punkt.punkt.y) {
+			*von = pv->click_pdf_punkt;
+			*bis = pdf_punkt;
+		} else if (pv->click_pdf_punkt.punkt.y > pdf_punkt.punkt.y) {
+			*von = pdf_punkt;
+			*bis = pv->click_pdf_punkt;
+		} else //gleiche Höhe
+		{
+			if (pv->click_pdf_punkt.punkt.x < pdf_punkt.punkt.x) {
+				*von = pv->click_pdf_punkt;
+				*bis = pdf_punkt;
+			} else if (pv->click_pdf_punkt.punkt.x >= pdf_punkt.punkt.x) {
+				*von = pdf_punkt;
+				*bis = pv->click_pdf_punkt;
+			}
+		}
+	}
+
+	return;
+}
+
+/* Wenn Maus ruckartig über Seitengrenzen bewegt wird, werden alte Markierungen
+ * manchmal nicht mitgenommen: Seiten des alten Bereichs außerhalb des neuen neu zeichnen. */
+static void motion_alte_markierung_neu_zeichnen(PdfViewer *pv, PdfPunkt von, PdfPunkt bis) {
+	for (gint range_old = pv->von_alt; range_old <= pv->bis_alt; range_old++) {
+		if (range_old < von.seite || range_old > bis.seite) {
+			ViewerPageNew *viewer_page_old_range = NULL;
+
+			viewer_page_old_range = g_ptr_array_index(pv->arr_pages, range_old);
+			viewer_render_wait_for_transfer(viewer_page_old_range->pdf_document_page);
+
+			if (!(viewer_page_old_range->thread & 2))
+				continue;
+
+			gtk_widget_queue_draw(viewer_page_old_range->image_page);
+		}
+	}
+
+	return;
+}
+
+//Text erfassen, linker Button gehalten, Klick war auf Text
+static void motion_markieren(PdfViewer *pv, PdfPunkt pdf_punkt, ViewerPageNew *viewer_page) {
+	PdfPunkt von = { 0 };
+	PdfPunkt bis = { 0 };
+	gint zaehler = 0;
+	fz_context *ctx = NULL;
+	gint n = 0;
+	fz_point point_start = { 0, };
+	fz_point point_end = { 0, };
+
+	motion_markierung_ordnen(pv, pdf_punkt, &von, &bis);
+
+	for (gint page = von.seite; page <= bis.seite; page++) {
+		ViewerPageNew *viewer_page_loop = NULL;
+
+		if (page == pdf_punkt.seite)
+			viewer_page_loop = viewer_page;
+		else {
+			viewer_page_loop = g_ptr_array_index(pv->arr_pages, page);
+			viewer_render_wait_for_transfer(viewer_page_loop->pdf_document_page);
+		}
+
+		//when stext_page nicht gerendert, dann weiter
+		if (!(viewer_page_loop->pdf_document_page->thread & 8))
+			continue;
+
+		if (page == von.seite) {
+			point_start = von.punkt;
+			if (page == bis.seite)
+				point_end = bis.punkt;
+			else
+				point_end = fz_make_point(viewer_page_loop->crop.x1,
+						viewer_page_loop->crop.y1);
+		} else if (page == bis.seite) { //Der Fall, daß page == von.seite, ist schon abgefrühstückt
+			point_start = fz_make_point(0, 0);
+			point_end = bis.punkt;
+		} else //dazwischen
+		{
+			point_start = fz_make_point(0, 0);
+			point_end = fz_make_point(viewer_page_loop->crop.x1,
+					viewer_page_loop->crop.y1);
+		}
+
+		ctx = zond_pdf_document_get_ctx(viewer_page_loop->pdf_document_page->document);
+
+		n = fz_highlight_selection(ctx, viewer_page_loop->pdf_document_page->stext_page,
+				point_start, point_end, &pv->highlight.quad[zaehler], 999 - zaehler);
+
+		for (gint u = 0; u < n; u++)
+			pv->highlight.page[u + zaehler] = page;
+
+		zaehler += n;
+
+		pv->highlight.page[zaehler] = -1;
+
+		/* image_page kann hier noch NULL sein - "thread & 8" sagt
+		 * nur, daß stext_page vorhanden ist (auch über den
+		 * synchronen Schnellpfad viewer_render_stext_page_fast(),
+		 * z.B. aus der Textsuche heraus, gesetzt), image_page wird
+		 * aber erst mit dem separaten Flag viewer_page->thread & 2
+		 * angelegt (viewer_render_transfer_rendered()). Ohne diese
+		 * Prüfung: gtk_widget_queue_draw(NULL) - GLib-"critical",
+		 * unter G_DEBUG=fatal-criticals/-warnings fatal. Die
+		 * Markierung selbst (pv->highlight) ist trotzdem korrekt
+		 * berechnet - sobald die Seite später normal gerendert
+		 * wird, zeigt sie die Markierung dann ohnehin an. */
+		if (viewer_page_loop->image_page)
+			gtk_widget_queue_draw(viewer_page_loop->image_page);
+	}
+
+	motion_alte_markierung_neu_zeichnen(pv, von, bis);
+	pv->von_alt = von.seite;
+	pv->bis_alt = bis.seite;
+
+	return;
+}
+
+//Text-Annotation mit der Maus verschieben; FALSE, wenn die Seite noch nicht gerendert ist
+static gboolean motion_annot_verschieben(PdfViewer *pv, ViewerPageNew *viewer_page,
+		GdkEvent *event) {
+	if (!(viewer_page->thread & 2))
+		return FALSE;
+
+	gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
+
+	pv->clicked_annot->annot.annot_text.rect.x0 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
+	pv->clicked_annot->annot.annot_text.rect.x1 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
+	pv->clicked_annot->annot.annot_text.rect.y0 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
+	pv->clicked_annot->annot.annot_text.rect.y1 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
+
+	gtk_widget_queue_draw(viewer_page->image_page);
+
+	return TRUE;
+}
+
+//Layout wird mit Mauszeiger geschoben
+static void motion_seite_ziehen(PdfViewer *pv, GdkEvent *event) {
+	gdouble y = gtk_adjustment_get_value(pv->v_adj);
+	gdouble x = gtk_adjustment_get_value(pv->h_adj);
+
+	gtk_adjustment_set_value(pv->v_adj, y + pv->y - event->motion.y_root);
+	gtk_adjustment_set_value(pv->h_adj, x + pv->x - event->motion.x_root);
+
+	return;
+}
+
+//Kein Button, Mauszeiger über Annotation: Popover mit dem Inhalt anzeigen, sonst ausblenden
+static PdfDocumentPageAnnot* motion_annot_popover(PdfViewer *pv, ViewerPageNew *viewer_page,
+		PdfPunkt pdf_punkt) {
+	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
+
+	if ((viewer_page->pdf_document_page->thread & 2)
+			&& (pdf_document_page_annot = viewer_on_annot(pv, viewer_page, pdf_punkt.punkt))) {
+		//Popover anzeigen, falls /Contents text enthält
+		if (pdf_document_page_annot->annot.type == PDF_ANNOT_TEXT
+				&& pdf_document_page_annot->annot.annot_text.content && //Inhalt?
+				g_strcmp0(pdf_document_page_annot->annot.annot_text.content, "") && //gefüllt?
+				!(pdf_document_page_annot == pv->clicked_annot && //nicht angeklickt und...
+				gtk_widget_is_visible(pv->annot_pop_edit))) {//...geöffnet
+			GdkRectangle gdk_rectangle = { 0, };
+
+			viewer_annot_rect_im_fenster(pv, viewer_page,
+					pdf_document_page_annot->annot.annot_text.rect, &gdk_rectangle);
+			gtk_popover_set_pointing_to(GTK_POPOVER(pv->annot_pop), &gdk_rectangle);
+			gtk_label_set_text(GTK_LABEL(pv->annot_label),
+					pdf_document_page_annot->annot.annot_text.content);
+			gtk_popover_popup(GTK_POPOVER(pv->annot_pop));
+		}
+	} else
+		gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
+
+	return pdf_document_page_annot;
+}
+
 void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event) {
 	gint rc = 0;
 	PdfPunkt pdf_punkt = { 0 };
@@ -223,214 +409,204 @@ void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event) {
 	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
 	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
 
-	//Text erfassen, wenn linker button gehalten
+	//linker Button gehalten
 	if (event->motion.state == GDK_BUTTON1_MASK) {
-		if (pv->click_on_text && !pv->clicked_annot) {
-			PdfPunkt von = { 0 };
-			PdfPunkt bis = { 0 };
-			gint zaehler = 0;
-			fz_context *ctx = NULL;
-			gint n = 0;
-			fz_point point_start = { 0, };
-			fz_point point_end = { 0, };
-
-			if (pv->click_pdf_punkt.seite < pdf_punkt.seite) {
-				von = pv->click_pdf_punkt;
-				bis = pdf_punkt;
-			} else if (pv->click_pdf_punkt.seite > pdf_punkt.seite) {
-				von = pdf_punkt;
-				bis = pv->click_pdf_punkt;
-			} else //gleiche Seite
-			{
-				if (pv->click_pdf_punkt.punkt.y < pdf_punkt.punkt.y) {
-					von = pv->click_pdf_punkt;
-					bis = pdf_punkt;
-				} else if (pv->click_pdf_punkt.punkt.y
-						> pdf_punkt.punkt.y) {
-					von = pdf_punkt;
-					bis = pv->click_pdf_punkt;
-				} else //gleiche Höhe
-				{
-					if (pv->click_pdf_punkt.punkt.x < pdf_punkt.punkt.x) {
-						von = pv->click_pdf_punkt;
-						bis = pdf_punkt;
-					} else if (pv->click_pdf_punkt.punkt.x
-							>= pdf_punkt.punkt.x) {
-						von = pdf_punkt;
-						bis = pv->click_pdf_punkt;
-					}
-				}
-			}
-
-			for (gint page = von.seite; page <= bis.seite; page++) {
-				ViewerPageNew *viewer_page_loop = NULL;
-
-				if (page == pdf_punkt.seite)
-					viewer_page_loop = viewer_page;
-				else {
-					viewer_page_loop = g_ptr_array_index(pv->arr_pages,
-							page);
-					viewer_render_wait_for_transfer(viewer_page_loop->pdf_document_page);
-				}
-
-				//when stext_page nicht gerendert, dann weiter
-				if (!(viewer_page_loop->pdf_document_page->thread & 8))
-					continue;
-
-				if (page == von.seite) {
-					point_start = von.punkt;
-					if (page == bis.seite)
-						point_end = bis.punkt;
-					else
-						point_end = fz_make_point(viewer_page_loop->crop.x1,
-								viewer_page_loop->crop.y1);
-				} else if (page == bis.seite) { //Der Fall, daß page == von.seite, ist schon abgefrühstückt
-					point_start = fz_make_point(0, 0);
-					point_end = bis.punkt;
-				} else //dazwischen
-				{
-					point_start = fz_make_point(0, 0);
-					point_end = fz_make_point(viewer_page_loop->crop.x1,
-							viewer_page_loop->crop.y1);
-				}
-
-				ctx = zond_pdf_document_get_ctx(
-						viewer_page_loop->pdf_document_page->document);
-
-				n = fz_highlight_selection(ctx,
-						viewer_page_loop->pdf_document_page->stext_page,
-						point_start, point_end,
-						&pv->highlight.quad[zaehler], 999 - zaehler);
-
-				for (gint u = 0; u < n; u++)
-					pv->highlight.page[u + zaehler] = page;
-
-				zaehler += n;
-
-				pv->highlight.page[zaehler] = -1;
-
-				/* image_page kann hier noch NULL sein - "thread & 8" sagt
-				 * nur, daß stext_page vorhanden ist (auch über den
-				 * synchronen Schnellpfad viewer_render_stext_page_fast(),
-				 * z.B. aus der Textsuche heraus, gesetzt), image_page wird
-				 * aber erst mit dem separaten Flag viewer_page->thread & 2
-				 * angelegt (viewer_render_transfer_rendered()). Ohne diese
-				 * Prüfung: gtk_widget_queue_draw(NULL) - GLib-"critical",
-				 * unter G_DEBUG=fatal-criticals/-warnings fatal. Die
-				 * Markierung selbst (pv->highlight) ist trotzdem korrekt
-				 * berechnet - sobald die Seite später normal gerendert
-				 * wird, zeigt sie die Markierung dann ohnehin an. */
-				if (viewer_page_loop->image_page)
-					gtk_widget_queue_draw(viewer_page_loop->image_page);
-			}
-
-			//Wenn Maus ruckartig über Seitengrenzen bewegt wird
-			// werden alte Markierungen manchmal nicht mitgenommen
-			for (gint range_old = pv->von_alt; range_old <= pv->bis_alt;
-					range_old++) {
-				if (range_old < von.seite || range_old > bis.seite) {
-					ViewerPageNew *viewer_page_old_range = NULL;
-
-					viewer_page_old_range = g_ptr_array_index(pv->arr_pages,
-							range_old);
-					viewer_render_wait_for_transfer(viewer_page_old_range->pdf_document_page);
-
-					if (!(viewer_page_old_range->thread & 2))
-						continue;
-
-					gtk_widget_queue_draw(
-							viewer_page_old_range->image_page);
-				}
-			}
-			pv->von_alt = von.seite;
-			pv->bis_alt = bis.seite;
-		} else if (pv->clicked_annot
-				&& pv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
-//            if ( rc || pdf_punkt.seite != pv->click_pdf_punkt.seite ) return TRUE;
-
-			if (!(viewer_page->thread & 2))
+		if (pv->click_on_text && !pv->clicked_annot)
+			motion_markieren(pv, pdf_punkt, viewer_page);
+		else if (pv->clicked_annot && pv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
+			if (!motion_annot_verschieben(pv, viewer_page, event))
 				return;
+		} else //nicht auf Text und nicht auf Text-annot
+			motion_seite_ziehen(pv, event);
 
-			gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
-
-			pv->clicked_annot->annot.annot_text.rect.x0 -= (pv->x
-					- event->motion.x_root) / pv->zoom * 100;
-			pv->clicked_annot->annot.annot_text.rect.x1 -= (pv->x
-					- event->motion.x_root) / pv->zoom * 100;
-			pv->clicked_annot->annot.annot_text.rect.y0 -= (pv->y
-					- event->motion.y_root) / pv->zoom * 100;
-			pv->clicked_annot->annot.annot_text.rect.y1 -= (pv->y
-					- event->motion.y_root) / pv->zoom * 100;
-
-			gtk_widget_queue_draw(viewer_page->image_page);
-		}
-		else { //nicht auf Text und nicht auf Text-annot
-		//layout wird mit Mauszeiger geschoben
-			gdouble y = gtk_adjustment_get_value(pv->v_adj);
-			gdouble x = gtk_adjustment_get_value(pv->h_adj);
-			gtk_adjustment_set_value(pv->v_adj,
-					y + pv->y - event->motion.y_root);
-			gtk_adjustment_set_value(pv->h_adj,
-					x + pv->x - event->motion.x_root);
-		}
 		pv->y = event->motion.y_root;
 		pv->x = event->motion.x_root;
 	}
 	//kein Button, Mauszeiger wird über annot bewegt
 	else {
-		PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
+		PdfDocumentPageAnnot *pdf_document_page_annot = motion_annot_popover(pv, viewer_page,
+				pdf_punkt);
 
-		if ((viewer_page->pdf_document_page->thread & 2)
-				&& (pdf_document_page_annot = viewer_on_annot(pv,
-						viewer_page, pdf_punkt.punkt))) {
-			//Popover anzeigen, falls /Contents text enthält
-			if (pdf_document_page_annot->annot.type == PDF_ANNOT_TEXT
-					&& pdf_document_page_annot->annot.annot_text.content && //Inhalt?
-					g_strcmp0(pdf_document_page_annot->annot.annot_text.content, "") && //gefüllt?
-					!(pdf_document_page_annot == pv->clicked_annot && //nicht angeklickt und...
-					gtk_widget_is_visible(pv->annot_pop_edit))) {//...geöffnet
-				GdkRectangle gdk_rectangle = { 0, };
-				gint x = 0, y = 0, width = 0, height = 0;
-
-				gtk_container_child_get(GTK_CONTAINER(pv->layout),
-						viewer_page->image_page, "y", &y, NULL);
-				y += (gint) (pdf_document_page_annot->annot.annot_text.rect.y0
-						* pv->zoom / 100);
-				y -= gtk_adjustment_get_value(pv->v_adj);
-
-				gtk_container_child_get(GTK_CONTAINER(pv->layout),
-						viewer_page->image_page, "x", &x, NULL);
-				x += (gint) (pdf_document_page_annot->annot.annot_text.rect.x0
-						* pv->zoom / 100);
-				x -= gtk_adjustment_get_value(pv->h_adj);
-
-				height =
-						(gint) ((pdf_document_page_annot->annot.annot_text.rect.y1
-								- pdf_document_page_annot->annot.annot_text.rect.y0)
-								* pv->zoom / 100);
-				width = (gint) ((pdf_document_page_annot->annot.annot_text.rect.x1
-						- pdf_document_page_annot->annot.annot_text.rect.x0)
-						* pv->zoom / 100);
-
-				gdk_rectangle.x = x;
-				gdk_rectangle.y = y;
-				gdk_rectangle.width = width;
-				gdk_rectangle.height = height;
-
-				gtk_popover_set_pointing_to(GTK_POPOVER(pv->annot_pop),
-						&gdk_rectangle);
-				gtk_label_set_text(GTK_LABEL(pv->annot_label),
-						pdf_document_page_annot->annot.annot_text.content);
-				gtk_popover_popup(GTK_POPOVER(pv->annot_pop));
-			}
-		} else
-			gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
-
-		viewer_set_cursor(pv, rc, viewer_page, pdf_document_page_annot,
-				pdf_punkt); //Kein Knopf gedrückt
+		viewer_set_cursor(pv, rc, viewer_page, pdf_document_page_annot, pdf_punkt); //Kein Knopf gedrückt
 	}
 
 	return;
+}
+
+//Klick auf eine Annotation: sie wird die angeklickte, eine zuvor geöffnete Text-Annotation wird
+//geschlossen (oder bleibt offen, wenn es dieselbe ist)
+static void klick_auf_annot(PdfViewer *pv, PdfDocumentPageAnnot *pdf_document_page_annot) {
+	if (pv->clicked_annot && pv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
+		if (pdf_document_page_annot != pv->clicked_annot)
+			pv->clicked_annot->annot.annot_text.open = FALSE;
+		else
+			pv->clicked_annot->annot.annot_text.open = TRUE;
+	}
+
+	pv->clicked_annot = pdf_document_page_annot;
+
+	return;
+}
+
+//Klick neben eine Annotation: neue Text-Annotation, Beginn einer Textmarkierung oder Greifen
+static gint klick_neben_annot(PdfViewer *pv, ViewerPageNew *viewer_page, PdfPunkt pdf_punkt,
+		GError **error) {
+	//wird weiter unten geprüft, ob click_on_text wieder angeschaltet werden soll
+	pv->click_on_text = FALSE;
+
+	if (pv->clicked_annot && pv->clicked_annot->annot.type == PDF_ANNOT_TEXT)
+		pv->clicked_annot->annot.annot_text.open = FALSE;
+	pv->clicked_annot = NULL;
+
+	if ((viewer_page->pdf_document_page->thread & 2) && pv->state == 3) { //Neue AnnotText einfügen
+		gint rc = 0;
+
+		rc = viewer_annot_create(viewer_page, error);
+		if (rc)
+			return -1;
+
+		//neu erzeugte Text-Annot soll markiert sein!
+		pv->clicked_annot = g_ptr_array_index(viewer_page->pdf_document_page->arr_annots,
+				viewer_page->pdf_document_page->arr_annots->len - 1);
+		pv->clicked_annot->annot.annot_text.open = TRUE;
+
+		//Nach Einfügen von annot-text: auf Zeiger zurückflitschen
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE);
+	} else if ((viewer_page->pdf_document_page->thread & 8)
+			&& viewer_on_text(pv, viewer_page, pdf_punkt.punkt))
+		pv->click_on_text = TRUE;
+	else
+		gdk_window_set_cursor(pv->gdk_window, pv->cursor_grab);
+
+	return 0;
+}
+
+static gint button_press_einzelklick(PdfViewer *pv, GdkEvent *event, PdfPunkt pdf_punkt,
+		GError **error) {
+	ViewerPageNew *viewer_page = NULL;
+	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
+
+	pv->click_pdf_punkt = pdf_punkt;
+	pv->highlight.page[0] = -1;
+	pv->text_occ.index_act = -1;
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+
+	pv->y = event->button.y_root;
+	pv->x = event->button.x_root;
+
+	pv->von_alt = pdf_punkt.seite;
+	pv->bis_alt = pdf_punkt.seite;
+
+	gtk_widget_set_sensitive(pv->item_copy, FALSE);
+
+	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
+	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
+
+	if ((pdf_document_page_annot = viewer_on_annot(pv, viewer_page, pdf_punkt.punkt)))
+		klick_auf_annot(pv, pdf_document_page_annot);
+	else { //nicht auf annot geklickt, z.B. weil neben layout geclickt
+		gint rc = klick_neben_annot(pv, viewer_page, pdf_punkt, error);
+
+		if (rc)
+			return -1;
+	}
+
+	gtk_widget_queue_draw(pv->layout); //um ggf. Markierung der annot zu löschen
+
+	return 0;
+}
+
+/* Zweiter Doppelklick: Ende der Anbindung setzen (bei umgekehrter Reihenfolge Anfang und Ende
+ * tauschen), Anbindung beim Host anfordern und die Anzeige des Anfangs zurücksetzen. */
+static gint anbindung_ende_setzen(PdfViewer *pv, gint page_pdf, gboolean punktgenau,
+		PdfPunkt pdf_punkt, GError **error) {
+	gint rc = 0;
+
+	//Wenn nicht zurückliegende Seite oder - wenn punktgenau - gleiche
+	//Seite und zurückliegender Index
+	//"richtige" Reihenfolge
+	if ((page_pdf > pv->anbindung.von.seite)
+			|| ((punktgenau) && (page_pdf == pv->anbindung.von.seite)
+					&& (pdf_punkt.punkt.y >= pv->anbindung.von.index))) {
+		pv->anbindung.bis.seite = page_pdf;
+		if (punktgenau)
+			pv->anbindung.bis.index = pdf_punkt.punkt.y;
+		else
+			pv->anbindung.bis.index = EOP;
+	}
+	else //umdrehen
+	{
+		pv->anbindung.bis.seite = pv->anbindung.von.seite;
+		if (pv->anbindung.von.index == 0)
+			pv->anbindung.bis.index = EOP;
+		else
+			pv->anbindung.bis.index = pv->anbindung.von.index;
+
+		pv->anbindung.von.seite = page_pdf;
+		if (punktgenau)
+			pv->anbindung.von.index = pdf_punkt.punkt.y;
+		else
+			pv->anbindung.von.index = 0;
+	}
+
+	rc = pdf_viewer_session_anbindung_requested(pv->session, pv, error);
+	if (rc)
+		return -1;
+
+	//anbindung.von "löschen"
+	pv->anbindung.von.index = -1;
+
+	//Anzeige Beginn rückgängig machen
+	gtk_widget_set_tooltip_text(pv->button_anbindung, "Anbindung Anfang löschen");
+	gtk_widget_set_sensitive(pv->button_anbindung, FALSE);
+
+	return 0;
+}
+
+//Doppelklick: erster Klick wählt den Anfang der Anbindung, zweiter das Ende
+static gint button_press_doppelklick(PdfViewer *pv, GdkEvent *event, PdfPunkt pdf_punkt,
+		GError **error) {
+	gboolean punktgenau = FALSE;
+	ViewerPageNew *viewer_page = NULL;
+	gint page_pdf = 0;
+
+	if (event->button.state == GDK_SHIFT_MASK)
+		punktgenau = TRUE;
+
+	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
+	page_pdf = viewer_page->pdf_document_page->page_akt;
+
+	//Test, ob Seite in Dokument frisch eingefügt
+	if (viewer_page->pdf_document_page->inserted) {
+		g_set_error(error, VIEWER_ERROR, 0,
+				"Die gewählte Seite wurde in das Dokument eingefügt,\n"
+						"Dokument ist aber noch nicht gespeichert.\n\n"
+						"Um Inkonsistenzen zu vermeiden, speichern Sie "
+						"das Dokument zunächst.");
+
+		return -1;
+	}
+
+	if (pv->anbindung.von.index == -1) {
+		pv->anbindung.von.seite = page_pdf;
+		if (punktgenau)
+			pv->anbindung.von.index = pdf_punkt.punkt.y;
+		else
+			pv->anbindung.von.index = 0;
+
+		//Wahl des Beginns irgendwie anzeigen
+		gchar *button_label_text = g_strdup_printf(
+				"Anbindung Anfang löschen\nSeite: %i, Index: %i",
+				pv->anbindung.von.seite, pv->anbindung.von.index);
+		gtk_widget_set_tooltip_text(pv->button_anbindung, button_label_text);
+		gtk_widget_set_sensitive(pv->button_anbindung, TRUE);
+
+		g_free(button_label_text);
+	}
+	else //zweiter Doppelklick - pv->anbindung "gefüllt"
+		return anbindung_ende_setzen(pv, page_pdf, punktgenau, pdf_punkt, error);
+
+	return 0;
 }
 
 gint viewer_handle_button_press(PdfViewer* pv,
@@ -443,166 +619,13 @@ gint viewer_handle_button_press(PdfViewer* pv,
 	if (rc) //daneben!
 		return 0;
 
-//Einzelklick
-	if (event->button.type == GDK_BUTTON_PRESS
-			&& event->button.button == 1) {
-		ViewerPageNew *viewer_page = NULL;
+	if (event->button.type == GDK_BUTTON_PRESS && event->button.button == 1)
+		return button_press_einzelklick(pv, event, pdf_punkt, error);
 
-		pv->click_pdf_punkt = pdf_punkt;
-		pv->highlight.page[0] = -1;
-		pv->text_occ.index_act = -1;
-		gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-
-		pv->y = event->button.y_root;
-		pv->x = event->button.x_root;
-
-		pv->von_alt = pdf_punkt.seite;
-		pv->bis_alt = pdf_punkt.seite;
-
-		gtk_widget_set_sensitive(pv->item_copy, FALSE);
-
-		viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
-		viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
-
-		PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
-
-		if ((pdf_document_page_annot = viewer_on_annot(pv,
-				viewer_page, pdf_punkt.punkt))) {
-			if (pv->clicked_annot
-					&& pv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
-				if (pdf_document_page_annot != pv->clicked_annot)
-					pv->clicked_annot->annot.annot_text.open = FALSE;
-				else
-					pv->clicked_annot->annot.annot_text.open = TRUE;
-			}
-
-			pv->clicked_annot = pdf_document_page_annot;
-		}
-		else { //nicht auf annot geklickt, z.B. weil neben layout geclickt
-			//wird weiter unten geprüft, ob click_on_text wieder angeschaltet werden soll
-			pv->click_on_text = FALSE;
-
-			if (pv->clicked_annot
-					&& pv->clicked_annot->annot.type == PDF_ANNOT_TEXT)
-				pv->clicked_annot->annot.annot_text.open = FALSE;
-			pv->clicked_annot = NULL;
-
-			if ((viewer_page->pdf_document_page->thread & 2)
-					&& pv->state == 3) { //Neue AnnotText einfügen
-				gint rc = 0;
-
-				rc = viewer_annot_create(viewer_page, error);
-				if (rc)
-					return -1;
-
-				//neu erzeugte Text-Annot soll markiert sein!
-				pv->clicked_annot = g_ptr_array_index(
-						viewer_page->pdf_document_page->arr_annots,
-						viewer_page->pdf_document_page->arr_annots->len
-								- 1);
-				pv->clicked_annot->annot.annot_text.open = TRUE;
-
-				//Nach Einfügen von annot-text: auf Zeiger zurückflitschen
-				gtk_toggle_button_set_active(
-						GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE);
-			} else if ((viewer_page->pdf_document_page->thread & 8)
-					&& viewer_on_text(pv, viewer_page, pdf_punkt.punkt))
-				pv->click_on_text = TRUE;
-			else
-				gdk_window_set_cursor(pv->gdk_window, pv->cursor_grab);
-		}
-
-		gtk_widget_queue_draw(pv->layout); //um ggf. Markierung der annot zu löschen
-	}
-//Doppelklick - nur für Anbindung interessant, also nur wenn der Host sie anlegt
-	else if (event->button.type == GDK_2BUTTON_PRESS
-			&& event->button.button == 1
-			&& pdf_viewer_session_wants_anbindung(pv->session)) {
-		gboolean punktgenau = FALSE;
-
-		if (event->button.state == GDK_SHIFT_MASK)
-			punktgenau = TRUE;
-
-		if (!rc) {
-			ViewerPageNew* viewer_page = NULL;
-			gint page_pdf = 0;
-
-			viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
-			page_pdf = viewer_page->pdf_document_page->page_akt;
-
-			//Test, ob Seite in Dokument frisch eingefügt
-			if (viewer_page->pdf_document_page->inserted) {
-				g_set_error(error, VIEWER_ERROR, 0,
-						"Die gewählte Seite wurde in das Dokument eingefügt,\n"
-								"Dokument ist aber noch nicht gespeichert.\n\n"
-								"Um Inkonsistenzen zu vermeiden, speichern Sie "
-								"das Dokument zunächst.");
-
-				return -1;
-			}
-
-			if (pv->anbindung.von.index == -1) {
-				pv->anbindung.von.seite = page_pdf;
-				if (punktgenau)
-					pv->anbindung.von.index = pdf_punkt.punkt.y;
-				else
-					pv->anbindung.von.index = 0;
-
-				//Wahl des Beginns irgendwie anzeigen
-				gchar *button_label_text = g_strdup_printf(
-						"Anbindung Anfang löschen\nSeite: %i, Index: %i",
-						pv->anbindung.von.seite, pv->anbindung.von.index);
-				gtk_widget_set_tooltip_text(pv->button_anbindung,
-						button_label_text);
-				gtk_widget_set_sensitive(pv->button_anbindung, TRUE);
-
-				g_free(button_label_text);
-			}
-			else { //zweiter Doppelklick - pv->anbindung "gefüllt"
-				//Wenn nicht zurückliegende Seite oder - wenn punktgenau - gleiche
-				//Seite und zurückliegender Index
-				//"richtige" Reihenfolge
-
-				if ((page_pdf > pv->anbindung.von.seite)
-						|| ((punktgenau)
-								&& (page_pdf == pv->anbindung.von.seite)
-								&& (pdf_punkt.punkt.y >= pv->anbindung.von.index))) {
-					pv->anbindung.bis.seite = page_pdf;
-					if (punktgenau)
-						pv->anbindung.bis.index = pdf_punkt.punkt.y;
-					else
-						pv->anbindung.bis.index = EOP;
-				}
-				else //umdrehen
-				{
-					pv->anbindung.bis.seite = pv->anbindung.von.seite;
-					if (pv->anbindung.von.index == 0)
-						pv->anbindung.bis.index = EOP;
-					else
-						pv->anbindung.bis.index = pv->anbindung.von.index;
-
-					pv->anbindung.von.seite = page_pdf;
-					if (punktgenau)
-						pv->anbindung.von.index = pdf_punkt.punkt.y;
-					else
-						pv->anbindung.von.index = 0;
-				}
-
-				rc = pdf_viewer_session_anbindung_requested(pv->session, pv,
-						error);
-				if (rc)
-					return -1;
-
-				//anbindung.von "löschen"
-				pv->anbindung.von.index = -1;
-
-				//Anzeige Beginn rückgängig machen
-				gtk_widget_set_tooltip_text(pv->button_anbindung,
-						"Anbindung Anfang löschen");
-				gtk_widget_set_sensitive(pv->button_anbindung, FALSE);
-			}
-		}
-	}
+	//Doppelklick - nur für Anbindung interessant, also nur wenn der Host sie anlegt
+	if (event->button.type == GDK_2BUTTON_PRESS && event->button.button == 1
+			&& pdf_viewer_session_wants_anbindung(pv->session))
+		return button_press_doppelklick(pv, event, pdf_punkt, error);
 
 	return 0;
 }

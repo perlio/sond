@@ -348,166 +348,200 @@ static fz_rect viewer_annot_clamp_page(ViewerPageNew *viewer_page,
 
 
 
+/* Rechteck einer Annotation (PDF-Koordinaten der Seite) als Rechteck im Fenster des Layouts
+ * (Position der Seite, Zoom, abzüglich Bildlauf). */
+void viewer_annot_rect_im_fenster(PdfViewer *pv, ViewerPageNew *viewer_page, fz_rect rect,
+		GdkRectangle *gdk_rectangle) {
+	gint x = 0, y = 0;
+
+	gtk_container_child_get(GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page->image_page), "y",
+			&y, NULL);
+	y += (gint) (rect.y0 * pv->zoom / 100);
+	y -= gtk_adjustment_get_value(pv->v_adj);
+
+	gtk_container_child_get(GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page->image_page), "x",
+			&x, NULL);
+	x += (gint) (rect.x0 * pv->zoom / 100);
+	x -= gtk_adjustment_get_value(pv->h_adj);
+
+	gdk_rectangle->x = x;
+	gdk_rectangle->y = y;
+	gdk_rectangle->width = (gint) ((rect.x1 - rect.x0) * pv->zoom / 100);
+	gdk_rectangle->height = (gint) ((rect.y1 - rect.y0) * pv->zoom / 100);
+
+	return;
+}
+
+/* Seite des Klicks holen (die Maus kann auf einer anderen Seite losgelassen worden sein) und
+ * das bisherige Rechteck der Annotation aus MuPDF lesen: clicked_annot->rect wurde beim Ziehen
+ * laufend angepasst, das Journal braucht aber den bisherigen Zustand. */
+static gint annot_verschiebung_holen(PdfViewer *pv, ViewerPageNew **viewer_page,
+		PdfPunkt pdf_punkt, pdf_annot **pdf_annot, fz_rect *rect_old, GError **error) {
+	fz_context *ctx = NULL;
+
+	if (pv->click_pdf_punkt.seite != pdf_punkt.seite) { //viewer_page neu holen
+		*viewer_page = g_ptr_array_index(pv->arr_pages, pv->click_pdf_punkt.seite);
+		viewer_render_wait_for_transfer((*viewer_page)->pdf_document_page);
+
+		if (!((*viewer_page)->pdf_document_page->thread & 2)) {
+			if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+					"%s\nSeite noch nicht fertig gerendert", __func__);
+
+			return -1;
+		}
+	}
+
+	ctx = zond_pdf_document_get_ctx((*viewer_page)->pdf_document_page->document);
+
+	zond_pdf_document_mutex_lock((*viewer_page)->pdf_document_page->document);
+
+	*pdf_annot = pdf_document_page_annot_get_pdf_annot(pv->clicked_annot);
+	if (!*pdf_annot) {
+		zond_pdf_document_mutex_unlock((*viewer_page)->pdf_document_page->document);
+
+		if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+				"%s\nBei Aufruf pdf_annot_get_pdf_annot", __func__);
+
+		return -1;
+	}
+
+	fz_try(ctx)
+		*rect_old = pdf_annot_rect(ctx, *pdf_annot);
+	fz_always(ctx)
+		zond_pdf_document_mutex_unlock((*viewer_page)->pdf_document_page->document);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\nBei Aufruf pdf_annot_rect: %s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	return 0;
+}
+
+/* Prüfen, ob die Verschiebung dazu führt, dass die Annotation in einem anderen geöffneten
+ * Abschnitt erscheint oder verschwindet; dann wird das alte Rechteck wiederhergestellt. */
+static gint annot_verschiebung_pruefen(PdfViewer *pv, ViewerPageNew *viewer_page,
+		fz_rect rect_old, GError **error) {
+	for (gint i = 0; i < pv->session->arr_pv->len; i++) {
+		DisplayedDocument *dd = NULL;
+
+		PdfViewer *pv_loop = g_ptr_array_index(pv->session->arr_pv, i);
+		dd = pv_loop->dd;
+		do {
+			if (viewer_annot_check_diff(dd, viewer_page->pdf_document_page, rect_old,
+					pv->clicked_annot->annot.annot_text.rect)) {
+				pv->clicked_annot->annot.annot_text.rect = rect_old;
+
+				//Fenster hervorholen
+				gtk_window_present(GTK_WINDOW(pv_loop->vf));
+
+				if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+						"%s\nAnnotation würde in geöffnetem Abschnitt entfernt oder hinzugefügt\n\n"
+						"Bitte Abschnitt schließen und erneut versuchen", __func__);
+
+				return -1;
+			}
+
+		} while ((dd = dd->next) != NULL);
+	}
+
+	return 0;
+}
+
+//Verschiebung in MuPDF schreiben, ins Journal eintragen und die Viewer aktualisieren
+static gint annot_verschiebung_uebernehmen(PdfViewer *pv, ViewerPageNew *viewer_page,
+		pdf_annot *pdf_annot, fz_rect rect_old, GError **error) {
+	fz_context *ctx = zond_pdf_document_get_ctx(viewer_page->pdf_document_page->document);
+	JournalEntry entry = { 0, };
+	GArray *arr_journal = NULL;
+	gint rc = 0;
+
+	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
+	rc = viewer_annot_do_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
+			pv->clicked_annot->annot, error);
+	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
+	if (rc) {
+		pv->clicked_annot->annot.annot_text.rect = rect_old;
+
+		return -1;
+	}
+
+	//ins Journal
+	entry.pdf_document_page = viewer_page->pdf_document_page;
+	entry.type = JOURNAL_TYPE_ANNOT_CHANGED;
+	entry.annot_changed.pdf_document_page_annot = pv->clicked_annot;
+	entry.annot_changed.annot_before = annot_deep_copy(pv->clicked_annot->annot);
+	//rect anpassen
+	entry.annot_changed.annot_before.annot_text.rect = rect_old;
+
+	entry.annot_changed.annot_after = annot_deep_copy(pv->clicked_annot->annot);
+
+	arr_journal = zond_pdf_document_get_arr_journal(viewer_page->pdf_document_page->document);
+	g_array_append_val(arr_journal, entry);
+
+	fz_drop_display_list(ctx, viewer_page->pdf_document_page->display_list);
+	viewer_page->pdf_document_page->display_list = NULL;
+	viewer_page->pdf_document_page->thread &= 10;
+
+	viewer_foreach(pv, viewer_page->pdf_document_page, viewer_annot_foreach_changed,
+			&entry.annot_changed.annot_after);
+
+	return 0;
+}
+
+//Annotation wurde verschoben
+static gint annot_verschoben(PdfViewer *pv, ViewerPageNew *viewer_page, PdfPunkt pdf_punkt,
+		GError **error) {
+	pdf_annot *pdf_annot = NULL;
+	fz_rect rect_old = fz_empty_rect;
+	gint rc = 0;
+
+	rc = annot_verschiebung_holen(pv, &viewer_page, pdf_punkt, &pdf_annot, &rect_old, error);
+	if (rc)
+		return -1;
+
+	//neues rect kommt ja schon so an, aber clamp machen
+	pv->clicked_annot->annot.annot_text.rect =
+			viewer_annot_clamp_page(viewer_page, pv->clicked_annot->annot.annot_text.rect);
+
+	rc = annot_verschiebung_pruefen(pv, viewer_page, rect_old, error);
+	if (rc)
+		return -1;
+
+	return annot_verschiebung_uebernehmen(pv, viewer_page, pdf_annot, rect_old, error);
+}
+
+//Nicht verschoben, sondern angeklickt: Textfeld zum Bearbeiten an der Annotation öffnen
+static void annot_edit_popover_oeffnen(PdfViewer *pv, ViewerPageNew *viewer_page) {
+	GdkRectangle gdk_rectangle = { 0, };
+
+	viewer_annot_rect_im_fenster(pv, viewer_page, pv->clicked_annot->annot.annot_text.rect,
+			&gdk_rectangle);
+
+	gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
+
+	g_object_set_data(G_OBJECT(pv->annot_pop_edit), "pdf-document-page-annot", pv->clicked_annot);
+	gtk_popover_set_pointing_to(GTK_POPOVER(pv->annot_pop_edit), &gdk_rectangle);
+	if (pv->clicked_annot->annot.annot_text.content)
+		gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(pv->annot_textview)),
+				pv->clicked_annot->annot.annot_text.content, -1);
+	gtk_popover_popup(GTK_POPOVER(pv->annot_pop_edit));
+	gtk_widget_grab_focus(pv->annot_pop_edit);
+
+	return;
+}
+
 gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		ViewerPageNew* viewer_page, PdfPunkt pdf_punkt, GError** error) {
 	//verschoben?
 	if (!(pv->click_pdf_punkt.seite == pdf_punkt.seite
 			&& pv->click_pdf_punkt.punkt.x == pdf_punkt.punkt.x
-			&& pv->click_pdf_punkt.punkt.y == pdf_punkt.punkt.y)) {
-		fz_context *ctx = NULL;
-		JournalEntry entry = { 0, };
-		GArray* arr_journal = NULL;
-		gint rc = 0;
-		pdf_annot *pdf_annot = NULL;
-		fz_rect rect_old = fz_empty_rect;
+			&& pv->click_pdf_punkt.punkt.y == pdf_punkt.punkt.y))
+		return annot_verschoben(pv, viewer_page, pdf_punkt, error);
 
-		if (pv->click_pdf_punkt.seite != pdf_punkt.seite) { //viewer_page neu holen
-			viewer_page = g_ptr_array_index(pv->arr_pages,
-					pv->click_pdf_punkt.seite);
-			viewer_render_wait_for_transfer(
-					viewer_page->pdf_document_page);
-
-			if (!(viewer_page->pdf_document_page->thread & 2)) {
-				if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
-						"%s\nSeite noch nicht fertig gerendert", __func__);
-
-				return -1;
-			}
-		}
-
-		ctx = zond_pdf_document_get_ctx(
-				viewer_page->pdf_document_page->document);
-
-		zond_pdf_document_mutex_lock(
-				viewer_page->pdf_document_page->document);
-
-		pdf_annot = pdf_document_page_annot_get_pdf_annot(pv->clicked_annot);
-		if (!pdf_annot) {
-			zond_pdf_document_mutex_unlock(
-					viewer_page->pdf_document_page->document);
-
-			if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
-					"%s\nBei Aufruf pdf_annot_get_pdf_annot", __func__);
-
-			return -1;
-		}
-		//clicked_annot->rect wurde beim Ziehen laufend angepaßt
-		//im JournalEntry soll der bisherige Zustand gespeichert werden
-		//der muß dann aus der annot selbt geholt werden
-		fz_try(ctx)
-			rect_old = pdf_annot_rect(ctx, pdf_annot);
-		fz_always(ctx)
-			zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-					"%s\nBei Aufruf pdf_annot_rect: %s", __func__, fz_caught_message(ctx));
-
-			return -1;
-		}
-
-		//neues rect kommt ja schon so an, aber clamp machen
-		pv->clicked_annot->annot.annot_text.rect =
-				viewer_annot_clamp_page(viewer_page, pv->clicked_annot->annot.annot_text.rect);
-
-		//erst einmal prüfen, ob Verschiebung dazu führt, daß Annot in anderem
-		//geöffneten Abschnitt aufscheint oder verschwindet
-		for (gint i = 0; i < pv->session->arr_pv->len; i++) {
-			DisplayedDocument *dd = NULL;
-
-			PdfViewer *pv_loop = g_ptr_array_index(pv->session->arr_pv, i);
-			dd = pv_loop->dd;
-			do {
-				if (viewer_annot_check_diff(dd, viewer_page->pdf_document_page,
-						rect_old, pv->clicked_annot->annot.annot_text.rect)) {
-					pv->clicked_annot->annot.annot_text.rect = rect_old;
-
-					//Fenster hervorholen
-					gtk_window_present(GTK_WINDOW(pv_loop->vf));
-
-					if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
-							"%s\nAnnotation würde in geöffnetem Abschnitt entfernt oder hinzugefügt\n\n"
-							"Bitte Abschnitt schließen und erneut versuchen", __func__);
-
-					return -1;
-				}
-
-			} while ((dd = dd->next) != NULL);
-		}
-
-		zond_pdf_document_mutex_lock(
-				viewer_page->pdf_document_page->document);
-		rc = viewer_annot_do_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
-				pv->clicked_annot->annot, error);
-		zond_pdf_document_mutex_unlock(
-				viewer_page->pdf_document_page->document);
-		if (rc) {
-			pv->clicked_annot->annot.annot_text.rect = rect_old;
-
-			return -1;
-		}
-
-		//ins Journal
-		entry.pdf_document_page = viewer_page->pdf_document_page;
-		entry.type = JOURNAL_TYPE_ANNOT_CHANGED;
-		entry.annot_changed.pdf_document_page_annot = pv->clicked_annot;
-		entry.annot_changed.annot_before = annot_deep_copy(pv->clicked_annot->annot);
-		//rect anpassen
-		entry.annot_changed.annot_before.annot_text.rect = rect_old;
-
-		entry.annot_changed.annot_after = annot_deep_copy(pv->clicked_annot->annot);
-
-		arr_journal = zond_pdf_document_get_arr_journal(viewer_page->pdf_document_page->document);
-		g_array_append_val(arr_journal, entry);
-
-		fz_drop_display_list(ctx,
-				viewer_page->pdf_document_page->display_list);
-		viewer_page->pdf_document_page->display_list = NULL;
-		viewer_page->pdf_document_page->thread &= 10;
-
-		viewer_foreach(pv, viewer_page->pdf_document_page,
-				viewer_annot_foreach_changed, &entry.annot_changed.annot_after);
-	} else if (pv->clicked_annot->annot.annot_text.open) {//nicht verschoben, edit-popup geöffnet
-		//angeklickt -> textview öffnen
-		GdkRectangle gdk_rectangle = { 0, };
-		gint x = 0, y = 0, width = 0, height = 0;
-
-		gtk_container_child_get(GTK_CONTAINER(pv->layout),
-				GTK_WIDGET(viewer_page->image_page), "y", &y, NULL);
-		y += (gint) (pv->clicked_annot->annot.annot_text.rect.y0 * pv->zoom
-				/ 100);
-		y -= gtk_adjustment_get_value(pv->v_adj);
-
-		gtk_container_child_get(GTK_CONTAINER(pv->layout),
-				GTK_WIDGET(viewer_page->image_page), "x", &x, NULL);
-		x += (gint) (pv->clicked_annot->annot.annot_text.rect.x0 * pv->zoom
-				/ 100);
-		x -= gtk_adjustment_get_value(pv->h_adj);
-
-		height = (gint) ((pv->clicked_annot->annot.annot_text.rect.y1
-				- pv->clicked_annot->annot.annot_text.rect.y0) * pv->zoom
-				/ 100);
-		width = (gint) ((pv->clicked_annot->annot.annot_text.rect.x1
-				- pv->clicked_annot->annot.annot_text.rect.x0) * pv->zoom
-				/ 100);
-
-		gdk_rectangle.x = x;
-		gdk_rectangle.y = y;
-		gdk_rectangle.width = width;
-		gdk_rectangle.height = height;
-
-		gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
-
-		g_object_set_data(G_OBJECT(pv->annot_pop_edit),
-				"pdf-document-page-annot", pv->clicked_annot);
-		gtk_popover_set_pointing_to(GTK_POPOVER(pv->annot_pop_edit),
-				&gdk_rectangle);
-		if (pv->clicked_annot->annot.annot_text.content)
-			gtk_text_buffer_set_text(gtk_text_view_get_buffer(
-					GTK_TEXT_VIEW(pv->annot_textview)),
-					pv->clicked_annot->annot.annot_text.content, -1);
-		gtk_popover_popup(GTK_POPOVER(pv->annot_pop_edit));
-		gtk_widget_grab_focus(pv->annot_pop_edit);
-	}
+	if (pv->clicked_annot->annot.annot_text.open) //nicht verschoben, edit-popup geöffnet
+		annot_edit_popover_oeffnen(pv, viewer_page);
 
 	return 0;
 }
