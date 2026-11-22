@@ -75,274 +75,236 @@ static gint viewer_save_get_physical_annot_index(PdfDocumentPage* pdfp,
 	return -1;
 }
 
-static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
-		fz_context* ctx, pdf_document* doc, GError** error) {
-	GArray* arr_journal = NULL;
-	gint rc = 0;
-	Anbindung anbindung = { 0 };
-	Anbindung anbindung_orig = { 0 };
-	gint page_orig = 0;
-	gint num = 0; //für ocr-Font - nur einmal suchen oder kopieren
+/* Zustand eines Speichervorgangs für einen Abschnitt (dd) */
+typedef struct {
+	fz_context* ctx;
+	pdf_document* doc; //die frisch geladene Arbeitskopie
+	DisplayedDocument* dd;
+	GArray* arr_journal;
+	gint num; //Objektnummer der OCR-Schrift: nur einmal suchen oder anlegen
+} SaveCtx;
 
-	//jetzt speichern.
-	//Dafür ersemal rausfinden,
-	//welche Seite im doc die letzte Seite vor 1. Seite des dd ist
-	zpdfd_part_get_anbindung(dd->zpdfd_part, &anbindung);
-	anbindung_orig = anbindung;
-	anbindung_get_orig(dd->zpdfd_part->zond_pdf_document, &anbindung_orig);
-	page_orig = anbindung_orig.bis.seite;
+/* Bereitet die Seite pdfp (Nr. i im Live-Dokument) in der Arbeitskopie vor: ausgeschlossene Seiten
+ * entfernen, eingefügte kopieren, dann die Seite laden. *page_orig ist die Position der Seite in
+ * der Kopie und wird mitgeführt.
+ * 0: Seite in *page_out geladen, 1: nichts weiter zu tun, -1: Fehler (die Kopie ist dann schon
+ * freigegeben). */
+static gint viewer_save_seite_vorbereiten(SaveCtx* s, PdfDocumentPage* pdfp, gint i,
+		gint* page_orig, pdf_page** page_out, GError** error) {
+	fz_context* ctx = s->ctx;
+	pdf_document* doc = s->doc;
+	pdf_page* page = NULL;
 
-	arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-
-	for (gint i = anbindung.bis.seite; i >= anbindung.von.seite; i--) {
-		PdfDocumentPage* pdfp = NULL;
-		pdf_page* pdf_page = NULL;
-
-		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
-
-		if (pdfp->deleted && !pdfp->inserted) {
-			/* Schon bei einem früheren Speichern aus der Datei
-			 * ausgeschlossen (nur noch live als Karteileiche in
-			 * arr_pages vorhanden, s. PdfDocumentPage->on_disk_deleted) -
-			 * existiert in der hier frisch geöffneten doc gar nicht
-			 * mehr. Nichts zu tun, page_orig unverändert lassen (sonst
-			 * würde eine nie in doc vorhandene Seite fälschlich
-			 * abgezogen). */
-			if (pdfp->on_disk_deleted)
-				continue;
-
-			fz_try(ctx)
-				pdf_delete_page(ctx, doc, page_orig);
-			fz_catch(ctx) {
-				pdf_drop_document(ctx, doc);
-
-				ERROR_PDF
-			}
-
-			pdfp->on_disk_deleted = TRUE;
-
-			page_orig--;
-
-			continue;
-		}
-
-		/* In dieser Sitzung eingefügt UND wieder gelöscht (Phantom-Seite):
-		 * existiert nie in doc und wurde von anbindung_get_orig() schon
-		 * von Anfang an nicht in page_orig mitgezählt (siehe dortige
-		 * Behandlung von pdfp->inserted, unabhängig von ->deleted) - also
-		 * weder pdf_delete_page() noch page_orig--, sonst würde eine nie
-		 * gezählte Seite doch abgezogen und alle folgenden (früheren)
-		 * Seiten dieser Schleife um 1 verschoben. */
-		if (pdfp->deleted && pdfp->inserted)
-			continue;
-
-		if (pdfp->inserted && !pdfp->deleted) {
-			gint rc = 0;
-
-			//mit Annotationen aus dem Live-Dokument, auch den versteckten:
-			//die Löschschleife unten arbeitet positionsweise über arr_annots
-			zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
-			rc = pdf_copy_page(ctx,
-					zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document),
-					i, i, doc, page_orig, TRUE, error);
-			zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-			if (rc) {
-				pdf_drop_document(ctx, doc);
-
-				return -1;
-			}
-
-			page_orig++;
-		}
+	if (pdfp->deleted && !pdfp->inserted) {
+		/* Schon bei einem früheren Speichern aus der Datei
+		 * ausgeschlossen (nur noch live als Karteileiche in
+		 * arr_pages vorhanden, s. PdfDocumentPage->on_disk_deleted) -
+		 * existiert in der hier frisch geöffneten doc gar nicht
+		 * mehr. Nichts zu tun, page_orig unverändert lassen (sonst
+		 * würde eine nie in doc vorhandene Seite fälschlich
+		 * abgezogen). */
+		if (pdfp->on_disk_deleted)
+			return 1;
 
 		fz_try(ctx)
-			pdf_page = pdf_load_page(ctx, doc, page_orig);
+			pdf_delete_page(ctx, doc, *page_orig);
 		fz_catch(ctx) {
 			pdf_drop_document(ctx, doc);
 
 			ERROR_PDF
 		}
 
-		//entries durchgehen und ggf. einpflegen
-		for (gint u = 0; u < arr_journal->len; u++) {
-			JournalEntry entry = { 0 };
+		pdfp->on_disk_deleted = TRUE;
 
-			entry = g_array_index(arr_journal, JournalEntry, u);
+		(*page_orig)--;
 
-			if (pdfp != entry.pdf_document_page)
-				continue;
-
-			if (entry.type == JOURNAL_TYPE_PAGES_INSERTED ||
-					entry.type == JOURNAL_TYPE_PAGE_DELETED ||
-					entry.type == JOURNAL_TYPE_ANNOT_DELETED)
-				continue;
-
-			if (entry.pdf_document_page->deleted)
-				continue;
-
-			//eingefügte Seite: Annotationen kamen schon mit der Kopie
-			//aus dem Live-Dokument (samt allen Änderungen)
-			if (pdfp->inserted && (entry.type == JOURNAL_TYPE_ANNOT_CREATED ||
-					entry.type == JOURNAL_TYPE_ANNOT_CHANGED))
-				continue;
-
-			if (entry.type == JOURNAL_TYPE_ROTATE) {
-				gint rc = 0;
-
-				rc = pdf_page_rotate(ctx, pdf_page->obj, entry.rotate.winkel, error);
-				if (rc) {
-					pdf_drop_page(ctx, pdf_page);
-					pdf_drop_document(ctx, doc);
-
-					return -1;
-				}
-			}
-			else if (entry.type == JOURNAL_TYPE_OCR) {
-				gint rc = 0;
-
-				if (!num) {
-					pdf_obj* font_ref = NULL;
-
-					rc = pdf_get_sond_font(ctx, doc, &font_ref, error);
-					if (rc) {
-						pdf_drop_page(ctx, pdf_page);
-						pdf_drop_document(ctx, doc);
-
-						return -1;
-					}
-					else if (!font_ref) {
-
-						font_ref = pdf_put_sond_font(ctx, doc, error);
-						if (!font_ref) {
-							pdf_drop_page(ctx, pdf_page);
-							pdf_drop_document(ctx, doc);
-
-							return -1;
-						}
-					}
-
-					fz_try(ctx)
-						num = pdf_to_num(ctx, font_ref);
-					fz_catch(ctx) {
-						pdf_drop_page(ctx, pdf_page);
-						pdf_drop_document(ctx, doc);
-
-						ERROR_PDF
-					}
-				}
-
-				rc = pdf_set_content_stream(ctx, pdf_page, entry.ocr.buf_new, error);
-				if (rc)
-				{
-					pdf_drop_page(ctx, pdf_page);
-					pdf_drop_document(ctx, doc);
-
-					return -1;
-				}
-			}
-			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
-				pdf_annot* pdf_ann = NULL;
-
-				//pdf_ann borrowed pointer
-				//created (NULL): bei einem Fehlschlag hier wird doc ohnehin
-				//komplett verworfen (s. u.), kein Bookkeeping nötig
-				pdf_ann = viewer_annot_do_create(ctx, pdf_page, entry.pdf_document_page->rotate,
-						entry.annot_changed.annot_after, NULL, error);
-				if (!pdf_ann) {
-					pdf_drop_page(ctx, pdf_page);
-					pdf_drop_document(ctx, doc);
-					return -1;
-				}
-			}
-			else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
-				gint index = 0;
-				gint rc = 0;
-				pdf_annot* pdf_ann = NULL;
-
-				index = viewer_save_get_physical_annot_index(pdfp,
-						entry.annot_changed.pdf_document_page_annot);
-				pdf_ann = (index >= 0) ?
-						pdf_annot_lookup_index(ctx, pdf_page, index) : NULL;
-				if (!pdf_ann) {
-					pdf_drop_page(ctx, pdf_page);
-					pdf_drop_document(ctx, doc);
-					*error = g_error_new(VIEWER_ERROR, 0,
-							"%s\nZu ändernde Annotation auf Seite %i nicht gefunden",
-							__func__, pdfp->page_akt + 1);
-					return -1;
-				}
-
-				rc = viewer_annot_do_change(ctx, pdf_ann,
-						entry.pdf_document_page->rotate,
-						entry.annot_changed.annot_after, error);
-				if (rc) {
-					pdf_drop_page(ctx, pdf_page);
-					pdf_drop_document(ctx, doc);
-					return -1;
-				}
-			}
-		}
-
-		//Annots löschen
-		//erstmal sicherstellen, daß nichts mehr läuft
-		viewer_render_wait_for_transfer(pdfp);
-
-		if (pdfp->arr_annots) {
-			pdf_annot* pdf_ann = NULL;
-
-			pdf_ann = pdf_first_annot(ctx, pdf_page);
-
-			for (gint u = 0; u < pdfp->arr_annots->len; u++) {
-				PdfDocumentPageAnnot* pdfp_annot = NULL;
-				pdf_annot* annot_next = NULL;
-
-				pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
-
-				/* Schon bei einem früheren Speichern aus der Datei
-				 * ausgeschlossen (s. on_disk_deleted an PdfDocumentPage)
-				 * - existiert auf der frisch geladenen Seite gar nicht
-				 * mehr. pdf_ann bewußt NICHT voranrücken, sonst
-				 * verschiebt sich die positionsweise Zuordnung zu den
-				 * übrigen, tatsächlich noch vorhandenen Annotationen. */
-				if (pdfp_annot->deleted && pdfp_annot->on_disk_deleted)
-					continue;
-
-				if (pdf_ann) {
-					annot_next = pdf_next_annot(ctx, pdf_ann);
-					if (pdfp_annot->deleted) {
-						fz_try(ctx)
-							pdf_delete_annot(ctx, pdf_page, pdf_ann);
-						fz_catch(ctx) {
-							pdf_drop_page(ctx, pdf_page);
-							pdf_drop_document(ctx, doc);
-
-							ERROR_PDF
-						}
-
-						pdfp_annot->on_disk_deleted = TRUE;
-					}
-				}
-				else
-					LOG_WARN("%s\nzu viele annots", __func__);
-
-				pdf_ann = annot_next;
-			}
-		}
-
-		pdf_drop_page(ctx, pdf_page);
-
-		page_orig--;
+		return 1;
 	}
 
-	//alles geändert, dann speichern
-	zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
-	rc = sond_file_part_pdf_save_and_close(ctx, doc,
-			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
-	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-	if (rc)
-		return -1;
+	/* In dieser Sitzung eingefügt UND wieder gelöscht (Phantom-Seite):
+	 * existiert nie in doc und wurde von anbindung_get_orig() schon
+	 * von Anfang an nicht in page_orig mitgezählt (siehe dortige
+	 * Behandlung von pdfp->inserted, unabhängig von ->deleted) - also
+	 * weder pdf_delete_page() noch page_orig--, sonst würde eine nie
+	 * gezählte Seite doch abgezogen und alle folgenden (früheren)
+	 * Seiten dieser Schleife um 1 verschoben. */
+	if (pdfp->deleted && pdfp->inserted)
+		return 1;
 
-	//Journal bereinigen
+	if (pdfp->inserted && !pdfp->deleted) {
+		gint rc = 0;
+
+		//mit Annotationen aus dem Live-Dokument, auch den versteckten:
+		//die Löschschleife arbeitet positionsweise über arr_annots
+		zond_pdf_document_mutex_lock(s->dd->zpdfd_part->zond_pdf_document);
+		rc = pdf_copy_page(ctx,
+				zond_pdf_document_get_pdf_doc(s->dd->zpdfd_part->zond_pdf_document),
+				i, i, doc, *page_orig, TRUE, error);
+		zond_pdf_document_mutex_unlock(s->dd->zpdfd_part->zond_pdf_document);
+		if (rc) {
+			pdf_drop_document(ctx, doc);
+
+			return -1;
+		}
+
+		(*page_orig)++;
+	}
+
+	fz_try(ctx)
+		page = pdf_load_page(ctx, doc, *page_orig);
+	fz_catch(ctx) {
+		pdf_drop_document(ctx, doc);
+
+		ERROR_PDF
+	}
+
+	*page_out = page;
+
+	return 0;
+}
+
+/* Pflegt einen Journal-Eintrag in die geladene Seite ein (Drehung, OCR, Annotation anlegen oder
+ * ändern). Bei einem Fehler gibt der Aufrufer Seite und Kopie frei. */
+static gint viewer_save_eintrag(SaveCtx* s, PdfDocumentPage* pdfp, pdf_page* page,
+		JournalEntry* entry, GError** error) {
+	fz_context* ctx = s->ctx;
+
+	if (entry->type == JOURNAL_TYPE_ROTATE)
+		return pdf_page_rotate(ctx, page->obj, entry->rotate.winkel, error);
+
+	if (entry->type == JOURNAL_TYPE_OCR) {
+		if (!s->num) {
+			pdf_obj* font_ref = NULL;
+
+			if (pdf_get_sond_font(ctx, s->doc, &font_ref, error))
+				return -1;
+
+			if (!font_ref) {
+				font_ref = pdf_put_sond_font(ctx, s->doc, error);
+				if (!font_ref)
+					return -1;
+			}
+
+			fz_try(ctx)
+				s->num = pdf_to_num(ctx, font_ref);
+			fz_catch(ctx)
+				ERROR_PDF
+		}
+
+		return pdf_set_content_stream(ctx, page, entry->ocr.buf_new, error);
+	}
+
+	if (entry->type == JOURNAL_TYPE_ANNOT_CREATED) {
+		//pdf_ann borrowed pointer
+		//created (NULL): bei einem Fehlschlag hier wird doc ohnehin
+		//komplett verworfen (s. Aufrufer), kein Bookkeeping nötig
+		if (!viewer_annot_do_create(ctx, page, entry->pdf_document_page->rotate,
+				entry->annot_changed.annot_after, NULL, error))
+			return -1;
+	}
+	else if (entry->type == JOURNAL_TYPE_ANNOT_CHANGED) {
+		gint index = viewer_save_get_physical_annot_index(pdfp,
+				entry->annot_changed.pdf_document_page_annot);
+		pdf_annot* pdf_ann = (index >= 0) ?
+				pdf_annot_lookup_index(ctx, page, index) : NULL;
+
+		if (!pdf_ann) {
+			*error = g_error_new(VIEWER_ERROR, 0,
+					"%s\nZu ändernde Annotation auf Seite %i nicht gefunden",
+					__func__, pdfp->page_akt + 1);
+
+			return -1;
+		}
+
+		return viewer_annot_do_change(ctx, pdf_ann, entry->pdf_document_page->rotate,
+				entry->annot_changed.annot_after, error);
+	}
+
+	return 0;
+}
+
+//Geht das Journal durch und pflegt die Einträge dieser Seite ein
+static gint viewer_save_journal_einpflegen(SaveCtx* s, PdfDocumentPage* pdfp, pdf_page* page,
+		GError** error) {
+	for (gint u = 0; u < s->arr_journal->len; u++) {
+		JournalEntry entry = { 0 };
+
+		entry = g_array_index(s->arr_journal, JournalEntry, u);
+
+		if (pdfp != entry.pdf_document_page)
+			continue;
+
+		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED ||
+				entry.type == JOURNAL_TYPE_PAGE_DELETED ||
+				entry.type == JOURNAL_TYPE_ANNOT_DELETED)
+			continue;
+
+		if (entry.pdf_document_page->deleted)
+			continue;
+
+		//eingefügte Seite: Annotationen kamen schon mit der Kopie
+		//aus dem Live-Dokument (samt allen Änderungen)
+		if (pdfp->inserted && (entry.type == JOURNAL_TYPE_ANNOT_CREATED ||
+				entry.type == JOURNAL_TYPE_ANNOT_CHANGED))
+			continue;
+
+		if (viewer_save_eintrag(s, pdfp, page, &entry, error))
+			return -1;
+	}
+
+	return 0;
+}
+
+//Löscht die als gelöscht markierten Annotationen der Seite aus der Kopie
+static gint viewer_save_annots_loeschen(fz_context* ctx, pdf_page* page, PdfDocumentPage* pdfp,
+		GError** error) {
+	pdf_annot* pdf_ann = NULL;
+
+	//erstmal sicherstellen, daß nichts mehr läuft
+	viewer_render_wait_for_transfer(pdfp);
+
+	if (!pdfp->arr_annots)
+		return 0;
+
+	pdf_ann = pdf_first_annot(ctx, page);
+
+	for (gint u = 0; u < pdfp->arr_annots->len; u++) {
+		PdfDocumentPageAnnot* pdfp_annot = NULL;
+		pdf_annot* annot_next = NULL;
+
+		pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
+
+		/* Schon bei einem früheren Speichern aus der Datei
+		 * ausgeschlossen (s. on_disk_deleted an PdfDocumentPage)
+		 * - existiert auf der frisch geladenen Seite gar nicht
+		 * mehr. pdf_ann bewußt NICHT voranrücken, sonst
+		 * verschiebt sich die positionsweise Zuordnung zu den
+		 * übrigen, tatsächlich noch vorhandenen Annotationen. */
+		if (pdfp_annot->deleted && pdfp_annot->on_disk_deleted)
+			continue;
+
+		if (pdf_ann) {
+			annot_next = pdf_next_annot(ctx, pdf_ann);
+			if (pdfp_annot->deleted) {
+				fz_try(ctx)
+					pdf_delete_annot(ctx, page, pdf_ann);
+				fz_catch(ctx)
+					ERROR_PDF
+
+				pdfp_annot->on_disk_deleted = TRUE;
+			}
+		}
+		else
+			LOG_WARN("%s\nzu viele annots", __func__);
+
+		pdf_ann = annot_next;
+	}
+
+	return 0;
+}
+
+//Entfernt die Journal-Einträge dieses Abschnitts, nachdem er gespeichert ist
+static void viewer_save_journal_bereinigen(GArray* arr_journal, DisplayedDocument* dd) {
 	for (gint i = arr_journal->len - 1; i >= 0; i--) {
 		JournalEntry entry = { 0 };
 
@@ -350,23 +312,24 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		if (document_entry_in_dd(&entry, dd->zpdfd_part))
 			g_array_remove_index(arr_journal, i);
 	}
+}
 
-	/* Live-Buchführung nachziehen: nur noch Flags setzen, kein Zugriff
-	 * mehr auf das Live-pdf_doc. Das tatsächliche Ausschließen aus der
-	 * gespeicherten Datei ist oben in der ersten Schleife bereits
-	 * passiert (inkl. Markieren via on_disk_deleted); hier wird nur noch
-	 * "inserted" zurückgesetzt (Seite ist jetzt nicht mehr "neu, noch
-	 * nicht gespeichert") und - rein informativ für spätere best-effort-
-	 * Aufräumversuche - on_disk_deleted an bereits gelöschten Seiten/
-	 * Annotationen (falls hier oben in der ersten Schleife noch nicht
-	 * gesetzt, z.B. bei Phantom-Seiten) nachgezogen. Gelöschte Seiten und
-	 * Annotationen bleiben bewußt dauerhaft in arr_pages/arr_annots
-	 * liegen ("Karteileichen") - kein pdf_delete_page()/pdf_delete_annot()
-	 * mehr auf dem Live-pdf_doc, keine Umnumerierung, kein Anpassen von
-	 * first_page/last_page. Sie sind für Anzeige (viewer_new_page()) und
-	 * künftige Speichervorgänge (on_disk_deleted-Prüfung oben) bereits
-	 * korrekt unsichtbar/ausgeschlossen. Reine Struct-Feld-Zuweisungen -
-	 * kann anders als vorher nicht mehr fehlschlagen. */
+/* Live-Buchführung nachziehen: nur noch Flags setzen, kein Zugriff
+ * mehr auf das Live-pdf_doc. Das tatsächliche Ausschließen aus der
+ * gespeicherten Datei ist in viewer_save_seite_vorbereiten() bereits
+ * passiert (inkl. Markieren via on_disk_deleted); hier wird nur noch
+ * "inserted" zurückgesetzt (Seite ist jetzt nicht mehr "neu, noch
+ * nicht gespeichert") und - rein informativ für spätere best-effort-
+ * Aufräumversuche - on_disk_deleted an bereits gelöschten Seiten/
+ * Annotationen (falls dort noch nicht gesetzt, z.B. bei Phantom-Seiten)
+ * nachgezogen. Gelöschte Seiten und Annotationen bleiben bewußt
+ * dauerhaft in arr_pages/arr_annots liegen ("Karteileichen") - kein
+ * pdf_delete_page()/pdf_delete_annot() mehr auf dem Live-pdf_doc, keine
+ * Umnumerierung, kein Anpassen von first_page/last_page. Sie sind für
+ * Anzeige (viewer_new_page()) und künftige Speichervorgänge
+ * (on_disk_deleted-Prüfung) bereits korrekt unsichtbar/ausgeschlossen.
+ * Reine Struct-Feld-Zuweisungen - kann nicht fehlschlagen. */
+static void viewer_save_buchfuehrung_nachziehen(DisplayedDocument* dd) {
 	gint i = dd->zpdfd_part->last_page->page_akt;
 
 	do {
@@ -393,6 +356,64 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 		i--;
 	} while (i >= dd->zpdfd_part->first_page->page_akt);
+}
+
+static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
+		fz_context* ctx, pdf_document* doc, GError** error) {
+	SaveCtx s = { ctx, doc, dd, NULL, 0 };
+	gint rc = 0;
+	Anbindung anbindung = { 0 };
+	Anbindung anbindung_orig = { 0 };
+	gint page_orig = 0;
+
+	//jetzt speichern.
+	//Dafür erstmal rausfinden,
+	//welche Seite im doc die letzte Seite vor 1. Seite des dd ist
+	zpdfd_part_get_anbindung(dd->zpdfd_part, &anbindung);
+	anbindung_orig = anbindung;
+	anbindung_get_orig(dd->zpdfd_part->zond_pdf_document, &anbindung_orig);
+	page_orig = anbindung_orig.bis.seite;
+
+	s.arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
+
+	for (gint i = anbindung.bis.seite; i >= anbindung.von.seite; i--) {
+		PdfDocumentPage* pdfp = NULL;
+		pdf_page* page = NULL;
+
+		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
+
+		rc = viewer_save_seite_vorbereiten(&s, pdfp, i, &page_orig, &page, error);
+		if (rc == 1)
+			continue;
+		else if (rc)
+			return -1; //die Kopie ist schon freigegeben
+
+		//Einträge durchgehen und ggf. einpflegen, dann Annotationen löschen
+		rc = viewer_save_journal_einpflegen(&s, pdfp, page, error);
+		if (!rc)
+			rc = viewer_save_annots_loeschen(ctx, page, pdfp, error);
+		if (rc) {
+			pdf_drop_page(ctx, page);
+			pdf_drop_document(ctx, doc);
+
+			return -1;
+		}
+
+		pdf_drop_page(ctx, page);
+
+		page_orig--;
+	}
+
+	//alles geändert, dann speichern
+	zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
+	rc = sond_file_part_pdf_save_and_close(ctx, doc,
+			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
+	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
+	if (rc)
+		return -1;
+
+	viewer_save_journal_bereinigen(s.arr_journal, dd);
+	viewer_save_buchfuehrung_nachziehen(dd);
 
 	return 0;
 }
