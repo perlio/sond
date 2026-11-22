@@ -740,12 +740,241 @@ static gboolean is_garbage_word(const char *word) {
     return !has_valid_char;  // Müll wenn kein gültiges Zeichen gefunden
 }
 
+/* Ein erkanntes Wort mit seinem Rahmen (Pixel der gerenderten Seite) und der laufenden Nummer der
+ * Tesseract-Textzeile, zu der es gehört. */
+typedef struct {
+	gchar *text;
+	gint x1, y1, x2, y2;
+	gint zeile;
+} OcrWort;
+
+/* Eine Textzeile von Tesseract: Rahmen und die Wörter (zusammenhängend ab first, in der Reihenfolge,
+ * in der Tesseract sie liefert). */
+typedef struct {
+	gint x1, y1, x2, y2;
+	guint first;
+	guint n;
+} OcrZeile;
+
+static gint ocr_zeile_cy(OcrZeile const *z) {
+	return (z->y1 + z->y2) / 2;
+}
+
+static gint ocr_zeile_cmp_y(gconstpointer a, gconstpointer b, gpointer data) {
+	OcrZeile const *z = data;
+	OcrZeile const *za = &z[*(guint const*) a];
+	OcrZeile const *zb = &z[*(guint const*) b];
+	gint ya = ocr_zeile_cy(za);
+	gint yb = ocr_zeile_cy(zb);
+
+	if (ya != yb)
+		return ya < yb ? -1 : 1;
+
+	return za->x1 < zb->x1 ? -1 : (za->x1 > zb->x1 ? 1 : 0);
+}
+
+static gint ocr_zeile_cmp_x(gconstpointer a, gconstpointer b, gpointer data) {
+	OcrZeile const *z = data;
+	gint xa = z[*(guint const*) a].x1;
+	gint xb = z[*(guint const*) b].x1;
+
+	return xa < xb ? -1 : (xa > xb ? 1 : 0);
+}
+
+/* Stabiles Einfügesortieren von Zeilennummern (es sind nur einige Dutzend bis wenige hundert) */
+static void ocr_sortieren(guint *feld, guint n, GCompareDataFunc cmp, gpointer data) {
+	for (guint i = 1; i < n; i++) {
+		guint wert = feld[i];
+		guint j = i;
+
+		while (j > 0 && cmp(&feld[j - 1], &wert, data) > 0) {
+			feld[j] = feld[j - 1];
+			j--;
+		}
+		feld[j] = wert;
+	}
+}
+
+static gint ocr_intervall_cmp(gconstpointer a, gconstpointer b) {
+	gint const *ia = a;
+	gint const *ib = b;
+
+	return ia[0] < ib[0] ? -1 : (ia[0] > ib[0] ? 1 : 0);
+}
+
+/* Hat die Seite mehrere Spalten? Dann steht zwischen den Zeilen ein Streifen, den keine Zeile
+ * kreuzt (breiter als ein paar Zeilenhöhen), und links wie rechts davon stehen mehrere Zeilen, die
+ * sich in der Höhe überschneiden. Eine Tabelle zählt dabei auch als mehrspaltig; dann bleibt die
+ * Reihenfolge von Tesseract, wie sie vorher war. */
+static gboolean ocr_mehrspaltig(OcrZeile const *z, guint n) {
+	gboolean mehrspaltig = FALSE;
+	gint (*iv)[2] = NULL;
+	guint n_merged = 0;
+	gint breite_min = G_MAXINT, breite_max = 0;
+	gint h_summe = 0;
+	gint schwelle = 0;
+
+	if (n < 8)
+		return FALSE;
+
+	for (guint i = 0; i < n; i++) {
+		if (z[i].x1 < breite_min)
+			breite_min = z[i].x1;
+		if (z[i].x2 > breite_max)
+			breite_max = z[i].x2;
+		h_summe += z[i].y2 - z[i].y1;
+	}
+
+	//ein Streifen ab vier Zeilenhöhen und mindestens 4 % der Textbreite
+	schwelle = MAX(4 * h_summe / (gint) n, (breite_max - breite_min) / 25);
+
+	iv = g_malloc_n(n, sizeof(gint[2]));
+	for (guint i = 0; i < n; i++) {
+		iv[i][0] = z[i].x1;
+		iv[i][1] = z[i].x2;
+	}
+	qsort(iv, n, sizeof(gint[2]), ocr_intervall_cmp);
+
+	//überlappende Intervalle zusammenfassen
+	for (guint i = 1; i < n; i++) {
+		if (iv[i][0] <= iv[n_merged][1]) {
+			if (iv[i][1] > iv[n_merged][1])
+				iv[n_merged][1] = iv[i][1];
+		}
+		else {
+			n_merged++;
+			iv[n_merged][0] = iv[i][0];
+			iv[n_merged][1] = iv[i][1];
+		}
+	}
+	n_merged++;
+
+	for (guint k = 0; k + 1 < n_merged && !mehrspaltig; k++) {
+		gint g1 = iv[k][1];
+		gint g2 = iv[k + 1][0];
+		guint links = 0, rechts = 0;
+		gint l_y1 = G_MAXINT, l_y2 = 0, r_y1 = G_MAXINT, r_y2 = 0;
+		gint ueberlapp = 0;
+
+		if (g2 - g1 < schwelle)
+			continue;
+
+		for (guint i = 0; i < n; i++) {
+			if (z[i].x2 <= g1) {
+				links++;
+				l_y1 = MIN(l_y1, z[i].y1);
+				l_y2 = MAX(l_y2, z[i].y2);
+			}
+			else if (z[i].x1 >= g2) {
+				rechts++;
+				r_y1 = MIN(r_y1, z[i].y1);
+				r_y2 = MAX(r_y2, z[i].y2);
+			}
+		}
+
+		if (links < 4 || rechts < 4)
+			continue;
+
+		//beide Seiten müssen sich über einen größeren Teil der Höhe überschneiden
+		ueberlapp = MIN(l_y2, r_y2) - MAX(l_y1, r_y1);
+		if (ueberlapp > 0 && ueberlapp * 10 >= MIN(l_y2 - l_y1, r_y2 - r_y1) * 3)
+			mehrspaltig = TRUE;
+	}
+
+	g_free(iv);
+
+	return mehrspaltig;
+}
+
+/* Bringt die Zeilen in Leserichtung (order enthält die Zeilennummern): bei einer mehrspaltigen Seite
+ * bleibt die Reihenfolge von Tesseract, sonst von oben nach unten und nebeneinander stehende
+ * Zeilen (gleiche Höhe) von links nach rechts. Die Reihenfolge von Tesseract ist nicht immer von
+ * oben nach unten: die automatische Seitenanalyse ordnet ihre Blöcke nach eigener Schätzung. Der
+ * Textlayer steht im Stream in dieser Reihenfolge, Markieren und Kopieren folgen ihr. */
+/* Typische Zeilenhöhe der Seite (Median). Zeilen, die deutlich höher sind (gedrehter Randtext,
+ * Grafik, ein zusammengefasster Bereich), werden beim Bilden der Reihen nicht mit anderen
+ * zusammengefasst, sonst risse ihr Rahmen alle Zeilen darin mit. */
+static gint ocr_median_hoehe(OcrZeile const *z, guint n) {
+	g_autofree guint *hoehen = g_new(guint, n);
+	gint median = 0;
+
+	for (guint i = 0; i < n; i++) {
+		hoehen[i] = z[i].y2 - z[i].y1;
+	}
+	//Einfügesortieren der Höhen
+	for (guint i = 1; i < n; i++) {
+		guint wert = hoehen[i];
+		guint j = i;
+
+		while (j > 0 && hoehen[j - 1] > wert) {
+			hoehen[j] = hoehen[j - 1];
+			j--;
+		}
+		hoehen[j] = wert;
+	}
+	median = (gint) hoehen[n / 2];
+
+	return MAX(median, 1);
+}
+
+static void ocr_zeilen_ordnen(OcrZeile *z, guint n, guint *order) {
+	guint start = 0;
+	gint median = 0;
+	gint max_h = 0;
+
+	for (guint i = 0; i < n; i++)
+		order[i] = i;
+
+	if (n < 2 || ocr_mehrspaltig(z, n))
+		return;
+
+	median = ocr_median_hoehe(z, n);
+	max_h = 3 * median;
+
+	ocr_sortieren(order, n, ocr_zeile_cmp_y, z);
+
+	//Reihen bilden: Zeilen, deren Mitte innerhalb der halben Höhe der ersten Zeile der Reihe liegt;
+	//auffällig hohe Zeilen stehen allein in ihrer Reihe
+	while (start < n) {
+		gint reihe_cy = ocr_zeile_cy(&z[order[start]]);
+		gint reihe_h = MIN(z[order[start]].y2 - z[order[start]].y1, max_h);
+		guint ende = start + 1;
+
+		if (z[order[start]].y2 - z[order[start]].y1 <= max_h) {
+			while (ende < n) {
+				OcrZeile const *zz = &z[order[ende]];
+
+				if (zz->y2 - zz->y1 > max_h || ocr_zeile_cy(zz) - reihe_cy > reihe_h / 2)
+					break;
+				if (zz->y2 - zz->y1 > reihe_h)
+					reihe_h = zz->y2 - zz->y1;
+				ende++;
+			}
+		}
+
+		if (ende - start > 1)
+			ocr_sortieren(&order[start], ende - start, ocr_zeile_cmp_x, z);
+
+		start = ende;
+	}
+}
+
+static void ocr_woerter_free(GArray *woerter) {
+	for (guint i = 0; i < woerter->len; i++)
+		g_free(g_array_index(woerter, OcrWort, i).text);
+	g_array_unref(woerter);
+}
+
 static GString* tesseract_to_content_stream(
                                         TessResultIterator *iter,
                                         const OcrTransform *transform,
                                         GError **error) {
     GString *content = NULL;
     TessPageIteratorLevel level = RIL_WORD;
+    GArray *woerter = NULL;
+    GArray *zeilen = NULL;
+    g_autofree guint *order = NULL;
+    gint zeile_nr = -1;
 
     content = g_string_sized_new(4096);
     if (!content) {
@@ -758,10 +987,21 @@ static GString* tesseract_to_content_stream(
 
     float last_font_size = -1;
 
-    do {
-        gint rc = 0;
+    woerter = g_array_new(FALSE, FALSE, sizeof(OcrWort));
+    zeilen = g_array_new(FALSE, FALSE, sizeof(OcrZeile));
 
-        char *word = TessResultIteratorGetUTF8Text(iter, level);
+    /* Erst alle brauchbaren Wörter einsammeln, dann in Leserichtung ordnen und schreiben. */
+    do {
+        char *word = NULL;
+        int x1, y1, x2, y2;
+        gint base_x1, base_y1, base_x2, base_y2;
+        OcrWort w = { 0 };
+
+        //Beginn einer neuen Textzeile zählt auch, wenn ihr erstes Wort übersprungen wird
+        if (TessPageIteratorIsAtBeginningOf((TessPageIterator*)iter, RIL_TEXTLINE))
+            zeile_nr++;
+
+        word = TessResultIteratorGetUTF8Text(iter, level);
         if (!word || !*word) {
             if (word) TessDeleteText(word);
             continue;
@@ -772,54 +1012,97 @@ static GString* tesseract_to_content_stream(
             continue;
         }
 
-        int x1, y1, x2, y2;
         if (!TessPageIteratorBoundingBox((TessPageIterator*)iter, level,
                 &x1, &y1, &x2, &y2)) {
             TessDeleteText(word);
             continue;
         }
 
-        gint base_x1, base_y1, base_x2, base_y2;
         if (!TessPageIteratorBaseline((TessPageIterator*)iter, RIL_WORD,
                 &base_x1, &base_y1, &base_x2, &base_y2)) {
             TessDeleteText(word);
             continue;
         }
 
-        float word_width_pdf = (x2 - x1) / transform->scale_x;
-
-        // Schriftgröße aus voller Bounding-Box-Höhe (inkl. Descender),
-        // nicht nur Ascender-Anteil bis Baseline
-        float word_height = (y2 - y1) / transform->scale_y;
-        float font_size = word_height * 0.85f;  // ~85% der Box-Höhe = em-Größe
-        if (font_size < 1.0f) font_size = 1.0f;
-
-        if (fabsf(font_size - last_font_size) > 0.5f) {
-            g_string_append_printf(content, "/FSond %.2f Tf\n", font_size);
-            last_font_size = font_size;
-        }
-
-        float actual_width = helvetica_text_width(word, font_size);
-        float scale_word_x = (actual_width > 0.01f)
-                ? (word_width_pdf / actual_width) : 1.0f;
-
-        float pdf_x, pdf_y;
-        transform_coordinates(transform, x1, y2, &pdf_x, &pdf_y);
-
-        append_text_matrix_gs(content, transform, scale_word_x, pdf_x, pdf_y);
-
-        rc = append_winansi_text_gs(content, word, error);
+        w.text = g_strdup(word);
+        w.x1 = x1;
+        w.y1 = y1;
+        w.x2 = x2;
+        w.y2 = y2;
+        w.zeile = zeile_nr;
+        g_array_append_val(woerter, w);
         TessDeleteText(word);
-        if (rc) {
-            g_string_free(content, TRUE);
-            return NULL;
-        }
-
-        g_string_append(content, " Tj\n");
-
     } while (TessResultIteratorNext(iter, level));
 
+    //Zeilen aus den Wörtern bilden (Wörter einer Textzeile stehen zusammenhängend)
+    for (guint i = 0; i < woerter->len; i++) {
+        OcrWort *w = &g_array_index(woerter, OcrWort, i);
+
+        if (i == 0 || w->zeile != g_array_index(woerter, OcrWort, i - 1).zeile) {
+            OcrZeile z = { w->x1, w->y1, w->x2, w->y2, i, 1 };
+
+            g_array_append_val(zeilen, z);
+        }
+        else {
+            OcrZeile *z = &g_array_index(zeilen, OcrZeile, zeilen->len - 1);
+
+            z->x1 = MIN(z->x1, w->x1);
+            z->y1 = MIN(z->y1, w->y1);
+            z->x2 = MAX(z->x2, w->x2);
+            z->y2 = MAX(z->y2, w->y2);
+            z->n++;
+        }
+    }
+
+    order = g_new(guint, zeilen->len ? zeilen->len : 1);
+    ocr_zeilen_ordnen((OcrZeile*) zeilen->data, zeilen->len, order);
+
+    for (guint o = 0; o < zeilen->len; o++) {
+        OcrZeile *z = &g_array_index(zeilen, OcrZeile, order[o]);
+
+        for (guint k = z->first; k < z->first + z->n; k++) {
+            OcrWort *w = &g_array_index(woerter, OcrWort, k);
+            gint rc = 0;
+
+            float word_width_pdf = (w->x2 - w->x1) / transform->scale_x;
+
+            // Schriftgröße aus voller Bounding-Box-Höhe (inkl. Descender),
+            // nicht nur Ascender-Anteil bis Baseline
+            float word_height = (w->y2 - w->y1) / transform->scale_y;
+            float font_size = word_height * 0.85f;  // ~85% der Box-Höhe = em-Größe
+            if (font_size < 1.0f) font_size = 1.0f;
+
+            if (fabsf(font_size - last_font_size) > 0.5f) {
+                g_string_append_printf(content, "/FSond %.2f Tf\n", font_size);
+                last_font_size = font_size;
+            }
+
+            float actual_width = helvetica_text_width(w->text, font_size);
+            float scale_word_x = (actual_width > 0.01f)
+                    ? (word_width_pdf / actual_width) : 1.0f;
+
+            float pdf_x, pdf_y;
+            transform_coordinates(transform, w->x1, w->y2, &pdf_x, &pdf_y);
+
+            append_text_matrix_gs(content, transform, scale_word_x, pdf_x, pdf_y);
+
+            rc = append_winansi_text_gs(content, w->text, error);
+            if (rc) {
+                g_string_free(content, TRUE);
+                ocr_woerter_free(woerter);
+                g_array_unref(zeilen);
+
+                return NULL;
+            }
+
+            g_string_append(content, " Tj\n");
+        }
+    }
+
     g_string_append(content, "ET\nQ\n");
+
+    ocr_woerter_free(woerter);
+    g_array_unref(zeilen);
 
     return content;
 }
