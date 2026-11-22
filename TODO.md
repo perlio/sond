@@ -6,8 +6,8 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #261.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #257, #258, #260
-Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259
+Offen: #245, #247, #254, #255, #256, #257, #258
+Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260
 Ideen: #167, #169, #205, #232, #233
 
 ## Offen
@@ -117,30 +117,6 @@ Status: offen
  - Stillgelegte Chat-Dateien (zond_chat, sond_chat) prüfen.
  - misc.h umbenennen/aufteilen.
  - Tests für tvfm, anbindung, dbase_zond fehlen (src/tests).
-```
-
-### #260 Inhalts- und Auswertungsbaum: GTK-freie Logik, später GTK4-Baum und Notizen
-
-Status: in Arbeit (Phase 1)
-
-```text
- Ziel: Inhalts-/Auswertungsbaum und Notizen später als GTK4-Widgets in einem GTK4-zond.
- Phase 1 löst die Baum-Logik aus src/zond/zond_treeview.c GTK-frei heraus nach
- src/zond/zond_knoten.[ch] (Arbeit auf node_id und Anzeige-ID statt GtkTreeIter); das
- GTK3-zond ändert sich dabei im Verhalten nicht, jeder Schritt ist einzeln baubar.
- Erledigt: 1a Lesen (zond_knoten_get_children, _get_root, Kinder ebenenweise, Anbindung und
- Link über Anzeige-ID), 1b-1 Anker prüfen, 1b-2 Verschieben und neuer Punkt, 1b-3
- Löschprüfung, Verlinkungs-Prüfung, Auflösen (Anbindung entfernen). Dabei behoben:
- Strukturpunkt mit als Copy angebundenem Kind wurde samt Kind gelöscht (blieb vorher per
- Kaskade ungeprüft); jetzt bleibt der Punkt stehen.
- Offen: 1c Anbinden (Container, Fortschritt, Passwörter, Meldungen; in Abschnitten), 1d Notiz
- (Text lesen und schreiben).
- Danach (noch nicht angegangen): Phase 2 Knotenmodell GTK4 (ZondNode, create_children über
- zond_knoten, Links über Registry node_id), Phase 3 GTK4-Baum auf SondTreeview (Menü,
- Drag-and-Drop, Clipboard, Hooks), Phase 4 Notizen-Widget, Phase 5 Testfenster. Engpass für ein
- GTK4-zond in einem Prozess bleibt der PDF-Viewer (GTK3, rund 7500 Zeilen mit modalen Dialogen).
- Ort: zond/, nicht znd/ (der Client zeigt diese Bäume nicht; wer so tief einsteigen will,
- öffnet zond).
 ```
 
 ## Zurückgestellt
@@ -465,6 +441,32 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     extern; sond_file_part_open_external liegt wieder in sond_fileparts.c. Der GTK4-Baum nutzt das:
     "Öffnen" intern, "Öffnen mit" extern. Inhaltsbäume, PDF-Viewer, Headerbar und Export für
     GTK4 sind noch ungeplant.
+```
+
+### #260 Inhalts- und Auswertungsbaum: GTK4-Baum und Notizen auf GTK-freier Logik
+
+Status: Phase 1 erledigt; Phasen 2 bis 5 zurückgestellt (erst mit der Umstellung von zond auf GTK4)
+
+```text
+ Ziel: Inhalts-/Auswertungsbaum und Notizen später als GTK4-Widgets in einem GTK4-zond.
+ Phase 1 (erledigt): Die Baum-Logik ist aus src/zond/zond_treeview.c GTK-frei nach
+ src/zond/zond_knoten.[ch] gelöst (Arbeit auf node_id und Anzeige-ID statt GtkTreeIter);
+ zond_treeview.c führt nur noch die Anzeige nach. Im Modul: Lesen (get_children ebenenweise,
+ get_root), Anker prüfen, neuer Punkt, Verschieben, Löschprüfung, extern verlinkt, Auflösen
+ (Anbindung entfernen), Kopieren in die Auswertung (vorbereiten, anlegen), neuer Link,
+ Anbinden (Datei anlegen, untergeordnete Teile auflösen, Anker einfügen). Bei Verschieben und
+ Löschen behoben: Strukturpunkt mit als Copy angebundenem Kind wurde samt Kind gelöscht, jetzt
+ bleibt er stehen. Die Rekursion beim Anbinden (Container, Passwörter, SeaDrive, Info-Fenster,
+ Abbrechen) und die Zulässigkeitsregeln des Einfügens (aktiver Baum, Clipboard) hängen am
+ Zustand der Oberfläche und bleiben in zond_treeview.c. Die Notizen brauchen nichts: Lesen und
+ Schreiben sind zond_dbase_get_text/_update_text (GTK-frei, in znd/).
+ Offen (noch nicht angegangen): Phase 2 Knotenmodell GTK4 (ZondNode, create_children über
+ zond_knoten, Links über eine Registry node_id), Phase 3 GTK4-Baum auf SondTreeview (Menü,
+ Drag-and-Drop, Clipboard, Hooks), Phase 4 Notizen-Widget (GtkTextView mit Pin und Sprung),
+ Phase 5 Testfenster. Engpass für ein GTK4-zond in einem Prozess bleibt der PDF-Viewer (GTK3,
+ rund 7500 Zeilen mit modalen Dialogen).
+ Ort: zond/, nicht znd/ (der Client zeigt diese Bäume nicht; wer so tief einsteigen will,
+ öffnet zond).
 ```
 
 ## Ideen
