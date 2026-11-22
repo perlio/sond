@@ -185,6 +185,9 @@ ZPDFDPart* zpdfd_part_peek(SondFilePartPDF*, Anbindung*, GError** );
 
 void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
 
+/* Live-Numerierung in die Zählung, die der Viewer anzeigt (ohne gelöschte Seiten) */
+void anbindung_get_sichtbar(ZondPdfDocument*, Anbindung*);
+
 void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
 
 void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);

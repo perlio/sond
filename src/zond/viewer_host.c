@@ -248,6 +248,15 @@ static gint viewer_host_update_sections(DBaseZond* dbase_zond,
  * sections()), weil die dort ablaufende Kompaktierung (pdfp->deleted/
  * inserted-Flags werden gelöscht/page_akt neu gesetzt) genau das ist,
  * was anbindung_korrigieren() auswertet - danach sind die Flags weg. */
+//Seitenzahl in der Zählung der Datei auf der Platte (vor dem Speichern): so zählt der Index
+static gint viewer_host_page_platte(ZondPdfDocument *zpdfd, gint page_live) {
+	Anbindung anbindung = { { page_live, 0 }, { page_live, EOP } };
+
+	anbindung_get_orig(zpdfd, &anbindung);
+
+	return anbindung.von.seite;
+}
+
 static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *dd,
 		SondIndexCtx *index_ctx) {
 	gchar *filename = NULL;
@@ -292,7 +301,8 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 
 			if (entry.type == JOURNAL_TYPE_OCR) {
 				if (!sond_index_ctx_clear_page(index_ctx, filename,
-						entry.pdf_document_page->page_akt, &error)) {
+						viewer_host_page_platte(dd->zpdfd_part->zond_pdf_document,
+								entry.pdf_document_page->page_akt), &error)) {
 					LOG_WARN("%s\n", error->message);
 					g_clear_error(&error);
 				}
@@ -343,6 +353,8 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 				if (is_new)
 					continue;
 
+				//in den Index kommt die Zählung der Datei auf der Platte
+				page_nr = viewer_host_page_platte(dd->zpdfd_part->zond_pdf_document, page_nr);
 				g_array_append_val(pages_to_write, page_nr);
 			}
 
@@ -374,15 +386,23 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 
 	for (guint u = 0; u < pages->len; u++) {
 		gint page_nr = g_array_index(pages, gint, u);
+		Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
 		PdfDocumentPage *pdfp = NULL;
+		gint page_live = 0;
 
 		if (page_nr < 0) /* Nicht-PDF-Konvention (page_nr == -1) betrifft hier nicht */
 			continue;
 
+		/* Der Index zählt wie die Datei auf der Platte, das Seiten-Array live (mit gelöschten
+		 * Seiten als Karteileichen): erst umrechnen, dann nachsehen, dann zurück auf die
+		 * Zählung nach dem Speichern. */
+		anbindung_aktualisieren(dd->zpdfd_part->zond_pdf_document, &anbindung);
+		page_live = anbindung.von.seite;
+
 		/* Verteidigung gegen g_ptr_array_index() ohne Bounds-Check:
 		 * sollte der Index eine Seitenzahl kennen, die es (mehr) gar
 		 * nicht gibt, verwerfen statt out-of-bounds zuzugreifen. */
-		if (page_nr >= zond_pdf_document_get_number_of_pages(
+		if (page_live >= zond_pdf_document_get_number_of_pages(
 				dd->zpdfd_part->zond_pdf_document)) {
 			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
 				LOG_WARN("%s\n", error->message);
@@ -392,7 +412,7 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 		}
 
 		pdfp = zond_pdf_document_get_pdf_document_page(
-				dd->zpdfd_part->zond_pdf_document, page_nr);
+				dd->zpdfd_part->zond_pdf_document, page_live);
 
 		if (!pdfp || pdfp->deleted) {
 			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
@@ -402,15 +422,11 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 			continue;
 		}
 
-		{
-			Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
+		anbindung_korrigieren(dd->zpdfd_part, &anbindung);
 
-			anbindung_korrigieren(dd->zpdfd_part, &anbindung);
-
-			if (anbindung.von.seite != page_nr) {
-				g_array_append_val(old_nrs, page_nr);
-				g_array_append_val(new_nrs, anbindung.von.seite);
-			}
+		if (anbindung.von.seite != page_nr) {
+			g_array_append_val(old_nrs, page_nr);
+			g_array_append_val(new_nrs, anbindung.von.seite);
 		}
 	}
 
@@ -423,30 +439,42 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 		}
 	}
 
-	/* Nach dem Renumerieren prüfen, ob jetzt ALLE aktuell existierenden
-	 * (nicht gelöschten) Seiten der Datei individuell indiziert sind
-	 * (keine Lücke mehr, z.B. weil gerade die letzte, bisher nicht
-	 * indizierte Seite gelöscht wurde) - falls ja, zur Datei-Ebene
-	 * kollabieren (Mindestmodus-Prinzip wie bei coverage_try_collapse),
-	 * statt die pages-Tabelle dauerhaft fein-granular stehen zu lassen.
-	 * ACHTUNG: zond_pdf_document_get_number_of_pages() ist NICHT die
-	 * aktuelle Seitenzahl - gelöschte Seiten bleiben als stabile
-	 * "Karteileichen" im Seiten-Array stehen (keine Kompaktierung mehr),
-	 * deshalb hier direkt über das Array gehen und pdfp->deleted prüfen. */
+	/* Nach dem Renumerieren prüfen, ob jetzt ALLE nach dem Speichern in der Datei stehenden
+	 * (nicht gelöschten) Seiten individuell indiziert sind (keine Lücke mehr, z.B. weil gerade die
+	 * letzte, bisher nicht indizierte Seite gelöscht wurde) - falls ja, zur Datei-Ebene
+	 * kollabieren (Mindestmodus-Prinzip wie bei coverage_try_collapse), statt die pages-Tabelle
+	 * dauerhaft fein-granular stehen zu lassen.
+	 * Der Index zählt wie die Datei nach dem Speichern, das Seiten-Array live: gelöschte Seiten
+	 * bleiben als stabile "Karteileichen" stehen, eingefügte Seiten außerhalb dieses Teils sind
+	 * noch nicht in der Datei. Deshalb wird hier nach der Zählung der Datei durchgezählt. */
 	{
 		GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
 				dd->zpdfd_part->zond_pdf_document);
 		GArray *pages_now = sond_index_ctx_get_pages_for_file(index_ctx, filename);
-		g_autofree gboolean *seen = g_new0(gboolean, arr_pages->len ? arr_pages->len : 1);
+		g_autofree gboolean *erwartet = g_new0(gboolean, arr_pages->len ? arr_pages->len : 1);
+		Anbindung teil = { 0 };
 		gboolean complete = TRUE;
 		gint min_mode = G_MAXINT;
-		gint n_live = 0;
+		gint n_platte = 0; //Seiten in der Datei nach dem Speichern
+		gint n_erwartet = 0; //davon nicht gelöscht: müssen im Index stehen
+
+		zpdfd_part_get_anbindung(dd->zpdfd_part, &teil);
 
 		for (guint i = 0; i < arr_pages->len; i++) {
 			PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
+			gboolean in_teil = (gint) i >= teil.von.seite && (gint) i <= teil.bis.seite;
 
-			if (pdfp && !pdfp->deleted)
-				n_live++;
+			if (pdfp && ((pdfp->deleted && (pdfp->on_disk_deleted || in_teil)) ||
+					(pdfp->inserted && !in_teil)))
+				continue; //steht nach dem Speichern nicht in der Datei
+
+			if (pdfp && pdfp->deleted) { //anderer Teil, noch nicht gespeichert: bleibt, ohne Eintrag
+				n_platte++;
+				continue;
+			}
+
+			erwartet[n_platte++] = TRUE;
+			n_erwartet++;
 		}
 
 		/* file_pagecount (coalescing-unabhängige Gesamtseitenzahl, s.
@@ -456,7 +484,7 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 		 * veraltete Zahl stehen, die z.B. sond_index_ctx_delete_index()
 		 * beim Rekonstruieren der übrigen Seiten fälschlich zugrunde
 		 * legen würde. */
-		if (!sond_index_ctx_set_page_count(index_ctx, filename, n_live, &error)) {
+		if (!sond_index_ctx_set_page_count(index_ctx, filename, n_erwartet, &error)) {
 			LOG_WARN("%s\n", error->message);
 			g_clear_error(&error);
 		}
@@ -465,11 +493,10 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 			gint page_nr = g_array_index(pages_now, gint, u);
 			gint mode;
 
-			if (page_nr < 0 || (guint) page_nr >= arr_pages->len) {
+			if (page_nr < 0 || page_nr >= n_platte || !erwartet[page_nr]) {
 				complete = FALSE;
 				break;
 			}
-			seen[page_nr] = TRUE;
 
 			mode = sond_index_ctx_get_page_ocr_mode(index_ctx, filename, page_nr);
 			if (mode < 0) {
@@ -480,19 +507,9 @@ static void viewer_host_update_index_for_save(Projekt *zond, DisplayedDocument *
 				min_mode = mode;
 		}
 
-		if (n_live == 0 || pages_now->len != (guint) n_live)
+		//jede erwartete Seite steht genau einmal im Index
+		if (n_erwartet == 0 || pages_now->len != (guint) n_erwartet)
 			complete = FALSE;
-
-		if (complete) {
-			for (guint i = 0; i < arr_pages->len; i++) {
-				PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
-
-				if (pdfp && !pdfp->deleted && !seen[i]) {
-					complete = FALSE;
-					break;
-				}
-			}
-		}
 
 		if (complete) {
 			if (!sond_index_ctx_coverage_mark(index_ctx, filename, min_mode, &error)) {

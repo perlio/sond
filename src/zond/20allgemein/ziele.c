@@ -509,9 +509,12 @@ gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
 	return 0;
 }
 
+/* anbindung: Zählung der Datei auf der Platte (für Abschnitt und Einfügestelle);
+ * anbindung_text: die im Viewer angezeigte Zählung (für den Text der Anbindung) */
 static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
-		const gchar *file_part, Anbindung anbindung, gint *anchor_pdf_abschnitt,
-		gboolean *child, gint *node_inserted, gchar **node_text, GError **error) {
+		const gchar *file_part, Anbindung anbindung, Anbindung anbindung_text,
+		gint *anchor_pdf_abschnitt, gboolean *child, gint *node_inserted,
+		gchar **node_text, GError **error) {
 	gint pdf_root = 0;
 	gint node_id_new = 0;
 	gint rc = 0;
@@ -541,7 +544,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	if (anchor_pdf_abschnitt)
 		*anchor_pdf_abschnitt = anchor_id_dbase;
 
-	*node_text = anbindung_to_human_readable(&anbindung);
+	*node_text = anbindung_to_human_readable(&anbindung_text);
 
 	//file_section zusammensetzen
 	anbindung_build_file_section(anbindung, &file_section);
@@ -567,6 +570,8 @@ gint zond_anbindung_erzeugen(Projekt *zond, PdfViewer *pv, GError **error) {
 	gchar *node_text = NULL;
 	gint anchor_pdf_abschnitt = 0;
 	gchar* filepart = NULL;
+	Anbindung anbindung = { 0 };
+	Anbindung anbindung_text = { 0 };
 
 	//ToDo: Wollen wir später schon!
 	if (pv->dd->next) {
@@ -581,8 +586,18 @@ gint zond_anbindung_erzeugen(Projekt *zond, PdfViewer *pv, GError **error) {
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
 			zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document)));
 
+	/* Der Viewer zählt live: ausgeschlossene Seiten bleiben als Karteileichen mitgezählt, neue
+	 * Seiten zählen schon mit. Datenbank, Abschnitt und Dateibaum zählen wie die Datei auf der
+	 * Platte (vor dem nächsten Speichern, dabei werden sie nachgeführt), also hier umrechnen.
+	 * Der Text zeigt die Seitenzahlen, die der Viewer anzeigt (ohne gelöschte Seiten), wie sie
+	 * nach dem Speichern in der Datei stehen. */
+	anbindung = pv->anbindung;
+	anbindung_get_orig(pv->dd->zpdfd_part->zond_pdf_document, &anbindung);
+	anbindung_text = pv->anbindung;
+	anbindung_get_sichtbar(pv->dd->zpdfd_part->zond_pdf_document, &anbindung_text);
+
 	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(zond, filepart,
-			pv->anbindung, &anchor_pdf_abschnitt, &child, &node_inserted,
+			anbindung, anbindung_text, &anchor_pdf_abschnitt, &child, &node_inserted,
 			&node_text, error);
 	if (rc) {
 		g_free(filepart);
@@ -590,7 +605,7 @@ gint zond_anbindung_erzeugen(Projekt *zond, PdfViewer *pv, GError **error) {
 	}
 
 	rc = zond_anbindung_trees(zond, anchor_pdf_abschnitt, child, node_inserted,
-			pv->anbindung, filepart, zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document),
+			anbindung, filepart, zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document),
 			node_text, error);
 	g_free(filepart);
 	g_free(node_text);
