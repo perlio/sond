@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #260.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #261.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #257, #258
+Offen: #245, #247, #254, #255, #256, #257, #258, #260
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259
 Ideen: #167, #169, #205, #232, #233
 
@@ -117,6 +117,30 @@ Status: offen
  - Stillgelegte Chat-Dateien (zond_chat, sond_chat) prüfen.
  - misc.h umbenennen/aufteilen.
  - Tests für tvfm, anbindung, dbase_zond fehlen (src/tests).
+```
+
+### #260 Inhalts- und Auswertungsbaum: GTK-freie Logik, später GTK4-Baum und Notizen
+
+Status: in Arbeit (Phase 1)
+
+```text
+ Ziel: Inhalts-/Auswertungsbaum und Notizen später als GTK4-Widgets in einem GTK4-zond.
+ Phase 1 löst die Baum-Logik aus src/zond/zond_treeview.c GTK-frei heraus nach
+ src/zond/zond_knoten.[ch] (Arbeit auf node_id und Anzeige-ID statt GtkTreeIter); das
+ GTK3-zond ändert sich dabei im Verhalten nicht, jeder Schritt ist einzeln baubar.
+ Erledigt: 1a Lesen (zond_knoten_get_children, _get_root, Kinder ebenenweise, Anbindung und
+ Link über Anzeige-ID), 1b-1 Anker prüfen, 1b-2 Verschieben und neuer Punkt, 1b-3
+ Löschprüfung, Verlinkungs-Prüfung, Auflösen (Anbindung entfernen). Dabei behoben:
+ Strukturpunkt mit als Copy angebundenem Kind wurde samt Kind gelöscht (blieb vorher per
+ Kaskade ungeprüft); jetzt bleibt der Punkt stehen.
+ Offen: 1c Anbinden (Container, Fortschritt, Passwörter, Meldungen; in Abschnitten), 1d Notiz
+ (Text lesen und schreiben).
+ Danach (noch nicht angegangen): Phase 2 Knotenmodell GTK4 (ZondNode, create_children über
+ zond_knoten, Links über Registry node_id), Phase 3 GTK4-Baum auf SondTreeview (Menü,
+ Drag-and-Drop, Clipboard, Hooks), Phase 4 Notizen-Widget, Phase 5 Testfenster. Engpass für ein
+ GTK4-zond in einem Prozess bleibt der PDF-Viewer (GTK3, rund 7500 Zeilen mit modalen Dialogen).
+ Ort: zond/, nicht znd/ (der Client zeigt diese Bäume nicht; wer so tief einsteigen will,
+ öffnet zond).
 ```
 
 ## Zurückgestellt
@@ -434,7 +458,13 @@ Status: zurückgestellt (erst mit der Umstellung von zond auf GTK4)
     und sperrt gegenseitig. Die Takte für Projekt-DB und Index im Dokumentenfenster bleiben
     (Änderungen kommen per Synchronisierung). Offen: Index-Menü im Client, Öffnen von
     Abschnitten mit Seitensprung (zond-Viewer im Client), echter Schreibschutz in zond.
-    Inhaltsbäume, Viewer, Headerbar und Export für GTK4 sind noch ungeplant.
+    Renderer: das Rendern (sond_render_doc.[ch], ohne Widgets) ist vom Viewer-Fenster
+    (sond_renderer.c) getrennt; das Fenster läuft in GTK3 und GTK4 aus einer Quelle über die
+    Wrapper in sond_gtk_compat.[ch]. sond_renderer_open_file_part() (vorher sond_file_part_open)
+    öffnet Text, Bild, DOCX/ODT und E-Mail im eigenen Viewer (sond_renderer_can_render), sonst
+    extern; sond_file_part_open_external liegt wieder in sond_fileparts.c. Der GTK4-Baum nutzt das:
+    "Öffnen" intern, "Öffnen mit" extern. Inhaltsbäume, PDF-Viewer, Headerbar und Export für
+    GTK4 sind noch ungeplant.
 ```
 
 ## Ideen
