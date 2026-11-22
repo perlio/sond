@@ -180,3 +180,49 @@ gint zond_knoten_anker_pruefen(ZondDBase *dbase, gint *anchor_id, gboolean child
 
 	return 0;
 }
+
+gint zond_knoten_neuer_punkt(ZondDBase *dbase, gint anchor_id, gboolean child,
+		gchar const *icon_name, gchar const *node_text, gint *id, GError **error) {
+	gint node_id_new = zond_dbase_insert_node(dbase, anchor_id, child,
+			ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name, node_text, NULL, error);
+
+	if (node_id_new == -1)
+		return -1;
+
+	if (id)
+		*id = node_id_new;
+
+	return 0;
+}
+
+gint zond_knoten_verschieben(ZondDBase *dbase, gint node_id, gboolean in_inhalt,
+		gint anchor_id, gboolean child, gint *moved_id, GError **error) {
+	//im Inhaltsbaum wird das Ziel (der FILE_PART) nicht verschoben, wohl aber seine Anbindung
+	if (in_inhalt) {
+		gint type = 0;
+
+		if (zond_dbase_get_type_and_link(dbase, node_id, &type, NULL, error) == -1)
+			return -1;
+
+		if (type == ZOND_DBASE_TYPE_FILE_PART) {
+			gint baum_inhalt_file = 0;
+
+			if (zond_dbase_get_baum_inhalt_file_from_file_part(dbase, node_id,
+					&baum_inhalt_file, error) == -1)
+				return -1;
+
+			if (!baum_inhalt_file)
+				return 1;
+
+			node_id = baum_inhalt_file;
+		}
+	}
+
+	if (zond_dbase_verschieben_knoten(dbase, node_id, anchor_id, child, error))
+		return -1;
+
+	if (moved_id)
+		*moved_id = node_id;
+
+	return 0;
+}

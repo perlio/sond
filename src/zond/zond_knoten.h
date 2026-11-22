@@ -69,6 +69,19 @@ gint zond_knoten_get_root(ZondDBase *dbase, gint node_id, gint *root, GError **e
 gint zond_knoten_anker_pruefen(ZondDBase *dbase, gint *anchor_id, gboolean child,
 		GError **error);
 
+/* Legt einen neuen Strukturpunkt (BAUM_STRUKT) an: unter anchor_id (child) oder dahinter. Die
+ * neue ID kommt in *id. 0: in Ordnung, -1: Fehler. */
+gint zond_knoten_neuer_punkt(ZondDBase *dbase, gint anchor_id, gboolean child,
+		gchar const *icon_name, gchar const *node_text, gint *id, GError **error);
+
+/* Verschiebt den Knoten node_id (Anzeige-ID; bei Links die Link-Nummer) unter anchor_id (child)
+ * oder dahinter. Im Inhaltsbaum (in_inhalt) wird ein angebundener FILE_PART als seine Anbindung
+ * verschoben, ein nicht angebundener bleibt, wo er ist. Die ID der tatsächlich verschobenen
+ * Zeile kommt in *moved_id. 0: verschoben, 1: nicht verschoben (nicht angebundener FILE_PART),
+ * -1: Fehler. */
+gint zond_knoten_verschieben(ZondDBase *dbase, gint node_id, gboolean in_inhalt,
+		gint anchor_id, gboolean child, gint *moved_id, GError **error);
+
 G_END_DECLS
 
 #endif /* ZOND_KNOTEN_H_INCLUDED */

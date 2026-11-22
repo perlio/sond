@@ -827,10 +827,10 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 		return 2; //Punkt darf nicht als Unterpunkt von Link eingefügt werden
 
 	//Knoten in Datenbank einfügen
-	node_id_new = zond_dbase_insert_node(zond->proj.dbase_zond->zond_dbase_work,
-			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
-			zond->app.icon[ICON_NORMAL].icon_name, "Neuer Punkt", NULL, error);
-	if (node_id_new == -1)
+	rc = zond_knoten_neuer_punkt(zond->proj.dbase_zond->zond_dbase_work, anchor_id,
+			child, zond->app.icon[ICON_NORMAL].icon_name, "Neuer Punkt", &node_id_new,
+			error);
+	if (rc)
 		return -1;
 
 	//Knoten in baum_inhalt einfuegen
@@ -1717,6 +1717,7 @@ typedef struct {
 static gint zond_treeview_clipboard_verschieben_foreach(SondTreeview *tree_view,
 		GtkTreeIter *iter_src, gpointer data, GError **error) {
 	gint node_id = 0;
+	gint moved_id = 0;
 	gint rc = 0;
 	GtkTreeIter iter_new = { 0 };
 
@@ -1731,41 +1732,14 @@ static gint zond_treeview_clipboard_verschieben_foreach(SondTreeview *tree_view,
 		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)),
 				iter_src, 2, &node_id, -1);
 
-	//soll Ziel verschoben werden? Nein!
-	if (zond_tree_store_get_root(zond_tree_store_get_tree_store(iter_src))
-			== BAUM_INHALT) {
-		gint rc = 0;
-		gint type = 0;
-
-		rc = zond_dbase_get_type_and_link(
-				s_selection->zond->proj.dbase_zond->zond_dbase_work, node_id, &type,
-				NULL, error);
-		if (rc == -1)
-			return -1;
-
-		if (type == ZOND_DBASE_TYPE_FILE_PART) { //Test, ob als BAUM_INHALT_PDF_ABSCHNITT angebunden - dann geht verschieben
-			gint rc = 0;
-			gint baum_inhalt_file = 0;
-
-			rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-					s_selection->zond->proj.dbase_zond->zond_dbase_work, node_id,
-					&baum_inhalt_file, error);
-			if (rc == -1)
-				return -1;
-
-			if (!baum_inhalt_file)
-				return 0;
-
-			node_id = baum_inhalt_file;
-		}
-	}
-
-	//Knoten verschieben verschieben
-	rc = zond_dbase_verschieben_knoten(
-			s_selection->zond->proj.dbase_zond->zond_dbase_work, node_id,
-			s_selection->anchor_id, s_selection->child, error);
-	if (rc)
+	rc = zond_knoten_verschieben(s_selection->zond->proj.dbase_zond->zond_dbase_work,
+			node_id,
+			zond_tree_store_get_root(zond_tree_store_get_tree_store(iter_src)) == BAUM_INHALT,
+			s_selection->anchor_id, s_selection->child, &moved_id, error);
+	if (rc == -1)
 		return -1;
+	else if (rc == 1) //nicht angebundener FILE_PART: bleibt, wo er ist
+		return 0;
 
 	zond_tree_store_move_node(iter_src,
 			zond_tree_store_get_tree_store(s_selection->iter_anchor),
@@ -1773,7 +1747,7 @@ static gint zond_treeview_clipboard_verschieben_foreach(SondTreeview *tree_view,
 
 	s_selection->child = FALSE;
 	*(s_selection->iter_anchor) = iter_new;
-	s_selection->anchor_id = node_id;
+	s_selection->anchor_id = moved_id;
 
 	return 0;
 }
