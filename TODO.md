@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #263.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #266.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258
+Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -111,6 +111,91 @@ Status: offen
    zond_knoten). Für die Zählung die Rechenlogik aus zond_pdf_document.c in ein kleines
    GTK-freies Modul in zond/ ziehen (z. B. zond/anbindung_zaehlung.[ch]), damit der echte
    Code getestet wird und nicht eine ausgeschnittene Kopie.
+```
+
+### #263 Viewer-Review: schwere Fehler
+
+Status: offen (aus dem Code abgeleitet, nicht reproduziert)
+
+```text
+ Review vom 22.11.2026 (40viewer, zond_pdf_document, viewer_host). Reihenfolge nach Schwere:
+ 1 Render-Queue: viewer_close_thread_pool_and_transfer (viewer_render.c) verwirft wartende Tasks
+   mit g_thread_pool_free(immediate), ihre Flags (pdf_document_page->thread Bit 1, thread_pv)
+   bleiben gesetzt; viewer_render_wait_for_transfer und viewer_render_thread laufen dann in
+   while (thread & 1) endlos, bei geschlossenem Viewer mit dangling thread_pv. Behebung: nach
+   Free und Transfer alle Seiten des Viewers durchgehen und Bit 1 samt thread_pv löschen, wenn
+   thread_pv dieser Viewer ist. Auslöser: viele Seiten sichtbar, dann Zoom, Drehen, Löschen,
+   Schließen.
+ 2 Einfügen: seiten_einfuegen_ausfuehren hält die Thread-Pools nicht an (Voraussetzung laut
+   Kommentar an zond_pdf_document_insert_pages; wartende Tasks tragen den alten page_pv).
+   Außerdem zond_pdf_document_insert_pages: pdfp_loop->page_akt += count ohne NULL-Prüfung;
+   bei einem nur über einen Abschnitt geöffneten Dokument sind die Seiten dahinter NULL
+   (init_pages füllt nur von bis), Absturz beim Einfügen im Abschnitt-Viewer.
+ 3 zond_pdf_document_open: Fehler von pdf_open_document liefert NULL ohne GError, die Aufrufer
+   lesen error->message (Absturz bei defekter PDF).
+ 4 zpdfd_part_peek: Referenzleck am Dokument, wenn der Abschnitt schon existiert (die Referenz
+   aus zond_pdf_document_open wird nur im Neuanlage-Zweig an den Abschnitt übergeben). Das
+   Dokument wird nie freigegeben, die Arbeitskopie bleibt liegen.
+ 5 project.c: "Alle Viewer schließen" läuft vorwärts über arr_pv, viewer_schliessen entfernt mit
+   g_ptr_array_remove_fast; jeder zweite Viewer bleibt offen. Rückwärts iterieren.
+ 6 viewer_save_and_close als delete-event-Handler (viewer_ui.c) ist void statt gboolean; bei
+   Abbruch kann das Fenster trotzdem zerstört werden. Wrapper, der immer TRUE liefert.
+ 7 cb_seiten_ausschneiden löscht ohne pages-deleting (Anbindungsprüfung des Hosts); Seiten mit
+   Anbindungen gehen verloren, Anbindungen werden inkonsistent.
+ 8 zond_indexsuche: Highlight im letzten Viewer von arr_pv statt im Viewer, der das Dokument
+   zeigt (Wiederverwendung eines vorhandenen Viewers, remove_fast ändert die Reihenfolge).
+   zond_treeview_oeffnen_internal_viewer soll den Viewer zurückgeben.
+```
+
+### #264 Viewer-Review: mittlere Fehler und Lecks
+
+Status: offen (aus dem Code abgeleitet, nicht reproduziert)
+
+```text
+ - document_entry_in_dd (document.c): fz_rect {0.0, rect.x1, y0, y1} hat die Felder in falscher
+   Reihenfolge, richtig {0.0, y0, rect.x1, y1}; Annotationen auf den Randseiten eines Abschnitts
+   werden falsch zugeordnet (Dirty, Journal-Bereinigung).
+ - pv_schliessen_datei (stand_alone.c) setzt den Zustand nicht zurück: clicked_annot dangling
+   (draw-Handler und Entf-Taste greifen darauf zu), highlight, text_occ, anbindung, Popover;
+   viewer_springen_idle bei leerem arr_pages mit Index -1.
+ - GtkImage-Leck: nach Zoom und Drehen wird ein neues Bild angelegt, das alte (nur geleert)
+   bleibt im Layout (viewer_render.c, viewer_ui.c, seiten.c). Besser gtk_image_set_from_pixbuf.
+ - Zyklus Journal -> Abschnitt -> Dokument bei PAGES_INSERTED: Dokument und Arbeitskopie bleiben
+   nach dem Schließen ohne Speichern bestehen, ohne Einfügungen werden sie freigegeben
+   (uneinheitlich).
+ - OCR (viewer_ocr.c): Seite laden, Schrift suchen, Content-Stream lesen ohne Dokument-Mutex und
+   ohne Warten auf laufende Render-Tasks (Race auf dem Dokument).
+ - Annotations-Popover (viewer_annot.c): bleibt der Text beim Schließen unverändert, bleibt er im
+   Puffer; eine Annotation ohne Inhalt zeigt dann den Text der vorherigen und übernimmt ihn.
+ - viewer_schliessen gibt arr_pages und text_occ frei, bevor das Fenster zerstört wird; die
+   value-changed-Handler von v_adj sind noch verbunden. Erst Handler trennen, dann zerstören,
+   dann freigeben.
+ - Einfügen: Abbruch des Dateidialogs zeigt "filepart ist NULL" statt still abzubrechen.
+ - filename wird bei jedem Öffnen eines Dokuments geleakt (zond_pdf_document_open).
+ - Kleinkram: insert_pages hinterlässt bei Fehler einen halben Zustand;
+   pdf_document_page_annot_get_index liefert bei Nichtfinden 0; fz_copy_selection ohne fz_try;
+   viewer_init stürzt ohne GSettings-Schema ab; viewer_render_get_visible_pages kann -1 liefern.
+```
+
+### #265 Viewer: Modulaufteilung
+
+Status: offen (nach #263 und #264; Verzeichnis siehe #262)
+
+```text
+ - zond_pdf_document.c (1294 Zeilen) in vier Dateien: Dokument, Abschnitt (GObject, Signale),
+   Anbindungs-Zählung (siehe #258), Annot-Helfer. GTK-frei, gehört mit 40viewer aus zond/ heraus.
+ - Annot-Datenlogik (viewer_annot_do_create, _do_change, _is_in_rect) aus viewer_annot.c in ein
+   Modul ohne GTK (z. B. pdf_annot_ops.c): viewer_save.c und document.c hängen heute von der
+   UI-Datei ab (Abhängigkeit in falscher Richtung).
+ - Signal-Handler zentralisieren (viewer_parts.c): cb_viewer_part_page_changed (seiten.c),
+   cb_viewer_part_annot_changed (viewer_annot.c), dirty, Verbinden und Trennen (viewer.c).
+ - seiten.c (1121 Zeilen): Dialoge nach seiten_dialoge.c.
+ - viewer_render.c (1006 Zeilen): Drucken nach viewer_print.c, draw-Handler nach viewer_draw.c.
+ - viewer_save_and_close von viewer_save.c nach viewer.c.
+ - Includes bereinigen: ungenutzte Header (sond_index, sond_process_file, sond_ocr,
+   sond_pdf_helper, sond_fileparts in viewer.c, viewer_search.c, viewer_save.c, seiten.c u. a.),
+   doppeltes misc_stdlib.h (seiten.c, stand_alone.c), die Typedefs in viewer.h.
+ - PdfViewer (rund 70 Felder): Zustand und Widgets trennen (Vorarbeit für #262).
 ```
 
 ## Zurückgestellt
