@@ -33,6 +33,7 @@ void test_sond_text_extract_register(void);
 void test_dbase_zond_register(void);
 void test_anbindung_register(void);
 void test_anbindung_zaehlung_register(void);
+void test_tvfm_item_register(void);
 
 int
 main(int argc, char *argv[])
@@ -47,6 +48,7 @@ main(int argc, char *argv[])
     test_dbase_zond_register();
     test_anbindung_register();
     test_anbindung_zaehlung_register();
+    test_tvfm_item_register();
 
     return g_test_run();
 }

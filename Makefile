@@ -133,7 +133,14 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_dbase_zond.c \
 	$(SRC_DIRS)/tests/test_anbindung.c \
 	$(SRC_DIRS)/tests/test_anbindung_zaehlung.c \
+	$(SRC_DIRS)/tests/test_tvfm_item.c \
 	$(SRC_DIRS)/zond/anbindung_zaehlung.c \
+	$(SRC_DIRS)/sond_fileparts.c \
+	$(SRC_DIRS)/sond_password.c \
+	$(SRC_DIRS)/sond_tmpfiles.c \
+	$(SRC_DIRS)/sond_pdf_helper.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_item.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_owner.c \
 	$(SRC_DIRS)/znd/zond_dbase.c \
 	$(SRC_DIRS)/znd/dbase_zond.c \
 	$(SRC_DIRS)/znd/anbindung.c \

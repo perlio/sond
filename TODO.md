@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #267.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #268.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266
+Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266, #267
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -108,8 +108,11 @@ Status: offen
  - Stillgelegte Chat-Dateien (zond_chat, sond_chat): bewusst belassen (Entscheidung 22.11.2026).
  - Tests: für anbindung (znd/anbindung.c) und die Seitenzählung (zond/anbindung_zaehlung.c) angelegt
    (src/tests/test_anbindung.c, test_anbindung_zaehlung.c, im Makefile-Ziel test; die Zählung wird
-   gegen die echte Datei getestet, Dokument und Abschnitt sind nachgebildet). Fehlen noch für tvfm
-   (src/tvfm, 4083 Zeilen; Teile ohne GTK und SeaDrive zuerst, z. B. preflight und index_sync).
+   gegen die echte Datei getestet, Dokument und Abschnitt sind nachgebildet). Für tvfm:
+   src/tests/test_tvfm_item.c (SondTVFMItem im Dateisystem: Anlegen, Einlesen, Pfade, Umbenennen,
+   Kopieren, Verschieben, Löschen, neues Verzeichnis; Eigentümer nachgebildet, temporäres
+   Projektverzeichnis). Noch ohne Tests: Container (ZIP, PDF, E-Mail) im Item sowie preflight,
+   search, load, unlock, status, index_sync.
 ```
 
 ### #263 Viewer-Review: schwere Fehler
@@ -235,6 +238,19 @@ Status: umgesetzt am 23.11.2026, Bestätigung steht aus
  Test /anbindung/parse_punkt ist nicht mehr unvollständig, der Rundlauf und human_readable decken
  Punkte ab. Zu prüfen bleibt, ob in vorhandenen Projekten Punkte gespeichert sind, die bisher mit
  der falschen Seite gelesen wurden (Aufrufer: zond_treeview.c, ziele.c, viewer_host.c u. a.).
+```
+
+### #267 tvfm: Kopieren eines Verzeichnisses im Dateisystem meldet Fehler
+
+Status: offen (vom Test /tvfm_item/kopieren_verzeichnis gefunden, dort als unvollständig markiert)
+
+```text
+ sond_tvfm_item_copy() (tvfm/sond_tvfm_item.c, Zweig "innerhalb Dateisystem") liest den Rückgabewert
+ von sond_copy_r() als Fehlercode: rc = sond_copy_r(...) und danach if (rc) return -1. sond_copy_r()
+ liefert aber TRUE bei Erfolg. Folge: Der Aufruf meldet -1 (ohne GError), obwohl kopiert wurde,
+ und 0, wenn das Kopieren scheitert. Behebung: gboolean auswerten (ok = sond_copy_r(...); if (!ok)
+ return -1), danach in test_tvfm_item.c den Aufruf g_test_incomplete entfernen. Zu prüfen: Aufrufer
+ (sond_treeviewfm.c, Pflege) und ob ein fehlender GError beim Anzeigen abfängt wird.
 ```
 
 ## Zurückgestellt
