@@ -155,7 +155,7 @@ Status: umgesetzt am 22.11.2026, Test durch den Nutzer steht aus
 
 ### #264 Viewer-Review: mittlere Fehler und Lecks
 
-Status: umgesetzt am 22.11.2026 (außer dem Zyklus, s. u.), Test steht aus
+Status: umgesetzt am 22.11.2026, Test steht aus
 
 ```text
  - document_entry_in_dd (document.c): fz_rect {0.0, rect.x1, y0, y1} hat die Felder in falscher
@@ -181,10 +181,13 @@ Status: umgesetzt am 22.11.2026 (außer dem Zyklus, s. u.), Test steht aus
  - Kleinkram: insert_pages hinterlässt bei Fehler einen halben Zustand;
    pdf_document_page_annot_get_index liefert bei Nichtfinden 0; fz_copy_selection ohne fz_try;
    viewer_init stürzt ohne GSettings-Schema ab; viewer_render_get_visible_pages kann -1 liefern.
- Umsetzung: alles außer dem Zyklus. Der Zyklus bleibt: pdfp->inserted ist ein Zeiger ohne
- Referenz, die Referenz des Journal-Eintrags hält den Abschnitt am Leben (anbindung_aktualisieren
- liest ihn). Eine Lösung braucht einen anderen Besitzer für den Abschnitt (z. B. Dokument hält
- Abschnitte, die noch von Seiten referenziert werden, schwach und gibt sie beim Speichern frei).
+ Umsetzung: alles. Zyklus (Variante B): PdfDocumentPage.inserted ist ein gboolean, dazu inserted_in
+ (Zeiger auf den Abschnitt ohne Referenz); der Journal-Eintrag PAGES_INSERTED trägt nur noch count;
+ zond_pdf_part_finalize setzt inserted_in der eingefügten Seiten auf NULL; anbindung_aktualisieren
+ ordnet Randseiten nur bei gesetztem inserted_in zu. Folge: Wird ein Abschnitt ohne Speichern
+ geschlossen, während das Dokument noch offen ist, gelten die über ihn eingefügten Randseiten
+ beim Speichern anderer Abschnitte als außerhalb von ihm. Schließt der letzte Viewer, wird das
+ Dokument freigegeben (ungespeicherte Änderungen sind weg).
  OCR: Seite laden, Schrift und Content-Stream unter dem Dokument-Mutex, vorher Warten auf den
  Render-Task, Seite danach als geladen markiert (Bit 2). Datei schließen im eigenständigen Viewer
  setzt Annotation, Markierung, Suche, Anbindung zurück. Bildwidget wird nach Zoom und Drehen

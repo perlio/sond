@@ -509,8 +509,6 @@ void zond_pdf_document_free_journal_entry(JournalEntry *entry) {
 		fz_drop_buffer(priv->ctx, entry->ocr.buf_old);
 		fz_drop_buffer(priv->ctx, entry->ocr.buf_new);
 	}
-	else if (entry->type == JOURNAL_TYPE_PAGES_INSERTED)
-		zpdfd_part_drop(entry->pages_inserted.zpdfd_part);
 
 	return;
 }
@@ -879,7 +877,8 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 
 		pdf_document_page->document = zond_pdf_document;
 		pdf_document_page->page_akt = i;
-		pdf_document_page->inserted = zpdfd_part;
+		pdf_document_page->inserted = TRUE;
+		pdf_document_page->inserted_in = zpdfd_part;
 		g_ptr_array_insert(priv->pages, i, pdf_document_page);
 	}
 

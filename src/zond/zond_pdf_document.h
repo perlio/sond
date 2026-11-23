@@ -30,7 +30,11 @@ typedef struct _Pdf_Document_Page {
 	gpointer thread_pv; //PdfViewer, der gerade rendert (nur Viewer)
 	GPtrArray *arr_annots;
 	gint page_akt;
-	ZPDFDPart* inserted;
+	/* Seite ist eingefügt und noch nicht gespeichert (steht noch nicht in der Datei). inserted_in:
+	 * der Abschnitt, in dem sie eingefügt wurde, ohne Referenz; wird NULL, wenn der Abschnitt
+	 * freigegeben wird (dann gilt die Seite an der Grenze nicht mehr als zu ihm gehörend). */
+	gboolean inserted;
+	ZPDFDPart* inserted_in;
 	gboolean deleted;
 	/* Nur relevant, wenn deleted == TRUE: ob diese Seite beim letzten
 	 * physischen Speichern bereits aus der Datei ausgeschlossen wurde
@@ -101,7 +105,6 @@ typedef struct _Pdf_Document_Page_Annot {
 
 struct PagesInserted {
 	gint count;
-	ZPDFDPart* zpdfd_part;
 };
 struct AnnotChanged {
 	PdfDocumentPageAnnot* pdf_document_page_annot;

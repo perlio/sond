@@ -336,7 +336,8 @@ static void viewer_save_buchfuehrung_nachziehen(DisplayedDocument* dd) {
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
 
 		if (pdfp) {
-			pdfp->inserted = NULL;
+			pdfp->inserted = FALSE;
+			pdfp->inserted_in = NULL;
 
 			if (pdfp->deleted)
 				pdfp->on_disk_deleted = TRUE;

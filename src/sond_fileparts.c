@@ -989,11 +989,13 @@ static GBytes* sond_file_part_zip_read_entry(SondFilePartZip* sfp_zip,
 }
 
 /* Voller Pfad einer Datei im Dateisystem: ist path_root gesetzt (Dateibaum in zond), sind die Pfade
- * root-relativ, sonst (z.B. eigenständiger Viewer) stehen sie schon vollständig da. */
+ * root-relativ, sonst (z.B. eigenständiger Viewer) stehen sie schon vollständig da. Ein absoluter
+ * Pfad (Datei außerhalb des Projekts, z.B. die Quelle beim Einfügen von Seiten) bekommt das
+ * Projektverzeichnis nie davor: Projektpfade sind immer relativ. */
 static gchar* sond_file_part_fs_path(gchar const *path) {
 	gchar const *root = SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
 
-	if (root)
+	if (root && !g_path_is_absolute(path))
 		return g_strconcat(root, "/", path, NULL);
 
 	return g_strdup(path);
@@ -1013,15 +1015,8 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		gchar const* path, gssize max_len, gint const* cancel, gboolean prompt,
 		GError** error) {
 	if (!sfp_parent) {
-		gchar* full_path = NULL;
-
-		gchar const* root =
-				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
 		/* Filesystem */
-		if (root)
-			full_path = g_strconcat(root, "/", path, NULL);
-		else
-			full_path = g_strdup(path);
+		gchar* full_path = sond_file_part_fs_path(path);
 
 		if (max_len == -1) {
 			guchar* data = NULL;
@@ -1604,12 +1599,8 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 		 * g_chdir() so gehalten) - und es unterläuft unter Windows den an
 		 * anderer Stelle in dieser Datei extra vorgesehenen
 		 * Long-Path-Support, der einen absoluten Pfad voraussetzt. */
-		gchar const* root = SOND_FILE_PART_CLASS(
-				g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
-		gchar* full_old = root ? g_strconcat(root, "/", sfp_priv->path, NULL)
-				: g_strdup(sfp_priv->path);
-		gchar* full_new = root ? g_strconcat(root, "/", path_new, NULL)
-				: g_strdup(path_new);
+		gchar* full_old = sond_file_part_fs_path(sfp_priv->path);
+		gchar* full_new = sond_file_part_fs_path(path_new);
 
 		//sond_rename() überschreibt ein vorhandenes Ziel: hier nie
 		if (sond_rename_target_taken(full_old, full_new)) {

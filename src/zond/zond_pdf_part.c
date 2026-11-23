@@ -44,6 +44,16 @@ static void zond_pdf_part_finalize(GObject *self) {
 	ZPDFDPart *zpdfd_part = (ZPDFDPart*) self;
 
 	if (zpdfd_part->zond_pdf_document) {
+		GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(zpdfd_part->zond_pdf_document);
+
+		//eingefügte Seiten verweisen nicht mehr auf den Abschnitt (kein Zeiger auf freigegebenen Speicher)
+		for (guint i = 0; i < arr_pages->len; i++) {
+			PdfDocumentPage *pdf_document_page = g_ptr_array_index(arr_pages, i);
+
+			if (pdf_document_page && pdf_document_page->inserted_in == zpdfd_part)
+				pdf_document_page->inserted_in = NULL;
+		}
+
 		if (!g_ptr_array_remove_fast(zond_pdf_document_get_arr_parts(zpdfd_part->zond_pdf_document),
 				zpdfd_part))
 			LOG_WARN("zpdfd_part nicht in Array vorhanden");

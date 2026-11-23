@@ -224,7 +224,8 @@ void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 		if (seite_auf_platte_weg(pdfp))
 			continue;
 
-		if (pdfp && pdfp->inserted && anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted))
+		if (pdfp && pdfp->inserted && pdfp->inserted_in &&
+				anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted_in))
 			von = j;
 		else
 			break;
@@ -237,7 +238,8 @@ void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 		if (seite_auf_platte_weg(pdfp))
 			continue;
 
-		if (pdfp && pdfp->inserted && anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted))
+		if (pdfp && pdfp->inserted && pdfp->inserted_in &&
+				anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted_in))
 			bis = j;
 		else
 			break;

@@ -516,7 +516,9 @@ static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart *
 		return NULL;
 	}
 
-	*sfp = sond_file_part_from_filepart(path_merge, &error);
+	/* Die Quelle ist eine Datei im Dateisystem mit absolutem Pfad, kein Projektpfad: direkt anlegen
+	 * (sond_file_part_from_filepart() zerlegt den Pfad an den Container-Trennern) */
+	*sfp = sond_file_part_create(NULL, path_merge, &error);
 	g_free(path_merge);
 	if (!*sfp) {
 		display_message(pv->vf, "Datei einfügen\n\n", error->message, NULL);
@@ -609,7 +611,6 @@ static void seiten_einfuegen_ausfuehren(PdfViewer *pv, ViewerPageNew *viewer_pag
 
 	entry.type = JOURNAL_TYPE_PAGES_INSERTED;
 	entry.pages_inserted.count = count;
-	entry.pages_inserted.zpdfd_part = zpdfd_part_ref(viewer_page->dd->zpdfd_part);
 
 	//viewer_page->pdf_document_page ist - wenn nicht Einfügen nach letzter Seite -
 	//im zond_pdf_document nach hinten gerutscht; die Abschnitte, die sie umfassen, fügen ein
