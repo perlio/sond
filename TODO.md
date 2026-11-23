@@ -109,10 +109,13 @@ Status: offen
  - Tests: für anbindung (znd/anbindung.c) und die Seitenzählung (zond/anbindung_zaehlung.c) angelegt
    (src/tests/test_anbindung.c, test_anbindung_zaehlung.c, im Makefile-Ziel test; die Zählung wird
    gegen die echte Datei getestet, Dokument und Abschnitt sind nachgebildet). Für tvfm:
-   src/tests/test_tvfm_item.c (SondTVFMItem im Dateisystem: Anlegen, Einlesen, Pfade, Umbenennen,
-   Kopieren, Verschieben, Löschen, neues Verzeichnis; Eigentümer nachgebildet, temporäres
-   Projektverzeichnis). Noch ohne Tests: Container (ZIP, PDF, E-Mail) im Item sowie preflight,
-   search, load, unlock, status, index_sync.
+   test_tvfm_item.c (SondTVFMItem im Dateisystem), test_tvfm_container.c (ZIP, E-Mail, PDF mit
+   Anhängen: Anlegen, Einlesen, Pfade, Umbenennen, Kopieren, Verschieben, Löschen, neues
+   Verzeichnis), test_tvfm_search.c (Dateisuche), gemeinsamer Rahmen tvfm_test_support.[ch]
+   (temporäres Projektverzeichnis, Eigentümer, Testdateien werden im Test erzeugt). Noch ohne
+   Tests: preflight, unlock (Passwörter), index_sync (Index-Datenbank), load und status (SeaDrive,
+   Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
+   Makefile-Ziel test ist der Linux-Build und enthält es nicht.
 ```
 
 ### #263 Viewer-Review: schwere Fehler
