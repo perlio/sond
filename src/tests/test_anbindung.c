@@ -162,24 +162,16 @@ static void test_parse(void) {
 	g_assert_true(anbindung_1_gleich_2(a, SEITEN(7, 8)));
 }
 
-/* Ein Punkt steht als "{seite,index}" in der Datenbank. anbindung_parse_file_section() übergibt
- * dem Parser dafür file_section + 1 (hinter der Klammer), der Parser überspringt die Klammer aber
- * selbst: die erste Ziffer der Seite geht verloren ("{3,17}" ergibt Seite 0, "{12,345}" Seite 2). */
+//Ein Punkt steht als "{seite,index}" in der Datenbank
 static void test_parse_punkt(void) {
 	Anbindung a = A(0, 0, 0, 0);
-	Anbindung b = A(0, 0, 0, 0);
 
 	anbindung_parse_file_section("{3,17}", &a);
-	anbindung_parse_file_section("{12,345}", &b);
-
-	if (!anbindung_1_gleich_2(a, A(3, 17, 0, 0)) || !anbindung_1_gleich_2(b, A(12, 345, 0, 0))) {
-		g_test_incomplete("Punkt wird falsch gelesen: anbindung_parse_file_section, Zweig ohne zwei Klammern");
-
-		return;
-	}
-
 	g_assert_true(anbindung_1_gleich_2(a, A(3, 17, 0, 0)));
-	g_assert_true(anbindung_1_gleich_2(b, A(12, 345, 0, 0)));
+
+	a = A(0, 0, 0, 0);
+	anbindung_parse_file_section("{12,345}", &a);
+	g_assert_true(anbindung_1_gleich_2(a, A(12, 345, 0, 0)));
 }
 
 static void test_build(void) {
@@ -199,8 +191,7 @@ static void test_build(void) {
 }
 
 static void test_rundlauf(void) {
-	//Bereiche; Punkte s. test_parse_punkt
-	Anbindung faelle[] = { SEITEN(0, 0), SEITEN(1, 4), SEITEN(0, 99), A(2, 40, 5, 300),
+	Anbindung faelle[] = { A(3, 17, 0, 0), A(12, 345, 0, 0), SEITEN(0, 0), SEITEN(1, 4), SEITEN(0, 99), A(2, 40, 5, 300),
 			A(10, 0, 10, 500) };
 
 	for (guint i = 0; i < G_N_ELEMENTS(faelle); i++) {
@@ -224,6 +215,12 @@ static void test_human_readable(void) {
 	a = A(2, 40, 4, 300);
 	s = anbindung_to_human_readable(&a);
 	g_assert_cmpstr(s, ==, "S. 3, Index 40 - S. 5, Index 300");
+	g_free(s);
+
+	//ein Punkt hat kein "bis"
+	a = A(3, 17, 0, 0);
+	s = anbindung_to_human_readable(&a);
+	g_assert_cmpstr(s, ==, "S. 4, Index 17");
 	g_free(s);
 }
 

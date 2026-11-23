@@ -222,7 +222,7 @@ Status: größtenteils umgesetzt am 22.11.2026, Test steht aus (Rest s. u.; Verz
 
 ### #266 Anbindung: Punkt wird falsch gelesen
 
-Status: offen (vom Test /anbindung/parse_punkt gefunden, dort als unvollständig markiert)
+Status: umgesetzt am 23.11.2026, Bestätigung steht aus
 
 ```text
  anbindung_parse_file_section() liest einen Punkt "{seite,index}" falsch: Der Zweig ohne "{{"
@@ -230,10 +230,11 @@ Status: offen (vom Test /anbindung/parse_punkt gefunden, dort als unvollständig
  aber selbst. Die erste Ziffer der Seite geht verloren: "{3,17}" ergibt Seite 0, "{12,345}" Seite 2.
  Der Zweig mit zwei Klammern ist richtig. Behebung: im Zweig ohne "{{" file_section statt
  file_section + 1 übergeben; danach in test_anbindung.c den Aufruf g_test_incomplete entfernen.
- Zu prüfen: Wo Punkte vorkommen (anbindung_is_pdf_punkt) und ob gespeicherte Punkte in
- Projekten schon mit der falschen Seite gelesen werden. Die Sections in Test.ZND sind alle
- Bereiche. Dazu: anbindung_to_human_readable() hängt bei einem Punkt ", Index 0" an
- (bis.index != EOP steht außerhalb der Bedingung für bis).
+ Umsetzung: im Zweig ohne "{{" wird file_section übergeben; anbindung_to_human_readable() hängt
+ "bis" und dessen Index nur noch an, wenn bis gesetzt ist (ein Punkt ergab ", Index 0"). Der
+ Test /anbindung/parse_punkt ist nicht mehr unvollständig, der Rundlauf und human_readable decken
+ Punkte ab. Zu prüfen bleibt, ob in vorhandenen Projekten Punkte gespeichert sind, die bisher mit
+ der falschen Seite gelesen wurden (Aufrufer: zond_treeview.c, ziele.c, viewer_host.c u. a.).
 ```
 
 ## Zurückgestellt

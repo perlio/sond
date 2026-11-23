@@ -126,8 +126,8 @@ void anbindung_parse_file_section(gchar const *file_section,
 		anbindung_parse_pdf_pos(file_section + 1, &anbindung->von);
 
 		anbindung_parse_pdf_pos(strstr(file_section, "}") + 1, &anbindung->bis);
-	} else
-		anbindung_parse_pdf_pos(file_section + 1, &anbindung->von);
+	} else //Punkt "{seite,index}": der Parser überspringt die Klammer selbst
+		anbindung_parse_pdf_pos(file_section, &anbindung->von);
 
 	return;
 }
@@ -168,10 +168,11 @@ gchar* anbindung_to_human_readable(Anbindung* anbindung) {
 	g_string_append_printf(text, "S. %i", anbindung->von.seite + 1);
 	if (anbindung->von.index)
 		g_string_append_printf(text, ", Index %d", anbindung->von.index);
-	if (anbindung->bis.seite || anbindung->bis.index)
+	if (anbindung->bis.seite || anbindung->bis.index) { //ein Punkt hat kein "bis"
 		g_string_append_printf(text, " - S. %d", anbindung->bis.seite + 1);
-	if (anbindung->bis.index != EOP)
-		g_string_append_printf(text, ", Index %d", anbindung->bis.index);
+		if (anbindung->bis.index != EOP)
+			g_string_append_printf(text, ", Index %d", anbindung->bis.index);
+	}
 
 	return g_string_free(text, FALSE);
 }
