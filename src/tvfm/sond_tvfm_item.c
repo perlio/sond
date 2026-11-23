@@ -1334,7 +1334,7 @@ gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
 			g_free(base_real);
 			abs_src = g_strconcat(root, "/", stvfm_item_priv->path_or_section, NULL);
 
-			rc = sond_copy_r(abs_src, path_dst, FALSE, error);
+			rc = sond_copy_r(abs_src, path_dst, FALSE, error) ? 0 : -1; //TRUE = Erfolg
 			g_free(abs_src);
 			g_free(path_dst);
 		}

@@ -476,35 +476,32 @@ static void test_kopieren_datei(void) {
 	fix_free(f);
 }
 
-/* Verzeichnis rekursiv, unter anderem Namen in die Wurzel. sond_copy_r() liefert TRUE bei Erfolg,
- * sond_tvfm_item_copy() liest den Wert als Fehlercode: der Aufruf meldet -1, obwohl kopiert ist
- * (und 0, wenn das Kopieren scheitert). Bis das behoben ist, bleibt der Test unvollständig. */
+//Verzeichnis rekursiv, unter anderem Namen in die Wurzel
 static void test_kopieren_verzeichnis(void) {
 	Fix *f = fix_new();
 	SondTVFMItem *w = wurzel(f);
 	SondTVFMItem *sub = NULL;
 	GError *error = NULL;
-	gint rc = 0;
 
 	schreibe(f, "sub/c.txt", "C");
 	schreibe(f, "sub/tief/d.txt", "D");
 	sub = verzeichnis(f, "sub");
 
-	rc = sond_tvfm_item_copy(sub, w, "sub_kopie", 0, &error);
+	g_assert_cmpint(sond_tvfm_item_copy(sub, w, "sub_kopie", 0, &error), ==, 0);
+	g_assert_no_error(error);
 	g_assert_true(existiert(f, "sub/tief/d.txt")); //Quelle bleibt
 	{
 		gchar *x = lese(f, "sub_kopie/tief/d.txt");
 
-		g_assert_cmpstr(x, ==, "D"); //die Kopie ist da
+		g_assert_cmpstr(x, ==, "D");
 		g_free(x);
 	}
 
-	if (rc != 0) {
-		g_clear_error(&error);
-		g_test_incomplete("sond_tvfm_item_copy meldet beim Kopieren eines Verzeichnisses im Dateisystem Fehler (sond_copy_r: TRUE = Erfolg)");
-	}
-	else
-		g_assert_no_error(error);
+	//das Ziel liegt innerhalb der Quelle: abgewiesen, ohne etwas anzulegen
+	g_assert_cmpint(sond_tvfm_item_copy(sub, sub, "innen", 0, &error), ==, -1);
+	g_assert_true(g_error_matches(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT));
+	g_clear_error(&error);
+	g_assert_false(existiert(f, "sub/innen"));
 
 	g_object_unref(sub);
 	g_object_unref(w);

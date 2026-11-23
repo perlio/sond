@@ -242,15 +242,16 @@ Status: umgesetzt am 23.11.2026, Bestätigung steht aus
 
 ### #267 tvfm: Kopieren eines Verzeichnisses im Dateisystem meldet Fehler
 
-Status: offen (vom Test /tvfm_item/kopieren_verzeichnis gefunden, dort als unvollständig markiert)
+Status: umgesetzt am 23.11.2026, Bestätigung steht aus
 
 ```text
- sond_tvfm_item_copy() (tvfm/sond_tvfm_item.c, Zweig "innerhalb Dateisystem") liest den Rückgabewert
+ sond_tvfm_item_copy() (tvfm/sond_tvfm_item.c, Zweig "innerhalb Dateisystem") las den Rückgabewert
  von sond_copy_r() als Fehlercode: rc = sond_copy_r(...) und danach if (rc) return -1. sond_copy_r()
- liefert aber TRUE bei Erfolg. Folge: Der Aufruf meldet -1 (ohne GError), obwohl kopiert wurde,
- und 0, wenn das Kopieren scheitert. Behebung: gboolean auswerten (ok = sond_copy_r(...); if (!ok)
- return -1), danach in test_tvfm_item.c den Aufruf g_test_incomplete entfernen. Zu prüfen: Aufrufer
- (sond_treeviewfm.c, Pflege) und ob ein fehlender GError beim Anzeigen abfängt wird.
+ liefert aber TRUE bei Erfolg. Folge: Der Aufruf meldete -1 (ohne GError), obwohl kopiert war,
+ und 0, wenn das Kopieren scheiterte. Umsetzung: rc = sond_copy_r(...) ? 0 : -1. Der Test
+ /tvfm_item/kopieren_verzeichnis ist nicht mehr unvollständig und prüft zusätzlich, dass ein Ziel
+ innerhalb der Quelle abgewiesen wird. Zu prüfen bleibt, ob die Aufrufer (sond_treeviewfm.c, Pflege)
+ mit dem bisherigen Verhalten gerechnet haben.
 ```
 
 ## Zurückgestellt
