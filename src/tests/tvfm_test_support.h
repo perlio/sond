@@ -75,6 +75,9 @@ void schreibe_eml(Fix*, gchar const *rel, gchar const *betreff, gchar const *tex
  * NULL (gleiche Namen bekommen im Namensbaum einen Zähler). */
 void schreibe_pdf(Fix*, gchar const *rel, ...) G_GNUC_NULL_TERMINATED;
 
+//PDF-Datei rel mit n leeren Seiten, ohne Anhänge
+void schreibe_pdf_seiten(Fix*, gchar const *rel, gint n);
+
 //Item der Wurzel, eines Verzeichnisses (nur Pfad) und einer Datei (SondFilePart)
 SondTVFMItem* wurzel(Fix*);
 SondTVFMItem* verzeichnis(Fix*, gchar const *rel);

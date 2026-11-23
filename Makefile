@@ -137,6 +137,10 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_tvfm_search.c \
 	$(SRC_DIRS)/tests/test_tvfm_container.c \
 	$(SRC_DIRS)/tests/tvfm_test_support.c \
+	$(SRC_DIRS)/tests/test_zond_pdf_document.c \
+	$(SRC_DIRS)/zond/zond_pdf_document.c \
+	$(SRC_DIRS)/zond/zond_pdf_part.c \
+	$(SRC_DIRS)/znd/zond_error.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_search.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_load.c \
 	$(SRC_DIRS)/zond/anbindung_zaehlung.c \

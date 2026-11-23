@@ -295,6 +295,36 @@ void schreibe_pdf(Fix *f, gchar const *rel, ...) {
 	g_free(p);
 }
 
+void schreibe_pdf_seiten(Fix *f, gchar const *rel, gint n) {
+	gchar *p = voll(f, rel);
+	fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+	pdf_document *doc = NULL;
+
+	g_assert_nonnull(ctx);
+	eltern_anlegen(p);
+
+	fz_try(ctx) {
+		doc = pdf_create_document(ctx);
+		for (gint i = 0; i < n; i++) {
+			pdf_obj *res = pdf_new_dict(ctx, doc, 1);
+			fz_buffer *leer = fz_new_buffer(ctx, 1);
+			pdf_obj *seite = pdf_add_page(ctx, doc, fz_make_rect(0, 0, 200, 200), 0, res, leer);
+
+			pdf_insert_page(ctx, doc, -1, seite);
+			fz_drop_buffer(ctx, leer);
+			pdf_drop_obj(ctx, res);
+			pdf_drop_obj(ctx, seite);
+		}
+		pdf_save_document(ctx, doc, p, NULL);
+	}
+	fz_catch(ctx)
+		g_error("PDF nicht anlegbar: %s", fz_caught_message(ctx));
+
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
+	g_free(p);
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* Items                                                                                     */
 

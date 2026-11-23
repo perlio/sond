@@ -22,10 +22,9 @@
  * Datei auf der Platte, der Live-Zählung des geöffneten Dokuments (mit gelöschten und noch nicht
  * gespeicherten eingefügten Seiten) und der Zählung des Viewers um.
  *
- * Getestet wird die echte Datei. Von zond_pdf_document.c wird nur gebraucht, was die Zählung
- * liest: die vier Zugriffsfunktionen unten sind im Test nachgebildet (Dokument = Liste von
- * PdfDocumentPage, Abschnitt = Seitenzeiger und Indizes), PdfDocumentPage und ZPDFDPart sind die
- * echten Strukturen aus dem Header.
+ * Getestet wird die echte Datei, gegen die echten Zugriffsfunktionen von zond_pdf_document.c. Das
+ * Dokument ist ein ZondPdfDocument ohne geöffnete Datei, dessen Seiten-Array der Test füllt;
+ * PdfDocumentPage und ZPDFDPart sind die echten Strukturen.
  */
 
 #include <glib.h>
@@ -34,55 +33,44 @@
 #include "../znd/anbindung.h"
 
 /* ---------------------------------------------------------------------------------------- */
-/* Nachbildung von Dokument und Abschnitt                                                    */
+/* Dokument und Abschnitt ohne PDF-Datei                                                     */
 
-typedef struct {
-	ZondPdfDocument base;
-	GPtrArray *pages;
-} TestDoc;
-
-GPtrArray* zond_pdf_document_get_arr_pages(ZondPdfDocument const *d) {
-	return ((TestDoc const*) d)->pages;
-}
-
-PdfDocumentPage* zond_pdf_document_get_pdf_document_page(ZondPdfDocument *d, gint i) {
-	return g_ptr_array_index(((TestDoc*) d)->pages, i);
-}
-
-gint zond_pdf_document_get_number_of_pages(ZondPdfDocument *d) {
-	return ((TestDoc*) d)->pages->len;
-}
-
-void zpdfd_part_get_anbindung(ZPDFDPart *p, Anbindung *a) {
-	a->von.seite = p->first_page->page_akt;
-	a->von.index = p->first_index;
-	a->bis.seite = p->last_page->page_akt;
-	a->bis.index = p->last_index;
-}
+/* Ein ZondPdfDocument ohne geöffnete Datei: das Seiten-Array wird im Test gefüllt. Es hängt nie
+ * an einer Datei und wird deshalb nicht freigegeben (finalize braucht die geöffnete Datei); die
+ * Zählung liest nur die Seiten und die Grenzen des Abschnitts über die echten Zugriffsfunktionen. */
 
 #define A(vs, vi, bs, bi) ((Anbindung) { { (vs), (vi) }, { (bs), (bi) } })
 
-static ZondPdfDocument* neues_dokument(gint n) {
-	TestDoc *d = g_new0(TestDoc, 1);
+static PdfDocumentPage* neue_seite(ZondPdfDocument *d) {
+	PdfDocumentPage *p = g_new0(PdfDocumentPage, 1);
 
-	d->pages = g_ptr_array_new_with_free_func(g_free);
+	p->document = d;
+
+	return p;
+}
+
+static ZondPdfDocument* neues_dokument(gint n) {
+	ZondPdfDocument *d = g_object_new(ZOND_TYPE_PDF_DOCUMENT, NULL);
+
 	for (gint i = 0; i < n; i++) {
-		PdfDocumentPage *p = g_new0(PdfDocumentPage, 1);
+		PdfDocumentPage *p = neue_seite(d);
 
 		p->page_akt = i;
-		g_ptr_array_add(d->pages, p);
+		g_ptr_array_add(zond_pdf_document_get_arr_pages(d), p);
 	}
 
-	return (ZondPdfDocument*) d;
+	return d;
 }
 
 static void dokument_frei(ZondPdfDocument *d) {
-	g_ptr_array_unref(((TestDoc*) d)->pages);
-	g_free(d);
+	GPtrArray *pages = zond_pdf_document_get_arr_pages(d);
+
+	//die Seiten gibt das Array frei (ohne geladene Seite, ohne Kontext); das Dokument bleibt liegen
+	g_ptr_array_set_size(pages, 0);
 }
 
 static PdfDocumentPage* seite(ZondPdfDocument *d, gint i) {
-	return g_ptr_array_index(((TestDoc*) d)->pages, i);
+	return g_ptr_array_index(zond_pdf_document_get_arr_pages(d), i);
 }
 
 static ZPDFDPart* neuer_teil(ZondPdfDocument *d, gint von, gint bis) {
@@ -124,7 +112,7 @@ static Anbindung speichern_nachfuehren(ZPDFDPart *teil, Anbindung db) {
 
 //Nach dem Speichern: gelöschte Seiten sind aus der Datei raus, eingefügte sind drin
 static void nach_dem_speichern(ZondPdfDocument *d) {
-	for (guint i = 0; i < ((TestDoc*) d)->pages->len; i++) {
+	for (guint i = 0; i < zond_pdf_document_get_arr_pages(d)->len; i++) {
 		PdfDocumentPage *p = seite(d, i);
 
 		p->inserted = FALSE;
@@ -455,7 +443,7 @@ static void test_eingefuegte_bloecke(void) {
 		gint live_d[40];  //Live-Position der Plattenseiten
 		gint first_blk[40], last_blk[40];
 		ZondPdfDocument *d = neues_dokument(0);
-		GPtrArray *pages = ((TestDoc*) d)->pages;
+		GPtrArray *pages = zond_pdf_document_get_arr_pages(d);
 		ZPDFDPart *teil = NULL;
 		gint tv, tb;
 
@@ -479,7 +467,7 @@ static void test_eingefuegte_bloecke(void) {
 			for (gint step = 0; step < 2; step++) {
 				if ((step == 0) == (order == 1)) { //Karteileiche
 					if (kl_vor[g]) {
-						PdfDocumentPage *p = g_new0(PdfDocumentPage, 1);
+						PdfDocumentPage *p = neue_seite(d);
 
 						p->deleted = TRUE;
 						p->on_disk_deleted = TRUE;
@@ -489,12 +477,12 @@ static void test_eingefuegte_bloecke(void) {
 				else { //eingefügter Block
 					first_blk[g] = pages->len;
 					for (gint k = 0; k < blk_count[g]; k++)
-						g_ptr_array_add(pages, g_new0(PdfDocumentPage, 1)); //inserted unten
+						g_ptr_array_add(pages, neue_seite(d)); //inserted unten
 					last_blk[g] = pages->len - 1;
 				}
 			}
 			if (g < nd) {
-				PdfDocumentPage *p = g_new0(PdfDocumentPage, 1);
+				PdfDocumentPage *p = neue_seite(d);
 
 				p->deleted = neu_geloescht[g];
 				live_d[g] = pages->len;
