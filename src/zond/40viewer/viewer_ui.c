@@ -23,7 +23,6 @@
 
 #include "../../gtk3/sond_dialoge.h"
 #include "../../misc_stdlib.h"
-#include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
@@ -245,11 +244,15 @@ static void cb_pv_copy_text(GtkMenuItem *item, gpointer data) {
 				ctx = zond_pdf_document_get_ctx(viewer_page->pdf_document_page->document);
 
 				if (viewer_page->pdf_document_page->thread & 8) {
-					add = fz_copy_selection(ctx,
-							viewer_page->pdf_document_page->stext_page,
-							pv->highlight.quad[start].ul,
-							pv->highlight.quad[end].lr, FALSE);
-					text = add_string(text, add);
+					fz_try(ctx)
+						add = fz_copy_selection(ctx,
+								viewer_page->pdf_document_page->stext_page,
+								pv->highlight.quad[start].ul,
+								pv->highlight.quad[end].lr, FALSE);
+					fz_catch(ctx)
+						add = NULL;
+					if (add)
+						text = add_string(text, add);
 				}
 			}
 
@@ -258,9 +261,12 @@ static void cb_pv_copy_text(GtkMenuItem *item, gpointer data) {
 		}
 	} while (pv->highlight.page[i++] != -1);
 
-	GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
-	gtk_clipboard_set_text(clipboard, text, -1);
-	g_free(text);
+	if (text) {
+		GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+
+		gtk_clipboard_set_text(clipboard, text, -1);
+		g_free(text);
+	}
 
 	return;
 }
@@ -347,6 +353,13 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 			g_error_free(error);
 		}
 	}
+
+	return TRUE;
+}
+
+//Schließen des Fensters: viewer_save_and_close zerstört das Fenster selbst (oder auch nicht)
+static gboolean cb_viewer_delete_event(GtkWidget *window, GdkEvent *event, gpointer data) {
+	viewer_save_and_close((PdfViewer*) data);
 
 	return TRUE;
 }
@@ -768,8 +781,8 @@ static void viewer_ui_signale_verbinden(PdfViewer *pv, ViewerFensterWidgets *w) 
 	g_signal_connect(pv->vf, "motion-notify-event",
 			G_CALLBACK(cb_viewer_motion_notify), (gpointer)pv);
 
-	g_signal_connect_swapped(pv->vf, "delete-event",
-			G_CALLBACK(viewer_save_and_close), (gpointer)pv);
+	g_signal_connect(pv->vf, "delete-event",
+			G_CALLBACK(cb_viewer_delete_event), (gpointer)pv);
 }
 
 static void viewer_einrichten_fenster(PdfViewer *pv) {
@@ -803,7 +816,7 @@ viewer_init(PdfViewerSession *session) {
 	PdfViewer *pv = g_malloc0(sizeof(PdfViewer));
 
 	pv->session = session;
-	pv->zoom = g_settings_get_double(session->settings, "zoom");
+	pv->zoom = session->settings ? g_settings_get_double(session->settings, "zoom") : 100.0;
 
 	g_ptr_array_add(session->arr_pv, pv);
 

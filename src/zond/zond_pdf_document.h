@@ -191,6 +191,10 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint, ZPDFDPart*,
 		pdf_document*, GError**);
 
+/* Öffnet das Dokument (oder liefert das schon offene) mit einer neuen Referenz; initialisiert
+ * die Seiten von bis (bis == -1: alle). Für zpdfd_part_peek(). */
+ZondPdfDocument* zond_pdf_document_open(SondFilePartPDF*, gint von, gint bis, GError**);
+
 gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 
 void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
@@ -224,15 +228,6 @@ void zpdfd_part_get_anbindung(ZPDFDPart*, Anbindung*);
 ZPDFDPart* zpdfd_part_ref(ZPDFDPart*);
 
 ZPDFDPart* zpdfd_part_peek(SondFilePartPDF*, Anbindung*, GError** );
-
-void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
-
-/* Live-Numerierung in die Zählung, die der Viewer anzeigt (ohne gelöschte Seiten) */
-void anbindung_get_sichtbar(ZondPdfDocument*, Anbindung*);
-
-void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
-
-void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 
 G_END_DECLS
 

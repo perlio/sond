@@ -4,94 +4,15 @@
 #include <cairo.h>
 
 #include "../../sond_log_and_error.h"
-#include "../../sond_fileparts.h"
 #include "../../sond_pdf_helper.h"
+#include "../../sond_fileparts.h"
 #include "../../gtk3/sond_dialoge.h"
 
 #include "../zond_pdf_document.h"
 
 #include "viewer.h"
+#include "viewer_draw.h"
 
-
-static void viewer_render_mark_quad(cairo_t *cr, fz_quad quad,
-		fz_matrix transform) {
-	fz_rect rect = fz_transform_rect(fz_rect_from_quad(quad), transform);
-
-	float x = rect.x0;
-	float y = rect.y0;
-	float width = rect.x1 - x;
-	float heigth = rect.y1 - y;
-
-	cairo_rectangle(cr, x, y, width, heigth);
-	cairo_set_source_rgba(cr, 0, .1, .8, 0.5);
-	cairo_fill(cr);
-}
-
-static gboolean viewer_draw_image_page(GtkWidget *image, cairo_t *cr,
-		gpointer data) {
-	fz_matrix transform = { 0, };
-
-	ViewerPageNew *viewer_page = (ViewerPageNew*) data;
-
-	if (!gtk_widget_is_visible(image))
-		return FALSE;
-
-	transform = fz_translate(0.0, -viewer_page->crop.y0);
-	transform = fz_post_scale(transform, viewer_page->pdfv->zoom / 100,
-			viewer_page->pdfv->zoom / 100);
-
-	//wenn annot angeclickt wurde
-	if (viewer_page->pdfv->clicked_annot && //selbe Seite
-			viewer_page->pdfv->clicked_annot->pdf_document_page
-			== viewer_page->pdf_document_page) {
-		if (viewer_page->pdfv->clicked_annot->annot.type == PDF_ANNOT_HIGHLIGHT
-				|| viewer_page->pdfv->clicked_annot->annot.type
-						== PDF_ANNOT_UNDERLINE) {
-			GArray *arr_quads =
-					viewer_page->pdfv->clicked_annot->annot.annot_text_markup.arr_quads;
-
-			for (gint i = 0; i < arr_quads->len; i++) {
-				fz_quad quad = g_array_index(arr_quads, fz_quad, i);
-				quad = fz_transform_quad(quad, transform);
-				cairo_move_to(cr, quad.ul.x, quad.ul.y);
-				cairo_line_to(cr, quad.ur.x, quad.ur.y);
-				cairo_line_to(cr, quad.lr.x, quad.lr.y);
-				cairo_line_to(cr, quad.ll.x, quad.ll.y);
-				cairo_line_to(cr, quad.ul.x, quad.ul.y);
-				cairo_set_source_rgb(cr, 0, 1, 0);
-				cairo_stroke(cr);
-			}
-		} else if (viewer_page->pdfv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
-			fz_rect rect = { 0, };
-
-			rect = fz_transform_rect(
-					viewer_page->pdfv->clicked_annot->annot.annot_text.rect,
-					transform);
-
-			cairo_move_to(cr, rect.x0, rect.y0);
-			cairo_line_to(cr, rect.x1, rect.y0);
-			cairo_line_to(cr, rect.x1, rect.y1);
-			cairo_line_to(cr, rect.x0, rect.y1);
-			cairo_line_to(cr, rect.x0, rect.y0);
-			cairo_set_source_rgb(cr, 0, 1, 0);
-			cairo_stroke(cr);
-		}
-	} else //ansonsten etwaige highlights zeichnen
-	{
-		gint i = 0;
-		while (viewer_page->pdfv->highlight.page[i] >= 0) {
-			if (viewer_page
-					== g_ptr_array_index(viewer_page->pdfv->arr_pages,
-							viewer_page->pdfv->highlight.page[i]))
-				viewer_render_mark_quad(cr, viewer_page->pdfv->highlight.quad[i],
-						transform);
-
-			i++;
-		}
-	}
-
-	return FALSE;
-}
 
 static void viewer_render_transfer_rendered(PdfViewer *pdfv, gboolean protect) {
 	gint idx = 0;
@@ -141,20 +62,27 @@ static void viewer_render_transfer_rendered(PdfViewer *pdfv, gboolean protect) {
 
 			//Kein mutex erforderlich, weil nur Zugriff, wenn schon gerendert
 			//Dann ist aber ausgeschlossen, daß ein thread auf viewer_page->pixbuf_page zugreift
-			viewer_page->image_page = gtk_image_new_from_pixbuf(
-					viewer_page->pixbuf_page);
-			gtk_widget_show(viewer_page->image_page);
-			g_signal_connect_after(viewer_page->image_page, "draw",
-					G_CALLBACK(viewer_draw_image_page), viewer_page);
-
 			gtk_widget_get_size_request(pdfv->layout, &width, NULL);
 			x_pos = (width
 					- (viewer_page->crop.x1 - viewer_page->crop.x0) * pdfv->zoom
 							/ 100) / 2;
 
-			gtk_layout_put(GTK_LAYOUT(pdfv->layout),
-					GTK_WIDGET(viewer_page->image_page), x_pos,
-					viewer_page->y_pos);
+			if (viewer_page->image_page) { //nach Zoom oder Drehen: Widget weiterverwenden
+				gtk_image_set_from_pixbuf(GTK_IMAGE(viewer_page->image_page),
+						viewer_page->pixbuf_page);
+				gtk_layout_move(GTK_LAYOUT(pdfv->layout), viewer_page->image_page, x_pos,
+						viewer_page->y_pos);
+			} else {
+				viewer_page->image_page = gtk_image_new_from_pixbuf(
+						viewer_page->pixbuf_page);
+				gtk_widget_show(viewer_page->image_page);
+				g_signal_connect_after(viewer_page->image_page, "draw",
+						G_CALLBACK(viewer_draw_image_page), viewer_page);
+
+				gtk_layout_put(GTK_LAYOUT(pdfv->layout),
+						GTK_WIDGET(viewer_page->image_page), x_pos,
+						viewer_page->y_pos);
+			}
 			//g_clear_object() statt g_object_unref(): GtkImage hält seine
 			//eigene Referenz, viewer_page->pixbuf_page danach auf NULL
 			//setzen statt als dangling Pointer stehen zu lassen
@@ -214,6 +142,19 @@ void viewer_close_thread_pool_and_transfer(PdfViewer *pdfv) {
 	}
 
 	viewer_render_transfer_rendered(pdfv, FALSE);
+
+	/* Für die verworfenen Tasks kommt nie eine Antwort: ihre Flags (Seite wird gerendert, Viewer)
+	 * würden sonst für immer gesetzt bleiben und jedes Warten darauf endlos laufen lassen. Nach
+	 * dem Transfer gehört jedes noch gesetzte Flag dieses Viewers zu einem verworfenen Task. */
+	for (guint i = 0; i < pdfv->arr_pages->len; i++) {
+		ViewerPageNew *viewer_page = g_ptr_array_index(pdfv->arr_pages, i);
+
+		viewer_page->thread &= ~1;
+		if (viewer_page->pdf_document_page->thread_pv == pdfv) {
+			viewer_page->pdf_document_page->thread &= ~1;
+			viewer_page->pdf_document_page->thread_pv = NULL;
+		}
+	}
 
 	return;
 }
@@ -611,6 +552,11 @@ static gint render_schritte(PdfViewer *pv, ViewerPageNew *viewer_page, fz_contex
 	return 0;
 }
 
+/* Worker des Pools. Die Seite kommt als Index in pv->arr_pages (in thread_data), der Worker löst
+ * ihn ohne Sperre auf. Das ist nur sicher, solange sich pv->arr_pages und die Seiten nicht ändern,
+ * während Tasks warten oder laufen: Wer das Array ändert oder eine Seite verändert oder freigibt
+ * (Drehen, Löschen, Einfügen, Schließen), hält vorher den Pool des Viewers an
+ * (viewer_close_thread_pool_and_transfer). */
 void viewer_render_page(gpointer data, gpointer user_data) {
 	GError *error = NULL;
 	ViewerPageNew *viewer_page = NULL;
@@ -792,6 +738,14 @@ void viewer_render_get_visible_pages(PdfViewer *pv, gint *von,
 				/ 100) + 10;
 	}
 
+	//Bildlauf-Bereich noch ohne Größe: mindestens die erste Seite
+	if (pv->arr_pages->len > 0) {
+		if (*bis < 0)
+			*bis = 0;
+		if (*von < 0)
+			*von = 0;
+	}
+
 	return;
 }
 
@@ -845,162 +799,6 @@ void cb_viewer_render_visible_pages(PdfViewer* pv) {
 	gtk_tree_view_scroll_to_cell(GTK_TREE_VIEW(pv->tree_thumb), path, NULL,
 	FALSE, 0, 0);
 	gtk_tree_path_free(path);
-
-	return;
-}
-
-static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
-		GtkPrintContext *context, gint page_nr, gpointer user_data) {
-	PdfViewer *pdfv = (PdfViewer*) user_data;
-	ViewerPageNew *viewer_page = NULL;
-	fz_context *ctx = NULL;
-	gdouble width = 0;
-	gdouble height = 0;
-	gdouble zoom_x = 0;
-	gdouble zoom_y = 0;
-	gdouble zoom = 0;
-
-	viewer_page = g_ptr_array_index(pdfv->arr_pages, page_nr);
-
-	viewer_render_thread(pdfv, page_nr);
-	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
-
-	/* viewer_render_wait_for_transfer() wartet nur, bis der Render-Task
-	 * fertig ist (erfolgreich oder nicht) - ein Fehlschlag wird dabei nur
-	 * intern geloggt (LOG_WARN in viewer_render_transfer_rendered()), aber
-	 * nicht nach hier zurückgemeldet. Ohne diese Prüfung würde
-	 * fz_run_display_list() unten mit display_list == NULL aufgerufen -
-	 * ein direkter Nullpointer-Zugriff tief in mupdf, der NICHT über
-	 * fz_throw() läuft und damit auch vom umgebenden fz_try/fz_catch nicht
-	 * abgefangen wird (Absturz statt Fehlerdialog). */
-	if (!viewer_page->pdf_document_page->display_list) {
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nSeite konnte nicht gerendert werden", NULL);
-		g_free(errmsg);
-
-		return;
-	}
-
-	width = gtk_print_context_get_width(context);
-	height = gtk_print_context_get_height(context);
-
-	zoom_x = width / (viewer_page->crop.x1 - viewer_page->crop.x0);
-	zoom_y = height / (viewer_page->crop.y1 - viewer_page->crop.y0);
-	zoom = (zoom_x <= zoom_y) ? zoom_x : zoom_y;
-
-	ctx = fz_clone_context(zond_pdf_document_get_ctx(viewer_page->pdf_document_page->document));
-	if (!ctx) {
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nfz_context konnte nicht geklont werden", NULL);
-		g_free(errmsg);
-		return;
-	}
-
-	fz_pixmap *pixmap = NULL;
-	fz_matrix transform = fz_scale(zoom, zoom);
-	fz_rect rect = fz_transform_rect(viewer_page->crop, transform);
-	fz_irect irect = fz_round_rect(rect);
-
-	fz_try(ctx)
-		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), irect, NULL, 0);
-	fz_catch(ctx) {
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nBei Aufruf fz_new_pixmap_with_bbox:\n", fz_caught_message(ctx), NULL);
-		g_free(errmsg);
-		fz_drop_context(ctx);
-		return;
-	}
-
-	fz_try(ctx)
-		fz_clear_pixmap_with_value(ctx, pixmap, 255);
-	fz_catch(ctx) {
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nBei Aufruf fz_pixmap_with_value:\n", fz_caught_message(ctx), NULL);
-		g_free(errmsg);
-		fz_drop_context(ctx);
-		return;
-	}
-
-	fz_device *draw_device = NULL;
-	fz_try(ctx)
-		draw_device = fz_new_draw_device(ctx, fz_identity, pixmap);
-	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pixmap);
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nBei Aufruf fz_new_draw_device:\n", fz_caught_message(ctx), NULL);
-		g_free(errmsg);
-		fz_drop_context(ctx);
-		return;
-	}
-
-	fz_try(ctx)
-		fz_run_display_list(ctx, viewer_page->pdf_document_page->display_list,
-				draw_device, transform, rect, NULL);
-	fz_always(ctx) {
-		fz_close_device(ctx, draw_device);
-		fz_drop_device(ctx, draw_device);
-	}
-	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pixmap);
-		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
-				" -\n\nBei Aufruf fz_run_display_list:\n", fz_caught_message(ctx), NULL);
-		g_free(errmsg);
-		fz_drop_context(ctx);
-		return;
-	}
-
-	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_data(pixmap->samples, GDK_COLORSPACE_RGB,
-			FALSE, 8, pixmap->w, pixmap->h, pixmap->stride, NULL, NULL);
-
-	cairo_t *cr = gtk_print_context_get_cairo_context(context);
-	gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
-	g_object_unref(pixbuf);
-	fz_drop_pixmap(ctx, pixmap);
-	fz_drop_context(ctx);
-
-	cairo_paint(cr);
-	cairo_fill(cr);
-
-	return;
-}
-
-void cb_viewer_render_print(GtkButton *button, gpointer data) {
-	GtkPrintOperation *print = NULL;
-	GtkPrintOperationResult res;
-	GtkPageSetup *page_setup = NULL;
-	GError *error = NULL;
-	PdfViewer *pdfv = (PdfViewer*) data;
-
-	print = gtk_print_operation_new();
-	gtk_print_operation_set_n_pages(print, pdfv->arr_pages->len);
-
-	page_setup = gtk_page_setup_new();
-	gtk_page_setup_set_top_margin(page_setup, 0, GTK_UNIT_POINTS);
-	gtk_page_setup_set_bottom_margin(page_setup, 0, GTK_UNIT_POINTS);
-	gtk_page_setup_set_left_margin(page_setup, 0, GTK_UNIT_POINTS);
-	gtk_page_setup_set_right_margin(page_setup, 0, GTK_UNIT_POINTS);
-	gtk_print_operation_set_default_page_setup(print, page_setup);
-	g_object_unref(page_setup);
-
-	g_signal_connect(print, "draw_page",
-			G_CALLBACK(cb_viewer_render_page_for_printing), pdfv);
-
-	res = gtk_print_operation_run(print,
-			GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, GTK_WINDOW(pdfv->vf), &error);
-	g_object_unref(print);
-
-	if (res == GTK_PRINT_OPERATION_RESULT_ERROR) {
-		display_message(pdfv->vf,
-				"Fehler Ausdruck -\n\nBei Aufruf gtk_print_operation_run:\n",
-				error->message, NULL);
-		g_clear_error(&error);
-	}
 
 	return;
 }

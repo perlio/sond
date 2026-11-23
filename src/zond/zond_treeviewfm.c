@@ -577,7 +577,7 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 			return -1;
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				dd, &pdf_pos, (ztvfm_priv->zond->win.state & GDK_SHIFT_MASK), error);
+				dd, &pdf_pos, (ztvfm_priv->zond->win.state & GDK_SHIFT_MASK), NULL, error);
 		if (rc)
 			return -1;
 	}

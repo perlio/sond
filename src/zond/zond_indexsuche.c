@@ -39,6 +39,7 @@
 #include "zond_treeviewfm.h"
 #include "zond_treeview.h"
 #include "zond_pdf_document.h"
+#include "anbindung_zaehlung.h"
 
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
@@ -202,16 +203,16 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 	return;
                 }
 
+                PdfViewer *pv = NULL;
+
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
-                        dd, &pos_pdf, (zond->win.state & GDK_SHIFT_MASK), &error);
+                        dd, &pos_pdf, (zond->win.state & GDK_SHIFT_MASK), &pv, &error);
                 if (rc) {
                     display_message(zond->win.app_window,
                             "Fehler beim Öffnen\n\n",
                             error ? error->message : "?", NULL);
                     g_clear_error(&error);
-                } else if (has_pos && term && zond->app.viewer_session->arr_pv->len > 0) {
-                    PdfViewer *pv = g_ptr_array_index(zond->app.viewer_session->arr_pv,
-                            zond->app.viewer_session->arr_pv->len - 1);
+                } else if (has_pos && term && pv) {
                     viewer_highlight_at_char_pos(pv, page_nr_akt,
                             char_pos_in_page, term);
                 }

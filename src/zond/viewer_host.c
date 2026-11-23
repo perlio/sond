@@ -34,6 +34,7 @@
 #include "../znd/zond_dbase.h"
 #include "../znd/dbase_zond.h"
 #include "zond_pdf_document.h"
+#include "anbindung_zaehlung.h"
 #include "../znd/anbindung.h"
 #include "20allgemein/project.h"
 #include "20allgemein/ziele.h"

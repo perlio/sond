@@ -115,7 +115,7 @@ Status: offen
 
 ### #263 Viewer-Review: schwere Fehler
 
-Status: offen (aus dem Code abgeleitet, nicht reproduziert)
+Status: umgesetzt am 22.11.2026, Test durch den Nutzer steht aus
 
 ```text
  Review vom 22.11.2026 (40viewer, zond_pdf_document, viewer_host). Reihenfolge nach Schwere:
@@ -145,11 +145,17 @@ Status: offen (aus dem Code abgeleitet, nicht reproduziert)
  8 zond_indexsuche: Highlight im letzten Viewer von arr_pv statt im Viewer, der das Dokument
    zeigt (Wiederverwendung eines vorhandenen Viewers, remove_fast ändert die Reihenfolge).
    zond_treeview_oeffnen_internal_viewer soll den Viewer zurückgeben.
+ Umsetzung: 1 viewer_close_thread_pool_and_transfer löscht die Flags verworfener Tasks; 2 alle
+ Pools werden vor dem Einfügen angehalten, NULL-Prüfung und Aufbau in insert_pages; 3 GError
+ und fz_try für Öffnen und Seitenzahl; 4 Referenz in zpdfd_part_peek freigegeben; 5 Schleife
+ rückwärts; 6 Wrapper cb_viewer_delete_event liefert TRUE; 7 seiten_loeschen_erlaubt auch beim
+ Ausschneiden (vor dem Kopieren in die Zwischenablage); 8 zond_treeview_oeffnen_internal_viewer
+ hat einen Parameter pv_out.
 ```
 
 ### #264 Viewer-Review: mittlere Fehler und Lecks
 
-Status: offen (aus dem Code abgeleitet, nicht reproduziert)
+Status: umgesetzt am 22.11.2026 (außer dem Zyklus, s. u.), Test steht aus
 
 ```text
  - document_entry_in_dd (document.c): fz_rect {0.0, rect.x1, y0, y1} hat die Felder in falscher
@@ -175,11 +181,19 @@ Status: offen (aus dem Code abgeleitet, nicht reproduziert)
  - Kleinkram: insert_pages hinterlässt bei Fehler einen halben Zustand;
    pdf_document_page_annot_get_index liefert bei Nichtfinden 0; fz_copy_selection ohne fz_try;
    viewer_init stürzt ohne GSettings-Schema ab; viewer_render_get_visible_pages kann -1 liefern.
+ Umsetzung: alles außer dem Zyklus. Der Zyklus bleibt: pdfp->inserted ist ein Zeiger ohne
+ Referenz, die Referenz des Journal-Eintrags hält den Abschnitt am Leben (anbindung_aktualisieren
+ liest ihn). Eine Lösung braucht einen anderen Besitzer für den Abschnitt (z. B. Dokument hält
+ Abschnitte, die noch von Seiten referenziert werden, schwach und gibt sie beim Speichern frei).
+ OCR: Seite laden, Schrift und Content-Stream unter dem Dokument-Mutex, vorher Warten auf den
+ Render-Task, Seite danach als geladen markiert (Bit 2). Datei schließen im eigenständigen Viewer
+ setzt Annotation, Markierung, Suche, Anbindung zurück. Bildwidget wird nach Zoom und Drehen
+ weiterverwendet. Popover-Text wird immer gesetzt, Vergleich leer gegen kein Inhalt.
 ```
 
 ### #265 Viewer: Modulaufteilung
 
-Status: offen (nach #263 und #264; Verzeichnis siehe #262)
+Status: größtenteils umgesetzt am 22.11.2026, Test steht aus (Rest s. u.; Verzeichnis siehe #262)
 
 ```text
  - zond_pdf_document.c (1294 Zeilen) in vier Dateien: Dokument, Abschnitt (GObject, Signale),
@@ -196,6 +210,12 @@ Status: offen (nach #263 und #264; Verzeichnis siehe #262)
    sond_pdf_helper, sond_fileparts in viewer.c, viewer_search.c, viewer_save.c, seiten.c u. a.),
    doppeltes misc_stdlib.h (seiten.c, stand_alone.c), die Typedefs in viewer.h.
  - PdfViewer (rund 70 Felder): Zustand und Widgets trennen (Vorarbeit für #262).
+ Umsetzung: pdf_annot_ops.[ch] (Annot-Datenlogik ohne GTK), viewer_parts.[ch] (Signal-Handler,
+ Abonnement), seiten_dialoge.c, viewer_print.c, viewer_draw.[ch], anbindung_zaehlung.[ch],
+ zond_pdf_part.c; viewer_save_and_close in viewer.c; ungenutzte und doppelte Includes entfernt.
+ Makefile: Ziel viewer um zond_pdf_part.c und anbindung_zaehlung.c ergänzt.
+ Offen: Annot-Helfer (annot_deep_copy, annot_free) bleiben in zond_pdf_document.c, die Typedefs
+ in viewer.h, PdfViewer in Zustand und Widgets teilen (gehört zu #262), Verzeichnis (#262).
 ```
 
 ## Zurückgestellt

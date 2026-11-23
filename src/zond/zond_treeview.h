@@ -51,8 +51,11 @@ void zond_treeview_expand_all(GtkTreeView*);
 
 void zond_treeview_expand_row_rekursiv(GtkTreeView*, GtkTreePath*);
 
+typedef struct _Pdf_Viewer PdfViewer;
+
+/* pv_out (optional): der Viewer, der das Dokument zeigt (neu oder vorhandener) */
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, DisplayedDocument*,
-		PdfPos*, gboolean neue_instanz, GError**);
+		PdfPos*, gboolean neue_instanz, PdfViewer **pv_out, GError**);
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 

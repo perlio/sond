@@ -757,7 +757,8 @@ gint project_close(Projekt *zond, GError **error) {
 	db_check_fenster_schliessen();
 
 	// Close all viewer windows
-	for (gint i = 0; i < zond->app.viewer_session->arr_pv->len; i++)
+	//rückwärts: viewer_schliessen entfernt den Viewer mit g_ptr_array_remove_fast
+	for (gint i = (gint) zond->app.viewer_session->arr_pv->len - 1; i >= 0; i--)
 		viewer_save_and_close(
 				g_ptr_array_index(zond->app.viewer_session->arr_pv, i));
 

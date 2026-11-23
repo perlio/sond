@@ -28,8 +28,4 @@ typedef int gint;
  * einpflegen, physisch speichern, Anbindungen/FTS-Index nachziehen. */
 gint viewer_save_dirty_dds(PdfViewer*, GError**);
 
-/* Vor dem Schließen ggf. fragen, ob gespeichert werden soll (falls
- * button_speichern aktiv), dann viewer_schliessen(). */
-void viewer_save_and_close(PdfViewer*);
-
 #endif // VIEWER_SAVE_H_INCLUDED

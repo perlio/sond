@@ -33,12 +33,10 @@
 #include "../../gtk3/sond_dialoge.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
-#include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
-#include "../../sond_index.h"
-#include "../../sond_process_file.h"
 
 #include "../zond_pdf_document.h"
+#include "../anbindung_zaehlung.h"
 
 #include "../../znd/anbindung.h"
 
@@ -47,7 +45,7 @@
 #include "seiten.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
-#include "viewer_annot.h"
+#include "pdf_annot_ops.h"
 
 /* Liefert die physische Annot-Position auf der frisch geöffneten pdf_page
  * (0-basiert) - im Unterschied zu pdf_document_page_annot_get_index()
@@ -198,7 +196,7 @@ static gint viewer_save_eintrag(SaveCtx* s, PdfDocumentPage* pdfp, pdf_page* pag
 		//pdf_ann borrowed pointer
 		//created (NULL): bei einem Fehlschlag hier wird doc ohnehin
 		//komplett verworfen (s. Aufrufer), kein Bookkeeping nötig
-		if (!viewer_annot_do_create(ctx, page, entry->pdf_document_page->rotate,
+		if (!pdf_annot_ops_create(ctx, page, entry->pdf_document_page->rotate,
 				entry->annot_changed.annot_after, NULL, error))
 			return -1;
 	}
@@ -216,7 +214,7 @@ static gint viewer_save_eintrag(SaveCtx* s, PdfDocumentPage* pdfp, pdf_page* pag
 			return -1;
 		}
 
-		return viewer_annot_do_change(ctx, pdf_ann, entry->pdf_document_page->rotate,
+		return pdf_annot_ops_change(ctx, pdf_ann, entry->pdf_document_page->rotate,
 				entry->annot_changed.annot_after, error);
 	}
 
@@ -485,34 +483,4 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	document_reset_dirty(pdfv);
 
 	return 0;
-}
-
-void viewer_save_and_close(PdfViewer *pdfv) {
-	gtk_popover_popdown(GTK_POPOVER(pdfv->annot_pop_edit));
-
-	//ggf. fragen, ob gespeichert werden soll
-	if (gtk_widget_get_sensitive(pdfv->button_speichern)) {
-		gint rc = 0;
-
-		rc = abfrage_frage( NULL, "Viewer enthält Änderungen", "Speichern?",
-				NULL);
-
-		if (rc == GTK_RESPONSE_YES) {
-			gint ret = 0;
-			GError* error = NULL;
-
-			ret = viewer_save_dirty_dds(pdfv, &error);
-			if (ret) {
-				display_message(pdfv->vf, "Speichern nicht erfoglreich\n\n", error->message, NULL);
-				g_error_free(error);
-
-				return;
-			}
-		}
-		else if (rc != GTK_RESPONSE_NO) return;
-	}
-
-	viewer_schliessen(pdfv);
-
-	return;
 }

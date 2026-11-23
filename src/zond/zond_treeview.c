@@ -2418,8 +2418,11 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 		DisplayedDocument* dd, PdfPos *pos_pdf, gboolean neue_instanz,
-		GError **error) {
+		PdfViewer **pv_out, GError **error) {
 	PdfPos pos_von = { 0 };
+
+	if (pv_out)
+		*pv_out = NULL;
 
 	//Neue Instanz oder bestehende?
 	if (!neue_instanz) {
@@ -2445,6 +2448,8 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 
 				//dd wird nicht an einen Viewer übergeben
 				document_free_displayed_documents(dd);
+				if (pv_out)
+					*pv_out = pv;
 
 				return 0;
 			}
@@ -2456,6 +2461,8 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 
 	PdfViewer *pv = viewer_init(zond->app.viewer_session);
 	viewer_display_document(pv, dd, pos_von.seite, pos_von.index);
+	if (pv_out)
+		*pv_out = pv;
 
 	return 0;
 }
@@ -3300,7 +3307,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		gint rc = 0;
 
 		rc = zond_treeview_oeffnen_internal_viewer(zond, dd,
-				&pdf_pos, neue_instanz, error);
+				&pdf_pos, neue_instanz, NULL, error);
 		if (rc) {
 			document_free_displayed_documents(dd);
 

@@ -31,6 +31,7 @@
 #include "zond_init.h"
 #include "zond_indexsuche.h"
 #include "zond_pdf_document.h"
+#include "anbindung_zaehlung.h"
 
 #include "20allgemein/project.h"
 

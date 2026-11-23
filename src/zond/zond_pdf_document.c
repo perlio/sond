@@ -30,230 +30,6 @@
 #include "../znd/anbindung.h"
 #include "../znd/zond_error.h"
 
-void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
-	Anbindung anbindung_akt = { 0 };
-
-	if (!anbindung)
-		return;
-
-	anbindung_akt = *anbindung;
-
-	for (guint i = 0; i < zond_pdf_document_get_number_of_pages(zpdfd); i++) {
-		PdfDocumentPage* pdfp = NULL;
-
-		pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
-
-		/* Seiten, die in der frisch von der Platte geöffneten Kopie
-		 * (doc) NICHT (mehr) vorhanden sind, verschieben die Live-
-		 * Numerierung gegenüber der Platten-Numerierung: entweder weil
-		 * sie live neu eingefügt, aber noch nicht gespeichert sind
-		 * (pdfp->inserted), oder weil sie bei einem früheren Speichern
-		 * bereits aus der Datei ausgeschlossen wurden (pdfp->deleted &&
-		 * pdfp->on_disk_deleted) - live aber (als "Karteileiche") noch
-		 * mitgezählt werden. Noch nicht gespeicherte Löschungen
-		 * (pdfp->deleted && !pdfp->on_disk_deleted) existieren in doc
-		 * dagegen noch (werden gerade erst in diesem Speichervorgang
-		 * entfernt) und zählen daher wie eine normale, unveränderte
-		 * Seite mit. */
-		if (pdfp && (pdfp->inserted ||
-				(pdfp->deleted && pdfp->on_disk_deleted))) {
-			if (i <= anbindung_akt.von.seite) {
-				anbindung->von.seite--;
-				anbindung->bis.seite--;
-			}
-			else if (i <= anbindung_akt.bis.seite)
-				anbindung->bis.seite--;
-		}
-	}
-
-	return;
-}
-
-//aus aktueller Anbindung diejenige errechnen, die sich nach Speichern von zpdfd_part ergibt
-void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
-	GPtrArray* arr_pages = NULL;
-	Anbindung anbindung_zpdfd_part = { 0 };
-
-	zpdfd_part_get_anbindung(zpdfd_part, &anbindung_zpdfd_part);
-	arr_pages = zond_pdf_document_get_arr_pages(zpdfd_part->zond_pdf_document);
-
-	for (gint i = anbindung->bis.seite; i >= 0; i--) {
-		PdfDocumentPage* pdfp = NULL;
-
-		pdfp = g_ptr_array_index(arr_pages, i);
-
-		if (!pdfp)
-			continue;
-
-		/* Ergebnis ist die Numerierung der Datei auf der Platte nach dem Speichern. Die
-		 * Live-Numerierung bleibt dabei unverändert (gelöschte Seiten bleiben als
-		 * Karteileichen stehen, s. PdfDocumentPage->on_disk_deleted), die Datei verliert sie
-		 * aber: jede Seite, die danach nicht mehr in der Datei steht, zählt hier nicht mit.
-		 * Innerhalb des zu speichernden Teils sind das alle gelöschten Seiten (auch neu
-		 * eingefügte und wieder gelöschte), außerhalb nur die schon früher gespeicherten
-		 * und die eingefügten (sie kommen erst mit ihrem eigenen Speichern in die Datei und
-		 * wurden in anbindung_aktualisieren() zuvor hinzugerechnet). */
-		gboolean weg = FALSE;
-
-		if (i >= anbindung_zpdfd_part.von.seite && i <= anbindung_zpdfd_part.bis.seite)
-			weg = pdfp->deleted;
-		else
-			weg = pdfp->inserted || (pdfp->deleted && pdfp->on_disk_deleted);
-
-		if (weg) {
-			if (i <= anbindung->von.seite) {
-				anbindung->von.seite--;
-				anbindung->bis.seite--;
-			}
-			else if (i <= anbindung->bis.seite)
-				anbindung->bis.seite--;
-		}
-	}
-
-	return;
-}
-
-/* Von der Live-Numerierung in die Zählung, die der Viewer anzeigt: gelöschte Seiten sind nicht
- * sichtbar und zählen nicht mit, eingefügte schon. Das ist die Numerierung der Datei nach dem
- * Speichern. */
-void anbindung_get_sichtbar(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
-	Anbindung anbindung_akt = { 0 };
-
-	if (!anbindung)
-		return;
-
-	anbindung_akt = *anbindung;
-
-	for (guint i = 0; i < zond_pdf_document_get_number_of_pages(zpdfd); i++) {
-		PdfDocumentPage* pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
-
-		if (pdfp && pdfp->deleted) {
-			if (i <= anbindung_akt.von.seite) {
-				anbindung->von.seite--;
-				anbindung->bis.seite--;
-			}
-			else if (i <= anbindung_akt.bis.seite)
-				anbindung->bis.seite--;
-		}
-	}
-}
-
-/* Seite, die schon bei einem früheren Speichern aus der Datei ausgeschlossen wurde (steht live
- * noch als Karteileiche) */
-static gboolean seite_auf_platte_weg(PdfDocumentPage* pdfp) {
-	return pdfp && pdfp->deleted && pdfp->on_disk_deleted;
-}
-
-/* Seite, die vor dem nächsten Speichern auf der Platte steht: weder eingefügt noch schon früher
- * ausgeschlossen. Noch nicht initialisierte Seiten (NULL) sind unveränderte Plattenseiten. */
-static gboolean seite_auf_platte(PdfDocumentPage* pdfp) {
-	return !pdfp || (!pdfp->inserted && !seite_auf_platte_weg(pdfp));
-}
-
-/* Fasst die Anbindung anbindung (Zählung der Platte vor dem Speichern) den Teil part, in den
- * Seiten eingefügt wurden, ganz ein oder ist sie ihm gleich? Dann gehören eingefügte Seiten an
- * ihrer Grenze zu ihr. Der Teil steht live mit seinen eingefügten Randseiten im Array: seine
- * Grenzen auf der Platte sind die erste und letzte Plattenseite darin. */
-static gboolean anbindung_umfasst_teil(ZondPdfDocument* zpdfd, Anbindung anbindung,
-		ZPDFDPart* part) {
-	GPtrArray* arr_pages = zond_pdf_document_get_arr_pages(zpdfd);
-	Anbindung part_live = { 0 };
-	Anbindung part_platte = { 0 };
-	gint rang = 0;
-	gint erste = -1;
-	gint letzte = -1;
-
-	zpdfd_part_get_anbindung(part, &part_live);
-
-	for (gint i = 0; i < (gint) arr_pages->len && i <= part_live.bis.seite; i++) {
-		if (!seite_auf_platte(g_ptr_array_index(arr_pages, i)))
-			continue;
-
-		if (i >= part_live.von.seite) {
-			if (erste < 0)
-				erste = rang;
-			letzte = rang;
-		}
-		rang++;
-	}
-
-	if (erste < 0)
-		return FALSE;
-
-	part_platte.von.seite = erste;
-	part_platte.von.index = part->first_index;
-	part_platte.bis.seite = letzte;
-	part_platte.bis.index = part->last_index;
-
-	return anbindung_1_gleich_2(anbindung, part_platte)
-			|| anbindung_1_eltern_von_2(anbindung, part_platte);
-}
-
-/* Von der Zählung der Datei auf der Platte (wie in der Datenbank) in die Live-Zählung. Live
- * stehen zusätzlich die schon früher gespeicherten Löschungen (Karteileichen) und die noch nicht
- * gespeicherten eingefügten Seiten im Array. Eingefügte Seiten an der Grenze der Anbindung
- * gehören zu ihr, wenn sie in einen Teil eingefügt wurden, den die Anbindung umfasst oder dem sie
- * gleicht (im Viewer eines Abschnitts eingefügte Seiten sind in dem Abschnitt). Gegenstück zu
- * anbindung_get_orig(). */
-void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
-	GPtrArray* arr_pages = NULL;
-	g_autofree gint* live_der_platte = NULL; //Live-Position der k-ten Plattenseite
-	gint n_platte = 0;
-	gint von = 0;
-	gint bis = 0;
-	Anbindung anbindung_orig = { 0 };
-
-	if (!anbindung || anbindung_is_empty(anbindung))
-		return;
-
-	anbindung_orig = *anbindung;
-
-	arr_pages = zond_pdf_document_get_arr_pages(zpdfd);
-	live_der_platte = g_new(gint, arr_pages->len + 1);
-
-	for (gint i = 0; i < (gint) arr_pages->len; i++)
-		if (seite_auf_platte(g_ptr_array_index(arr_pages, i)))
-			live_der_platte[n_platte++] = i;
-
-	//Seiten hinter der letzten Plattenseite zählen einfach weiter
-	von = (anbindung->von.seite < n_platte) ? live_der_platte[anbindung->von.seite] :
-			anbindung->von.seite + (gint) arr_pages->len - n_platte;
-	bis = (anbindung->bis.seite < n_platte) ? live_der_platte[anbindung->bis.seite] :
-			anbindung->bis.seite + (gint) arr_pages->len - n_platte;
-
-	//unmittelbar davor eingefügte Seiten
-	for (gint j = von - 1; j >= 0; j--) {
-		PdfDocumentPage* pdfp = g_ptr_array_index(arr_pages, j);
-
-		if (seite_auf_platte_weg(pdfp))
-			continue;
-
-		if (pdfp && pdfp->inserted && anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted))
-			von = j;
-		else
-			break;
-	}
-
-	//unmittelbar dahinter eingefügte Seiten
-	for (gint j = bis + 1; j < (gint) arr_pages->len; j++) {
-		PdfDocumentPage* pdfp = g_ptr_array_index(arr_pages, j);
-
-		if (seite_auf_platte_weg(pdfp))
-			continue;
-
-		if (pdfp && pdfp->inserted && anbindung_umfasst_teil(zpdfd, anbindung_orig, pdfp->inserted))
-			bis = j;
-		else
-			break;
-	}
-
-	anbindung->von.seite = von;
-	anbindung->bis.seite = bis;
-
-	return;
-}
-
-
 typedef struct {
 	GMutex mutex_doc;
 	fz_context *ctx;
@@ -275,7 +51,8 @@ gint pdf_document_page_annot_get_index(PdfDocumentPageAnnot* pdpa) {
 
 	arr_annots = pdpa->pdf_document_page->arr_annots;
 
-	g_ptr_array_find(arr_annots, pdpa, &index);
+	if (!arr_annots || !g_ptr_array_find(arr_annots, pdpa, &index))
+		return -1;
 
 	return (gint) index;
 }
@@ -286,6 +63,8 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	gint index = 0;
 
 	index = pdf_document_page_annot_get_index(pdpa);
+	if (index < 0) //nicht in der Liste der Seite: nicht die erste Annotation nehmen
+		return NULL;
 
 	ctx = zond_pdf_document_get_ctx(pdpa->pdf_document_page->document);
 
@@ -802,7 +581,7 @@ ZondPdfDocument* zond_pdf_document_find_by_filename(const gchar* filename) {
 	return NULL;
 }
 
-static ZondPdfDocument*
+ZondPdfDocument*
 zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		GError **error) {
 	gint rc = 0;
@@ -849,6 +628,10 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		priv->doc = pdf_open_document(priv->ctx, filename);
 	fz_catch(priv->ctx) {
 		GError* error_rem = NULL;
+
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nPDF konnte nicht geöffnet werden:\n%s",
+					__func__, fz_caught_message(priv->ctx));
 
 		if (!sond_tmp_remove(filename, &error_rem)) {
 			LOG_WARN("Datei '%s' konnte nicht gelöscht werden: %s",
@@ -905,7 +688,20 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		}
 	}
 
-	number_of_pages = pdf_count_pages(priv->ctx, priv->doc);
+	//die Arbeitskopie wird über den Namen im Stream wieder entfernt (finalize)
+	g_free(filename);
+
+	fz_try(priv->ctx)
+		number_of_pages = pdf_count_pages(priv->ctx, priv->doc);
+	fz_catch(priv->ctx) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nSeitenzahl nicht ermittelbar:\n%s",
+					__func__, fz_caught_message(priv->ctx));
+		g_object_unref(zond_pdf_document);
+
+		return NULL;
+	}
+
 	if (number_of_pages == 0) {
 		if (error)
 			*error = g_error_new(ZOND_ERROR, 0, "%s\nDokument enthält keine Seiten",
@@ -1037,7 +833,9 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument *self) {
 	return;
 }
 
-//wird nur aufgerufen, wenn alle threadpools aus sind!
+/* Fügt die Seiten von pdf_doc ab pos ein. Das Dokument und die Seitennummern ändern sich unter dem
+ * Dokument-Mutex; die Viewer, deren Seitenliste sich dadurch ändert, halten ihre Render-Threads
+ * selbst an (seiten_viewer_einfuegen). */
 gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		gint pos, ZPDFDPart* zpdfd_part, pdf_document *pdf_doc, GError **error) {
 	gint rc = 0;
@@ -1047,7 +845,16 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 			zond_pdf_document);
 
 	zond_pdf_document_mutex_lock(zond_pdf_document);
-	count = pdf_count_pages(priv->ctx, pdf_doc);
+	fz_try(priv->ctx)
+		count = pdf_count_pages(priv->ctx, pdf_doc);
+	fz_catch(priv->ctx) {
+		zond_pdf_document_mutex_unlock(zond_pdf_document);
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nSeitenzahl nicht ermittelbar:\n%s",
+					__func__, fz_caught_message(priv->ctx));
+
+		return -1;
+	}
 	if (count == 0) {
 		zond_pdf_document_mutex_unlock(zond_pdf_document);
 
@@ -1057,33 +864,39 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 	//einfügen in doc, Annotationen kommen mit, gelöschte (versteckte) nicht
 	rc = pdf_copy_page(priv->ctx, pdf_doc, 0, count - 1,
 			priv->doc, pos, FALSE, error);
-	zond_pdf_document_mutex_unlock(zond_pdf_document);
-	if (rc)
+	if (rc) {
+		zond_pdf_document_mutex_unlock(zond_pdf_document);
+
 		return -1;
-
-	//eingefügte Seiten als pdf_document_page erzeugen und initiieren
-	for (gint i = pos; i < pos + count; i++) {
-		gint rc = 0;
-		PdfDocumentPage *pdf_document_page = NULL;
-
-		pdf_document_page = g_malloc0(sizeof(PdfDocumentPage));
-
-		g_ptr_array_insert(priv->pages, i, pdf_document_page);
-
-		rc = zond_pdf_document_init_page(zond_pdf_document, pdf_document_page,
-				i, error);
-		if (rc == -1)
-			return -1;
-
-		pdf_document_page->inserted = zpdfd_part;
 	}
 
-	//Index der nachfolgenden Seiten anpassen
-	for (gint i = pos + count; i < priv->pages->len; i++) {
-		PdfDocumentPage* pdfp_loop = NULL;
+	/* Platz im Seiten-Array schaffen und die Nummern der nachfolgenden Seiten anpassen, noch
+	 * unter dem Mutex: Render-Threads lesen page_akt beim Laden einer Seite unter demselben
+	 * Mutex und sehen so den Seitenbaum und die Nummern immer im gleichen Stand. Danach stimmt
+	 * die Numerierung auch dann, wenn das Initiieren einer Seite scheitert. */
+	for (gint i = pos; i < pos + count; i++) {
+		PdfDocumentPage *pdf_document_page = g_malloc0(sizeof(PdfDocumentPage));
 
-		pdfp_loop = g_ptr_array_index(priv->pages, i);
-		pdfp_loop->page_akt += count;
+		pdf_document_page->document = zond_pdf_document;
+		pdf_document_page->page_akt = i;
+		pdf_document_page->inserted = zpdfd_part;
+		g_ptr_array_insert(priv->pages, i, pdf_document_page);
+	}
+
+	for (gint i = pos + count; i < priv->pages->len; i++) {
+		PdfDocumentPage* pdfp_loop = g_ptr_array_index(priv->pages, i);
+
+		if (pdfp_loop) //noch nicht initialisierte Seiten (Dokument nur über Abschnitte geöffnet)
+			pdfp_loop->page_akt += count;
+	}
+	zond_pdf_document_mutex_unlock(zond_pdf_document);
+
+	//eingefügte Seiten initiieren (nimmt den Mutex selbst)
+	for (gint i = pos; i < pos + count; i++) {
+		rc = zond_pdf_document_init_page(zond_pdf_document,
+				g_ptr_array_index(priv->pages, i), i, error);
+		if (rc == -1)
+			return -1;
 	}
 
 	return 0;
@@ -1102,193 +915,3 @@ void zond_pdf_document_set_ocr_num(ZondPdfDocument *self, gint ocr_num) {
 
 	return;
 }
-
-/**
- * ZPDF_PART ist das Objekt, das Zugriff auf zond_pdf_document hat
- */
-enum {
-	PART_PAGE_CHANGED,
-	PART_ANNOT_CHANGED,
-	PART_DIRTY_CHANGED,
-	PART_N_SIGNALS
-};
-
-static guint part_signals[PART_N_SIGNALS] = { 0 };
-
-G_DEFINE_TYPE(ZPDFDPart, zond_pdf_part, G_TYPE_OBJECT)
-
-static void zond_pdf_part_finalize(GObject *self) {
-	ZPDFDPart *zpdfd_part = (ZPDFDPart*) self;
-
-	if (zpdfd_part->zond_pdf_document) {
-		ZondPdfDocumentPrivate *zpdfd_priv =
-				zond_pdf_document_get_instance_private(zpdfd_part->zond_pdf_document);
-
-		if (!g_ptr_array_remove_fast(zpdfd_priv->arr_zpdf_parts, zpdfd_part))
-			LOG_WARN("zpdfd_part nicht in Array vorhanden");
-		g_object_unref(zpdfd_part->zond_pdf_document);
-	}
-
-	G_OBJECT_CLASS(zond_pdf_part_parent_class)->finalize(self);
-
-	return;
-}
-
-static void zond_pdf_part_class_init(ZPDFDPartClass *klass) {
-	GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-	object_class->finalize = zond_pdf_part_finalize;
-
-	part_signals[PART_PAGE_CHANGED] = g_signal_new("page-changed",
-			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-			G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_INT, G_TYPE_POINTER);
-	part_signals[PART_ANNOT_CHANGED] = g_signal_new("annot-changed",
-			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-			G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
-	part_signals[PART_DIRTY_CHANGED] = g_signal_new("dirty-changed",
-			G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-			G_TYPE_NONE, 0);
-
-	return;
-}
-
-static void zond_pdf_part_init(ZPDFDPart *self) {
-	return;
-}
-
-void zpdfd_part_drop(ZPDFDPart* zpdfd_part) {
-	g_object_unref(zpdfd_part);
-
-	return;
-}
-
-ZPDFDPart* zpdfd_part_ref(ZPDFDPart* zpdfd_part) {
-	return g_object_ref(zpdfd_part);
-}
-
-gboolean zpdfd_part_umfasst_seite(ZPDFDPart *zpdfd_part, PdfDocumentPage *pdf_document_page) {
-	return pdf_document_page->page_akt >= zpdfd_part->first_page->page_akt
-			&& pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt;
-}
-
-gboolean zpdfd_part_wird_angezeigt(ZPDFDPart *zpdfd_part) {
-	return g_signal_has_handler_pending(zpdfd_part, part_signals[PART_ANNOT_CHANGED], 0, TRUE);
-}
-
-void zpdfd_part_set_dirty(ZPDFDPart *zpdfd_part, gboolean dirty) {
-	if (zpdfd_part->dirty == dirty)
-		return;
-
-	zpdfd_part->dirty = dirty;
-	g_signal_emit(zpdfd_part, part_signals[PART_DIRTY_CHANGED], 0);
-
-	return;
-}
-
-/* Sendet an alle Abschnitte, die die Seite umfassen. Über eine Kopie mit eigenen Referenzen, damit
- * ein Handler Abschnitte freigeben darf. */
-static GPtrArray* zond_pdf_document_parts_der_seite(ZondPdfDocument *zond_pdf_document,
-		PdfDocumentPage *pdf_document_page) {
-	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(zond_pdf_document);
-	GPtrArray *arr = g_ptr_array_new_with_free_func(g_object_unref);
-
-	for (guint i = 0; i < priv->arr_zpdf_parts->len; i++) {
-		ZPDFDPart *zpdfd_part = g_ptr_array_index(priv->arr_zpdf_parts, i);
-
-		if (zpdfd_part_umfasst_seite(zpdfd_part, pdf_document_page))
-			g_ptr_array_add(arr, g_object_ref(zpdfd_part));
-	}
-
-	return arr;
-}
-
-void zond_pdf_document_notify_page_changed(ZondPdfDocument *zond_pdf_document,
-		PdfDocumentPage *pdf_document_page, ZPDFDPartChange art, gpointer data) {
-	GPtrArray *arr = zond_pdf_document_parts_der_seite(zond_pdf_document, pdf_document_page);
-
-	for (guint i = 0; i < arr->len; i++)
-		g_signal_emit(g_ptr_array_index(arr, i), part_signals[PART_PAGE_CHANGED], 0,
-				pdf_document_page, (gint) art, data);
-	g_ptr_array_unref(arr);
-
-	return;
-}
-
-void zond_pdf_document_notify_annot_changed(ZondPdfDocument *zond_pdf_document,
-		PdfDocumentPage *pdf_document_page, Annot *annot) {
-	GPtrArray *arr = zond_pdf_document_parts_der_seite(zond_pdf_document, pdf_document_page);
-
-	for (guint i = 0; i < arr->len; i++)
-		g_signal_emit(g_ptr_array_index(arr, i), part_signals[PART_ANNOT_CHANGED], 0,
-				pdf_document_page, annot);
-	g_ptr_array_unref(arr);
-
-	return;
-}
-
-void zpdfd_part_get_anbindung(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
-	anbindung->von.seite = zpdfd_part->first_page->page_akt;
-	anbindung->von.index = zpdfd_part->first_index;
-	anbindung->bis.seite = zpdfd_part->last_page->page_akt;
-	anbindung->bis.index = zpdfd_part->last_index;
-
-	return;
-}
-
-ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
-		GError** error) {
-	ZondPdfDocument* zpdfd = NULL;
-	ZondPdfDocumentPrivate* zpdfd_priv = NULL;
-	ZPDFDPart* zpdfd_part = NULL;
-
-	if (anbindung && anbindung_is_empty(anbindung))
-		anbindung = NULL;
-
-	zpdfd = zond_pdf_document_open(sfp_pdf,
-			(anbindung) ? anbindung->von.seite : 0,
-					(anbindung) ? anbindung->bis.seite : -1,
-							error);
-	if (!zpdfd)
-		return NULL;
-
-	zpdfd_priv = zond_pdf_document_get_instance_private(zpdfd);
-
-	//in Array von Parts suchen, ob schon vorhanden
-	for (guint i = 0; i < zpdfd_priv->arr_zpdf_parts->len; i++) {
-		ZPDFDPart* zpdfd_part_loop = NULL;
-
-		zpdfd_part_loop = g_ptr_array_index(zpdfd_priv->arr_zpdf_parts, i);
-
-		if (!anbindung) {
-			if (!zpdfd_part_loop->has_anbindung)
-				return zpdfd_part_ref(zpdfd_part_loop);
-		}
-		else {
-			Anbindung anbindung_part = { 0 };
-
-			zpdfd_part_get_anbindung(zpdfd_part_loop, &anbindung_part);
-
-			if (anbindung_1_gleich_2(*anbindung, anbindung_part))
-				return zpdfd_part_ref(zpdfd_part_loop);
-		}
-	}
-
-	//nicht gefunden, dann neu
-	zpdfd_part = g_object_new(ZOND_TYPE_PDF_PART, NULL);
-
-	zpdfd_part->zond_pdf_document = zpdfd;
-
-	zpdfd_part->first_page = g_ptr_array_index(zpdfd_priv->pages,
-			(anbindung) ? anbindung->von.seite : 0);
-	zpdfd_part->first_index = (anbindung) ? anbindung->von.index : 0;
-	zpdfd_part->last_page = g_ptr_array_index(zpdfd_priv->pages,
-			(anbindung) ? anbindung->bis.seite : zpdfd_priv->pages->len - 1);
-	zpdfd_part->last_index = (anbindung) ? anbindung->bis.index : EOP;
-
-	zpdfd_part->has_anbindung = (anbindung) ? TRUE : FALSE;
-
-	g_ptr_array_add(zpdfd_priv->arr_zpdf_parts, zpdfd_part);
-
-	return zpdfd_part;
-}
-

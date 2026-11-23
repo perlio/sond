@@ -22,7 +22,6 @@
 
 #include "../../gtk3/sond_dialoge.h"
 #include "../../misc_stdlib.h"
-#include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 
@@ -33,7 +32,9 @@
 #include "viewer.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_parts.h"
 #include "viewer_save.h"
+#include "viewer_search.h"
 #include "document.h"
 
 static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
@@ -73,6 +74,10 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 
 	viewer_close_thread_pool_and_transfer(pv);
 
+	//offene Bearbeitung einer Annotation abschließen (schreibt ggf. ins Journal)
+	gtk_popover_popdown(GTK_POPOVER(pv->annot_pop_edit));
+	gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
+
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
 		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
 		if (rc == GTK_RESPONSE_CANCEL)
@@ -96,6 +101,20 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 
 	//Array zurücksetzen
 	g_ptr_array_remove_range(pv->arr_pages, 0, pv->arr_pages->len);
+
+	//Zustand, der auf Seiten und Annotationen des alten Dokuments zeigt
+	pv->clicked_annot = NULL;
+	pv->click_on_text = FALSE;
+	pv->highlight.page[0] = -1;
+	viewer_text_search_cancel(pv);
+	g_array_remove_range(pv->text_occ.arr_quad, 0, pv->text_occ.arr_quad->len);
+	g_array_remove_range(pv->text_occ.arr_hit, 0, pv->text_occ.arr_hit->len);
+	pv->text_occ.index_act = -1;
+	pv->text_occ.page_act = -1;
+	pv->text_occ.not_found = FALSE;
+	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
+	pv->anbindung.von.index = -1;
+	pv->anbindung.bis.index = EOP + 1;
 
 	//thumbs leeren
 	//treeview bzw. treestore muß zerstört werden, da sonst irgendwie ref auf

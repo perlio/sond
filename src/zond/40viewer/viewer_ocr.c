@@ -22,7 +22,6 @@
 #include <tesseract/capi.h>
 
 #include "../../sond_log_and_error.h"
-#include "../../sond_fileparts.h"
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 #include "../../gtk3/sond_dialoge.h"
@@ -95,6 +94,9 @@ static gint seiten_ocr_seite_laden(InfoWindow *info_window, PdfDocumentPage *pdf
 	GError *error = NULL;
 	gint rc_load = 0;
 
+	//läuft für die Seite gerade ein Render-Task, würde er sie ebenfalls laden
+	viewer_render_wait_for_transfer(pdf_document_page);
+
 	if (pdf_document_page->page)
 		return 0;
 
@@ -102,7 +104,11 @@ static gint seiten_ocr_seite_laden(InfoWindow *info_window, PdfDocumentPage *pdf
 	 * legt dabei auch arr_annots an. page != NULL ohne arr_annots
 	 * würde die Invariante brechen, dass beide immer zusammen
 	 * gesetzt werden (siehe seiten_drehen()/viewer.c). */
+	zond_pdf_document_mutex_lock(pdf_document_page->document);
 	rc_load = zond_pdf_document_load_page(pdf_document_page, ctx, &error);
+	zond_pdf_document_mutex_unlock(pdf_document_page->document);
+	if (!rc_load)
+		pdf_document_page->thread |= 2; //Seite geladen: der Renderer lädt sie nicht noch einmal
 	if (rc_load) {
 		info_window_set_message(info_window,
 				"Seite %u konnte nicht geladen werden: %s",
@@ -183,7 +189,7 @@ static gint seiten_ocr_modus(PdfViewer *pv, InfoWindow *info_window,
 /* Besorgt das Objekt der SOND-Schrift im Dokument der Seite (legt sie an, falls es sie noch nicht
  * gibt). *font_ref kommt mit eigener Referenz, der Aufrufer gibt sie frei. 0 oder -1 (Meldung im
  * InfoWindow gesetzt). */
-static gint seiten_ocr_font(InfoWindow *info_window, PdfDocumentPage *pdf_document_page,
+static gint seiten_ocr_font_intern(InfoWindow *info_window, PdfDocumentPage *pdf_document_page,
 		fz_context *ctx, pdf_obj **font_ref) {
 	GError *error = NULL;
 	gint font_num = zond_pdf_document_get_ocr_num(pdf_document_page->document);
@@ -244,6 +250,18 @@ static gint seiten_ocr_font(InfoWindow *info_window, PdfDocumentPage *pdf_docume
 	zond_pdf_document_set_ocr_num(pdf_document_page->document, font_num);
 
 	return 0;
+}
+
+//Das Dokument wird auch von den Render-Threads benutzt: nur unter dem Dokument-Mutex ändern
+static gint seiten_ocr_font(InfoWindow *info_window, PdfDocumentPage *pdf_document_page,
+		fz_context *ctx, pdf_obj **font_ref) {
+	gint rc = 0;
+
+	zond_pdf_document_mutex_lock(pdf_document_page->document);
+	rc = seiten_ocr_font_intern(info_window, pdf_document_page, ctx, font_ref);
+	zond_pdf_document_mutex_unlock(pdf_document_page->document);
+
+	return rc;
 }
 
 /* Führt die OCR für die Seite aus (ein Task im Pool). Nimmt die Referenz auf font_ref und gibt sie
@@ -460,7 +478,9 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		else if (rc == 2)
 			break;
 
+		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		buf_content = pdf_get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
+		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (!buf_content) {
 			info_window_set_message(info_window, "Alter Content-Stream nicht gefunden: %s",
 					error->message, NULL);

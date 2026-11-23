@@ -24,6 +24,7 @@
 #include "../../sond_fileparts.h"
 
 #include "../zond_pdf_document.h"
+#include "../anbindung_zaehlung.h"
 
 #include "../../znd/zond_dbase.h"
 #include "../zond_treeviewfm.h"

@@ -23,11 +23,8 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_fileparts.h"
-#include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
-#include "../../sond_process_file.h"
 #include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
 #include "../../misc_stdlib.h"
 
 
@@ -38,12 +35,13 @@
 
 
 #include "viewer.h"
+#include "seiten.h"
 #include "viewer_render.h"
 #include "viewer_search.h"
 #include "viewer_save.h"
 #include "document.h"
 
-static GPtrArray*
+GPtrArray*
 seiten_get_document_pages(PdfViewer *pv, GArray *arr_seiten_pv) {
 	GPtrArray *arr_document_page = NULL;
 
@@ -64,7 +62,7 @@ seiten_get_document_pages(PdfViewer *pv, GArray *arr_seiten_pv) {
 	return arr_document_page;
 }
 
-static GArray*
+GArray*
 seiten_markierte_thumbs(PdfViewer *pv) {
 	GList *selected = NULL;
 	GList *list = NULL;
@@ -89,211 +87,6 @@ seiten_markierte_thumbs(PdfViewer *pv) {
 	return arr_page_pv;
 }
 
-static gint compare_gint(gconstpointer a, gconstpointer b) {
-	const gint *_a = a;
-	const gint *_b = b;
-
-	return *_a - *_b;
-}
-
-static GArray*
-seiten_parse_text(PdfViewer *pv, gint max, const gchar *text) {
-	gint start = 0;
-	gint end = 0;
-	const gchar *range = NULL;
-	gint i = 0;
-	gint page = 0;
-	gint last_inserted = -1;
-
-	if (!fz_is_page_range( NULL, text))
-		return NULL;
-
-	GArray *arr_tmp = g_array_new( FALSE, FALSE, sizeof(gint));
-	GArray *arr_pages = g_array_new( FALSE, FALSE, sizeof(gint));
-
-	range = text;
-	while ((range = fz_parse_page_range( NULL, range, &start, &end, max))) {
-		if (start < end) {
-			for (i = start; i <= end; i++)
-				g_array_append_val(arr_tmp, i);
-		} else if (start > end) {
-			for (i = start; i >= end; i--)
-				g_array_append_val(arr_tmp, i);
-		} else
-			g_array_append_val(arr_tmp, start);
-	}
-
-	g_array_sort(arr_tmp, (GCompareFunc) compare_gint);
-
-	for (i = 0; i < arr_tmp->len; i++) {
-		page = g_array_index( arr_tmp, gint, i ) - 1;
-		if (page != last_inserted) {
-			g_array_append_val(arr_pages, page);
-			last_inserted = page;
-		}
-	}
-
-	g_array_free(arr_tmp, TRUE);
-
-	return arr_pages;
-}
-
-static void cb_seiten_drehen_entry(GtkEntry *entry, gpointer dialog) {
-	gtk_dialog_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
-
-	return;
-}
-
-static void cb_radio_auswahl_toggled(GtkToggleButton *button, gpointer data) {
-	gtk_widget_set_sensitive((GtkWidget*) data,
-			gtk_toggle_button_get_active(button));
-
-	return;
-}
-
-GPtrArray*
-seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
-		gboolean mit_alles) {
-	gint rc = 0;
-	GtkWidget *radio_90_UZS = NULL;
-	GtkWidget *radio_180 = NULL;
-	GtkWidget *radio_90_gegen_UZS = NULL;
-	gchar *text = NULL;
-	GPtrArray *arr_document_pages = NULL;
-
-	GtkWidget *dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(pv->vf),
-			GTK_DIALOG_MODAL, "Ok", GTK_RESPONSE_OK, "Abbrechen",
-			GTK_RESPONSE_CANCEL, NULL);
-
-	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-
-	if (winkel) {
-		radio_90_UZS = gtk_radio_button_new_with_label( NULL,
-				"90° im Uhrzeigersinn");
-		radio_180 = gtk_radio_button_new_with_label( NULL, "180°");
-		radio_90_gegen_UZS = gtk_radio_button_new_with_label( NULL,
-				"90° gegen Uhrzeigersinn");
-
-		gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio_180),
-				GTK_RADIO_BUTTON(radio_90_UZS));
-		gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio_90_gegen_UZS),
-				GTK_RADIO_BUTTON(radio_180));
-
-		gtk_box_pack_start(GTK_BOX(content_area), radio_90_UZS, FALSE, FALSE,
-				0);
-		gtk_box_pack_start(GTK_BOX(content_area), radio_180, FALSE, FALSE, 0);
-		gtk_box_pack_start(GTK_BOX(content_area), radio_90_gegen_UZS, FALSE,
-				FALSE, 0);
-	}
-
-	GtkWidget *radio_alle = gtk_radio_button_new_with_label( NULL, "Alle");
-	GtkWidget *radio_mark = gtk_radio_button_new_with_label( NULL, "Markierte");
-	GtkWidget *radio_auswahl = gtk_radio_button_new_with_label( NULL,
-			"Seiten auswählen");
-
-	gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio_alle),
-			GTK_RADIO_BUTTON(radio_auswahl));
-	gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio_mark),
-			GTK_RADIO_BUTTON(radio_alle));
-
-	GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), radio_auswahl, FALSE, FALSE, 0);
-
-	GtkWidget *entry = gtk_entry_new();
-	gtk_box_pack_start(GTK_BOX(hbox), entry, FALSE, FALSE, 0);
-
-	gtk_box_pack_start(GTK_BOX(content_area), radio_alle, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(content_area), radio_mark, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(content_area), hbox, FALSE, FALSE, 0);
-
-	g_signal_connect(radio_auswahl, "toggled",
-			G_CALLBACK( cb_radio_auswahl_toggled), entry);
-
-	if (!gtk_tree_selection_count_selected_rows(
-			gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)))) {
-		gtk_widget_set_sensitive(radio_mark, FALSE);
-		gtk_widget_grab_focus(entry);
-	} else
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_mark), TRUE);
-
-	if (!mit_alles)
-		gtk_widget_set_sensitive(radio_alle, FALSE);
-
-	g_signal_connect(entry, "activate", G_CALLBACK(cb_seiten_drehen_entry),
-			(gpointer ) dialog);
-
-	gtk_widget_show_all(dialog);
-
-	rc = my_dialog_run(GTK_DIALOG(dialog));
-
-	if (rc == GTK_RESPONSE_OK) {
-		GArray *arr_seiten_pv = NULL;
-
-		if (winkel) {
-			if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio_90_UZS)))
-				*winkel = 90;
-			else if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio_180)))
-				*winkel = 180;
-			else
-				*winkel = -90;
-		}
-
-		if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio_auswahl))) {
-			text = g_strdup(gtk_entry_get_text( GTK_ENTRY(entry) ));
-			if (text)
-				arr_seiten_pv = seiten_parse_text(pv, pv->arr_pages->len, text);
-			g_free(text);
-		} else if (gtk_toggle_button_get_active(
-				GTK_TOGGLE_BUTTON(radio_alle))) {
-			arr_seiten_pv = g_array_new( FALSE, FALSE, sizeof(gint));
-			for (gint i = 0; i < pv->arr_pages->len; i++)
-				g_array_append_val(arr_seiten_pv, i);
-		} else if (gtk_toggle_button_get_active(
-				GTK_TOGGLE_BUTTON(radio_mark))) {
-			arr_seiten_pv = seiten_markierte_thumbs(pv);
-		}
-
-		if (arr_seiten_pv && arr_seiten_pv->len) {
-			arr_document_pages = seiten_get_document_pages(pv, arr_seiten_pv);
-			g_array_unref(arr_seiten_pv);
-		}
-	}
-
-	gtk_widget_destroy(dialog);
-
-	return arr_document_pages;
-}
-
-//Layout neu aufbauen, wenn es als geändert gemerkt ist
-static void seiten_refresh_layout(PdfViewer *pv) {
-	if (g_object_get_data(G_OBJECT(pv->layout), "dirty")) {
-		viewer_refresh_layout(pv, 0);
-		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
-
-		g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
-	}
-
-	return;
-}
-
-static gboolean cb_seiten_layout_idle(gpointer data) {
-	PdfViewer *pv = (PdfViewer*) data;
-
-	pv->idle_layout = 0;
-	if (pv->dd) //Datei im eigenständigen Viewer kann inzwischen geschlossen sein
-		seiten_refresh_layout(pv);
-
-	return G_SOURCE_REMOVE;
-}
-
-//Neuaufbau des Layouts einmalig im Idle einplanen, wenn es als geändert gemerkt ist
-static void seiten_layout_planen(PdfViewer *pv) {
-	if (!pv->idle_layout && g_object_get_data(G_OBJECT(pv->layout), "dirty"))
-		pv->idle_layout = g_idle_add(cb_seiten_layout_idle, pv);
-
-	return;
-}
-
 /*
  **      Seiten drehen
  */
@@ -312,7 +105,7 @@ static void seiten_page_tilt(ViewerPageNew *viewer_page) {
 	return;
 }
 
-static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
+gint seiten_viewer_drehen(PdfViewer *pv, ViewerPageNew* viewer_page,
 		gint page_pv, gpointer data) {
 	gint winkel = 0;
 	GtkTreeIter iter = { 0 };
@@ -545,9 +338,26 @@ static void seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page) {
 	return;
 }
 
-void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
+//Host fragen, ob die Seiten gelöscht werden dürfen (Anbindungen); sonst Meldung
+static gboolean seiten_loeschen_erlaubt(PdfViewer *pv, GPtrArray *arr_document_page) {
 	gint rc = 0;
 	GError *error = NULL;
+
+	rc = pdf_viewer_session_pages_deleting(pv->session, pv, arr_document_page, &error);
+	if (rc) {
+		if (rc == -1)
+			display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
+		else
+			display_message(pv->vf, error->message, NULL);
+		g_error_free(error);
+
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	gchar *title = NULL;
 	GPtrArray *arr_document_page = NULL;
 
@@ -561,17 +371,7 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-	//Host fragen, ob die Seiten gelöscht werden dürfen (Anbindungen)
-	rc = pdf_viewer_session_pages_deleting(pv->session, pv,
-			arr_document_page, &error);
-	if (rc) {
-		if (rc == -1)
-			display_message(pv->vf, "Fehler Seiten Löschen\n\n",
-					error->message, NULL);
-		else
-			display_message(pv->vf, error->message, NULL);
-		g_error_free(error);
-
+	if (!seiten_loeschen_erlaubt(pv, arr_document_page)) {
 		g_ptr_array_unref(arr_document_page);
 
 		return;
@@ -586,14 +386,7 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 /*
  **      Seiten einfügen
  */
-typedef struct _DataInsert {
-	DisplayedDocument* dd;
-	gint page_doc;
-	gint count;
-	gboolean after_last;
-} DataInsert;
-
-static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
+gint seiten_viewer_einfuegen(PdfViewer *pv, ViewerPageNew* viewer_page,
 		gint page_pv, gpointer data) {
 	DataInsert* data_insert = (DataInsert*) data;
 
@@ -643,6 +436,11 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 				data_insert->page_doc + data_insert->count - 1);
 	}
 
+	/* Ab hier ändert sich pv->arr_pages: wartende Render-Tasks kennen ihre Seite über den Index
+	 * und lösen ihn im Worker über arr_pages auf. Vorläufig anhalten, bis die Tasks die
+	 * viewer_page selbst bekommen. */
+	viewer_close_thread_pool_and_transfer(pv);
+
 	//highlights und Markierungen Text löschen
 	pv->highlight.page[0] = -1;
 	pv->text_occ.index_act = -1;
@@ -673,148 +471,6 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
 
 	return 1;
-}
-
-//Seite aus dem Viewer nehmen (Seitenfläche, Vorschau, Suche); das Layout wird gemerkt, nicht neu aufgebaut
-static void seiten_viewer_seite_entfernen(PdfViewer *pv, ViewerPageNew *viewer_page, gint page_pv) {
-	GtkTreeIter iter = { 0 };
-
-	//Markierungen und Textsuche zurücksetzen; die Seitennummern verschieben sich
-	pv->highlight.page[0] = -1;
-	pv->text_occ.index_act = -1;
-	pv->text_occ.page_act = -1;
-	viewer_text_search_cancel(pv);
-	gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-
-	viewer_close_thread_pool_and_transfer(pv);
-
-	if (viewer_page->image_page)
-		gtk_widget_destroy(viewer_page->image_page);
-
-	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird g_freed!
-
-	viewer_get_iter_thumb(pv, page_pv, &iter);
-	gtk_list_store_remove(GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(pv->tree_thumb))),
-			&iter);
-
-	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
-
-	return;
-}
-
-static gboolean cb_seiten_schliessen_idle(gpointer data) {
-	PdfViewer *pv = (PdfViewer*) data;
-
-	pv->idle_schliessen = 0;
-	if (pv->arr_pages->len == 0)
-		viewer_schliessen(pv);
-
-	return G_SOURCE_REMOVE;
-}
-
-/* Handler von "page-changed" der Abschnitte des Viewers: sucht die Viewer-Seite des Abschnitts und
- * führt die Änderung nach. Bei INSERTED ist daten ein DataInsert, die Seite die Bezugsseite. */
-void cb_viewer_part_page_changed(ZPDFDPart *zpdfd_part, gpointer pdf_document_page, gint art,
-		gpointer daten, gpointer data) {
-	PdfViewer *pv = (PdfViewer*) data;
-	ViewerPageNew *viewer_page = NULL;
-	gint page_pv = 0;
-
-	for (gint i = 0; i < pv->arr_pages->len; i++) {
-		ViewerPageNew *viewer_page_loop = g_ptr_array_index(pv->arr_pages, i);
-
-		if (viewer_page_loop->pdf_document_page == pdf_document_page
-				&& viewer_page_loop->dd->zpdfd_part == zpdfd_part) {
-			viewer_page = viewer_page_loop;
-			page_pv = i;
-
-			break;
-		}
-	}
-
-	if (!viewer_page)
-		return;
-
-	switch (art) {
-	case ZPDFD_PART_CHANGE_ROTATED:
-		seiten_drehen_foreach(pv, viewer_page, page_pv, daten);
-		zpdfd_part_set_dirty(zpdfd_part, TRUE);
-		break;
-	case ZPDFD_PART_CHANGE_OCR:
-		zpdfd_part_set_dirty(zpdfd_part, TRUE);
-		break;
-	case ZPDFD_PART_CHANGE_DELETED:
-		seiten_viewer_seite_entfernen(pv, viewer_page, page_pv);
-		zpdfd_part_set_dirty(zpdfd_part, TRUE);
-		//ein Viewer ohne Seiten ist sinnlos; im Signal selbst nicht schließen, daher im Idle
-		if (pv->arr_pages->len == 0 && !pv->idle_schliessen)
-			pv->idle_schliessen = g_idle_add(cb_seiten_schliessen_idle, pv);
-		break;
-	case ZPDFD_PART_CHANGE_INSERTED:
-		if (seiten_einfuegen_foreach(pv, viewer_page, page_pv, daten))
-			zpdfd_part_set_dirty(zpdfd_part, TRUE);
-		break;
-	default:
-		break;
-	}
-
-	seiten_layout_planen(pv);
-
-	return;
-}
-
-static void cb_pv_seiten_entry(GtkEntry *entry, gpointer button_datei) {
-	gtk_widget_grab_focus((GtkWidget*) button_datei);
-
-	return;
-}
-
-static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
-	gint res = 0;
-	gint rc = 0;
-
-	// Dialog erzeugen
-	GtkWidget *dialog = gtk_dialog_new_with_buttons("Seiten einfügen:",
-			GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL, "Datei", 1, "Clipboard", 2,
-			"Abbrechen", GTK_RESPONSE_CANCEL, NULL);
-
-	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-
-	GtkWidget *frame = gtk_frame_new("nach Seite:");
-	GtkWidget *entry = gtk_entry_new();
-	gtk_container_add(GTK_CONTAINER(frame), entry);
-	gtk_box_pack_start(GTK_BOX(content_area), frame, TRUE, TRUE, 0);
-
-	GtkWidget *button_clipboard = gtk_dialog_get_widget_for_response(
-			GTK_DIALOG(dialog), 2);
-	if (!pv->session->pv_clip)
-		gtk_widget_set_sensitive(button_clipboard, FALSE);
-
-	GtkWidget *button_datei = gtk_dialog_get_widget_for_response(
-			GTK_DIALOG(dialog), 1);
-	g_signal_connect(entry, "activate", G_CALLBACK(cb_pv_seiten_entry),
-			button_datei);
-
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_focus(entry);
-
-	res = my_dialog_run(GTK_DIALOG(dialog));
-
-	if (res == 1 || res == 2) {
-		rc = string_to_guint(gtk_entry_get_text(GTK_ENTRY(entry)), num);
-		if (rc) {
-			display_message(pv->vf, "Seiten einfügen\n\n",
-					"Ungültige oder fehlende Seitenzahl bei \"nach Seite:\"", NULL);
-			res = -1;
-		}
-	}
-
-	gtk_widget_destroy(dialog);
-
-	if (res != 1 && res != 2)
-		return -1;
-
-	return res;
 }
 
 //Einfügen vor der ersten oder nach der letzten Seite nur, wenn der Abschnitt am Rand der Seite liegt
@@ -849,9 +505,11 @@ static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart *
 
 	//Datei auswählen
 	path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
+	if (!path_merge) //Dialog abgebrochen
+		return NULL;
 
 	//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
-	if (path_merge && !pdf_viewer_session_load_file(pv->session,
+	if (!pdf_viewer_session_load_file(pv->session,
 			GTK_WINDOW(pv->vf), path_merge)) {
 		g_free(path_merge);
 
@@ -1099,23 +757,28 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 	if (!arr_page_pv)
 		return;
 
-	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
-	if (rc) {
-		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
-		g_error_free(error);
+	GPtrArray *arr_document_page = seiten_get_document_pages(pv, arr_page_pv);
+
+	//wie beim Löschen: der Host entscheidet, ob die Seiten (Anbindungen) entfernt werden dürfen
+	if (!seiten_loeschen_erlaubt(pv, arr_document_page)) {
+		g_ptr_array_unref(arr_document_page);
 		g_array_unref(arr_page_pv);
 
 		return;
 	}
 
-	GPtrArray *arr_document_page = seiten_get_document_pages(pv, arr_page_pv);
+	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
 	g_array_unref(arr_page_pv);
+	if (rc) {
+		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
+		g_error_free(error);
+		g_ptr_array_unref(arr_document_page);
+
+		return;
+	}
+
 	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
-	//Anders als cb_pv_seiten_loeschen() wird vorher keine
-	//seiten_anbindung()-Prüfung gemacht - "Ausschneiden" kann also auch
-	//Seiten entfernen, die Anbindungen tragen. Falls das nicht gewollt
-	//ist, hier ggf. denselben Guard wie dort ergänzen.
 
 	return;
 }

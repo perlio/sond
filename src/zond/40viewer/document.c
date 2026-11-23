@@ -3,7 +3,8 @@
 #include "viewer.h"
 #include "document.h"
 #include "../zond_pdf_document.h"
-#include "viewer_annot.h"
+#include "../anbindung_zaehlung.h"
+#include "pdf_annot_ops.h"
 
 #include "../../znd/anbindung.h"
 
@@ -190,9 +191,9 @@ gboolean document_entry_in_dd(JournalEntry* entry,
 				return TRUE; //keine Beschneidung auf dieser Seite
 
 			{
-				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, y0, y1};
+				fz_rect rect = { 0.0, y0, entry->pdf_document_page->rect.x1, y1 };
 
-				if (viewer_annot_is_in_rect(annot, rect))
+				if (pdf_annot_ops_is_in_rect(annot, rect))
 					return 1;
 			}
 		}

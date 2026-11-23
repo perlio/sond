@@ -5,8 +5,10 @@
 #define VIEWER_WIDTH 950
 #define VIEWER_HEIGHT 1050
 
+#ifndef ANNOT_ICON_WIDTH
 #define ANNOT_ICON_WIDTH 20
 #define ANNOT_ICON_HEIGHT 20
+#endif
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -193,13 +195,11 @@ void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
 void viewer_schliessen(PdfViewer*);
 
-//Abonnement der Abschnitte beenden, vor document_free_displayed_documents()
-void viewer_dd_signale_trennen(PdfViewer*);
+/* Vor dem Schließen ggf. fragen, ob gespeichert werden soll (falls button_speichern aktiv),
+ * dann viewer_schliessen(). */
+void viewer_save_and_close(PdfViewer*);
 
-//Fenster eines Viewers, der den Abschnitt anzeigt, nach vorn holen
-void viewer_part_praesentieren(PdfViewerSession*, ZPDFDPart*);
-
-/* viewer_save_dirty_dds()/viewer_save_and_close(): siehe viewer_save.h */
+/* viewer_save_dirty_dds(): siehe viewer_save.h */
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 

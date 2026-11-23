@@ -25,13 +25,9 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
+#include "../../gtk3/sond_dialoge.h"
 #include "../../misc_stdlib.h"
-#include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
-#include "../../sond_ocr.h"
-#include "../../sond_pdf_helper.h"
-#include "../../sond_index.h"
-#include "../../sond_process_file.h"
 
 #include "../zond_pdf_document.h"
 
@@ -44,13 +40,20 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 #include "viewer_render.h"
 #include "viewer_search.h"
 #include "viewer_annot.h"
+#include "viewer_parts.h"
+#include "viewer_save.h"
 
 void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	gdouble value = 0.0;
 	ViewerPageNew *viewer_page = NULL;
 
-	if (pdf_pos.seite >= pv->arr_pages->len)
+	if (pv->arr_pages->len == 0) //z.B. Datei im eigenständigen Viewer inzwischen geschlossen
+		return;
+
+	if (pdf_pos.seite >= (gint) pv->arr_pages->len)
 		pdf_pos.seite = pv->arr_pages->len - 1;
+	if (pdf_pos.seite < 0)
+		pdf_pos.seite = 0;
 
 	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_pos.seite);
 
@@ -248,65 +251,6 @@ void viewer_springen_zu_pos_pdf_idle(PdfViewer *pv, PdfPos pdf_pos,
 	return;
 }
 
-//Speichern-Knopf ist aktiv, wenn ein angezeigter Abschnitt geändert ist
-static void viewer_speichern_aktualisieren(PdfViewer *pv) {
-	gtk_widget_set_sensitive(pv->button_speichern, document_has_dirty(pv));
-
-	return;
-}
-
-static void cb_viewer_part_dirty_changed(ZPDFDPart *zpdfd_part, gpointer data) {
-	viewer_speichern_aktualisieren((PdfViewer*) data);
-
-	return;
-}
-
-//Abschnitte des Viewers abonnieren
-static void viewer_dd_signale_verbinden(PdfViewer *pv) {
-	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next) {
-		g_signal_connect(dd->zpdfd_part, "dirty-changed",
-				G_CALLBACK(cb_viewer_part_dirty_changed), pv);
-		g_signal_connect(dd->zpdfd_part, "annot-changed",
-				G_CALLBACK(cb_viewer_part_annot_changed), pv);
-		g_signal_connect(dd->zpdfd_part, "page-changed",
-				G_CALLBACK(cb_viewer_part_page_changed), pv);
-	}
-
-	return;
-}
-
-void viewer_part_praesentieren(PdfViewerSession *session, ZPDFDPart *zpdfd_part) {
-	for (guint i = 0; i < session->arr_pv->len; i++) {
-		PdfViewer *pv = g_ptr_array_index(session->arr_pv, i);
-
-		for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
-			if (dd->zpdfd_part == zpdfd_part) {
-				gtk_window_present(GTK_WINDOW(pv->vf));
-
-				return;
-			}
-	}
-
-	return;
-}
-
-//vor dem Freigeben der DisplayedDocuments aufrufen
-void viewer_dd_signale_trennen(PdfViewer *pv) {
-	if (pv->idle_layout) {
-		g_source_remove(pv->idle_layout);
-		pv->idle_layout = 0;
-	}
-	if (pv->idle_schliessen) {
-		g_source_remove(pv->idle_schliessen);
-		pv->idle_schliessen = 0;
-	}
-
-	for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
-		g_signal_handlers_disconnect_by_data(dd->zpdfd_part, pv);
-
-	return;
-}
-
 void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		gint index) {
 	PdfPos pdf_pos = { page, index };
@@ -333,6 +277,14 @@ void viewer_schliessen(PdfViewer *pv) {
 	viewer_close_thread_pool_and_transfer(pv); //..._and_transfer, damit etwaig noch gerenderte GdkPixbufs verarztet werden
 	g_idle_remove_by_data(pv);
 	viewer_text_search_cancel(pv);
+
+	/* Beim Zerstören des Fensters können sich Bildlauf-Bereiche und Auswahl ändern; die Handler
+	 * greifen auf pv zu, das unten teilweise schon freigegeben wird. */
+	g_signal_handlers_disconnect_by_data(pv->v_adj, pv);
+	g_signal_handlers_disconnect_by_data(
+			gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(pv->swindow_tree)), pv);
+	g_signal_handlers_disconnect_by_data(
+			gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)), pv);
 
 	g_array_unref(pv->arr_rendered);
 	g_mutex_clear(&pv->mutex_arr_rendered);
@@ -388,6 +340,36 @@ void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry) {
 	}
 
 	gtk_widget_grab_focus(pv->layout);
+
+	return;
+}
+
+void viewer_save_and_close(PdfViewer *pdfv) {
+	gtk_popover_popdown(GTK_POPOVER(pdfv->annot_pop_edit));
+
+	//ggf. fragen, ob gespeichert werden soll
+	if (gtk_widget_get_sensitive(pdfv->button_speichern)) {
+		gint rc = 0;
+
+		rc = abfrage_frage( NULL, "Viewer enthält Änderungen", "Speichern?",
+				NULL);
+
+		if (rc == GTK_RESPONSE_YES) {
+			gint ret = 0;
+			GError* error = NULL;
+
+			ret = viewer_save_dirty_dds(pdfv, &error);
+			if (ret) {
+				display_message(pdfv->vf, "Speichern nicht erfoglreich\n\n", error->message, NULL);
+				g_error_free(error);
+
+				return;
+			}
+		}
+		else if (rc != GTK_RESPONSE_NO) return;
+	}
+
+	viewer_schliessen(pdfv);
 
 	return;
 }
