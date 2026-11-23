@@ -36,14 +36,15 @@
 #include "viewer_render.h"
 #include "viewer_search.h"
 
-//Layout neu aufbauen, wenn es als geändert gemerkt ist
+/* Layout neu aufbauen, wenn es als geändert gemerkt ist, und die sichtbaren Seiten neu rendern
+ * lassen: auch ohne Neuaufbau (Drehen um 180 Grad, OCR) sind die Bilder der Seiten geleert. */
 static void seiten_refresh_layout(PdfViewer *pv) {
 	if (g_object_get_data(G_OBJECT(pv->layout), "dirty")) {
 		viewer_refresh_layout(pv, 0);
-		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
-
 		g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
 	}
+
+	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
 
 	return;
 }
@@ -58,9 +59,9 @@ static gboolean cb_seiten_layout_idle(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
-//Neuaufbau des Layouts einmalig im Idle einplanen, wenn es als geändert gemerkt ist
+//Neuaufbau des Layouts und Neurendern einmalig im Idle einplanen, nach allen Handlern
 static void seiten_layout_planen(PdfViewer *pv) {
-	if (!pv->idle_layout && g_object_get_data(G_OBJECT(pv->layout), "dirty"))
+	if (!pv->idle_layout)
 		pv->idle_layout = g_idle_add(cb_seiten_layout_idle, pv);
 
 	return;

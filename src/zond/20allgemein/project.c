@@ -750,17 +750,22 @@ gint project_close(Projekt *zond, GError **error) {
 		}
 	}
 
+	/* Alle Viewer schließen, bevor etwas am Projekt abgebaut wird (rückwärts: viewer_schliessen
+	 * entfernt den Viewer mit g_ptr_array_remove_fast). Bleibt einer offen, weil der Nutzer bei
+	 * "Speichern?" abgebrochen hat oder das Speichern scheiterte, wird das Projekt nicht
+	 * geschlossen: der Viewer greift beim Speichern auf die Projektdatenbank zu. */
+	for (gint i = (gint) zond->app.viewer_session->arr_pv->len - 1; i >= 0; i--)
+		viewer_save_and_close(
+				g_ptr_array_index(zond->app.viewer_session->arr_pv, i));
+
+	if (zond->app.viewer_session->arr_pv->len > 0)
+		return 1;
+
 	//Takt der Steuerdateien beenden, Zustand entfernen
 	project_ctl_stop(zond);
 
 	//Diagnose-Fenster arbeitet auf der Datenbank des Projekts
 	db_check_fenster_schliessen();
-
-	// Close all viewer windows
-	//rückwärts: viewer_schliessen entfernt den Viewer mit g_ptr_array_remove_fast
-	for (gint i = (gint) zond->app.viewer_session->arr_pv->len - 1; i >= 0; i--)
-		viewer_save_and_close(
-				g_ptr_array_index(zond->app.viewer_session->arr_pv, i));
 
 	// Gemerkte Passwörter vergessen und überschreiben
 	sond_password_clear();
