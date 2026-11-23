@@ -131,6 +131,9 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_sond_mime.c \
 	$(SRC_DIRS)/tests/test_sond_text_extract.c \
 	$(SRC_DIRS)/tests/test_dbase_zond.c \
+	$(SRC_DIRS)/tests/test_anbindung.c \
+	$(SRC_DIRS)/tests/test_anbindung_zaehlung.c \
+	$(SRC_DIRS)/zond/anbindung_zaehlung.c \
 	$(SRC_DIRS)/znd/zond_dbase.c \
 	$(SRC_DIRS)/znd/dbase_zond.c \
 	$(SRC_DIRS)/znd/anbindung.c \

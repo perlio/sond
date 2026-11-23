@@ -31,6 +31,8 @@ void test_sond_graph_db_filter_register(void);
 void test_sond_mime_register(void);
 void test_sond_text_extract_register(void);
 void test_dbase_zond_register(void);
+void test_anbindung_register(void);
+void test_anbindung_zaehlung_register(void);
 
 int
 main(int argc, char *argv[])
@@ -43,6 +45,8 @@ main(int argc, char *argv[])
     test_sond_mime_register();
     test_sond_text_extract_register();
     test_dbase_zond_register();
+    test_anbindung_register();
+    test_anbindung_zaehlung_register();
 
     return g_test_run();
 }

@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #266.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #267.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265
+Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -106,11 +106,10 @@ Status: offen
 ```text
  - 99conv/test.c samt Menü "test" und Make-Ziel test: bewusst belassen (Entscheidung 22.11.2026).
  - Stillgelegte Chat-Dateien (zond_chat, sond_chat): bewusst belassen (Entscheidung 22.11.2026).
- - Tests fehlen für tvfm und anbindung (src/tests; dbase_zond hat inzwischen welche). Vorschlag:
-   die Testrahmen aus der Arbeit am 22.11.2026 übernehmen (Seitenzählung, sond_projekt_pflege,
-   zond_knoten). Für die Zählung die Rechenlogik aus zond_pdf_document.c in ein kleines
-   GTK-freies Modul in zond/ ziehen (z. B. zond/anbindung_zaehlung.[ch]), damit der echte
-   Code getestet wird und nicht eine ausgeschnittene Kopie.
+ - Tests: für anbindung (znd/anbindung.c) und die Seitenzählung (zond/anbindung_zaehlung.c) angelegt
+   (src/tests/test_anbindung.c, test_anbindung_zaehlung.c, im Makefile-Ziel test; die Zählung wird
+   gegen die echte Datei getestet, Dokument und Abschnitt sind nachgebildet). Fehlen noch für tvfm
+   (src/tvfm, 4083 Zeilen; Teile ohne GTK und SeaDrive zuerst, z. B. preflight und index_sync).
 ```
 
 ### #263 Viewer-Review: schwere Fehler
@@ -219,6 +218,22 @@ Status: größtenteils umgesetzt am 22.11.2026, Test steht aus (Rest s. u.; Verz
  Makefile: Ziel viewer um zond_pdf_part.c und anbindung_zaehlung.c ergänzt.
  Offen: Annot-Helfer (annot_deep_copy, annot_free) bleiben in zond_pdf_document.c, die Typedefs
  in viewer.h, PdfViewer in Zustand und Widgets teilen (gehört zu #262), Verzeichnis (#262).
+```
+
+### #266 Anbindung: Punkt wird falsch gelesen
+
+Status: offen (vom Test /anbindung/parse_punkt gefunden, dort als unvollständig markiert)
+
+```text
+ anbindung_parse_file_section() liest einen Punkt "{seite,index}" falsch: Der Zweig ohne "{{"
+ übergibt dem Parser file_section + 1 (hinter der Klammer), der Parser überspringt die Klammer
+ aber selbst. Die erste Ziffer der Seite geht verloren: "{3,17}" ergibt Seite 0, "{12,345}" Seite 2.
+ Der Zweig mit zwei Klammern ist richtig. Behebung: im Zweig ohne "{{" file_section statt
+ file_section + 1 übergeben; danach in test_anbindung.c den Aufruf g_test_incomplete entfernen.
+ Zu prüfen: Wo Punkte vorkommen (anbindung_is_pdf_punkt) und ob gespeicherte Punkte in
+ Projekten schon mit der falschen Seite gelesen werden. Die Sections in Test.ZND sind alle
+ Bereiche. Dazu: anbindung_to_human_readable() hängt bei einem Punkt ", Index 0" an
+ (bis.index != EOP steht außerhalb der Bedingung für bis).
 ```
 
 ## Zurückgestellt
