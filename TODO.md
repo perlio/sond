@@ -6,7 +6,7 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #269.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266, #267, #268
+Offen: #245, #247, #254, #255, #256, #258
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -121,160 +121,6 @@ Status: offen
    (Index-Datenbank), load und status (SeaDrive,
    Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
    Makefile-Ziel test ist der Linux-Build und enthält es nicht.
-```
-
-### #268 Pflege: Anhang einer PDF löschen entfernt den gleichnamigen Zwilling mit
-
-Status: umgesetzt am 23.11.2026, Bestätigung steht aus
-
-```text
- sond_projekt_pflege_delete() führt bei einem PDF-Anhang zuerst die Adressen der übrigen Anhänge
- nach (emb_sibling_apply) und löscht danach die FILE_PART-Zeile zum Pfad (dbase_zond_remove_filepart,
- genauer Pfad). Bei zwei Anhängen gleichen Namens heißen die Adressen "x.pdf//bild.txt" und
- "x.pdf//bild.txt (1)". Wird der erste gelöscht, bekommt der zweite die Adresse "x.pdf//bild.txt";
- die anschließende Löschung nach dem Pfad des gelöschten Anhangs trifft dann auch seine
- (angebundene) FILE_PART-Zeile. Der Test /projekt_pflege/delete_pdf zeigt es (derzeit als
- unvollständig markiert). Behebung: die beiden Blöcke in sond_projekt_pflege_delete vertauschen
- (erst remove_filepart, dann Adressen nachführen); umgesetzt, die Markierung im Test ist entfernt.
-```
-
-### #263 Viewer-Review: schwere Fehler
-
-Status: umgesetzt am 22.11.2026, Test durch den Nutzer steht aus
-
-```text
- Review vom 22.11.2026 (40viewer, zond_pdf_document, viewer_host). Reihenfolge nach Schwere:
- 1 Render-Queue: viewer_close_thread_pool_and_transfer (viewer_render.c) verwirft wartende Tasks
-   mit g_thread_pool_free(immediate), ihre Flags (pdf_document_page->thread Bit 1, thread_pv)
-   bleiben gesetzt; viewer_render_wait_for_transfer und viewer_render_thread laufen dann in
-   while (thread & 1) endlos, bei geschlossenem Viewer mit dangling thread_pv. Behebung: nach
-   Free und Transfer alle Seiten des Viewers durchgehen und Bit 1 samt thread_pv löschen, wenn
-   thread_pv dieser Viewer ist. Auslöser: viele Seiten sichtbar, dann Zoom, Drehen, Löschen,
-   Schließen.
- 2 Einfügen: seiten_einfuegen_ausfuehren hält die Thread-Pools nicht an (Voraussetzung laut
-   Kommentar an zond_pdf_document_insert_pages; wartende Tasks tragen den alten page_pv).
-   Außerdem zond_pdf_document_insert_pages: pdfp_loop->page_akt += count ohne NULL-Prüfung;
-   bei einem nur über einen Abschnitt geöffneten Dokument sind die Seiten dahinter NULL
-   (init_pages füllt nur von bis), Absturz beim Einfügen im Abschnitt-Viewer.
- 3 zond_pdf_document_open: Fehler von pdf_open_document liefert NULL ohne GError, die Aufrufer
-   lesen error->message (Absturz bei defekter PDF).
- 4 zpdfd_part_peek: Referenzleck am Dokument, wenn der Abschnitt schon existiert (die Referenz
-   aus zond_pdf_document_open wird nur im Neuanlage-Zweig an den Abschnitt übergeben). Das
-   Dokument wird nie freigegeben, die Arbeitskopie bleibt liegen.
- 5 project.c: "Alle Viewer schließen" läuft vorwärts über arr_pv, viewer_schliessen entfernt mit
-   g_ptr_array_remove_fast; jeder zweite Viewer bleibt offen. Rückwärts iterieren.
- 6 viewer_save_and_close als delete-event-Handler (viewer_ui.c) ist void statt gboolean; bei
-   Abbruch kann das Fenster trotzdem zerstört werden. Wrapper, der immer TRUE liefert.
- 7 cb_seiten_ausschneiden löscht ohne pages-deleting (Anbindungsprüfung des Hosts); Seiten mit
-   Anbindungen gehen verloren, Anbindungen werden inkonsistent.
- 8 zond_indexsuche: Highlight im letzten Viewer von arr_pv statt im Viewer, der das Dokument
-   zeigt (Wiederverwendung eines vorhandenen Viewers, remove_fast ändert die Reihenfolge).
-   zond_treeview_oeffnen_internal_viewer soll den Viewer zurückgeben.
- Umsetzung: 1 viewer_close_thread_pool_and_transfer löscht die Flags verworfener Tasks; 2 alle
- Pools werden vor dem Einfügen angehalten, NULL-Prüfung und Aufbau in insert_pages; 3 GError
- und fz_try für Öffnen und Seitenzahl; 4 Referenz in zpdfd_part_peek freigegeben; 5 Schleife
- rückwärts; 6 Wrapper cb_viewer_delete_event liefert TRUE; 7 seiten_loeschen_erlaubt auch beim
- Ausschneiden (vor dem Kopieren in die Zwischenablage); 8 zond_treeview_oeffnen_internal_viewer
- hat einen Parameter pv_out.
-```
-
-### #264 Viewer-Review: mittlere Fehler und Lecks
-
-Status: umgesetzt am 22.11.2026, Test steht aus
-
-```text
- - document_entry_in_dd (document.c): fz_rect {0.0, rect.x1, y0, y1} hat die Felder in falscher
-   Reihenfolge, richtig {0.0, y0, rect.x1, y1}; Annotationen auf den Randseiten eines Abschnitts
-   werden falsch zugeordnet (Dirty, Journal-Bereinigung).
- - pv_schliessen_datei (stand_alone.c) setzt den Zustand nicht zurück: clicked_annot dangling
-   (draw-Handler und Entf-Taste greifen darauf zu), highlight, text_occ, anbindung, Popover;
-   viewer_springen_idle bei leerem arr_pages mit Index -1.
- - GtkImage-Leck: nach Zoom und Drehen wird ein neues Bild angelegt, das alte (nur geleert)
-   bleibt im Layout (viewer_render.c, viewer_ui.c, seiten.c). Besser gtk_image_set_from_pixbuf.
- - Zyklus Journal -> Abschnitt -> Dokument bei PAGES_INSERTED: Dokument und Arbeitskopie bleiben
-   nach dem Schließen ohne Speichern bestehen, ohne Einfügungen werden sie freigegeben
-   (uneinheitlich).
- - OCR (viewer_ocr.c): Seite laden, Schrift suchen, Content-Stream lesen ohne Dokument-Mutex und
-   ohne Warten auf laufende Render-Tasks (Race auf dem Dokument).
- - Annotations-Popover (viewer_annot.c): bleibt der Text beim Schließen unverändert, bleibt er im
-   Puffer; eine Annotation ohne Inhalt zeigt dann den Text der vorherigen und übernimmt ihn.
- - viewer_schliessen gibt arr_pages und text_occ frei, bevor das Fenster zerstört wird; die
-   value-changed-Handler von v_adj sind noch verbunden. Erst Handler trennen, dann zerstören,
-   dann freigeben.
- - Einfügen: Abbruch des Dateidialogs zeigt "filepart ist NULL" statt still abzubrechen.
- - filename wird bei jedem Öffnen eines Dokuments geleakt (zond_pdf_document_open).
- - Kleinkram: insert_pages hinterlässt bei Fehler einen halben Zustand;
-   pdf_document_page_annot_get_index liefert bei Nichtfinden 0; fz_copy_selection ohne fz_try;
-   viewer_init stürzt ohne GSettings-Schema ab; viewer_render_get_visible_pages kann -1 liefern.
- Umsetzung: alles. Zyklus (Variante B): PdfDocumentPage.inserted ist ein gboolean, dazu inserted_in
- (Zeiger auf den Abschnitt ohne Referenz); der Journal-Eintrag PAGES_INSERTED trägt nur noch count;
- zond_pdf_part_finalize setzt inserted_in der eingefügten Seiten auf NULL; anbindung_aktualisieren
- ordnet Randseiten nur bei gesetztem inserted_in zu. Folge: Wird ein Abschnitt ohne Speichern
- geschlossen, während das Dokument noch offen ist, gelten die über ihn eingefügten Randseiten
- beim Speichern anderer Abschnitte als außerhalb von ihm. Schließt der letzte Viewer, wird das
- Dokument freigegeben (ungespeicherte Änderungen sind weg).
- OCR: Seite laden, Schrift und Content-Stream unter dem Dokument-Mutex, vorher Warten auf den
- Render-Task, Seite danach als geladen markiert (Bit 2). Datei schließen im eigenständigen Viewer
- setzt Annotation, Markierung, Suche, Anbindung zurück. Bildwidget wird nach Zoom und Drehen
- weiterverwendet. Popover-Text wird immer gesetzt, Vergleich leer gegen kein Inhalt.
-```
-
-### #265 Viewer: Modulaufteilung
-
-Status: größtenteils umgesetzt am 22.11.2026, Test steht aus (Rest s. u.; Verzeichnis siehe #262)
-
-```text
- - zond_pdf_document.c (1294 Zeilen) in vier Dateien: Dokument, Abschnitt (GObject, Signale),
-   Anbindungs-Zählung (siehe #258), Annot-Helfer. GTK-frei, gehört mit 40viewer aus zond/ heraus.
- - Annot-Datenlogik (viewer_annot_do_create, _do_change, _is_in_rect) aus viewer_annot.c in ein
-   Modul ohne GTK (z. B. pdf_annot_ops.c): viewer_save.c und document.c hängen heute von der
-   UI-Datei ab (Abhängigkeit in falscher Richtung).
- - Signal-Handler zentralisieren (viewer_parts.c): cb_viewer_part_page_changed (seiten.c),
-   cb_viewer_part_annot_changed (viewer_annot.c), dirty, Verbinden und Trennen (viewer.c).
- - seiten.c (1121 Zeilen): Dialoge nach seiten_dialoge.c.
- - viewer_render.c (1006 Zeilen): Drucken nach viewer_print.c, draw-Handler nach viewer_draw.c.
- - viewer_save_and_close von viewer_save.c nach viewer.c.
- - Includes bereinigen: ungenutzte Header (sond_index, sond_process_file, sond_ocr,
-   sond_pdf_helper, sond_fileparts in viewer.c, viewer_search.c, viewer_save.c, seiten.c u. a.),
-   doppeltes misc_stdlib.h (seiten.c, stand_alone.c), die Typedefs in viewer.h.
- - PdfViewer (rund 70 Felder): Zustand und Widgets trennen (Vorarbeit für #262).
- Umsetzung: pdf_annot_ops.[ch] (Annot-Datenlogik ohne GTK), viewer_parts.[ch] (Signal-Handler,
- Abonnement), seiten_dialoge.c, viewer_print.c, viewer_draw.[ch], anbindung_zaehlung.[ch],
- zond_pdf_part.c; viewer_save_and_close in viewer.c; ungenutzte und doppelte Includes entfernt.
- Makefile: Ziel viewer um zond_pdf_part.c und anbindung_zaehlung.c ergänzt.
- Offen: Annot-Helfer (annot_deep_copy, annot_free) bleiben in zond_pdf_document.c, die Typedefs
- in viewer.h, PdfViewer in Zustand und Widgets teilen (gehört zu #262), Verzeichnis (#262).
-```
-
-### #266 Anbindung: Punkt wird falsch gelesen
-
-Status: umgesetzt am 23.11.2026, Bestätigung steht aus
-
-```text
- anbindung_parse_file_section() liest einen Punkt "{seite,index}" falsch: Der Zweig ohne "{{"
- übergibt dem Parser file_section + 1 (hinter der Klammer), der Parser überspringt die Klammer
- aber selbst. Die erste Ziffer der Seite geht verloren: "{3,17}" ergibt Seite 0, "{12,345}" Seite 2.
- Der Zweig mit zwei Klammern ist richtig. Behebung: im Zweig ohne "{{" file_section statt
- file_section + 1 übergeben; danach in test_anbindung.c den Aufruf g_test_incomplete entfernen.
- Umsetzung: im Zweig ohne "{{" wird file_section übergeben; anbindung_to_human_readable() hängt
- "bis" und dessen Index nur noch an, wenn bis gesetzt ist (ein Punkt ergab ", Index 0"). Der
- Test /anbindung/parse_punkt ist nicht mehr unvollständig, der Rundlauf und human_readable decken
- Punkte ab. Zu prüfen bleibt, ob in vorhandenen Projekten Punkte gespeichert sind, die bisher mit
- der falschen Seite gelesen wurden (Aufrufer: zond_treeview.c, ziele.c, viewer_host.c u. a.).
-```
-
-### #267 tvfm: Kopieren eines Verzeichnisses im Dateisystem meldet Fehler
-
-Status: umgesetzt am 23.11.2026, Bestätigung steht aus
-
-```text
- sond_tvfm_item_copy() (tvfm/sond_tvfm_item.c, Zweig "innerhalb Dateisystem") las den Rückgabewert
- von sond_copy_r() als Fehlercode: rc = sond_copy_r(...) und danach if (rc) return -1. sond_copy_r()
- liefert aber TRUE bei Erfolg. Folge: Der Aufruf meldete -1 (ohne GError), obwohl kopiert war,
- und 0, wenn das Kopieren scheiterte. Umsetzung: rc = sond_copy_r(...) ? 0 : -1. Der Test
- /tvfm_item/kopieren_verzeichnis ist nicht mehr unvollständig und prüft zusätzlich, dass ein Ziel
- innerhalb der Quelle abgewiesen wird. Zu prüfen bleibt, ob die Aufrufer (sond_treeviewfm.c, Pflege)
- mit dem bisherigen Verhalten gerechnet haben.
 ```
 
 ## Zurückgestellt
@@ -632,6 +478,9 @@ Status: Phase 1 erledigt; Phasen 2 bis 5 zurückgestellt (erst mit der Umstellun
 Status: zurückgestellt (Vorarbeit: viewer_einrichten_fenster ist in Hilfsfunktionen zerlegt)
 
 ```text
+ Rest aus #265: Annot-Helfer (annot_deep_copy, annot_free) von zond_pdf_document.c in ein eigenes
+ Modul, die Typedefs aus viewer.h, PdfViewer in Zustand und Widgets teilen, Verzeichnis 40viewer
+ aus zond/ heraus.
  Ziel: Der Viewer soll wahlweise in ein Toplevel-Fenster oder anderswo eingebettet werden
  können. Heute ist pv->vf ein GtkWindow und zugleich Kern und Hülle.
  Hindernisse:
