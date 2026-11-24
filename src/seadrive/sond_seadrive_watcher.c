@@ -205,7 +205,9 @@ static void update_dir_coverage(SondSeadriveWatcher *w, const gchar *file_full_p
     g_free(dir);
 }
 
-static void update_status(SondSeadriveWatcher *w, const gchar *path_pending_down,
+//Aktualisiert die Zähler "wird geladen" und "nicht synchron"; meldet nichts. Rückgabe: TRUE,
+//wenn der Aufrufer status-changed melden soll.
+static gboolean update_status(SondSeadriveWatcher *w, const gchar *path_pending_down,
         gint delta_down, const gchar *path_up, gboolean up_pending)
 {
     gboolean changed = FALSE;
@@ -240,8 +242,7 @@ static void update_status(SondSeadriveWatcher *w, const gchar *path_pending_down
         changed = TRUE;
     }
 
-    if (changed)
-        emit_status(w);
+    return changed;
 }
 
 //Zählt der Badge als "nicht hydriert" bzw. "hydriert und gepinnt"? Einzige Stelle
@@ -256,7 +257,9 @@ static void badge_to_coverage(SondSeadriveBadge badge, gboolean *out_not_hydrate
 
 //Badge genau einer Datei aktualisieren und davon abgeleitet die Ordner-Zähler.
 //new_badge NONE für eine gelöschte Datei; delta_total +1 (neu), -1 (weg), 0 (geändert).
-static void update_file_badge(SondSeadriveWatcher *w, const gchar *file_full_path,
+//Meldet nichts; Rückgabe TRUE, wenn sich der Badge geändert hat (der Aufrufer meldet, sobald
+//auch die übrigen Zähler stimmen).
+static gboolean update_file_badge(SondSeadriveWatcher *w, const gchar *file_full_path,
         SondSeadriveBadge new_badge, gint delta_total)
 {
     SondSeadriveBadge old_badge = SOND_SEADRIVE_BADGE_NONE;
@@ -264,9 +267,10 @@ static void update_file_badge(SondSeadriveWatcher *w, const gchar *file_full_pat
     gboolean old_not_hydrated = FALSE, old_hydrated_pinned = FALSE;
     gboolean new_not_hydrated = FALSE, new_hydrated_pinned = FALSE;
     gint delta_not_hydrated = 0, delta_hydrated_pinned = 0;
+    gboolean badge_changed = FALSE;
 
     if (!file_full_path)
-        return;
+        return FALSE;
 
     if (w->file_badges &&
             g_hash_table_lookup_extended(w->file_badges, file_full_path, NULL,
@@ -291,13 +295,14 @@ static void update_file_badge(SondSeadriveWatcher *w, const gchar *file_full_pat
                     GINT_TO_POINTER(new_badge));
         }
 
-        emit_status(w);
-        g_signal_emit(w, signals[SIGNAL_FILE_CHANGED], 0, file_full_path);
+        badge_changed = TRUE;
     }
 
     if (delta_not_hydrated != 0 || delta_hydrated_pinned != 0 || delta_total != 0)
         update_dir_coverage(w, file_full_path, delta_not_hydrated,
                 delta_hydrated_pinned, delta_total);
+
+    return badge_changed;
 }
 
 SondSeadriveBadge sond_seadrive_watcher_get_file_badge(SondSeadriveWatcher *w,
@@ -398,12 +403,23 @@ static gboolean watcher_idle_cb(gpointer user_data)
 
     //nach dem Stoppen betrifft das Ereignis ein Projekt, das nicht mehr gezeigt wird
     if (!watcher_stop_requested(w)) {
-        update_status(w, d->path_pending_down, d->delta_down, d->path_up,
-                d->up_pending);
+        //Erst alle Zähler und Badges ändern, dann einmal melden: wer auf status-changed
+        //hört, sieht nie einen Zwischenstand (z.B. Datei schon als lokal, aber noch als
+        //ladend gezählt)
+        gboolean badge_changed = FALSE;
+        gboolean status_changed = FALSE;
 
         if (d->path_pending_down)
-            update_file_badge(w, d->path_pending_down, d->coverage_badge,
-                    d->delta_total);
+            badge_changed = update_file_badge(w, d->path_pending_down,
+                    d->coverage_badge, d->delta_total);
+
+        status_changed = update_status(w, d->path_pending_down, d->delta_down,
+                d->path_up, d->up_pending);
+
+        if (badge_changed || status_changed)
+            emit_status(w);
+        if (badge_changed)
+            g_signal_emit(w, signals[SIGNAL_FILE_CHANGED], 0, d->path_pending_down);
 
         if (d->path_down)
             g_signal_emit(w, signals[SIGNAL_HYDRATED], 0, d->path_down);

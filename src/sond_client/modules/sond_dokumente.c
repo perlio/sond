@@ -56,6 +56,7 @@ typedef struct {
     GtkWidget *dialog;         /* offener Dialog "Index-Job" (schwach) */
     guint job_timer;
     guint sync_hoch;           /* Dateien, die noch nicht hochgeladen sind (↑) */
+    guint sync_runter;         /* angeheftete Dateien, die noch geladen werden (↓) */
     GtkWidget *ganz_hinweis;   /* "teilweise offline" bzw. "wird angewendet" */
     gint ganz_ziel;            /* nach dem Umschalten erwartet: 1 alles, 0 nichts, -1 keins */
     gint64 ganz_ablauf;        /* bis wann (monotonic, µs) das Ziel erwartet wird */
@@ -315,6 +316,7 @@ static void on_seadrive_status(SondTreeviewFM *tree, guint down, guint up, gpoin
     GString *text = NULL;
 
     d->sync_hoch = up;
+    d->sync_runter = down;
 #ifdef G_OS_WIN32
     ganz_abgleichen(d);
 #endif
@@ -507,6 +509,7 @@ static void ganz_abgleichen(DokData *d) {
     voll = (angeheftet >= gesamt);
     leer = (angeheftet == 0);
 
+
     if (d->ganz_ziel >= 0 && g_get_monotonic_time() > d->ganz_ablauf)
         d->ganz_ziel = -1;
     if ((d->ganz_ziel == 1 && voll) || (d->ganz_ziel == 0 && leer))
@@ -518,9 +521,17 @@ static void ganz_abgleichen(DokData *d) {
                 angeheftet, gesamt);
     } else {
         schalter_setzen(d, d->schalter_ganz, voll);
-        if (!voll && !leer)
-            text = g_strdup_printf("teilweise offline (%u von %u Dateien angeheftet)",
-                    angeheftet, gesamt);
+        if (!voll && !leer) {
+            if (d->sync_runter > 0)
+                text = g_strdup_printf("teilweise offline (%u von %u Dateien angeheftet, "
+                        "%u davon noch im Laden)", angeheftet, gesamt, d->sync_runter);
+            else
+                text = g_strdup_printf("teilweise offline (%u von %u Dateien angeheftet)",
+                        angeheftet, gesamt);
+        } else if (voll && d->sync_runter > 0)
+            //alle angeheftet, aber der Download läuft noch
+            text = g_strdup_printf("wird geladen (%u von %u Dateien lokal)",
+                    gesamt > d->sync_runter ? gesamt - d->sync_runter : 0, gesamt);
 
         if (voll) {
             schalter_setzen(d, d->schalter, TRUE);
