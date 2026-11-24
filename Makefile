@@ -139,6 +139,8 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/tvfm_test_support.c \
 	$(SRC_DIRS)/tests/test_zond_pdf_document.c \
 	$(SRC_DIRS)/tests/test_projekt_pflege.c \
+	$(SRC_DIRS)/tests/test_tvfm_index_sync.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
 	$(SRC_DIRS)/znd/dbase_zond_index.c \
 	$(SRC_DIRS)/sond_index.c \
 	$(SRC_DIRS)/sond_process_file.c \
