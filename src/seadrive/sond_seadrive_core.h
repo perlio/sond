@@ -42,6 +42,60 @@ G_BEGIN_DECLS
 #define STVFM_PIN_STATE_EXCLUDED     3
 #define STVFM_PIN_STATE_INHERIT      4
 
+/* Anzeige-Zustände (für Badges im Dateibaum); GTK-frei, auf allen Systemen verfügbar */
+
+/* SeaDrive-Cloud-Status, per Cairo als einfacher, voll gefüllter Farbkreis
+ * gezeichnet (wie SondIndexStatus) statt über Icon-Theme-Namen
+ * ("view-refresh", "process-stop", "emblem-default") oder feinere Formen
+ * wie Haken/Ring - beides war bei den winzigen Overlay-Größen kaum
+ * unterscheidbar/erkennbar. Der Normalfall (lokal vorhanden, nicht
+ * gepinnt) bleibt bewusst ohne Icon, um nicht unnötig visuelles Rauschen
+ * zu erzeugen: Violett = nicht lokal und (aktuell) auch nicht angefordert,
+ * Orange = gepinnt, aber noch nicht heruntergeladen ("wird geladen, sobald
+ * online"), Grün = lokal vorhanden UND dauerhaft gehalten (gepinnt).
+ *
+ * Prioritätsreihenfolge (s. sond_treeviewfm_render_file_icon()):
+ * 1. gepinnt UND nicht hydriert -> PENDING (Orange) - explizit angefordert,
+ *    Download folgt.
+ * 2. nicht hydriert, nicht gepinnt -> OFFLINE (Violett) - einfach nicht
+ *    lokal, keine Anforderung.
+ * 3. hydriert UND gepinnt -> PINNED (Grün).
+ * 4. sonst (hydriert, nicht gepinnt) -> NONE - der unmarkierte
+ *    Normalzustand, keine Garantie, aber auch keine Aktion nötig.
+ */
+typedef enum {
+	SOND_SEADRIVE_BADGE_NONE = 0,
+	SOND_SEADRIVE_BADGE_OFFLINE,  /* nicht lokal, nicht angefordert */
+	SOND_SEADRIVE_BADGE_PENDING,  /* gepinnt, noch nicht heruntergeladen */
+	SOND_SEADRIVE_BADGE_PINNED    /* lokal vorhanden UND dauerhaft gehalten */
+} SondSeadriveBadge;
+
+/* Rekursiver SeaDrive-Hydrierungsstatus für einen ganzen Verzeichnis-
+ * Teilbaum (analog SondIndexStatus, aber für den Cloud-Status statt für
+ * Indizierung) - s. sond_treeviewfm_seadrive_get_dir_status(). Ersetzt für
+ * Verzeichnis-Einträge das simple Attribut-Badge (das nur den Ordner
+ * selbst betrifft, was bei SeaDrive praktisch nie gesetzt ist) durch eine
+ * Aussage über den gesamten Teilbaum. Bewusst dieselbe Grün/Violett/kein-
+ * Badge-Bedeutung wie beim Datei-Badge (SondSeadriveBadge), damit der
+ * Nutzer nicht zwei verschiedene Farbschemata lernen muss - Grau ist der
+ * einzige zusätzliche, ordner-spezifische Zustand (kann bei einer
+ * einzelnen Datei nicht auftreten):
+ * - NONE: Teilbaum leer/nicht gescannt, ODER alle Dateien hydriert, aber
+ *   nicht alle gepinnt (= dieselbe Bedeutung wie beim Datei-Badge: kein
+ *   Grund für ein Icon).
+ * - FULL_OFFLINE (Violett): alle Dateien im Teilbaum nicht hydriert.
+ * - FULL_HYDRATED_PINNED (Grün): alle Dateien hydriert UND alle gepinnt.
+ * - MIXED (Grau): weder komplett hydriert noch komplett offline -
+ *   uneinheitlicher Teilbaum, hat also KEINEN gemeinsamen Nenner mit
+ *   einer der anderen drei Bedeutungen.
+ */
+typedef enum {
+	SOND_SEADRIVE_DIR_STATUS_NONE = 0,
+	SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE,
+	SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED,
+	SOND_SEADRIVE_DIR_STATUS_MIXED
+} SondSeadriveDirStatus;
+
 #if defined(_WIN32)
 
 /* TRUE, wenn full_path in einer Cloud-Sync-Wurzel (SeaDrive, OneDrive o. ä.) liegt */

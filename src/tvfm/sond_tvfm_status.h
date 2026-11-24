@@ -23,7 +23,8 @@
  * Aus sond_treeviewfm_render_file_icon() herausgelöste Entscheidungslogik, damit
  * die GTK3-Fassung (Zellrenderer) und die GTK4-Fassung (Zellwidgets) dieselben
  * Regeln anwenden. Zeichnen und Zusammensetzen der Symbole bleibt Sache der
- * Ansicht (sond_icon_util.h für die Badge-Pixbufs).
+ * Ansicht (sond_icon_util.h für die Badge-Pixbufs). Die Zustände selbst (SondSeadriveBadge,
+ * SondSeadriveDirStatus) stehen in seadrive/sond_seadrive_core.h, GTK-frei.
  *
  * Die Zustände, die ein Baum selbst vorhält (Datei-Badges und Ordner-Statistik des
  * SeaDrive-Watchers, Indexstatus), liefert er über SondTVFMBadgeSources. Der
@@ -35,7 +36,7 @@
 
 #include <glib.h>
 
-#include "../sond_icon_util.h"
+#include "../seadrive/sond_seadrive_core.h"
 #include "../sond_fileparts.h"
 #include "../sond_index.h"
 #include "sond_tvfm_item.h"

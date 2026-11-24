@@ -32,10 +32,6 @@
 #include "tvfm_test_support.h"
 
 //Namen der Einträge eines ZIP-Archivs, sortiert, mit "|" verbunden
-static gint vergleiche(gconstpointer a, gconstpointer b) {
-	return g_strcmp0(*(gchar* const*) a, *(gchar* const*) b);
-}
-
 static gchar* zip_namen(Fix *f, gchar const *rel) {
 	gchar *p = g_build_filename(f->dir, rel, NULL);
 	int err = 0;
@@ -47,7 +43,7 @@ static gchar* zip_namen(Fix *f, gchar const *rel) {
 	for (zip_int64_t i = 0; i < zip_get_num_entries(z, 0); i++)
 		g_ptr_array_add(namen, g_strdup(zip_get_name(z, i, 0)));
 	zip_close(z);
-	g_ptr_array_sort(namen, vergleiche);
+	g_ptr_array_sort_values(namen, (GCompareFunc) g_strcmp0);
 	for (guint i = 0; i < namen->len; i++) {
 		if (i)
 			g_string_append_c(str, '|');

@@ -54,10 +54,6 @@ static Fix* baum(void) {
 	return f;
 }
 
-static gint vergleiche(gconstpointer a, gconstpointer b) {
-	return g_strcmp0(*(gchar* const*) a, *(gchar* const*) b);
-}
-
 //sortierte Treffer, mit "|" verbunden; nicht gesuchte Wurzel-Items übergibt start
 static gchar* sucht(Fix *f, GPtrArray *start, SondTVFMSearchOpts const *opts, gint *rc_out) {
 	SondTVFMSearch *s = sond_tvfm_search_new(SOND_TVFM_OWNER(f->owner), opts);
@@ -71,7 +67,7 @@ static gchar* sucht(Fix *f, GPtrArray *start, SondTVFMSearchOpts const *opts, gi
 	g_clear_error(&error);
 
 	hits = sond_tvfm_search_take_hits(s);
-	g_ptr_array_sort(hits, vergleiche);
+	g_ptr_array_sort_values(hits, (GCompareFunc) g_strcmp0);
 	{
 		GString *str = g_string_new(NULL);
 

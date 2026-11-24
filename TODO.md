@@ -130,21 +130,24 @@ Status: offen
 
 ### #269 tvfm/sond_tvfm_status.h bindet GTK ein
 
-Status: offen
+Status: umgesetzt am 24.11.2026, Bau durch den Nutzer steht aus
 
 ```text
  sond_tvfm_status.h ist als GTK-frei beschrieben, bindet aber sond_icon_util.h ein, und das
  ruft <gtk/gtk.h> auf. Gebraucht werden nur die Aufzählungen SondSeadriveBadge und
  SondSeadriveDirStatus (außerdem SondIndexStatus aus sond_index.h). Folge: Wer status.h
- einbindet (auch der Test), braucht die GTK-Header; das Makefile-Ziel test hat dafür gtk+-3.0
- in den CFLAGS. Behebung: die beiden Aufzählungen aus sond_icon_util.h in eine Kopfdatei ohne
- GTK verlegen (z. B. sond_seadrive_status.h, von sond_icon_util.h, status.h, dem Watcher und
- den Bäumen eingebunden) und gtk+-3.0 wieder aus den test-CFLAGS nehmen.
+ einbindet (auch der Test), braucht die GTK-Header.
+ Umsetzung: SondSeadriveBadge und SondSeadriveDirStatus stehen jetzt in
+ seadrive/sond_seadrive_core.h (GTK-frei, auf allen Systemen sichtbar); sond_icon_util.h,
+ tvfm/sond_tvfm_status.h und seadrive/sond_seadrive_watcher.h binden diese Datei ein. Die
+ Bäume (GTK3 und GTK4) bekommen die Aufzählungen weiter über sond_icon_util.h. gtk+-3.0 ist
+ aus den CFLAGS des Makefile-Ziels test entfernt. Syntaxprüfung der betroffenen Dateien ohne
+ GTK, mit GTK3 und mit GTK4: sauber.
 ```
 
 ### #270 sond_password_action_skipped: Sortierung vergleicht Zeigeradressen
 
-Status: offen
+Status: umgesetzt am 24.11.2026, Bau durch den Nutzer steht aus
 
 ```text
  sond_password_action_skipped() (sond_password.c) sortiert mit
@@ -152,9 +155,9 @@ Status: offen
  aber mit Zeigern auf die Einträge auf (Zeiger auf Zeiger), nicht mit den Strings; g_strcmp0
  vergleicht dadurch Speicheradressen. Die Liste der übersprungenen Teile ist deshalb in zufälliger
  Reihenfolge (der Cast verdeckt die Warnung). Folgen sind gering (Reihenfolge einer Anzeige).
- Behebung: eine Vergleichsfunktion, die zweimal dereferenziert (oder g_ptr_array_sort_values()).
- Danach in test_sond_password.c (aktion_uebersprungene_teile) wieder auf die sortierte
- Reihenfolge prüfen.
+ Umsetzung: g_ptr_array_sort_values() (vergleicht die Einträge selbst). Der Test
+ aktion_uebersprungene_teile prüft wieder die sortierte Reihenfolge. Dieselbe Funktion ersetzt in
+ test_tvfm_search.c und test_tvfm_container.c die eigenen Vergleichsfunktionen.
 ```
 
 ## Zurückgestellt

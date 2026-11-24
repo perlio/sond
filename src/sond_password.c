@@ -141,7 +141,7 @@ GPtrArray* sond_password_action_skipped(void) {
 		while (g_hash_table_iter_next(&iter, &key, NULL))
 			g_ptr_array_add(arr, g_strdup((gchar const*) key));
 	}
-	g_ptr_array_sort(arr, (GCompareFunc) g_strcmp0);
+	g_ptr_array_sort_values(arr, (GCompareFunc) g_strcmp0);
 
 	return arr;
 }
