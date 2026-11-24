@@ -40,6 +40,7 @@ typedef struct {
 	gint n_before_move;
 	gint n_after;
 	gboolean last_ok;
+	gboolean seadrive; //die Wurzel gilt als SeaDrive-Pfad (Standard: nein)
 } TvfmTestOwner;
 
 typedef struct {

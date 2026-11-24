@@ -40,9 +40,7 @@ static gchar const* owner_get_root(SondTVFMOwner *o) {
 }
 
 static gboolean owner_is_seadrive_path(SondTVFMOwner *o) {
-	(void) o;
-
-	return FALSE;
+	return ((TvfmTestOwner*) o)->seadrive;
 }
 
 static gint owner_before_move(SondTVFMOwner *o, SondTVFMItem *item, SondTVFMItem *parent,

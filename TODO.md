@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #269.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #271.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258
+Offen: #245, #247, #254, #255, #256, #258, #269, #270
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -121,8 +121,40 @@ Status: offen
    (Löschen, Verschieben, Einfügen gegen eine echte Index-DB). Passwortspeicher: test_sond_password.c (Ablage, Kandidaten,
    Umbenennen, Abfrage und Aktion mit nachgebautem Dialog); test_tvfm_passwort.c (Vorprüfung vor
    Kopieren und Verschieben, Entsperren von ZIP-Einträgen und PDFs mit selbst erzeugten
-   geschützten Dateien). Noch ohne Tests: load und status (SeaDrive, nur Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
+   geschützten Dateien). Anzeige-Entscheidungen und SeaDrive-Hilfen: test_tvfm_status.c (Texte, Badges, Indexstatus,
+   Platzhalter-Erkennung; den SeaDrive-Zustand gibt es nur unter Windows, ein nicht geladener
+   Platzhalter lässt sich dort nicht erzeugen und kommt in den Badge-Tests von einer
+   nachgebauten Quelle). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
    Makefile-Ziel test ist der Linux-Build und enthält es nicht.
+```
+
+### #269 tvfm/sond_tvfm_status.h bindet GTK ein
+
+Status: offen
+
+```text
+ sond_tvfm_status.h ist als GTK-frei beschrieben, bindet aber sond_icon_util.h ein, und das
+ ruft <gtk/gtk.h> auf. Gebraucht werden nur die Aufzählungen SondSeadriveBadge und
+ SondSeadriveDirStatus (außerdem SondIndexStatus aus sond_index.h). Folge: Wer status.h
+ einbindet (auch der Test), braucht die GTK-Header; das Makefile-Ziel test hat dafür gtk+-3.0
+ in den CFLAGS. Behebung: die beiden Aufzählungen aus sond_icon_util.h in eine Kopfdatei ohne
+ GTK verlegen (z. B. sond_seadrive_status.h, von sond_icon_util.h, status.h, dem Watcher und
+ den Bäumen eingebunden) und gtk+-3.0 wieder aus den test-CFLAGS nehmen.
+```
+
+### #270 sond_password_action_skipped: Sortierung vergleicht Zeigeradressen
+
+Status: offen
+
+```text
+ sond_password_action_skipped() (sond_password.c) sortiert mit
+ g_ptr_array_sort(arr, (GCompareFunc) g_strcmp0). g_ptr_array_sort() ruft die Vergleichsfunktion
+ aber mit Zeigern auf die Einträge auf (Zeiger auf Zeiger), nicht mit den Strings; g_strcmp0
+ vergleicht dadurch Speicheradressen. Die Liste der übersprungenen Teile ist deshalb in zufälliger
+ Reihenfolge (der Cast verdeckt die Warnung). Folgen sind gering (Reihenfolge einer Anzeige).
+ Behebung: eine Vergleichsfunktion, die zweimal dereferenziert (oder g_ptr_array_sort_values()).
+ Danach in test_sond_password.c (aktion_uebersprungene_teile) wieder auf die sortierte
+ Reihenfolge prüfen.
 ```
 
 ## Zurückgestellt

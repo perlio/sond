@@ -143,6 +143,8 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
 	$(SRC_DIRS)/tests/test_sond_password.c \
 	$(SRC_DIRS)/tests/test_tvfm_passwort.c \
+	$(SRC_DIRS)/tests/test_tvfm_status.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_status.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_preflight.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_unlock.c \
 	$(SRC_DIRS)/znd/dbase_zond_index.c \
@@ -175,7 +177,7 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_gmessage_helper.c
 CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb libsoup-3.0 \
-	json-glib-1.0 libxml-2.0 pango sqlite3) -I/usr/local/include/mupdf
+	json-glib-1.0 libxml-2.0 pango sqlite3 gtk+-3.0) -I/usr/local/include/mupdf
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
 	libzip libxml-2.0 pango sqlite3 tesseract) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif

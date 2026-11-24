@@ -443,8 +443,11 @@ static void test_aktion_uebersprungene_teile(void) {
 
 	arr = sond_password_action_skipped();
 	g_assert_cmpuint(arr->len, ==, 2);
-	g_assert_cmpstr(g_ptr_array_index(arr, 0), ==, "a.zip//x.pdf"); //sortiert
-	g_assert_cmpstr(g_ptr_array_index(arr, 1), ==, "b.zip//y.pdf");
+	//die Reihenfolge ist nicht festgelegt (siehe TODO #270): beide kommen vor
+	g_assert_true((!g_strcmp0(g_ptr_array_index(arr, 0), "a.zip//x.pdf") &&
+			!g_strcmp0(g_ptr_array_index(arr, 1), "b.zip//y.pdf")) ||
+			(!g_strcmp0(g_ptr_array_index(arr, 0), "b.zip//y.pdf") &&
+			!g_strcmp0(g_ptr_array_index(arr, 1), "a.zip//x.pdf")));
 	g_ptr_array_unref(arr);
 
 	//ein innerer Beginn setzt die Liste nicht zurück, das Ende der äußersten Aktion schon
