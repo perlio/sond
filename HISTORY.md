@@ -6300,3 +6300,31 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  unvollständig markiert). Behebung: die beiden Blöcke in sond_projekt_pflege_delete vertauschen
  (erst remove_filepart, dann Adressen nachführen); umgesetzt, die Markierung im Test ist entfernt.
 ```
+
+## tvfm/sond_tvfm_status.h bindet GTK ein (24.11.2026) (#269)
+
+```text
+ sond_tvfm_status.h ist als GTK-frei beschrieben, bindet aber sond_icon_util.h ein, und das
+ ruft <gtk/gtk.h> auf. Gebraucht werden nur die Aufzählungen SondSeadriveBadge und
+ SondSeadriveDirStatus (außerdem SondIndexStatus aus sond_index.h). Folge: Wer status.h
+ einbindet (auch der Test), braucht die GTK-Header.
+ Umsetzung: SondSeadriveBadge und SondSeadriveDirStatus stehen jetzt in
+ seadrive/sond_seadrive_core.h (GTK-frei, auf allen Systemen sichtbar); sond_icon_util.h,
+ tvfm/sond_tvfm_status.h und seadrive/sond_seadrive_watcher.h binden diese Datei ein. Die
+ Bäume (GTK3 und GTK4) bekommen die Aufzählungen weiter über sond_icon_util.h. gtk+-3.0 ist
+ aus den CFLAGS des Makefile-Ziels test entfernt. Syntaxprüfung der betroffenen Dateien ohne
+ GTK, mit GTK3 und mit GTK4: sauber.
+```
+
+## sond_password_action_skipped: Sortierung vergleicht Zeigeradressen (24.11.2026) (#270)
+
+```text
+ sond_password_action_skipped() (sond_password.c) sortiert mit
+ g_ptr_array_sort(arr, (GCompareFunc) g_strcmp0). g_ptr_array_sort() ruft die Vergleichsfunktion
+ aber mit Zeigern auf die Einträge auf (Zeiger auf Zeiger), nicht mit den Strings; g_strcmp0
+ vergleicht dadurch Speicheradressen. Die Liste der übersprungenen Teile ist deshalb in zufälliger
+ Reihenfolge (der Cast verdeckt die Warnung). Folgen sind gering (Reihenfolge einer Anzeige).
+ Umsetzung: g_ptr_array_sort_values() (vergleicht die Einträge selbst). Der Test
+ aktion_uebersprungene_teile prüft wieder die sortierte Reihenfolge. Dieselbe Funktion ersetzt in
+ test_tvfm_search.c und test_tvfm_container.c die eigenen Vergleichsfunktionen.
+```

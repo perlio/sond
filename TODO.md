@@ -6,7 +6,7 @@ Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #271.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258, #269, #270
+Offen: #245, #247, #254, #255, #256, #258
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -126,38 +126,6 @@ Status: offen
    Platzhalter lässt sich dort nicht erzeugen und kommt in den Badge-Tests von einer
    nachgebauten Quelle). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
    Makefile-Ziel test ist der Linux-Build und enthält es nicht.
-```
-
-### #269 tvfm/sond_tvfm_status.h bindet GTK ein
-
-Status: umgesetzt am 24.11.2026, Bau durch den Nutzer steht aus
-
-```text
- sond_tvfm_status.h ist als GTK-frei beschrieben, bindet aber sond_icon_util.h ein, und das
- ruft <gtk/gtk.h> auf. Gebraucht werden nur die Aufzählungen SondSeadriveBadge und
- SondSeadriveDirStatus (außerdem SondIndexStatus aus sond_index.h). Folge: Wer status.h
- einbindet (auch der Test), braucht die GTK-Header.
- Umsetzung: SondSeadriveBadge und SondSeadriveDirStatus stehen jetzt in
- seadrive/sond_seadrive_core.h (GTK-frei, auf allen Systemen sichtbar); sond_icon_util.h,
- tvfm/sond_tvfm_status.h und seadrive/sond_seadrive_watcher.h binden diese Datei ein. Die
- Bäume (GTK3 und GTK4) bekommen die Aufzählungen weiter über sond_icon_util.h. gtk+-3.0 ist
- aus den CFLAGS des Makefile-Ziels test entfernt. Syntaxprüfung der betroffenen Dateien ohne
- GTK, mit GTK3 und mit GTK4: sauber.
-```
-
-### #270 sond_password_action_skipped: Sortierung vergleicht Zeigeradressen
-
-Status: umgesetzt am 24.11.2026, Bau durch den Nutzer steht aus
-
-```text
- sond_password_action_skipped() (sond_password.c) sortiert mit
- g_ptr_array_sort(arr, (GCompareFunc) g_strcmp0). g_ptr_array_sort() ruft die Vergleichsfunktion
- aber mit Zeigern auf die Einträge auf (Zeiger auf Zeiger), nicht mit den Strings; g_strcmp0
- vergleicht dadurch Speicheradressen. Die Liste der übersprungenen Teile ist deshalb in zufälliger
- Reihenfolge (der Cast verdeckt die Warnung). Folgen sind gering (Reihenfolge einer Anzeige).
- Umsetzung: g_ptr_array_sort_values() (vergleicht die Einträge selbst). Der Test
- aktion_uebersprungene_teile prüft wieder die sortierte Reihenfolge. Dieselbe Funktion ersetzt in
- test_tvfm_search.c und test_tvfm_container.c die eigenen Vergleichsfunktionen.
 ```
 
 ## Zurückgestellt
