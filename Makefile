@@ -138,6 +138,11 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_tvfm_container.c \
 	$(SRC_DIRS)/tests/tvfm_test_support.c \
 	$(SRC_DIRS)/tests/test_zond_pdf_document.c \
+	$(SRC_DIRS)/tests/test_projekt_pflege.c \
+	$(SRC_DIRS)/znd/dbase_zond_index.c \
+	$(SRC_DIRS)/sond_index.c \
+	$(SRC_DIRS)/sond_process_file.c \
+	$(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/zond/zond_pdf_document.c \
 	$(SRC_DIRS)/zond/zond_pdf_part.c \
 	$(SRC_DIRS)/znd/zond_error.c \
@@ -163,10 +168,10 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_file_helper.c \
 	$(SRC_DIRS)/sond_gmessage_helper.c
-CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
+CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb libsoup-3.0 \
 	json-glib-1.0 libxml-2.0 pango sqlite3) -I/usr/local/include/mupdf
-LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb json-glib-1.0 \
-	libzip libxml-2.0 pango sqlite3) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
+LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
+	libzip libxml-2.0 pango sqlite3 tesseract) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm -llexbor
 endif
 
 # Object files

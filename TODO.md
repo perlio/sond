@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #268.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #269.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266, #267
+Offen: #245, #247, #254, #255, #256, #258, #263, #264, #265, #266, #267, #268
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -115,10 +115,27 @@ Status: offen
    (temporäres Projektverzeichnis, Eigentümer, Testdateien werden im Test erzeugt). Dokumentmodell
    des Viewers: test_zond_pdf_document.c (Öffnen über Abschnitte, Lebensdauer von Dokument und
    Abschnitten, nur teilweise initialisierte Seiten, Einfügen, Zuordnung eingefügter Seiten,
-   Signale; erzeugt die PDF-Dateien selbst). Noch ohne Tests: preflight, unlock (Passwörter), index_sync
+   Signale; erzeugt die PDF-Dateien selbst). Pflegelogik: test_projekt_pflege.c (Verschieben,
+   Löschen, Einfügen, Abschnitte, Transaktionsende, Mimepart-Nummern und PDF-Anhänge gegen eine
+   Projekt-DB und einen Index; Dateien werden selbst erzeugt). Noch ohne Tests: preflight, unlock (Passwörter), index_sync
    (Index-Datenbank), load und status (SeaDrive,
    Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
    Makefile-Ziel test ist der Linux-Build und enthält es nicht.
+```
+
+### #268 Pflege: Anhang einer PDF löschen entfernt den gleichnamigen Zwilling mit
+
+Status: umgesetzt am 23.11.2026, Bestätigung steht aus
+
+```text
+ sond_projekt_pflege_delete() führt bei einem PDF-Anhang zuerst die Adressen der übrigen Anhänge
+ nach (emb_sibling_apply) und löscht danach die FILE_PART-Zeile zum Pfad (dbase_zond_remove_filepart,
+ genauer Pfad). Bei zwei Anhängen gleichen Namens heißen die Adressen "x.pdf//bild.txt" und
+ "x.pdf//bild.txt (1)". Wird der erste gelöscht, bekommt der zweite die Adresse "x.pdf//bild.txt";
+ die anschließende Löschung nach dem Pfad des gelöschten Anhangs trifft dann auch seine
+ (angebundene) FILE_PART-Zeile. Der Test /projekt_pflege/delete_pdf zeigt es (derzeit als
+ unvollständig markiert). Behebung: die beiden Blöcke in sond_projekt_pflege_delete vertauschen
+ (erst remove_filepart, dann Adressen nachführen); umgesetzt, die Markierung im Test ist entfernt.
 ```
 
 ### #263 Viewer-Review: schwere Fehler

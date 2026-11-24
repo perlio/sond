@@ -742,19 +742,21 @@ gint sond_projekt_pflege_delete(SondProjektPflege *pflege, SondProjektDelete con
 		return -1;
 	}
 
-	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen
-	sond_projekt_pflege_emb_sibling_clear(pflege);
-	if (d->sfp_emb && (sond_projekt_pflege_emb_sibling_changes(pflege, d->sfp_emb, NULL, error) ||
-			sond_projekt_pflege_emb_sibling_apply(pflege, error))) {
+	/* Die (nicht mehr angebundene, s. check_delete) FILE_PART-Zeile zum Pfad in work und store
+	 * mitlöschen, sonst bleibt sie als Müll stehen. Vor dem Nachführen der Anhang-Adressen: ein
+	 * Geschwister kann danach genau die Adresse des gelöschten Anhangs tragen (bild.txt (1) wird
+	 * bild.txt) und darf nicht mitgelöscht werden. */
+	if (!d->section && !d->from_gmessage && dbase_zond_remove_filepart(dbase, d->path, error)) {
 		sond_projekt_pflege_emb_sibling_clear(pflege);
 		sond_projekt_pflege_tx_abort(pflege);
 
 		return -1;
 	}
 
-	/* Die (nicht mehr angebundene, s. check_delete) FILE_PART-Zeile zum Pfad in work und store
-	 * mitlöschen, sonst bleibt sie als Müll stehen */
-	if (!d->section && !d->from_gmessage && dbase_zond_remove_filepart(dbase, d->path, error)) {
+	//Anhang einer PDF: Adressen der übrigen Anhänge nachführen
+	sond_projekt_pflege_emb_sibling_clear(pflege);
+	if (d->sfp_emb && (sond_projekt_pflege_emb_sibling_changes(pflege, d->sfp_emb, NULL, error) ||
+			sond_projekt_pflege_emb_sibling_apply(pflege, error))) {
 		sond_projekt_pflege_emb_sibling_clear(pflege);
 		sond_projekt_pflege_tx_abort(pflege);
 
