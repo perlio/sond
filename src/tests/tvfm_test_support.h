@@ -75,6 +75,14 @@ void schreibe_eml(Fix*, gchar const *rel, gchar const *betreff, gchar const *tex
  * NULL (gleiche Namen bekommen im Namensbaum einen Zähler). */
 void schreibe_pdf(Fix*, gchar const *rel, ...) G_GNUC_NULL_TERMINATED;
 
+/* ZIP-Archiv rel mit Einträgen als Tripel (Pfad, Inhalt, Passwort), abgeschlossen mit NULL; ein
+ * Passwort NULL lässt den Eintrag unverschlüsselt, sonst AES-256. Ein Pfad mit "/" am Ende ist
+ * ein Verzeichniseintrag. */
+void schreibe_zip_passwort(Fix*, gchar const *rel, ...) G_GNUC_NULL_TERMINATED;
+
+//PDF-Datei rel mit einer leeren Seite, die ein Passwort zum Öffnen verlangt (AES-256)
+void schreibe_pdf_passwort(Fix*, gchar const *rel, gchar const *passwort);
+
 //PDF-Datei rel mit n leeren Seiten, ohne Anhänge
 void schreibe_pdf_seiten(Fix*, gchar const *rel, gint n);
 

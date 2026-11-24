@@ -141,6 +141,10 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_projekt_pflege.c \
 	$(SRC_DIRS)/tests/test_tvfm_index_sync.c \
 	$(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
+	$(SRC_DIRS)/tests/test_sond_password.c \
+	$(SRC_DIRS)/tests/test_tvfm_passwort.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_preflight.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_unlock.c \
 	$(SRC_DIRS)/znd/dbase_zond_index.c \
 	$(SRC_DIRS)/sond_index.c \
 	$(SRC_DIRS)/sond_process_file.c \

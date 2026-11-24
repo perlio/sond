@@ -118,8 +118,10 @@ Status: offen
    Signale; erzeugt die PDF-Dateien selbst). Pflegelogik: test_projekt_pflege.c (Verschieben,
    Löschen, Einfügen, Abschnitte, Transaktionsende, Mimepart-Nummern und PDF-Anhänge gegen eine
    Projekt-DB und einen Index; Dateien werden selbst erzeugt). Index-Pflege des Dateisystems: test_tvfm_index_sync.c
-   (Löschen, Verschieben, Einfügen gegen eine echte Index-DB). Noch ohne Tests: preflight,
-   unlock (Passwörter), load und status (SeaDrive, Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
+   (Löschen, Verschieben, Einfügen gegen eine echte Index-DB). Passwortspeicher: test_sond_password.c (Ablage, Kandidaten,
+   Umbenennen, Abfrage und Aktion mit nachgebautem Dialog); test_tvfm_passwort.c (Vorprüfung vor
+   Kopieren und Verschieben, Entsperren von ZIP-Einträgen und PDFs mit selbst erzeugten
+   geschützten Dateien). Noch ohne Tests: load und status (SeaDrive, nur Windows). Unter Windows braucht der Test zusätzlich seadrive/sond_seadrive_core.c; das
    Makefile-Ziel test ist der Linux-Build und enthält es nicht.
 ```
 

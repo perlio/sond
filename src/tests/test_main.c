@@ -39,6 +39,8 @@ void test_tvfm_container_register(void);
 void test_zond_pdf_document_register(void);
 void test_projekt_pflege_register(void);
 void test_tvfm_index_sync_register(void);
+void test_sond_password_register(void);
+void test_tvfm_passwort_register(void);
 
 int
 main(int argc, char *argv[])
@@ -59,6 +61,8 @@ main(int argc, char *argv[])
     test_zond_pdf_document_register();
     test_projekt_pflege_register();
     test_tvfm_index_sync_register();
+    test_sond_password_register();
+    test_tvfm_passwort_register();
 
     return g_test_run();
 }
