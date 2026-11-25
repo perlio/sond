@@ -42,6 +42,7 @@ void test_tvfm_index_sync_register(void);
 void test_sond_password_register(void);
 void test_tvfm_passwort_register(void);
 void test_tvfm_status_register(void);
+void test_akte_lease_register(void);
 
 int
 main(int argc, char *argv[])
@@ -65,6 +66,7 @@ main(int argc, char *argv[])
     test_sond_password_register();
     test_tvfm_passwort_register();
     test_tvfm_status_register();
+    test_akte_lease_register();
 
     return g_test_run();
 }
