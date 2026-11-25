@@ -52,6 +52,7 @@ typedef struct {
     GPtrArray *nachlauf_dateien; /* entsperrte Dateien, für die ein Nachlauf noch aussteht (g_free) */
     guint nachlauf_timer;
     GtkWidget *btn_abbruch;    /* Job abbrechen */
+    GtkWidget *job_zeile;      /* Zeile mit Fortschritt und Abbruch, nur während eines Jobs sichtbar */
     GtkWidget *job_label;      /* Fortschritt des Index-Jobs */
     GtkWidget *dialog;         /* offener Dialog "Index-Job" (schwach) */
     guint job_timer;
@@ -1317,13 +1318,23 @@ static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d) {
         sond_treeviewfm_unlock_hooks_init(SOND_TREEVIEWFM(d->tree), hooks);
 }
 
+//Die Job-Zeile steht nur, solange es etwas zu melden gibt
+static void on_job_label_geaendert(GObject *label, GParamSpec *pspec, gpointer user_data) {
+    DokData *d = user_data;
+
+    (void) pspec;
+
+    if (d->job_zeile)
+        gtk_widget_set_visible(d->job_zeile, *gtk_label_get_text(GTK_LABEL(label)) != '\0');
+}
+
 GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
         guint lfd_nr, guint year, gint64 akte_id, GError **fehler) {
     GError *error = NULL;
     gchar *root = NULL;
     DokData *d = NULL;
     GtkWidget *box = NULL;
-    GtkWidget *kopf = NULL;
+    GtkWidget *leiste = NULL;
     GtkWidget *label = NULL;
 
     //dieselbe Akte nie zweimal zeigen (Index, Projektdatei und Passwörter gehören je einem Widget)
@@ -1362,79 +1373,76 @@ GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
         return NULL;
     }
 
-    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     d->box = box;
     gtk_widget_set_vexpand(box, TRUE);
     gtk_widget_set_hexpand(box, TRUE);
-    gtk_widget_set_margin_start(box, 8);
-    gtk_widget_set_margin_end(box, 8);
-    gtk_widget_set_margin_top(box, 8);
-    gtk_widget_set_margin_bottom(box, 8);
 
-    //Kopfzeile: Sync-Zustand und Offline-Haltung
-    kopf = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_box_append(GTK_BOX(box), kopf);
-    d->status = gtk_label_new("");
-    gtk_widget_set_hexpand(d->status, TRUE);
-    gtk_label_set_xalign(GTK_LABEL(d->status), 0.0);
-    gtk_widget_set_tooltip_text(d->status,
-            "↓ n: Dateien, die noch auf diesen Rechner geladen werden "
-            "(offline gehalten, noch nicht lokal)\n"
-            "↑ m: lokale Änderungen, die noch nicht hochgeladen sind\n"
-            "✓: alles abgeglichen");
-    gtk_box_append(GTK_BOX(kopf), d->status);
-
-    label = gtk_button_new_with_label("Auswahl zum Indizieren senden ...");
-    gtk_widget_set_tooltip_text(label,
-            "Übergibt die markierten Dateien und Verzeichnisse dem Server zur "
-            "Indizierung (und Texterkennung)");
-    g_signal_connect(label, "clicked", G_CALLBACK(on_index_knopf), d);
-    gtk_box_append(GTK_BOX(kopf), label);
-
-    {
-        GtkWidget *job_zeile = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-
-        d->job_label = gtk_label_new("");
-        gtk_widget_set_hexpand(d->job_label, TRUE);
-        gtk_label_set_xalign(GTK_LABEL(d->job_label), 0.0);
-        gtk_box_append(GTK_BOX(job_zeile), d->job_label);
-        d->btn_abbruch = gtk_button_new_with_label("Job abbrechen");
-        gtk_widget_set_visible(d->btn_abbruch, FALSE);
-        g_signal_connect(d->btn_abbruch, "clicked", G_CALLBACK(on_abbruch_clicked), d);
-        gtk_box_append(GTK_BOX(job_zeile), d->btn_abbruch);
-        gtk_box_append(GTK_BOX(box), job_zeile);
-    }
-
-    kopf = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(kopf), 4);
-    gtk_grid_set_column_spacing(GTK_GRID(kopf), 10);
-    gtk_box_append(GTK_BOX(box), kopf);
+    //Werkzeugleiste in einer Zeile: Offline-Haltung links, Sync-Zustand und Indizieren rechts
+    leiste = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(box), leiste);
 
     d->schalter_ganz = gtk_switch_new();
     gtk_widget_set_valign(d->schalter_ganz, GTK_ALIGN_CENTER);
     gtk_widget_set_tooltip_text(d->schalter_ganz,
             "Hält das ganze Projektverzeichnis dauerhaft auf diesem Rechner, auch neu "
             "hinzukommende Dateien");
-    gtk_grid_attach(GTK_GRID(kopf), d->schalter_ganz, 0, 0, 1, 1);
-    label = gtk_label_new("Ganzes Projektverzeichnis offline verfügbar machen");
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-    gtk_grid_attach(GTK_GRID(kopf), label, 1, 0, 1, 1);
+    gtk_box_append(GTK_BOX(leiste), d->schalter_ganz);
+    label = gtk_label_new("Alles offline");
+    gtk_widget_set_tooltip_text(label,
+            "Das ganze Projektverzeichnis offline verfügbar machen");
+    gtk_box_append(GTK_BOX(leiste), label);
     d->ganz_hinweis = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(d->ganz_hinweis), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(d->ganz_hinweis), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(d->ganz_hinweis), 36);
     gtk_widget_add_css_class(d->ganz_hinweis, "dim-label");
-    gtk_grid_attach(GTK_GRID(kopf), d->ganz_hinweis, 2, 0, 1, 1);
+    gtk_box_append(GTK_BOX(leiste), d->ganz_hinweis);
     d->ganz_ziel = -1;
 
     d->schalter = gtk_switch_new();
     gtk_widget_set_valign(d->schalter, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_start(d->schalter, 24);
+    gtk_widget_set_margin_start(d->schalter, 12);
     gtk_widget_set_tooltip_text(d->schalter,
             "Hält die Projektdatei, den Index und das Verzeichnis .sond dauerhaft "
             "auf diesem Rechner, damit zond auch ohne Verbindung arbeitet");
-    gtk_grid_attach(GTK_GRID(kopf), d->schalter, 0, 1, 1, 1);
-    label = gtk_label_new("Nur die Projektdateien (Projektdatei, Index) offline verfügbar machen");
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-    gtk_grid_attach(GTK_GRID(kopf), label, 1, 1, 1, 1);
+    gtk_box_append(GTK_BOX(leiste), d->schalter);
+    label = gtk_label_new("Nur Projektdateien offline");
+    gtk_widget_set_tooltip_text(label,
+            "Nur die Projektdateien (Projektdatei, Index) offline verfügbar machen");
+    gtk_box_append(GTK_BOX(leiste), label);
+
+    d->status = gtk_label_new("");
+    gtk_widget_set_hexpand(d->status, TRUE);
+    gtk_label_set_xalign(GTK_LABEL(d->status), 1.0);
+    gtk_label_set_ellipsize(GTK_LABEL(d->status), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_tooltip_text(d->status,
+            "↓ n: Dateien, die noch auf diesen Rechner geladen werden "
+            "(offline gehalten, noch nicht lokal)\n"
+            "↑ m: lokale Änderungen, die noch nicht hochgeladen sind\n"
+            "✓: alles abgeglichen");
+    gtk_box_append(GTK_BOX(leiste), d->status);
+
+    label = gtk_button_new_with_label("Auswahl indizieren ...");
+    gtk_widget_set_tooltip_text(label,
+            "Übergibt die markierten Dateien und Verzeichnisse dem Server zur "
+            "Indizierung (und Texterkennung)");
+    g_signal_connect(label, "clicked", G_CALLBACK(on_index_knopf), d);
+    gtk_box_append(GTK_BOX(leiste), label);
+
+    //Fortschritt eines Index-Jobs: nur während eines Jobs sichtbar
+    d->job_zeile = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_visible(d->job_zeile, FALSE);
+    d->job_label = gtk_label_new("");
+    gtk_widget_set_hexpand(d->job_label, TRUE);
+    gtk_label_set_xalign(GTK_LABEL(d->job_label), 0.0);
+    gtk_box_append(GTK_BOX(d->job_zeile), d->job_label);
+    d->btn_abbruch = gtk_button_new_with_label("Job abbrechen");
+    gtk_widget_set_visible(d->btn_abbruch, FALSE);
+    g_signal_connect(d->btn_abbruch, "clicked", G_CALLBACK(on_abbruch_clicked), d);
+    gtk_box_append(GTK_BOX(d->job_zeile), d->btn_abbruch);
+    g_signal_connect(d->job_label, "notify::label", G_CALLBACK(on_job_label_geaendert), d);
+    gtk_box_append(GTK_BOX(box), d->job_zeile);
 
     //Hinweis auf eine Sperre des Baums (zond offen, Index-Job)
     d->sperre = gtk_label_new("");

@@ -32,7 +32,9 @@ typedef struct {
     SondClient *client;
     SondAkteLease *lease;      /* Schreibberechtigung der Akten (Besitz) */
     GtkWidget *entry;
-    GtkWidget *info;           /* gewählte Akte */
+    GtkWidget *info_kurz;      /* Kurzbezeichnung der gewählten Akte */
+    GtkWidget *info_ggs;       /* Gegenstand, kleiner darunter */
+    GtkWidget *btn_ok;         /* "Schließen": Akte schließen und eine andere wählen */
     GtkWidget *btn_zond;       /* zond mit der Projektdatei der gewählten Akte starten */
     GtkWidget *lease_label;    /* Stand der Schreibberechtigung der gewählten Akte */
     GtkWidget *btn_release;    /* Berechtigung zurückgeben */
@@ -92,6 +94,27 @@ static gint64 akte_id_ermitteln(ProjektPriv *p, guint lfd_nr, guint year, const 
     return id;
 }
 
+//Bezeichnung und Gegenstand der gezeigten Akte (NULL oder leer: nichts); der Gegenstand steht kleiner darunter
+static void info_setzen(ProjektPriv *p, const gchar *kurz, const gchar *gegenstand) {
+    gboolean hat_kurz = kurz && *kurz;
+    gboolean hat_ggs = gegenstand && *gegenstand;
+
+    gtk_label_set_text(GTK_LABEL(p->info_kurz), hat_kurz ? kurz : "");
+    gtk_widget_set_tooltip_text(p->info_kurz, hat_kurz ? kurz : NULL);
+    gtk_widget_set_visible(p->info_kurz, hat_kurz);
+    gtk_label_set_text(GTK_LABEL(p->info_ggs), hat_ggs ? gegenstand : "");
+    gtk_widget_set_tooltip_text(p->info_ggs, hat_ggs ? gegenstand : NULL);
+    gtk_widget_set_visible(p->info_ggs, hat_ggs);
+}
+
+//Zeile zur Schreibberechtigung: nur sichtbar, wenn es etwas zu sagen gibt
+static void lease_text_setzen(ProjektPriv *p, const gchar *text) {
+    gtk_label_set_text(GTK_LABEL(p->lease_label), text);
+    gtk_widget_set_visible(p->lease_label, text && *text);
+}
+
+static void entry_zustand(ProjektPriv *p);
+
 /* Läuft zond gerade mit der gezeigten Akte? */
 static gboolean zond_laeuft_fuer_akte(ProjektPriv *p) {
     return p->doku_lib && sond_zond_prozess_laeuft(p->doku_lib);
@@ -104,6 +127,7 @@ static void anzeige_aktualisieren(ProjektPriv *p) {
     gboolean wartet = sond_zond_starter_waiting(p->starter);
 
     gtk_widget_set_sensitive(p->btn_zond, p->doku && !wartet && !zond_laeuft_fuer_akte(p));
+    entry_zustand(p);
     if (p->doku)
         sond_dokumente_sperre_pruefen(p->doku);
     gtk_widget_set_tooltip_text(p->btn_zond, p->doku && zond_laeuft_fuer_akte(p) ?
@@ -111,7 +135,7 @@ static void anzeige_aktualisieren(ProjektPriv *p) {
             "Die Projektdatei der gewählten Akte in zond öffnen");
 
     if (!p->doku) {
-        gtk_label_set_text(GTK_LABEL(p->lease_label), "");
+        lease_text_setzen(p, "");
         gtk_widget_set_visible(p->btn_release, FALSE);
 
         return;
@@ -140,15 +164,20 @@ static void anzeige_aktualisieren(ProjektPriv *p) {
         text = g_strdup(p->doku_akte_id > 0 && sond_akte_lease_may_write(p->lease, p->doku_akte_id) ?
                 "Projekt: auf diesem Rechner ausgecheckt (Stand ohne Server)" :
                 "Projekt: Stand unbekannt (Server nicht befragt)");
-    gtk_label_set_text(GTK_LABEL(p->lease_label), text);
+    lease_text_setzen(p, text);
     g_free(text);
 }
 
-/* Auswahlfeld: grün und bedienbar, außer während eines Index-Jobs (dann wechselt die Akte nicht) */
+/* Die gewählte Akte "rastet ein": Der Entry ist nur ohne gezeigte Akte bedienbar, "Schließen" gibt ihn
+ * wieder frei (nicht während eines Index-Jobs). */
 static void entry_zustand(ProjektPriv *p) {
-    gboolean frei = !(p->doku && sond_dokumente_busy(p->doku));
+    gboolean busy = p->doku && sond_dokumente_busy(p->doku);
 
-    sond_akten_suche_set_aktiv(p->entry, frei);
+    sond_akten_suche_set_aktiv(p->entry, p->doku == NULL);
+    gtk_widget_set_sensitive(p->btn_ok, p->doku && !busy);
+    gtk_widget_set_tooltip_text(p->btn_ok, busy ?
+            "Für die Akte läuft ein Index-Job. Bitte warten, bis er beendet ist." :
+            "Akte schließen und eine andere wählen");
 }
 
 static void on_starter_changed(gpointer user_data) {
@@ -162,6 +191,27 @@ static void on_release_clicked(GtkButton *button, gpointer user_data) {
 
     if (p->doku && p->doku_akte_id > 0)
         sond_zond_starter_confirm_release(p->starter, p->doku_akte_id, p->doku_lib);
+}
+
+/* "Schließen": die gezeigte Akte schließen, den Entry wieder freigeben und die letzte RegNr vorschlagen */
+static void on_ok_clicked(GtkButton *button, gpointer user_data) {
+    ProjektPriv *p = user_data;
+
+    (void) button;
+
+    if (!p->doku || sond_dokumente_busy(p->doku))
+        return;
+
+    sond_zond_starter_cancel_wait(p->starter);
+    gtk_box_remove(GTK_BOX(p->inhalt), p->doku);
+    p->doku = NULL;
+    g_clear_pointer(&p->doku_lib, g_free);
+    p->doku_akte_id = 0;
+    info_setzen(p, NULL, NULL);
+    gtk_editable_set_text(GTK_EDITABLE(p->entry), "");
+    anzeige_aktualisieren(p);
+    sond_akten_suche_vorschlagen(p->entry);
+    sond_akten_suche_fokus(p->entry);
 }
 
 static void on_zond_clicked(GtkButton *button, gpointer user_data) {
@@ -190,7 +240,6 @@ static void akte_waehlen(ProjektPriv *p, guint lfd_nr, guint year, const gchar *
     g_autofree gchar *lib = sond_akten_library_name(lfd_nr, year);
     GError *error = NULL;
     GtkWidget *neu = NULL;
-    gchar *text = NULL;
 
     if (p->doku && !g_strcmp0(p->doku_lib, lib))
         return; //wird schon gezeigt
@@ -207,7 +256,7 @@ static void akte_waehlen(ProjektPriv *p, guint lfd_nr, guint year, const gchar *
         gtk_box_remove(GTK_BOX(p->inhalt), p->doku);
         p->doku = NULL;
         g_clear_pointer(&p->doku_lib, g_free);
-        gtk_label_set_text(GTK_LABEL(p->info), "");
+        info_setzen(p, NULL, NULL);
         anzeige_aktualisieren(p);
     }
 
@@ -228,11 +277,7 @@ static void akte_waehlen(ProjektPriv *p, guint lfd_nr, guint year, const gchar *
     p->doku_year = year;
     p->doku_akte_id = akte_id;
 
-    text = g_strdup_printf("Akte %s%s%s%s%s", lib,
-            (bezeichnung && *bezeichnung) ? " - " : "", (bezeichnung && *bezeichnung) ? bezeichnung : "",
-            (gegenstand && *gegenstand) ? " / " : "", (gegenstand && *gegenstand) ? gegenstand : "");
-    gtk_label_set_text(GTK_LABEL(p->info), text);
-    g_free(text);
+    info_setzen(p, bezeichnung, gegenstand);
     anzeige_aktualisieren(p);
 }
 
@@ -243,26 +288,20 @@ static void on_akte_gewaehlt(const SondAkteTreffer *t, SondSucheServer server, g
     (void) server;
 
     gtk_editable_set_text(GTK_EDITABLE(p->entry), t->regnr_display);
+    sond_client_set_last_regnr(p->client, t->lfd_nr, t->year);
     akte_waehlen(p, t->lfd_nr, t->year, t->kurzbezeichnung, t->gegenstand,
             t->node ? sond_graph_node_get_id(t->node) : 0);
 }
 
-/* Beim Anzeigen der Seite: ohne eigene Wahl die aktuelle Akte des Clients vorschlagen */
+/* Beim Anzeigen der Seite, ohne gezeigte Akte: die zuletzt verwendete RegNr vorschlagen (sie kann im
+ * Aktenmodul gewählt worden sein) */
 static void on_map(GtkWidget *widget, gpointer user_data) {
     ProjektPriv *p = user_data;
-    guint lfd_nr = 0;
-    guint year = 0;
 
     (void) widget;
 
-    if (p->doku || *gtk_editable_get_text(GTK_EDITABLE(p->entry)))
-        return;
-
-    if (sond_client_get_current_akte(p->client, &lfd_nr, &year)) {
-        g_autofree gchar *anzeige = sond_akten_regnr_anzeige(lfd_nr, year);
-
-        gtk_editable_set_text(GTK_EDITABLE(p->entry), anzeige);
-    }
+    if (!p->doku)
+        sond_akten_suche_vorschlagen(p->entry);
 }
 
 static void on_destroy(GtkWidget *widget, gpointer user_data) {
@@ -280,17 +319,17 @@ static void on_destroy(GtkWidget *widget, gpointer user_data) {
 
 GtkWidget* sond_module_projekt_new(SondClient *client) {
     ProjektPriv *p = g_new0(ProjektPriv, 1);
-    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    GtkWidget *zeile = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkWidget *zeile = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *frage = gtk_label_new("Welche Akte?");
 
     p->client = g_object_ref(client);
     p->lease = sond_akte_lease_new(client);
 
-    gtk_widget_set_margin_start(main_box, 20);
-    gtk_widget_set_margin_end(main_box, 20);
-    gtk_widget_set_margin_top(main_box, 20);
-    gtk_widget_set_margin_bottom(main_box, 20);
+    gtk_widget_set_margin_start(main_box, 8);
+    gtk_widget_set_margin_end(main_box, 8);
+    gtk_widget_set_margin_top(main_box, 8);
+    gtk_widget_set_margin_bottom(main_box, 8);
 
     gtk_widget_add_css_class(frage, "heading");
     gtk_box_append(GTK_BOX(zeile), frage);
@@ -299,38 +338,54 @@ GtkWidget* sond_module_projekt_new(SondClient *client) {
     sond_akten_suche_set_funcs(p->entry, on_akte_gewaehlt, NULL, p);
     gtk_box_append(GTK_BOX(zeile), p->entry);
 
-    p->info = gtk_label_new("");
-    gtk_widget_set_hexpand(p->info, TRUE);
-    gtk_label_set_xalign(GTK_LABEL(p->info), 0.0);
-    gtk_label_set_ellipsize(GTK_LABEL(p->info), PANGO_ELLIPSIZE_END);
-    gtk_box_append(GTK_BOX(zeile), p->info);
+    p->btn_ok = gtk_button_new_with_label("Schließen");
+    gtk_widget_set_sensitive(p->btn_ok, FALSE);
+    gtk_widget_set_tooltip_text(p->btn_ok, "Akte schließen und eine andere wählen");
+    g_signal_connect(p->btn_ok, "clicked", G_CALLBACK(on_ok_clicked), p);
+    gtk_box_append(GTK_BOX(zeile), p->btn_ok);
+
+    //Kurzbezeichnung, darunter der Gegenstand kleiner und abgesetzt
+    {
+        GtkWidget *info = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+        gtk_widget_set_hexpand(info, TRUE);
+        gtk_widget_set_valign(info, GTK_ALIGN_CENTER);
+        p->info_kurz = gtk_label_new("");
+        gtk_label_set_xalign(GTK_LABEL(p->info_kurz), 0.0);
+        gtk_label_set_ellipsize(GTK_LABEL(p->info_kurz), PANGO_ELLIPSIZE_END);
+        gtk_widget_set_visible(p->info_kurz, FALSE);
+        gtk_box_append(GTK_BOX(info), p->info_kurz);
+        p->info_ggs = gtk_label_new("");
+        gtk_label_set_xalign(GTK_LABEL(p->info_ggs), 0.0);
+        gtk_label_set_ellipsize(GTK_LABEL(p->info_ggs), PANGO_ELLIPSIZE_END);
+        gtk_widget_add_css_class(p->info_ggs, "caption");
+        gtk_widget_add_css_class(p->info_ggs, "dim-label");
+        gtk_widget_set_visible(p->info_ggs, FALSE);
+        gtk_box_append(GTK_BOX(info), p->info_ggs);
+        gtk_box_append(GTK_BOX(zeile), info);
+    }
 
     p->btn_zond = gtk_button_new_with_label("zond starten");
     gtk_widget_set_sensitive(p->btn_zond, FALSE);
     g_signal_connect(p->btn_zond, "clicked", G_CALLBACK(on_zond_clicked), p);
     gtk_box_append(GTK_BOX(zeile), p->btn_zond);
+
+    p->btn_release = gtk_button_new_with_label("Freigeben");
+    gtk_widget_set_tooltip_text(p->btn_release,
+            "Die Schreibberechtigung zurückgeben, damit ein anderer Rechner die Akte "
+            "bearbeiten kann");
+    g_signal_connect(p->btn_release, "clicked", G_CALLBACK(on_release_clicked), p);
+    gtk_widget_set_visible(p->btn_release, FALSE);
+    gtk_box_append(GTK_BOX(zeile), p->btn_release);
     gtk_box_append(GTK_BOX(main_box), zeile);
 
-    {
-        GtkWidget *lease_zeile = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-
-        p->lease_label = gtk_label_new("");
-        gtk_label_set_xalign(GTK_LABEL(p->lease_label), 0.0);
-        gtk_widget_set_hexpand(p->lease_label, TRUE);
-        gtk_widget_add_css_class(p->lease_label, "dim-label");
-        gtk_box_append(GTK_BOX(lease_zeile), p->lease_label);
-
-        p->btn_release = gtk_button_new_with_label("Freigeben");
-        gtk_widget_set_tooltip_text(p->btn_release,
-                "Die Schreibberechtigung zurückgeben, damit ein anderer Rechner die Akte "
-                "bearbeiten kann");
-        g_signal_connect(p->btn_release, "clicked", G_CALLBACK(on_release_clicked), p);
-        gtk_widget_set_visible(p->btn_release, FALSE);
-        gtk_box_append(GTK_BOX(lease_zeile), p->btn_release);
-        gtk_box_append(GTK_BOX(main_box), lease_zeile);
-    }
-
-    gtk_box_append(GTK_BOX(main_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    p->lease_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(p->lease_label), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(p->lease_label), PANGO_ELLIPSIZE_END);
+    gtk_widget_add_css_class(p->lease_label, "caption");
+    gtk_widget_add_css_class(p->lease_label, "dim-label");
+    gtk_widget_set_visible(p->lease_label, FALSE);
+    gtk_box_append(GTK_BOX(main_box), p->lease_label);
 
     p->inhalt = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_vexpand(p->inhalt, TRUE);

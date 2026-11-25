@@ -78,6 +78,10 @@ void sond_akten_suche_set_funcs(GtkWidget *suche, SondAkteGewaehltFunc gewaehlt,
 /* Bedienbar und grün (TRUE) oder gesperrt und grau (FALSE) */
 void sond_akten_suche_set_aktiv(GtkWidget *suche, gboolean aktiv);
 
+/* Trägt die zuletzt verwendete Registernummer als Vorschlag ein, wenn das Feld bedienbar ist und
+ * leer ist oder noch den letzten Vorschlag enthält. Gewählt wird nichts; Enter bleibt nötig. */
+void sond_akten_suche_vorschlagen(GtkWidget *suche);
+
 /* Fokus auf das Feld, sofern es bedienbar ist */
 void sond_akten_suche_fokus(GtkWidget *suche);
 

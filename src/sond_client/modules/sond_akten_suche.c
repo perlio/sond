@@ -44,6 +44,7 @@ typedef struct {
     SondAkteGewaehltFunc gewaehlt;
     SondAkteUnbekanntFunc unbekannt;
     gpointer data;
+    gchar *vorschlag;   /* Text, den das Feld zuletzt als Vorschlag erhielt */
 } SucheCtx;
 
 /* Callback-Daten für Suchergebnis-Dialog */
@@ -748,6 +749,7 @@ static void ctx_free(gpointer data) {
     SucheCtx *c = data;
 
     g_clear_object(&c->client);
+    g_free(c->vorschlag);
     g_free(c);
     sond_akten_suche_stil_unref();
 }
@@ -762,8 +764,11 @@ GtkWidget* sond_akten_suche_new(SondClient *client) {
 
     sond_akten_suche_stil_ref();
     sond_akten_suche_stil_apply(entry, TRUE);
-    gtk_editable_set_width_chars(GTK_EDITABLE(entry), 30);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Registernummer oder Suchtext, dann Enter");
+    gtk_editable_set_width_chars(GTK_EDITABLE(entry), 32);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Aktennr. oder Suchtext, Enter");
+    gtk_widget_set_tooltip_text(entry,
+            "Registernummer (23/26, 2326 oder 126) oder Suchtext in Bezeichnung und Gegenstand, "
+            "dann Enter");
     g_signal_connect(entry, "activate", G_CALLBACK(on_entry_activate), c);
     g_object_set_data_full(G_OBJECT(entry), "sond-akten-suche", c, ctx_free);
 
@@ -784,6 +789,28 @@ void sond_akten_suche_set_funcs(GtkWidget *suche, SondAkteGewaehltFunc gewaehlt,
 void sond_akten_suche_set_aktiv(GtkWidget *suche, gboolean aktiv) {
     gtk_widget_set_sensitive(suche, aktiv);
     sond_akten_suche_stil_apply(suche, aktiv);
+}
+
+void sond_akten_suche_vorschlagen(GtkWidget *suche) {
+    SucheCtx *c = g_object_get_data(G_OBJECT(suche), "sond-akten-suche");
+    const gchar *text = NULL;
+    guint lfd_nr = 0;
+    guint year = 0;
+
+    g_return_if_fail(c != NULL);
+
+    if (!gtk_widget_get_sensitive(suche) || !sond_client_get_last_regnr(c->client, &lfd_nr, &year))
+        return;
+
+    //hat der Nutzer etwas anderes getippt, bleibt es stehen
+    text = gtk_editable_get_text(GTK_EDITABLE(suche));
+    if (*text && g_strcmp0(text, c->vorschlag))
+        return;
+
+    g_free(c->vorschlag);
+    c->vorschlag = sond_akten_regnr_anzeige(lfd_nr, year);
+    gtk_editable_set_text(GTK_EDITABLE(suche), c->vorschlag);
+    gtk_editable_set_position(GTK_EDITABLE(suche), -1);
 }
 
 void sond_akten_suche_fokus(GtkWidget *suche) {

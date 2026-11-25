@@ -234,20 +234,23 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             break;
 
         case AKTE_STATE_AUSGEWAEHLT:
-            /* Nur Ansicht ohne Sperre; ein neues Suchen ist jederzeit möglich.
-             * Ablegen/Reaktivieren erst nach "Bearbeiten" (dann gesperrt). */
-            gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
-            sond_akten_suche_stil_apply(priv->regnr_entry, TRUE);
+            /* Nur Ansicht ohne Sperre. Die gefundene Akte "rastet ein": der Entry ist gesperrt, bis
+             * "Ok" oder "Abbrechen" die Auswahl beendet. Ablegen/Reaktivieren erst nach
+             * "Bearbeiten" (dann gesperrt). */
+            gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
+
+            gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
 
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
 
             sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, FALSE);
             sond_akten_suche_stil_apply(priv->textview_gegenstand, FALSE);
 
-            /* Keine Sperre gehalten: nichts zu bestätigen oder zu verwerfen */
-            gtk_widget_set_sensitive(priv->btn_ok, FALSE);
+            /* Keine Sperre gehalten: nichts zu speichern; "Ok" und "Abbrechen" beenden die Auswahl */
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
-            gtk_widget_set_sensitive(priv->btn_abbrechen, FALSE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
             gtk_widget_set_visible(priv->btn_ablegen, FALSE);
             gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
             break;
@@ -285,8 +288,7 @@ static void update_action_widgets(SondModuleAktePrivate *priv) {
     gboolean arbeit = gewaehlt && !akte_ist_abgelegt(priv);
     AkteState st = priv->state;
 
-    gtk_widget_set_sensitive(priv->btn_neue_akte,
-            st == AKTE_STATE_INITIAL || st == AKTE_STATE_AUSGEWAEHLT);
+    gtk_widget_set_sensitive(priv->btn_neue_akte, st == AKTE_STATE_INITIAL);
 
     gtk_widget_set_sensitive(priv->btn_import,
             arbeit && st != AKTE_STATE_CREATING);
@@ -444,18 +446,7 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
  * Schlägt die zuletzt verwendete RegNr vom Client im Entry-Feld vor.
  */
 static void suggest_last_regnr(SondModuleAktePrivate *priv) {
-    guint lfd_nr, year;
-    
-    if (!sond_client_get_last_regnr(priv->client, &lfd_nr, &year)) {
-        return;  /* Keine RegNr gespeichert */
-    }
-    
-    gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
-    gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
-    g_free(regnr_display);
-    
-    /* Cursor ans Ende setzen */
-    gtk_editable_set_position(GTK_EDITABLE(priv->regnr_entry), -1);
+    sond_akten_suche_vorschlagen(priv->regnr_entry);
 }
 
 /* ========================================================================
@@ -2717,6 +2708,17 @@ static void on_import_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
  * Public API
  * ======================================================================== */
 
+//Wird die Seite angezeigt, ohne dass eine Akte gewählt ist, steht die zuletzt verwendete RegNr als
+//Vorschlag im Entry (sie kann inzwischen auf der Seite Projekt gewählt worden sein)
+static void on_main_box_map(GtkWidget *widget, gpointer user_data) {
+    SondModuleAktePrivate *priv = user_data;
+
+    (void) widget;
+
+    if (priv->state == AKTE_STATE_INITIAL)
+        suggest_last_regnr(priv);
+}
+
 GtkWidget* sond_module_akte_new(SondClient *client) {
     SondModuleAktePrivate *priv = g_new0(SondModuleAktePrivate, 1);
     priv->client = g_object_ref(client);
@@ -2862,6 +2864,7 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     /* Aufraeumen (Unlock, current_node/client unref, Stil freigeben)
      * beim Zerstoeren des Widgets - s. on_main_box_destroy(). */
     g_signal_connect(main_box, "destroy", G_CALLBACK(on_main_box_destroy), priv);
+    g_signal_connect(main_box, "map", G_CALLBACK(on_main_box_map), priv);
 
     sond_module_set_abort(main_box, akte_abort_cb, priv);
 
