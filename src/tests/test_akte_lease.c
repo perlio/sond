@@ -382,6 +382,20 @@ static void test_index_job(void) {
     g_assert_true(info.by_job);
     sond_akte_lease_info_clear(&info);
 
+    //auch derselbe Nutzer kann sie dem laufenden Job nicht abnehmen, weder sanft noch hart
+    g_assert_cmpint(takeover(f->a2, FALSE, NULL), ==, SOND_LEASE_NOT_ALLOWED);
+    g_assert_cmpint(takeover(f->a2, TRUE, NULL), ==, SOND_LEASE_NOT_ALLOWED);
+    g_assert_false(sond_akte_lease_may_write(f->a2, AKTE));
+    info_holen(f->a2, &info);
+    g_assert_true(info.by_job);
+    g_assert_false(info.takeover_requested);
+    sond_akte_lease_info_clear(&info);
+
+    //ein verwaister Job (ohne Lebenszeichen abgelaufen) gibt sie dagegen frei
+    fake_server_advance(f->srv, SOND_AKTE_LEASE_SECONDS + 1);
+    g_assert_cmpint(takeover(f->a2, TRUE, NULL), ==, SOND_LEASE_OK);
+    g_assert_true(sond_akte_lease_may_write(f->a2, AKTE));
+
     fix_free(f);
 }
 

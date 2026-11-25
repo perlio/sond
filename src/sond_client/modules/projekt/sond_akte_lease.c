@@ -796,7 +796,8 @@ static SondLeaseResult txn_takeover(LeaseTxn *txn, gpointer user_data) {
     if (!st.held || st.mine || st.expired) {
         grant(txn, &st, args);
         result = SOND_LEASE_OK;
-    } else if (!st.same_user) {
+    } else if (!st.same_user || st.is_job) {
+        //einem laufenden Index-Job nimmt niemand die Lease ab (er schreibt auf dem Server weiter)
         result = SOND_LEASE_NOT_ALLOWED;
     } else if (args->force) {
         grant(txn, &st, args);
