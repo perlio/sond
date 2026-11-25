@@ -6328,3 +6328,54 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  aktion_uebersprungene_teile prüft wieder die sortierte Reihenfolge. Dieselbe Funktion ersetzt in
  test_tvfm_search.c und test_tvfm_container.c die eigenen Vergleichsfunktionen.
 ```
+
+## Client: Seite "Projekt", Suchwidget, Module in Unterverzeichnissen (25.11.2026) (#271)
+
+```text
+ Die Seite "Projekt" im Hauptstack ersetzt das Dokumentenfenster: eigene Aktenauswahl,
+ Dokumentenverzeichnis der Akte (sond_dokumente_widget_new statt eines Fensters), "zond starten"
+ mit dem Lease-Ablauf (modules/projekt/sond_zond_lease: Berechtigung holen, Übernahme anfordern
+ oder erzwingen, Warten auf die Freigabe, Index-Job, Freigeben mit Rückfrage, Ereignisse des
+ Hintergrundtakts) und Lease-Zeile mit "Freigeben". Das Projekt-Modul legt die Lease an; das
+ Aktenmodul hat keinen Bezug mehr zu ihr, die Buttons "Dokumente ..." und "zond starten" im
+ Aktenmodul entfallen. Der Baum ist bei laufendem zond oder Index-Job schreibgeschützt (Hinweis
+ über dem Baum). Eine gefundene Akte "rastet ein" (Aktenmodul und Projekt): Entry gesperrt, bis
+ "Ok"/"Abbrechen" bzw. "Schließen" die Auswahl beenden; danach Fokus und letzte RegNr als Vorschlag
+ (sond_akten_suche_vorschlagen), auch wenn sie im anderen Modul gewählt wurde.
+ Die Aktensuche (Oberfläche und Logik: Server zuerst, Rückfall auf SeaDrive, Merkliste, Trefferfenster,
+ "Erneut suchen?") ist als Suchwidget in modules/sond_akten_suche.[ch] ausgelagert und wird von
+ Akte und Projekt genutzt; die RegNr-Helfer (sond_akten_parse_regnr, _library_name, _regnr_anzeige)
+ stehen in sond_akten.[ch], die lokale Suche erkennt die Kurzform ("126" = 1/26). Die Dateien unter
+ modules/ liegen in Unterverzeichnissen je Modul (akte/, projekt/, verwaltung/), Gemeinsames direkt
+ darunter. Die Seite ist platzsparend (Werkzeugleiste in einer Zeile, Info zweizeilig).
+ Behoben: die Zähler "x von y angeheftet" im Dokumentenverzeichnis liefen um ein Ereignis nach
+ (Signale des Watchers kamen vor der Zählung); der Hinweis zeigt "wird geladen (x von y lokal)".
+```
+
+## Lease: Tests gegen einen nachgebauten Server (25.11.2026) (#272)
+
+```text
+ tests/fake_server.[ch] bilden einen Graph-Server im Speicher nach (Knoten, Suche, Node-Locks,
+ steuerbare Serverzeit, SondClient-Funktionen der Lease). tests/test_akte_lease.c prüft acquire,
+ Ablauf nach 48 h, release, Lebenszeichen und Übergabewunsch, takeover (sanft, hart, frei),
+ Index-Job (Übergabe, Rückholung), lokalen Zustand über einen Neustart, Dubletten des
+ Lease-Knotens und Fehler (Server weg, ohne Zeitangabe); ein langsamer Test (mit -m slow) prüft
+ den Bruch eines hängenden Node-Locks. takeover liefert bei einer Job-Lease NOT_ALLOWED (auch
+ für denselben Nutzer), eine abgelaufene Job-Lease bleibt übernehmbar. Damit das GTK-freie
+ Testziel die Tests übersetzt, bindet sond_client.h statt gtk/gtk.h nur glib-object.h und gio.h
+ ein. Nicht abgedeckt: der Takt (30 s) und der Ablauf der Übergabe (GLib-Timer).
+```
+
+## Index-Job: Lease im Hintergrundtakt zurückholen (25.11.2026) (#273, aus #254 Punkt 3)
+
+```text
+ handover_to_job merkt den Job (Akte, Kennung, Library-Name, Zeit) in der State-Datei; er
+ überlebt den Neustart. Der Hintergrundtakt (sond_akte_lease_jobs_pruefen) fragt über einen
+ Rückruf /ocr/status ab (Projekt-Modul: Fehler = unbekannt, kein Job oder anderes Token =
+ beendet) und holt die Berechtigung mit reclaim_from_job zurück, sobald der Job beendet ist
+ (Ereignis SOND_LEASE_EVENT_JOB_ENDED, die Seite Projekt frischt Lease-Zeile und "Freigeben" auf).
+ Eben übergebene Jobs werden 120 s lang nicht geprüft; scheitert die Rückholung wegen des
+ Servers, bleibt der Job vorgemerkt. Fünf Tests (jobs_pruefen, _neustart, _server_weg, _verwaist,
+ _ohne_pruefung). #254 Punkt 1 (Dubletten mit führendem "/") entfällt: der Index ist noch
+ experimentell.
+```
