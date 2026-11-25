@@ -343,6 +343,34 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *self, const gchar *root,
 	return 0;
 }
 
+GPtrArray* sond_treeviewfm_get_selected_fileparts(SondTreeviewFM *self) {
+	GPtrArray *items = NULL;
+	GPtrArray *fileparts = g_ptr_array_new_with_free_func(g_free);
+
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), fileparts);
+
+	items = sond_treeview_get_selected_items(SOND_TREEVIEW(self));
+	for (guint i = 0; i < items->len; i++) {
+		SondTVFMItem *item = g_ptr_array_index(items, i);
+		SondFilePart *sfp = NULL;
+		gchar *filepart = NULL;
+
+		if (sond_tvfm_item_get_item_type(item) != SOND_TVFM_ITEM_TYPE_LEAF)
+			continue;
+
+		sfp = sond_tvfm_item_get_sond_file_part(item);
+		if (!sfp || !sond_file_part_get_parent(sfp))
+			continue;
+
+		filepart = sond_tvfm_item_get_filepart(item);
+		if (filepart)
+			g_ptr_array_add(fileparts, filepart);
+	}
+	g_ptr_array_unref(items);
+
+	return fileparts;
+}
+
 GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM *self) {
 	GPtrArray *items = NULL;
 	GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);

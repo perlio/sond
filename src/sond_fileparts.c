@@ -988,12 +988,24 @@ static GBytes* sond_file_part_zip_read_entry(SondFilePartZip* sfp_zip,
 	return bytes;
 }
 
-/* Voller Pfad einer Datei im Dateisystem: ist path_root gesetzt (Dateibaum in zond), sind die Pfade
- * root-relativ, sonst (z.B. eigenständiger Viewer) stehen sie schon vollständig da. Ein absoluter
- * Pfad (Datei außerhalb des Projekts, z.B. die Quelle beim Einfügen von Seiten) bekommt das
- * Projektverzeichnis nie davor: Projektpfade sind immer relativ. */
+/* Wurzel des Dateisystems für den aufrufenden Thread (z.B. ein Server-Job mit einem temporären
+ * Verzeichnis); sie geht der Wurzel der Klasse (path_root) vor und stört andere Threads nicht. */
+static GPrivate thread_root_private = G_PRIVATE_INIT(g_free);
+
+void sond_file_part_set_thread_root(gchar const *root) {
+	g_private_replace(&thread_root_private, (root && *root) ? g_strdup(root) : NULL);
+}
+
+/* Voller Pfad einer Datei im Dateisystem: ist eine Wurzel gesetzt (für den Thread, sonst path_root
+ * der Klasse: Dateibaum in zond), sind die Pfade root-relativ, sonst (z.B. eigenständiger Viewer)
+ * stehen sie schon vollständig da. Ein absoluter Pfad (Datei außerhalb des Projekts, z.B. die
+ * Quelle beim Einfügen von Seiten) bekommt das Projektverzeichnis nie davor: Projektpfade sind
+ * immer relativ. */
 static gchar* sond_file_part_fs_path(gchar const *path) {
-	gchar const *root = SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
+	gchar const *root = g_private_get(&thread_root_private);
+
+	if (!root)
+		root = SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
 
 	if (root && !g_path_is_absolute(path))
 		return g_strconcat(root, "/", path, NULL);

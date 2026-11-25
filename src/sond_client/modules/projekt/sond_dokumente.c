@@ -857,13 +857,6 @@ static void locked_ctx_free(LockedCtx *ctx) {
     g_free(ctx);
 }
 
-//Die Datei im Dateisystem zu einem Filepart ("a.zip//x.pdf" -> "a.zip")
-static gchar* datei_von_filepart(const gchar *filepart) {
-    const gchar *sep = g_strstr_len(filepart, -1, "//");
-
-    return sep ? g_strndup(filepart, (gsize) (sep - filepart)) : g_strdup(filepart);
-}
-
 static void on_gesperrt_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpointer user_data) {
     LockedCtx *ctx = user_data;
     DokData *d = ctx->d;
@@ -898,7 +891,8 @@ static void on_gesperrt_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpoi
             if (!d->nachlauf_dateien)
                 d->nachlauf_dateien = g_ptr_array_new_with_free_func(g_free);
             for (guint i = 0; i < res.decrypted->len; i++) {
-                gchar *datei = datei_von_filepart(g_ptr_array_index(res.decrypted, i));
+                //der entsperrte Teil selbst ("a.zip//x.pdf"); der Server lädt die Wurzeldatei
+                gchar *datei = g_strdup(g_ptr_array_index(res.decrypted, i));
                 gboolean bekannt = FALSE;
 
                 for (guint k = 0; k < d->nachlauf_dateien->len; k++)
@@ -1013,7 +1007,8 @@ static void on_indexdlg_abbrechen(GtkButton *button, gpointer user_data) {
 }
 
 /* Die markierten Einträge des Dateisystems als Pfade relativ zum Projektverzeichnis,
- * getrennt nach Dateien und Verzeichnissen */
+ * getrennt nach Dateien und Verzeichnissen. Markierte Teile in Containern ("x.zip//a.pdf") kommen
+ * zu den Dateien; der Server lädt die Wurzeldatei und indiziert nur diese Teile. */
 static void auswahl_sammeln(DokData *d, GPtrArray *dateien, GPtrArray *verzeichnisse) {
     const gchar *wurzel = sond_treeviewfm_get_root(SOND_TREEVIEWFM(d->tree));
     GPtrArray *pfade = sond_treeviewfm_get_selected_paths(SOND_TREEVIEWFM(d->tree));
@@ -1029,6 +1024,11 @@ static void auswahl_sammeln(DokData *d, GPtrArray *dateien, GPtrArray *verzeichn
         g_ptr_array_add(g_file_test(voll, G_FILE_TEST_IS_DIR) ? verzeichnisse : dateien,
                 g_strdup(voll + laenge + 1));
     }
+    g_ptr_array_unref(pfade);
+
+    pfade = sond_treeviewfm_get_selected_fileparts(SOND_TREEVIEWFM(d->tree));
+    for (guint i = 0; i < pfade->len; i++)
+        g_ptr_array_add(dateien, g_strdup(g_ptr_array_index(pfade, i)));
     g_ptr_array_unref(pfade);
 }
 

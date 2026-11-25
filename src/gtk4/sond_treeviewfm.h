@@ -150,6 +150,11 @@ gboolean sond_treeviewfm_is_seadrive_path(SondTreeviewFM*);
  * g_ptr_array_unref()); Einträge in Containern fehlen. */
 GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM*);
 
+/* Die Fileparts ("x.zip//a.pdf", "y.pdf//anhang.pdf") der markierten Einträge, die in einem Container
+ * liegen (g_free(), g_ptr_array_unref()); Verzeichnisse im Container und Teile einer Datei sind
+ * nicht dabei. Ergänzt sond_treeviewfm_get_selected_paths(). */
+GPtrArray* sond_treeviewfm_get_selected_fileparts(SondTreeviewFM*);
+
 /* Pin-Zustand (STVFM_PIN_STATE_*, s. sond_seadrive_core.h) der Markierten setzen;
  * Verzeichnisse rekursiv. Gescheiterte Einträge werden in einem Dialog gemeldet.
  * Ohne SeaDrive ohne Wirkung. */

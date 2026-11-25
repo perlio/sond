@@ -44,6 +44,12 @@ struct _SondFilePartClass {
 	GPtrArray* arr_opened_files;
 };
 
+/* Setzt die Wurzel des Dateisystems nur für den aufrufenden Thread (NULL oder leer löscht sie):
+ * Pfade der Fileparts sind dann relativ zu root. Sie geht der Klassen-Wurzel path_root vor und
+ * lässt andere Threads unberührt (Server-Job mit einem temporären Verzeichnis je Job). Gilt für
+ * alle Zugriffe des Threads auf das Dateisystem, nicht für andere Threads, die er startet. */
+void sond_file_part_set_thread_root(gchar const *root);
+
 SondFilePart* sond_file_part_is_open(SondFilePart* sfp, const gchar* path);
 
 SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,

@@ -23,6 +23,7 @@
 #include "../sond_ocr.h"
 #include "../sond_process_file.h"
 #include "../sond_index.h"
+#include "../sond_fileparts.h"
 
 #include <glib/gstdio.h>
 #include <libsoup/soup.h>
@@ -248,6 +249,7 @@ static void ocr_job_update_progress(OcrJobInfo *info,
 static void ocr_job_mark_complete(OcrJobInfo *info) {
     g_mutex_lock(&info->mutex);
     info->running = FALSE;
+    info->wctx_cancel = NULL;   //der Verarbeitungskontext des Threads endet mit dem Job
     info->end_time = g_date_time_new_now_local();
     g_mutex_unlock(&info->mutex);
 }
@@ -630,6 +632,38 @@ static gchar* ocr_normalize_selection_path(const gchar *in) {
     return result;
 }
 
+/* Wie ocr_normalize_selection_path(), aber ein Teil in einem Container bleibt erhalten:
+ * "x.zip//a.pdf" ("//" trennt die Schichten) wird zu "/x.zip//a.pdf". Der Pfad vor dem "//" wird
+ * normalisiert, der Teil dahinter bleibt wie er ist (Namen im Container, keine Dateipfade). */
+static gchar* ocr_normalize_selection_filepart(const gchar *in) {
+    gchar *trimmed = NULL;
+    gchar const *sep = NULL;
+    gchar *result = NULL;
+
+    if (!in)
+        return NULL;
+
+    trimmed = g_strstrip(g_strdup(in));
+    g_strdelimit(trimmed, "\\", '/');
+
+    //ein "//" gleich am Anfang trennt nichts ab
+    sep = (trimmed[0] && trimmed[1]) ? strstr(trimmed + 1, "//") : NULL;
+    if (sep && sep[2]) {
+        gchar *root_raw = g_strndup(trimmed, (gsize) (sep - trimmed));
+        gchar *root = ocr_normalize_selection_path(root_raw);
+
+        if (root)
+            result = g_strconcat(root, "//", sep + 2, NULL);
+        g_free(root_raw);
+        g_free(root);
+    } else {
+        result = ocr_normalize_selection_path(trimmed);
+    }
+    g_free(trimmed);
+
+    return result;
+}
+
 /* Liest "files" und "dirs" (Arrays von Strings) aus dem JSON-Body. Rückgabe: -1 bei
  * ungültigem Inhalt (error_text gesetzt), 0 ohne Auswahl, 1 mit Auswahl. */
 static gint ocr_parse_selection(SoupServerMessage *msg, GPtrArray **sel_files,
@@ -671,7 +705,8 @@ static gint ocr_parse_selection(SoupServerMessage *msg, GPtrArray **sel_files,
             gchar *norm = NULL;
 
             if (!JSON_NODE_HOLDS_VALUE(json_array_get_element(arr, i)) ||
-                    !(norm = ocr_normalize_selection_path(
+                    !(norm = (k == 0 ? ocr_normalize_selection_filepart :
+                            ocr_normalize_selection_path)(
                             json_array_get_string_element(arr, i)))) {
                 *error_text = "Invalid path in selection";
                 goto fail;
@@ -1037,8 +1072,8 @@ static void handle_ocr_status(SoupServer *soup_server,
  *
  * POST /ocr/cancel?library_name=XXX
  *
- * Fordert den Abbruch des laufenden Jobs an; der Job endet nach der Datei, die er
- * gerade bearbeitet.
+ * Fordert den Abbruch des laufenden Jobs an. Der Job bricht in der Datei ab (nach der Seite
+ * bzw. dem Teil, die gerade bearbeitet werden), das bis dahin Erreichte bleibt erhalten.
  */
 static void handle_ocr_cancel(SoupServer *soup_server,
                               SoupServerMessage *msg,
@@ -1082,6 +1117,11 @@ static void handle_ocr_cancel(SoupServer *soup_server,
     }
 
     g_atomic_int_set(&job_info->cancel, 1);
+    //auch die laufende Datei (Seiten, Container, OCR) bricht ab
+    g_mutex_lock(&job_info->mutex);
+    if (job_info->wctx_cancel)
+        g_atomic_int_set(job_info->wctx_cancel, 1);
+    g_mutex_unlock(&job_info->mutex);
     LOG_INFO("Cancel requested for OCR job of library '%s'", library_name);
     send_json_response(msg, SOUP_STATUS_OK, "{\"success\":true,\"message\":\"Cancel requested\"}");
 }
@@ -1728,10 +1768,162 @@ static void seafile_file_free(SeafileFile *file) {
  */
 #define INDEX_DB_FILENAME           "/.sond_index.db"
 
+/* -----------------------------------------------------------------------
+ * Teile in Containern (x.zip//a.pdf)
+ * ----------------------------------------------------------------------- */
+
+/* Die Dateiteile (SondFilePart) führen eine Klassen-weite Liste der geöffneten Dateien, die nicht
+ * thread-sicher ist; der Abschnitt, der sie benutzt, läuft nur in einem Job zugleich. */
+static GMutex fileparts_mutex;
+
+/* Verzeichnis samt Inhalt löschen. Nur für das temporäre Verzeichnis eines Jobs. */
+static void remove_tree(gchar const *path) {
+    GDir *dir = g_dir_open(path, 0, NULL);
+    gchar const *name = NULL;
+
+    if (dir) {
+        while ((name = g_dir_read_name(dir))) {
+            gchar *child = g_build_filename(path, name, NULL);
+
+            if (g_file_test(child, G_FILE_TEST_IS_DIR) && !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+                remove_tree(child);
+            else
+                g_remove(child);
+            g_free(child);
+        }
+        g_dir_close(dir);
+    }
+    g_rmdir(path);
+}
+
+/* Die Sperrliste des Verarbeitungskontexts (passwortgeschützte Teile) in den Job übernehmen und
+ * leeren: sond_process_fileparts() beginnt jeden Lauf mit einer leeren Liste. */
+static void job_take_locked(SondProcessFileCtx *wctx, OcrJobInfo *job_info) {
+    if (!wctx->locked || wctx->locked->len == 0)
+        return;
+
+    g_mutex_lock(&job_info->mutex);
+    if (!job_info->locked)
+        job_info->locked = g_ptr_array_new_with_free_func(sond_locked_item_free_server);
+    for (guint i = 0; i < wctx->locked->len; i++) {
+        SondLockedItem *src = g_ptr_array_index(wctx->locked, i);
+        SondLockedItem *copy = g_new0(SondLockedItem, 1);
+
+        copy->filepart = g_strdup(src->filepart);
+        copy->kind = src->kind;
+        g_ptr_array_add(job_info->locked, copy);
+    }
+    g_mutex_unlock(&job_info->mutex);
+    g_ptr_array_set_size(wctx->locked, 0);
+}
+
+/* Teile (parts: Fileparts ohne führendes '/', alle in der Wurzeldatei file) indizieren und OCRen:
+ * die Wurzeldatei wird in das temporäre Verzeichnis des Jobs geladen (Pfade wie in der Bibliothek),
+ * sond_process_fileparts() arbeitet auf ihr wie zond im Projektverzeichnis, und eine geänderte
+ * Wurzeldatei (OCR in einem Teil schreibt den Container neu) wird wieder hochgeladen. Auch nach
+ * einem Abbruch: das Teilergebnis passt zum Index. Die Wurzeldatei gilt nicht als verarbeitet (kein
+ * Eintrag im OCR-Log), denn nur ein Teil wurde bearbeitet. */
+static void process_root_parts(SeafileConfig *config, SoupSession *session,
+        SondProcessFileCtx *wctx, OcrLogEntry *log_entry, OcrJobInfo *job_info,
+        gchar **tmp_root, SeafileFile const *file, GPtrArray const *parts) {
+    GError *error = NULL;
+    gchar *local = NULL;
+    gchar *dir = NULL;
+    guchar *data = NULL;
+    gsize size = 0;
+    gchar *sum_before = NULL;
+    GHashTable *ht = NULL;
+
+    if (!*tmp_root) {
+        *tmp_root = g_dir_make_tmp("sond-job-XXXXXX", &error);
+        if (!*tmp_root) {
+            ocr_log_add_message(log_entry, "Temporäres Verzeichnis nicht anlegbar: %s",
+                    error ? error->message : "unknown");
+            g_clear_error(&error);
+            return;
+        }
+    }
+
+    local = g_build_filename(*tmp_root, file->path + 1, NULL);
+    dir = g_path_get_dirname(local);
+    g_mkdir_with_parents(dir, 0700);
+    g_free(dir);
+
+    data = seafile_download_file(config, session, file->path, &size, &error);
+    if (!data) {
+        ocr_log_add_message(log_entry, "Download '%s' failed: %s", file->path,
+                error ? error->message : "unknown");
+        g_clear_error(&error);
+        g_free(local);
+        return;
+    }
+    sum_before = g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, size);
+    if (!g_file_set_contents(local, (gchar const*) data, (gssize) size, &error)) {
+        ocr_log_add_message(log_entry, "'%s' nicht ablegbar: %s", file->path,
+                error ? error->message : "unknown");
+        g_clear_error(&error);
+        g_free(data);
+        g_free(sum_before);
+        g_free(local);
+        return;
+    }
+    g_free(data);
+
+    ht = g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
+
+    g_mutex_lock(&fileparts_mutex);
+    sond_file_part_set_thread_root(*tmp_root);
+
+    for (guint i = 0; i < parts->len; i++) {
+        gchar const *part = g_ptr_array_index((GPtrArray*) parts, i);
+        SondFilePart *sfp = sond_file_part_from_filepart_leaf(part, &error);
+
+        if (!sfp) {
+            ocr_log_add_message(log_entry, "Teil '%s' nicht öffenbar: %s", part,
+                    error ? error->message : "unknown");
+            g_clear_error(&error);
+            continue;
+        }
+        g_hash_table_insert(ht, sfp, NULL);   //die Tabelle übernimmt die Referenz
+    }
+
+    if (g_hash_table_size(ht) > 0) {
+        job_take_locked(wctx, job_info);   //aus einem vorigen Lauf
+        sond_process_fileparts(wctx, ht);
+        job_take_locked(wctx, job_info);
+    }
+
+    g_hash_table_destroy(ht);   //gibt die Dateiteile frei, ehe das Verzeichnis verschwindet
+    sond_file_part_set_thread_root(NULL);
+    g_mutex_unlock(&fileparts_mutex);
+
+    //geändert (OCR hat den Container neu geschrieben): die Wurzeldatei zurückladen
+    if (g_file_get_contents(local, (gchar**) &data, &size, &error)) {
+        gchar *sum_after = g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, size);
+
+        if (g_strcmp0(sum_before, sum_after)) {
+            if (!seafile_upload_file(config, session, file->path, data, size, &error)) {
+                ocr_log_add_message(log_entry, "Upload '%s' failed: %s", file->path,
+                        error ? error->message : "unknown");
+                g_clear_error(&error);
+            }
+        }
+        g_free(sum_after);
+        g_free(data);
+    } else {
+        ocr_log_add_message(log_entry, "'%s' nicht lesbar: %s", file->path,
+                error ? error->message : "unknown");
+        g_clear_error(&error);
+    }
+
+    g_remove(local);   //Platz freigeben; das Verzeichnis folgt am Ende des Jobs
+    g_free(sum_before);
+    g_free(local);
+}
+
 static gpointer seafile_repo_worker_thread(gpointer user_data) {
 	GError *error = NULL;
 	fz_context* ctx = NULL;
-	gint cancel_all = 0;
 	gint global_progress = 0;
 
     WorkerThreadData *thread_data = (WorkerThreadData*)user_data;
@@ -1761,7 +1953,7 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
     OcrLogEntry *log_entry = ocr_log_read(&config, session);
 
     SondOcrPool* ocr_pool = sond_ocr_pool_new("/usr/share/tesseract-ocr/5/tessdata/",
-    		"deu", 8, &cancel_all, &global_progress, &error);
+    		"deu", 8, &job_info->cancel, &global_progress, &error);
     if (!ocr_pool) {
 		LOG_ERROR("Failed to create threadpool: %s", error->message);
 		g_error_free(error);
@@ -1867,6 +2059,21 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
     		.ocr_mode = job_info->ocr_mode,
     };
 
+    /* Abbruch auch innerhalb einer Datei: /ocr/cancel setzt wctx.cancel über diesen Zeiger. Ein
+     * Abbruch, der schon vor der Anmeldung kam, gilt sofort. */
+    g_mutex_lock(&job_info->mutex);
+    job_info->wctx_cancel = &wctx.cancel;
+    if (g_atomic_int_get(&job_info->cancel))
+        g_atomic_int_set(&wctx.cancel, 1);
+    g_mutex_unlock(&job_info->mutex);
+
+    /* Teile in Containern: Wurzeldatei -> Fileparts; whole: Dateien, die ganz gewählt sind (auch über
+     * ein Verzeichnis), dort gilt die ganze Datei */
+    GHashTable *parts_map = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+            (GDestroyNotify) g_ptr_array_unref);
+    GHashTable *whole = g_hash_table_new(g_str_hash, g_str_equal);
+    gchar *tmp_root = NULL;   /* temporäres Verzeichnis für Teile in Containern */
+
     /* Liste alle Dateien rekursiv */
     GList *files = NULL;
     gboolean selection = (job_info->sel_files || job_info->sel_dirs);
@@ -1889,20 +2096,38 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             for (GList *l = sub; l; l = l->next) {
                 SeafileFile *f = l->data;
 
-                if (g_hash_table_add(seen, f->path))
+                if (g_hash_table_add(seen, f->path)) {
+                    g_hash_table_add(whole, f->path);
                     files = g_list_append(files, f);
-                else
+                } else {
                     seafile_file_free(f);
+                }
             }
             g_list_free(sub);
         }
 
         for (guint k = 0; job_info->sel_files && k < job_info->sel_files->len; k++) {
-            gchar const *path = g_ptr_array_index(job_info->sel_files, k);
+            gchar const *entry = g_ptr_array_index(job_info->sel_files, k);
+            //ein Teil in einem Container ("/x.zip//a.pdf"): die Wurzeldatei wird geladen
+            gchar const *sep = strstr(entry + 1, "//");
+            g_autofree gchar *root_path = sep ? g_strndup(entry, (gsize) (sep - entry)) : NULL;
+            gchar const *path = root_path ? root_path : entry;
             SeafileFile *f = NULL;
 
             gboolean exists = FALSE;
             GDateTime *mtime = NULL;
+
+            if (sep) {
+                GPtrArray *arr = g_hash_table_lookup(parts_map, path);
+
+                if (!arr) {
+                    arr = g_ptr_array_new_with_free_func(g_free);
+                    g_hash_table_insert(parts_map, g_strdup(path), arr);
+                }
+                g_ptr_array_add(arr, g_strdup(entry + 1));   //ohne führendes '/'
+            } else {
+                g_hash_table_add(whole, (gpointer) path);
+            }
 
             if (g_hash_table_contains(seen, path))
                 continue;
@@ -1991,6 +2216,21 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
 
         ocr_job_update_progress(job_info, file->path);
 
+        /* nur Teile dieser Datei gewählt (Container): sie werden eigens verarbeitet */
+        {
+            GPtrArray *parts = g_hash_table_lookup(parts_map, file->path);
+
+            if (parts && !g_hash_table_contains(whole, file->path)) {
+                process_root_parts(&config, session, &wctx, log_entry, job_info, &tmp_root,
+                        file, parts);
+                if (g_atomic_int_get(&job_info->cancel)) {
+                    ocr_log_add_message(log_entry, "Job abgebrochen in '%s'", file->path);
+                    break;
+                }
+                continue;
+            }
+        }
+
         if (!should_process)
             continue;
 
@@ -2029,6 +2269,8 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
 
 		sond_process_file(&wctx, data, data_size, index_key,
         				&result.data, &result.size, &result.pdf_count, NULL);
+        /* Bei einem Abbruch in dieser Datei ist sie nur teilweise bearbeitet */
+        gboolean abgebrochen = g_atomic_int_get(&job_info->cancel) != 0;
 
         /* Ordner zusammenfassen: einmal je Verzeichnis nach dem Lauf vormerken */
         if (index_ctx && sond_index_ctx_coverage_get(index_ctx, index_key) >= wctx.ocr_mode) {
@@ -2063,6 +2305,14 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             }
         }
 
+        /* Abgebrochen: das Teilergebnis ist hochgeladen (es passt zum Index, der die bearbeiteten
+         * Seiten kennt), die Datei gilt aber nicht als verarbeitet und wird beim nächsten Lauf
+         * fortgesetzt */
+        if (abgebrochen) {
+            ocr_log_add_message(log_entry, "Job abgebrochen in '%s'", file->path);
+            break;
+        }
+
         /* In Log eintragen */
 		GDateTime *now = g_date_time_new_now_local();
 		g_hash_table_insert(log_entry->files_new, g_strdup(file->path), now);
@@ -2082,6 +2332,19 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
             g_clear_error(&upload_err);
         }
     }
+
+    if (tmp_root) {
+        remove_tree(tmp_root);
+        g_free(tmp_root);
+        tmp_root = NULL;
+    }
+    g_hash_table_destroy(parts_map);
+    g_hash_table_destroy(whole);
+
+    /* der Verarbeitungskontext gilt nur bis hier: /ocr/cancel darf nicht mehr darauf zeigen */
+    g_mutex_lock(&job_info->mutex);
+    job_info->wctx_cancel = NULL;
+    g_mutex_unlock(&job_info->mutex);
 
     /* Übersprungene, passwortgeschützte Teile für den Client festhalten */
     if (wctx.locked && wctx.locked->len > 0) {

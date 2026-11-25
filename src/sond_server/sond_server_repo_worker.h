@@ -50,6 +50,8 @@ typedef struct {
     GPtrArray *sel_dirs;      /* nur diese Verzeichnisse (rekursiv), NULL = alle */
     gchar     *job_token;     /* vom Client vergeben, wird nur in /ocr/status zurückgegeben */
     gint       cancel;        /* atomar: Abbruch angefordert */
+    gint      *wctx_cancel;   /* Abbruch-Merker des laufenden Verarbeitungskontexts (nur unter
+                               * mutex, solange der Worker-Thread ihn hat), sonst NULL */
     gchar     *error_message; /* Grund, wenn der Job nicht (vollständig) lief, sonst NULL */
     GPtrArray *locked;        /* wegen Passwortschutzes übersprungene Teile (SondLockedItem*), NULL = keine */
 } OcrJobInfo;
