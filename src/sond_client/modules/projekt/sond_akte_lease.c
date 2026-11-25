@@ -54,6 +54,26 @@ typedef struct {
     guint clean_checks; //aufeinanderfolgende Prüfungen "alles gespeichert und hochgeladen"
 } LocalLease;
 
+//Ein Index-Job, dem dieses Gerät eine Berechtigung übergeben hat
+typedef struct {
+    gchar *token;
+    gchar *name;   //Library-Name der Akte
+    gint64 at;     //lokale Zeit (Unix) der Übergabe
+} LocalJob;
+
+static void local_job_free(gpointer data) {
+    LocalJob *j = data;
+
+    if (!j)
+        return;
+    g_free(j->token);
+    g_free(j->name);
+    g_free(j);
+}
+
+//Eben übergebene Jobs werden nicht geprüft: Der Start auf dem Server kann noch ausstehen
+#define JOB_GRACE_SECONDS 120
+
 static void local_lease_free(gpointer data) {
     LocalLease *ll = data;
 
@@ -82,6 +102,9 @@ struct _SondAkteLease {
     gchar *device_name;
     gchar *state_path;
     GHashTable *local; //gint64* akte_id -> LocalLease*
+    GHashTable *jobs;  //gint64* akte_id -> LocalJob*: übergebene Index-Jobs
+    SondJobStatusFunc job_func;
+    gpointer job_data;
 
     SondLeaseEventFunc event_func;
     gpointer event_data;
@@ -133,6 +156,17 @@ static void state_save(SondAkteLease *lease) {
         g_free(group);
     }
 
+    g_hash_table_iter_init(&iter, lease->jobs);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        LocalJob *j = value;
+        gchar *group = g_strdup_printf("job_%" G_GINT64_FORMAT, *(gint64*) key);
+
+        g_key_file_set_string(kf, group, "token", j->token);
+        g_key_file_set_string(kf, group, "name", j->name ? j->name : "");
+        g_key_file_set_int64(kf, group, "at", j->at);
+        g_free(group);
+    }
+
     dir = g_path_get_dirname(lease->state_path);
     g_mkdir_with_parents(dir, 0700);
     g_free(dir);
@@ -160,6 +194,26 @@ static void state_load(SondAkteLease *lease) {
             LocalLease *ll = NULL;
             gint64 *key = NULL;
 
+            if (g_str_has_prefix(*g, "job_")) {
+                LocalJob *j = NULL;
+
+                akte_id = g_ascii_strtoll(*g + 4, NULL, 10);
+                if (akte_id <= 0)
+                    continue;
+
+                j = g_new0(LocalJob, 1);
+                j->token = g_key_file_get_string(kf, *g, "token", NULL);
+                j->name = g_key_file_get_string(kf, *g, "name", NULL);
+                j->at = g_key_file_get_int64(kf, *g, "at", NULL);
+                if (!j->token || !*j->token) {
+                    local_job_free(j);
+                    continue;
+                }
+                key = g_new(gint64, 1);
+                *key = akte_id;
+                g_hash_table_replace(lease->jobs, key, j);
+                continue;
+            }
             if (!g_str_has_prefix(*g, "lease_"))
                 continue;
             akte_id = g_ascii_strtoll(*g + 6, NULL, 10);
@@ -265,6 +319,8 @@ SondAkteLease* sond_akte_lease_new(SondClient *client) {
     lease->state_path = default_state_path();
     lease->local = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free,
             local_lease_free);
+    lease->jobs = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free,
+            local_job_free);
 
     state_load(lease);
 
@@ -298,6 +354,7 @@ void sond_akte_lease_free(SondAkteLease *lease) {
     g_slist_free(lease->procs);
 
     g_hash_table_destroy(lease->local);
+    g_hash_table_destroy(lease->jobs);
     g_free(lease->device_id);
     g_free(lease->device_name);
     g_free(lease->state_path);
@@ -1081,8 +1138,23 @@ SondLeaseResult sond_akte_lease_handover_to_job(SondAkteLease *lease, gint64 akt
     if (!found)
         result = SOND_LEASE_LOST;
 
+    //den Job merken (mit dem Namen der Akte), damit die Berechtigung auch nach einem
+    //Neustart oder bei geschlossenem Fenster zurückgeholt wird
+    if (result == SOND_LEASE_OK) {
+        LocalLease *ll = local_get(lease, akte_id);
+        LocalJob *j = g_new0(LocalJob, 1);
+        gint64 *key = g_new(gint64, 1);
+
+        j->token = g_strdup(token);
+        j->name = ll ? g_strdup(ll->name) : NULL;
+        j->at = g_get_real_time() / G_USEC_PER_SEC;
+        *key = akte_id;
+        g_hash_table_replace(lease->jobs, key, j);
+    }
+
     //übergeben oder gar nicht mehr unsere: dieses Gerät hält sie jedenfalls nicht mehr
     local_remove(lease, akte_id);
+    state_save(lease);
 
     return result;
 }
@@ -1106,6 +1178,16 @@ SondLeaseResult sond_akte_lease_reclaim_from_job(SondAkteLease *lease, gint64 ak
 
     if (result == SOND_LEASE_OK && to_me)
         local_set(lease, akte_id, args.granted_epoch, args.node_id);
+
+    //zurückgeholt, oder es gibt keinen passenden Job mehr: nichts mehr zu prüfen
+    if (result == SOND_LEASE_OK || result == SOND_LEASE_DENIED) {
+        LocalJob *j = g_hash_table_lookup(lease->jobs, &akte_id);
+
+        if (j && (!token || !g_strcmp0(j->token, token))) {
+            g_hash_table_remove(lease->jobs, &akte_id);
+            state_save(lease);
+        }
+    }
 
     return result;
 }
@@ -1370,6 +1452,70 @@ static gboolean handover_tick(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
+void sond_akte_lease_set_job_status_func(SondAkteLease *lease, SondJobStatusFunc func,
+        gpointer user_data) {
+    g_return_if_fail(lease != NULL);
+
+    lease->job_func = func;
+    lease->job_data = user_data;
+}
+
+void sond_akte_lease_jobs_pruefen(SondAkteLease *lease, gint64 jetzt) {
+    GArray *ids = NULL;
+    GHashTableIter iter;
+    gpointer key = NULL;
+
+    g_return_if_fail(lease != NULL);
+
+    if (!lease->job_func || g_hash_table_size(lease->jobs) == 0)
+        return;
+
+    //Schlüssel vorab kopieren: die Rückholung ändert die Tabelle
+    ids = g_array_new(FALSE, FALSE, sizeof(gint64));
+    g_hash_table_iter_init(&iter, lease->jobs);
+    while (g_hash_table_iter_next(&iter, &key, NULL))
+        g_array_append_val(ids, *(gint64*) key);
+
+    for (guint i = 0; i < ids->len; i++) {
+        gint64 akte_id = g_array_index(ids, gint64, i);
+        LocalJob *j = g_hash_table_lookup(lease->jobs, &akte_id);
+        gchar *token = NULL;
+        gchar *name = NULL;
+        GError *error = NULL;
+        SondLeaseResult res = SOND_LEASE_ERROR;
+
+        if (!j || jetzt - j->at < JOB_GRACE_SECONDS)
+            continue;
+
+        token = g_strdup(j->token);
+        name = g_strdup(j->name);
+
+        //ohne Library-Namen lässt sich der Job nicht abfragen; das geschieht dann beim nächsten Öffnen
+        if (!name || lease->job_func(name, token, lease->job_data) != SOND_JOB_ENDE) {
+            g_free(token);
+            g_free(name);
+            continue;
+        }
+
+        res = sond_akte_lease_reclaim_from_job(lease, akte_id, token, TRUE, &error);
+        g_clear_error(&error);
+
+        if (res == SOND_LEASE_OK) {
+            sond_akte_lease_set_name(lease, akte_id, name);
+            notify_event(lease, akte_id, name, SOND_LEASE_EVENT_JOB_ENDED);
+        } else if (res == SOND_LEASE_NOT_ALLOWED) {
+            //nicht mehr unser Job (ein anderer Nutzer hat ihn übernommen): nicht weiter verfolgen
+            g_hash_table_remove(lease->jobs, &akte_id);
+            state_save(lease);
+        }
+
+        g_free(token);
+        g_free(name);
+    }
+
+    g_array_free(ids, TRUE);
+}
+
 static gboolean heartbeat_tick(gpointer data) {
     SondAkteLease *lease = data;
     GArray *ids = NULL;
@@ -1378,7 +1524,7 @@ static gboolean heartbeat_tick(gpointer data) {
     gpointer value = NULL;
     guint old_timeout = 0;
 
-    if (g_hash_table_size(lease->local) == 0)
+    if (g_hash_table_size(lease->local) == 0 && g_hash_table_size(lease->jobs) == 0)
         return G_SOURCE_CONTINUE;
 
     if (!sond_client_is_logged_in(lease->client))
@@ -1458,6 +1604,10 @@ static gboolean heartbeat_tick(gpointer data) {
         g_free(name);
         g_free(project);
     }
+
+    //übergebene Index-Jobs: beendete holen die Berechtigung zurück
+    if (lease->failures == 0)
+        sond_akte_lease_jobs_pruefen(lease, g_get_real_time() / G_USEC_PER_SEC);
 
     sond_client_set_io_timeout(lease->client, old_timeout);
     g_array_free(ids, TRUE);

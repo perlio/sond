@@ -592,6 +592,207 @@ static void test_haengender_lock(void) {
     fix_free(f);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Rückholung nach einem Index-Job (jobs_pruefen)                     */
+/* ------------------------------------------------------------------ */
+
+static SondJobState g_job_state = SOND_JOB_UNBEKANNT;
+static gint g_job_fragen = 0;
+static gint g_job_ende_ereignisse = 0;
+static gint64 g_job_ende_akte = 0;
+
+static SondJobState job_stub(const gchar *library_name, const gchar *job_token, gpointer user_data) {
+    (void) library_name;
+    (void) job_token;
+    (void) user_data;
+
+    g_job_fragen++;
+
+    return g_job_state;
+}
+
+static void job_ereignis(SondAkteLease *lease, gint64 akte_id, const gchar *name,
+        SondLeaseEvent event, gpointer user_data) {
+    (void) lease;
+    (void) name;
+    (void) user_data;
+
+    if (event == SOND_LEASE_EVENT_JOB_ENDED) {
+        g_job_ende_ereignisse++;
+        g_job_ende_akte = akte_id;
+    }
+}
+
+static void job_zaehler_zuruecksetzen(void) {
+    g_job_state = SOND_JOB_UNBEKANNT;
+    g_job_fragen = 0;
+    g_job_ende_ereignisse = 0;
+    g_job_ende_akte = 0;
+}
+
+static gint64 jetzt(void) {
+    return g_get_real_time() / G_USEC_PER_SEC;
+}
+
+//Lease halten, Namen merken, dem Job übergeben
+static void job_uebergeben(Fix *f, SondAkteLease *l) {
+    g_assert_cmpint(acquire(l, NULL), ==, SOND_LEASE_OK);
+    sond_akte_lease_set_name(l, AKTE, "2026-1");
+    g_assert_cmpint(sond_akte_lease_handover_to_job(l, AKTE, "tok1", NULL), ==, SOND_LEASE_OK);
+    g_assert_false(sond_akte_lease_may_write(l, AKTE));
+    (void) f;
+}
+
+static void test_jobs_pruefen(void) {
+    Fix *f = fix_new();
+    SondLeaseInfo info = { 0 };
+
+    job_zaehler_zuruecksetzen();
+    job_uebergeben(f, f->a1);
+    sond_akte_lease_set_job_status_func(f->a1, job_stub, NULL);
+    sond_akte_lease_set_event_handler(f->a1, job_ereignis, NULL);
+
+    //eben übergeben: der Start auf dem Server kann noch ausstehen, es wird nicht einmal gefragt
+    g_job_state = SOND_JOB_ENDE;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 10);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+    g_assert_false(sond_akte_lease_may_write(f->a1, AKTE));
+
+    //der Job läuft, oder der Server antwortet nicht: nichts anfassen
+    g_job_state = SOND_JOB_LAEUFT;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_job_state = SOND_JOB_UNBEKANNT;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_assert_cmpint(g_job_fragen, ==, 2);
+    g_assert_false(sond_akte_lease_may_write(f->a1, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 0);
+
+    //beendet: die Berechtigung kommt zurück, mit Namen, und das Ereignis wird gemeldet
+    g_job_state = SOND_JOB_ENDE;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_assert_true(sond_akte_lease_may_write(f->a1, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 1);
+    g_assert_cmpint(g_job_ende_akte, ==, AKTE);
+    g_assert_cmpint(sond_akte_lease_find_by_name(f->a1, "2026-1"), ==, AKTE);
+    info_holen(f->a1, &info);
+    g_assert_true(info.mine && !info.by_job);
+    sond_akte_lease_info_clear(&info);
+
+    //der Job ist vergessen: kein weiteres Fragen, kein zweites Ereignis
+    g_job_fragen = 0;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 2000);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 1);
+
+    fix_free(f);
+}
+
+static void test_jobs_neustart(void) {
+    Fix *f = fix_new();
+    SondAkteLease *neu = NULL;
+
+    job_zaehler_zuruecksetzen();
+    job_uebergeben(f, f->a1);
+
+    //der Client wurde beendet und neu gestartet: der übergebene Job steht in der State-Datei
+    neu = neue_lease(f->ca1, f->state_a1);
+    sond_akte_lease_set_job_status_func(neu, job_stub, NULL);
+    sond_akte_lease_set_event_handler(neu, job_ereignis, NULL);
+    g_job_state = SOND_JOB_ENDE;
+    sond_akte_lease_jobs_pruefen(neu, jetzt() + 1000);
+    g_assert_true(sond_akte_lease_may_write(neu, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 1);
+    sond_akte_lease_free(neu);
+
+    //auch der Eintrag ist aus der Datei verschwunden
+    neu = neue_lease(f->ca1, f->state_a1);
+    sond_akte_lease_set_job_status_func(neu, job_stub, NULL);
+    g_job_fragen = 0;
+    sond_akte_lease_jobs_pruefen(neu, jetzt() + 2000);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+    sond_akte_lease_free(neu);
+
+    fix_free(f);
+}
+
+static void test_jobs_server_weg(void) {
+    Fix *f = fix_new();
+
+    job_zaehler_zuruecksetzen();
+    job_uebergeben(f, f->a1);
+    sond_akte_lease_set_job_status_func(f->a1, job_stub, NULL);
+    sond_akte_lease_set_event_handler(f->a1, job_ereignis, NULL);
+
+    //Job laut Antwort beendet, aber die Rückholung scheitert: der Job bleibt vorgemerkt
+    g_job_state = SOND_JOB_ENDE;
+    fake_server_set_offline(f->srv, TRUE);
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_assert_false(sond_akte_lease_may_write(f->a1, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 0);
+
+    //beim nächsten Takt klappt es
+    fake_server_set_offline(f->srv, FALSE);
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1030);
+    g_assert_true(sond_akte_lease_may_write(f->a1, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 1);
+
+    fix_free(f);
+}
+
+static void test_jobs_verwaist_neu_vergeben(void) {
+    Fix *f = fix_new();
+
+    job_zaehler_zuruecksetzen();
+    job_uebergeben(f, f->a1);
+    sond_akte_lease_set_job_status_func(f->a1, job_stub, NULL);
+    sond_akte_lease_set_event_handler(f->a1, job_ereignis, NULL);
+
+    //der Job war verwaist, die Lease ist abgelaufen und ein anderer Nutzer hat sie genommen
+    fake_server_advance(f->srv, SOND_AKTE_LEASE_SECONDS + 1);
+    g_assert_cmpint(acquire(f->b, NULL), ==, SOND_LEASE_OK);
+
+    //die Rückholung findet keinen Job mehr: nichts geschieht, der Eintrag wird vergessen
+    g_job_state = SOND_JOB_ENDE;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_assert_false(sond_akte_lease_may_write(f->a1, AKTE));
+    g_assert_cmpint(g_job_ende_ereignisse, ==, 0);
+    g_job_fragen = 0;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 2000);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+
+    fix_free(f);
+}
+
+static void test_jobs_ohne_pruefung(void) {
+    Fix *f = fix_new();
+    GError *error = NULL;
+
+    job_zaehler_zuruecksetzen();
+
+    //ohne Library-Namen kann der Job nicht abgefragt werden
+    g_assert_cmpint(acquire(f->a1, NULL), ==, SOND_LEASE_OK);
+    g_assert_cmpint(sond_akte_lease_handover_to_job(f->a1, AKTE, "tok1", NULL), ==, SOND_LEASE_OK);
+    sond_akte_lease_set_job_status_func(f->a1, job_stub, NULL);
+    g_job_state = SOND_JOB_ENDE;
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 1000);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+    g_assert_false(sond_akte_lease_may_write(f->a1, AKTE));
+
+    //von Hand zurückgeholt (Dokumentenverzeichnis): der Job ist vergessen
+    g_assert_cmpint(sond_akte_lease_reclaim_from_job(f->a1, AKTE, "tok1", TRUE, &error), ==,
+            SOND_LEASE_OK);
+    g_clear_error(&error);
+    sond_akte_lease_set_name(f->a1, AKTE, "2026-1");
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 2000);
+    g_assert_cmpint(g_job_fragen, ==, 0);
+
+    //ohne Rückruf geschieht nichts
+    sond_akte_lease_set_job_status_func(f->a1, NULL, NULL);
+    sond_akte_lease_jobs_pruefen(f->a1, jetzt() + 3000);
+
+    fix_free(f);
+}
+
 void test_akte_lease_register(void) {
     g_test_add_func("/akte_lease/acquire", test_acquire);
     g_test_add_func("/akte_lease/ablauf", test_ablauf);
@@ -604,6 +805,11 @@ void test_akte_lease_register(void) {
     g_test_add_func("/akte_lease/index_job_zurueckholen", test_index_job_zurueckholen);
     g_test_add_func("/akte_lease/index_job_frei", test_index_job_frei);
     g_test_add_func("/akte_lease/lokaler_zustand", test_lokaler_zustand);
+    g_test_add_func("/akte_lease/jobs_pruefen", test_jobs_pruefen);
+    g_test_add_func("/akte_lease/jobs_neustart", test_jobs_neustart);
+    g_test_add_func("/akte_lease/jobs_server_weg", test_jobs_server_weg);
+    g_test_add_func("/akte_lease/jobs_verwaist", test_jobs_verwaist_neu_vergeben);
+    g_test_add_func("/akte_lease/jobs_ohne_pruefung", test_jobs_ohne_pruefung);
     g_test_add_func("/akte_lease/dubletten", test_dubletten);
     g_test_add_func("/akte_lease/fehler", test_fehler);
     g_test_add_func("/akte_lease/haengender_lock", test_haengender_lock);

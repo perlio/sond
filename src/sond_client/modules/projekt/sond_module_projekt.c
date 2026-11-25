@@ -54,6 +54,7 @@ static void priv_free(gpointer data) {
     if (p->lease) {
         //die Berechtigung bleibt bestehen (lokaler Zustand in der Datei)
         sond_akte_lease_set_event_handler(p->lease, NULL, NULL);
+        sond_akte_lease_set_job_status_func(p->lease, NULL, NULL);
         sond_akte_lease_free(p->lease);
     }
     g_clear_object(&p->client);
@@ -178,6 +179,29 @@ static void entry_zustand(ProjektPriv *p) {
     gtk_widget_set_tooltip_text(p->btn_ok, busy ?
             "Für die Akte läuft ein Index-Job. Bitte warten, bis er beendet ist." :
             "Akte schließen und eine andere wählen");
+}
+
+/* Stand des Index-Jobs einer Akte für die Lease (Server-Endpunkt /ocr/status): Fehler gelten als
+ * "unbekannt"; beendet ist der Job, wenn der Server keinen kennt oder ein anderer oder keiner läuft */
+static SondJobState job_status(const gchar *library_name, const gchar *job_token, gpointer user_data) {
+    ProjektPriv *p = user_data;
+    GError *error = NULL;
+    OcrStatus *status = sond_client_ocr_get_status(p->client, library_name, &error);
+    SondJobState state = SOND_JOB_UNBEKANNT;
+
+    if (error)
+        state = SOND_JOB_UNBEKANNT;
+    else if (!status)
+        state = SOND_JOB_ENDE;   //404: der Server kennt keinen Job für die Library
+    else
+        state = (status->running && !g_strcmp0(status->job_token, job_token)) ?
+                SOND_JOB_LAEUFT : SOND_JOB_ENDE;
+
+    if (status)
+        sond_client_ocr_status_free(status);
+    g_clear_error(&error);
+
+    return state;
 }
 
 static void on_starter_changed(gpointer user_data) {
@@ -393,6 +417,7 @@ GtkWidget* sond_module_projekt_new(SondClient *client) {
 
     p->starter = sond_zond_starter_new(client, p->lease, main_box, on_starter_changed, p);
     sond_akte_lease_set_event_handler(p->lease, sond_zond_starter_lease_event, p->starter);
+    sond_akte_lease_set_job_status_func(p->lease, job_status, p);
     sond_akte_lease_start_heartbeat(p->lease);
     p->timer = g_timeout_add_seconds(5, on_timer, p);
 

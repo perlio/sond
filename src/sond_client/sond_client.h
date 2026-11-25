@@ -19,8 +19,8 @@
 #ifndef SOND_CLIENT_H
 #define SOND_CLIENT_H
 
-#include <gtk/gtk.h>
 #include <glib-object.h>
+#include <gio/gio.h>
 
 G_BEGIN_DECLS
 

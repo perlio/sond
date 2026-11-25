@@ -804,7 +804,7 @@ void sond_zond_starter_lease_event(SondAkteLease *lease, gint64 akte_id, const g
 
     message_setzen(s, akte_id, NULL);
 
-    if (event == SOND_LEASE_EVENT_HANDED_OVER) {
+    if (event == SOND_LEASE_EVENT_HANDED_OVER || event == SOND_LEASE_EVENT_JOB_ENDED) {
         starter_changed(s);
 
         return;

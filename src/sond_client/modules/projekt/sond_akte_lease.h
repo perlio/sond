@@ -162,9 +162,12 @@ typedef enum {
     SOND_LEASE_EVENT_HANDED_OVER,        //Übergabe abgeschlossen: Berechtigung
                                          //freigegeben (zond war gespeichert,
                                          //SeaDrive hat alles hochgeladen)
-    SOND_LEASE_EVENT_HANDOVER_STUCK      //nicht selbständig zu klären (zu lange
+    SOND_LEASE_EVENT_HANDOVER_STUCK,     //nicht selbständig zu klären (zu lange
                                          //oder Upload-Stand unbekannt): der
                                          //Nutzer muss entscheiden
+    SOND_LEASE_EVENT_JOB_ENDED           //ein Index-Job, dem die Berechtigung übergeben
+                                         //war, ist beendet: sie ist wieder bei diesem
+                                         //Gerät
 } SondLeaseEvent;
 
 /* name: Library-Name der Akte laut lokalem Zustand (nullable, nur während des
@@ -175,6 +178,27 @@ typedef void (*SondLeaseEventFunc)(SondAkteLease *lease, gint64 akte_id,
 
 void sond_akte_lease_set_event_handler(SondAkteLease *lease,
         SondLeaseEventFunc func, gpointer user_data);
+
+/* Stand eines Index-Jobs auf dem Server (siehe sond_akte_lease_set_job_status_func) */
+typedef enum {
+    SOND_JOB_UNBEKANNT,   //Server nicht erreichbar: nichts anfassen
+    SOND_JOB_LAEUFT,      //der Job mit dieser Kennung läuft noch
+    SOND_JOB_ENDE         //beendet, abgebrochen oder dem Server unbekannt
+} SondJobState;
+
+/* Fragt den Stand des Index-Jobs der Library mit der Kennung ab (blockierend, kurze Zeitgrenze).
+ * Die Lease kennt den Server-Endpunkt nicht, das Modul liefert diese Abfrage. */
+typedef SondJobState (*SondJobStatusFunc)(const gchar *library_name, const gchar *job_token,
+        gpointer user_data);
+
+void sond_akte_lease_set_job_status_func(SondAkteLease *lease, SondJobStatusFunc func,
+        gpointer user_data);
+
+/* Prüft die Index-Jobs, denen dieses Gerät eine Berechtigung übergeben hat (der Zustand liegt in
+ * der State-Datei und überlebt den Neustart), und holt sie zurück, sobald ein Job beendet ist
+ * (Ereignis SOND_LEASE_EVENT_JOB_ENDED). Der Hintergrundtakt ruft das auf; jetzt = lokale Zeit
+ * (Unix-Sekunden). Eben erst übergebene Jobs (der Start kann noch ausstehen) werden übersprungen. */
+void sond_akte_lease_jobs_pruefen(SondAkteLease *lease, gint64 jetzt);
 
 /* Startet den Takt (alle 30 s ein Lebenszeichen je gehaltener Akte, nur bei
  * angemeldetem Client; bei Verbindungsfehlern mit wachsender Pause bis etwa
