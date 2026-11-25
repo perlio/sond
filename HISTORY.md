@@ -6379,3 +6379,40 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  _ohne_pruefung). #254 Punkt 1 (Dubletten mit führendem "/") entfällt: der Index ist noch
  experimentell.
 ```
+
+## Server: Abbruch innerhalb der Datei (25.11.2026) (#274, aus #254)
+
+```text
+ /ocr/cancel setzte nur job_info->cancel, das der Worker zwischen zwei Dateien abfragt. Der
+ OCR-Pool bekam eine lokale Variable als cancel_all (nie gesetzt), und wctx.cancel, das
+ sond_process_file an vielen Stellen abfragt (Seiten, Container, OCR, Lesen), blieb 0. Jetzt
+ verwendet der Pool job_info->cancel, und OcrJobInfo.wctx_cancel zeigt (unter dem Mutex, solange
+ der Worker-Thread den Kontext hat) auf wctx.cancel; /ocr/cancel setzt beide. Der Abbruch greift
+ nach der laufenden Seite bzw. dem laufenden Teil. Eine in der Datei abgebrochene Datei wird mit dem
+ Teilergebnis hochgeladen (es passt zum Index, der die bearbeiteten Seiten kennt), aber nicht im
+ OCR-Log als verarbeitet eingetragen und beim nächsten Lauf fortgesetzt. Offen war außerdem der
+ Hinweis, dass zond den Index weiter selbst schreibt (Lease-Disziplin genügt, Shard-Variante
+ verworfen): erledigt durch die Entscheidung.
+```
+
+## Server: Indizieren von Teilen in Containern (25.11.2026) (#275, aus #255)
+
+```text
+ Der Server kann auch Teile wie x.zip//a.pdf oder y.pdf//anhang.pdf indizieren (OCR eingeschlossen).
+ sond_file_part_set_thread_root() (sond_fileparts.[ch]) setzt die Wurzel des Dateisystems nur für den
+ aufrufenden Thread, sie geht der Klassen-Wurzel path_root vor; so stören sich Server-Jobs nicht und
+ zond bleibt unverändert (Test tests/test_fileparts_root.c). Die Auswahlnormalisierung des Servers
+ (ocr_normalize_selection_filepart) behält "//". Für jede Wurzeldatei mit gewählten Teilen lädt
+ process_root_parts() sie in ein temporäres Verzeichnis des Jobs (Pfade wie in der Bibliothek), ruft
+ sond_process_fileparts() auf (Coverage, gesperrte Teile, OCR wie in zond) und lädt eine geänderte
+ Wurzeldatei (Prüfsumme) hoch; das Verzeichnis wird am Ende des Jobs gelöscht. Die Wurzeldatei gilt
+ nicht als verarbeitet (kein OCR-Log-Eintrag). Ist dieselbe Datei auch ganz oder über ein
+ Verzeichnis gewählt, gilt die ganze Datei. Der Abschnitt mit Dateiteilen läuft hinter einem Mutex
+ (die Liste der geöffneten Dateien ist nicht thread-sicher). Gesperrte Teile gehen wie bisher über
+ /ocr/status an den Client. Client: sond_treeviewfm_get_selected_fileparts() liefert markierte
+ Einträge in Containern, "Auswahl indizieren" sendet sie mit; der Nachlauf nach dem dauerhaften
+ Entsperren übergibt den entsperrten Teil selbst statt der Wurzeldatei. Nicht unterstützt:
+ Verzeichnisse im Container und Teile einer Datei (Seitenbereiche, Marker).
+ Der Server ließ sich nur auf Syntax prüfen (gebaut wird in WSL); der Lauf eines Jobs mit
+ Teilen und mit Abbruch steht noch aus.
+```

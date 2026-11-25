@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #274.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #276.
 
 ## Inhalt
 
-Offen: #245, #247, #254, #255, #256, #258
+Offen: #245, #247, #256, #258
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -50,39 +50,6 @@ Status: offen (nicht implementiert)
  Zu tun: Einfügen in sond_file_part_insert() für GMESSAGE (MIME-Baum ändern,
  Mail zurückschreiben, Index-DB und DB-Pfade nachführen), danach die
  vorbereiteten Teile testen.
-```
-
-### #254 Index-Job unter der Lease: offene Punkte
-
-Status: offen (Abbruch mitten in einer Datei)
-
-```text
- Umgesetzt: Auswahl im Dokumentenverzeichnis -> /ocr/start (Pfadliste, ocr_mode, job_token);
- der Client trägt die Lease auf "job:<token>" um, der Server liefert das Token in
- /ocr/status, /ocr/cancel bricht ab; nach Jobende holt der Client die Lease zurück
- (sond_akte_lease_reclaim_from_job, im Dokumentenverzeichnis und im Hintergrundtakt, s. #273).
- Der Server lädt die Index-DB aus Seafile, löscht nur geänderte Dateien (oder bei "neu
- verarbeiten") und fasst Ordner über die Seafile-Auflistung zusammen.
- Offen:
- 1. Abbruch greift erst nach der laufenden Datei (kein Abbruch mitten in einer großen
-    PDF mit OCR).
- 2. Zond schreibt den Index weiterhin selbst; mit der Lease-Disziplin gibt es nur einen
-    Schreiber zur Zeit (Shard-Variante verworfen).
- Entfallen: Dubletten mit führendem "/" im Index (alte Server-Einträge): der Index ist noch
- experimentell, produktive Index-DBs mit dem Fehler gibt es nicht.
-```
-
-### #255 Server: Indizieren ausgehend von fileparts
-
-Status: offen (Entscheidung: der Server soll auch Teile in Containern indizieren können)
-
-```text
- Heute ruft der Server nur sond_process_file() mit den Bytes ganzer Dateien auf; Container-
- inhalte werden dabei rekursiv mitverarbeitet. Der fileparts-getriebene Einstieg
- (sond_process_fileparts, _roots_to_read in sond_process_file.c) wird nur von zond benutzt.
- Ziel: derselbe Einstieg auch im Server (Pfade wie x.zip//a.pdf). SondFilePart öffnet bisher
- über Dateipfade; der Server hat die Bytes aus Seafile. Zu klären: Quelle als Rückruf oder
- Download in eine Temp-Datei, Abbruch, Passwörter gesperrter Teile. Kein Split der Datei nötig.
 ```
 
 ### #256 seadrive_gtk3 ablösen
