@@ -18,8 +18,9 @@
 
 #include "sond_client_window.h"
 #include "sond_module.h"
-#include "modules/sond_module_akte.h"
-#include "modules/sond_module_verwaltung.h"
+#include "modules/akte/sond_module_akte.h"
+#include "modules/verwaltung/sond_module_verwaltung.h"
+#include "modules/projekt/sond_module_projekt.h"
 #include "../sond_log_and_error.h"
 
 struct _SondClientWindow {
@@ -34,6 +35,7 @@ struct _SondClientWindow {
     /* Module */
     GtkWidget *module_akte;
     GtkWidget *module_verwaltung;
+    GtkWidget *module_projekt;
 };
 
 G_DEFINE_TYPE(SondClientWindow, sond_client_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -45,6 +47,8 @@ static void on_module_button_clicked(GtkButton *button, SondClientWindow *window
         gtk_stack_set_visible_child_name(GTK_STACK(window->main_stack), module_name);
         if (!g_strcmp0(module_name, "akte"))
             sond_module_akte_focus_entry(window->module_akte);
+        else if (!g_strcmp0(module_name, "projekt"))
+            sond_module_projekt_focus_entry(window->module_projekt);
     }
 }
 
@@ -91,6 +95,12 @@ static void sond_client_window_init(SondClientWindow *self) {
     g_signal_connect(btn_akte, "clicked", G_CALLBACK(on_module_button_clicked), self);
     gtk_box_append(GTK_BOX(module_box), btn_akte);
 
+    /* Button für "Projekt"-Modul */
+    GtkWidget *btn_projekt = gtk_button_new_with_label("Projekt");
+    g_object_set_data(G_OBJECT(btn_projekt), "module-name", (gpointer)"projekt");
+    g_signal_connect(btn_projekt, "clicked", G_CALLBACK(on_module_button_clicked), self);
+    gtk_box_append(GTK_BOX(module_box), btn_projekt);
+
     /* Button für "Verwaltung"-Modul */
     GtkWidget *btn_verwaltung = gtk_button_new_with_label("Verwaltung");
     g_object_set_data(G_OBJECT(btn_verwaltung), "module-name", (gpointer)"verwaltung");
@@ -126,6 +136,10 @@ SondClientWindow* sond_client_window_new(GtkApplication *app, SondClient *client
     /* Akte-Modul erstellen */
     window->module_akte = sond_module_akte_new(client);
     gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_akte, "akte");
+
+    /* Projekt-Modul erstellen (verwaltet auch die Schreibberechtigung der Akten) */
+    window->module_projekt = sond_module_projekt_new(client);
+    gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_projekt, "projekt");
 
     /* Verwaltungs-Modul erstellen */
     window->module_verwaltung = sond_module_verwaltung_new(client);

@@ -17,22 +17,19 @@
  */
 
 #include "sond_module_akte.h"
-#include "../sond_client.h"
-#include "../../sond_log_and_error.h"
-#include "../../sond_graph/sond_graph_node.h"
-#include "../../sond_graph/sond_graph_property.h"
-#include "../../sond_graph/sond_graph_db.h"
-#include "sond_akten.h"
-#include "sond_archiv_kandidaten.h"
-#include "sond_import.h"
+#include "../../sond_client.h"
+#include "../../../sond_log_and_error.h"
+#include "../../../sond_graph/sond_graph_node.h"
+#include "../../../sond_graph/sond_graph_property.h"
+#include "../../../sond_graph/sond_graph_db.h"
+#include "../sond_akten.h"
+#include "../sond_akten_suche.h"
+#include "../sond_archiv_kandidaten.h"
+#include "../sond_import.h"
 #include "sond_import_dialog.h"
-#include "sond_zond_start.h"
-#include "sond_akte_lease.h"
-#include "sond_dokumente.h"
-#include "../sond_module.h"
-#include "../sond_zond_prozess.h"
-#include "../../sond_zond_ctl.h"
-#include "../../sond_akte_name.h"
+#include "../../sond_module.h"
+#include "../../sond_zond_prozess.h"
+#include "../../../sond_akte_name.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -62,8 +59,6 @@ typedef struct {
     
     GtkWidget *btn_neue_akte;
     GtkWidget *btn_import;         /* Import-Dialog für die gewählte Akte */
-    GtkWidget *btn_zond;           /* zond mit der Projektdatei starten */
-    GtkWidget *btn_dokumente;      /* Dokumentenverzeichnis (Baum, offline halten) */
     GtkWidget *btn_ok;
     GtkWidget *btn_speichern;
     GtkWidget *btn_abbrechen;
@@ -75,20 +70,8 @@ typedef struct {
     GtkWidget *btn_ablegen;        /* "Akte ablegen" */
     GtkWidget *btn_reaktivieren;   /* "Akte reaktivieren" */
 
-    /* Schreibberechtigung für das Projekt (Lease), s. sond_akte_lease.h */
-    SondAkteLease *lease;
-    GtkWidget *lease_box;          /* Zeile mit Anzeige und "Freigeben" */
-    GtkWidget *lease_label;
-    GtkWidget *btn_lease_release;
-    gint64 server_pause_bis;         /* bis dahin (monotone Zeit) wird der Server nicht erneut versucht */
-    gboolean merkliste_abgeglichen;  /* Merkliste in dieser Sitzung auf den Serverstand gekürzt */
-    guint lease_wait_source;       /* Warten auf die Freigabe durch den anderen Rechner */
-    gint64 lease_wait_akte;
-    gchar *lease_wait_name;
-    gint lease_wait_elapsed;
 
     gchar *library_name;                // wird bei update_ui_from_node gesetzt
-    GtkCssProvider *css_provider;
 
     /* Lock-Konflikt: wer haelt den Lock, wenn wir ihn nicht bekommen haben
      * (AKTE_STATE_READONLY), und seit wann - fuer Anzeige + "Lock brechen" */
@@ -107,24 +90,6 @@ typedef struct {
     gchar *wh_status;                 /* Anzeige zum Stand einer laufenden Wiederherstellung (nullable) */
 } SondModuleAktePrivate;
 
-/* Struktur für Suchergebnis */
-typedef struct {
-    SondGraphNode *node;    /* (nullable) nur, wenn der Server die Akte kennt */
-    guint lfd_nr;
-    guint year;
-    gchar *regnr_display;   /* Format: "23/26" */
-    gchar *kurzbezeichnung; /* (nullable) */
-    gchar *gegenstand;      /* (nullable) unterscheidet gleiche Bezeichnungen */
-    gboolean lokal;         /* Library im SeaDrive vorhanden */
-} AkteSearchResult;
-
-/* Wie weit der Server an einer Suche beteiligt war */
-typedef enum {
-    SERVER_NICHT_BEFRAGT,   /* keine Sitzung: es wurde nur lokal gesucht */
-    SERVER_OK,              /* hat geantwortet (auch "nicht gefunden") */
-    SERVER_FEHLER           /* nicht erreichbar oder Fehler */
-} SuchServer;
-
 /* Zeitgrenze für Suche und Laden einer Akte (Sekunden), damit das Fenster bei
  * toter Verbindung nicht minutenlang steht; andere Serveraufrufe behalten
  * ihre Voreinstellung */
@@ -139,77 +104,16 @@ static void update_ui_from_node(SondModuleAktePrivate *priv);
 static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
-static void apply_widget_style(GtkWidget *widget, gboolean active);
 static gboolean ist_akte_aktiv(SondGraphNode *node);
-static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term, SuchServer server);
-static void akte_search_result_free(AkteSearchResult *result);
-static GPtrArray* search_akten_by_property(SondModuleAktePrivate *priv, const gchar *key, const gchar *search_term, GError **error);
 static void update_action_widgets(SondModuleAktePrivate *priv);
-static gchar* aktuelle_lib_name(SondModuleAktePrivate *priv);
-static void lease_refresh(SondModuleAktePrivate *priv, gboolean ask_server);
 static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
                                            guint lfd_nr, guint year, GError **error);
 static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
                         const gchar *bezeichnung, const gchar *gegenstand,
-                        SondGraphNode *node, SuchServer server);
+                        SondGraphNode *node, SondSucheServer server);
 
 extern const gchar* sond_client_get_server_url(SondClient *client);
 extern SoupSession* sond_client_get_session(SondClient *client);
-
-/* ========================================================================
- * CSS Styling für aktive/inaktive Widgets
- * ======================================================================== */
-
-/**
- * setup_css_provider:
- *
- * Erstellt und registriert den CSS Provider für Widget-Styling
- */
-static GtkCssProvider* setup_css_provider(void) {
-    GtkCssProvider *provider = gtk_css_provider_new();
-
-    const gchar *css_data =
-        "entry.widget-active {"
-        "  background-color: #f0ffd0;"
-        "  color: #000000;"  // ← WICHTIG
-        "}"
-        "entry.widget-inactive {"
-        "  background-color: #f5f5f5;"
-        "  color: #808080;"  // ← WICHTIG
-        "}";
-
-    gtk_css_provider_load_from_string(provider, css_data);
-
-    gtk_style_context_add_provider_for_display(
-        gdk_display_get_default(),
-        GTK_STYLE_PROVIDER(provider),
-        GTK_STYLE_PROVIDER_PRIORITY_USER  // ← WICHTIG
-    );
-
-    return provider;
-}
-
-/**
- * apply_widget_style:
- *
- * Wendet CSS-Klasse auf Widget an je nach aktivem/inaktivem Zustand
- */
-static void apply_widget_style(GtkWidget *widget, gboolean active) {
-    if (!widget) {
-        return;
-    }
-
-    /* Alte Klassen entfernen */
-    gtk_widget_remove_css_class(widget, "widget-active");
-    gtk_widget_remove_css_class(widget, "widget-inactive");
-
-    /* Neue Klasse hinzufügen */
-    if (active) {
-        gtk_widget_add_css_class(widget, "widget-active");
-    } else {
-        gtk_widget_add_css_class(widget, "widget-inactive");
-    }
-}
 
 /* ========================================================================
  * UI State Management
@@ -236,13 +140,13 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_INITIAL:
             /* Nur "Neue Akte" + Entry aktiv */
             gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
-            apply_widget_style(priv->regnr_entry, TRUE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, TRUE);
 
             gtk_widget_set_sensitive(priv->btn_neue_akte, TRUE);
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
-            apply_widget_style(priv->textview_gegenstand, FALSE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, FALSE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, FALSE);
 
             /* Keine Bearbeitungssitzung: nichts zu bestätigen oder zu verwerfen */
             gtk_widget_set_sensitive(priv->btn_ok, FALSE);
@@ -253,13 +157,13 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_CREATING:
             /* Entry insensitiv, Felder editierbar */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
-            apply_widget_style(priv->regnr_entry, FALSE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
-            apply_widget_style(priv->textview_gegenstand, TRUE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, TRUE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, TRUE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
@@ -269,13 +173,13 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_EDITING:
             /* Alles editierbar außer Entry */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
-            apply_widget_style(priv->regnr_entry, FALSE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
-            apply_widget_style(priv->textview_gegenstand, TRUE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, TRUE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, TRUE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
@@ -285,13 +189,13 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_READONLY:
             /* Nur Ansicht */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
-            apply_widget_style(priv->regnr_entry, FALSE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
-            apply_widget_style(priv->textview_gegenstand, FALSE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, FALSE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
@@ -314,13 +218,13 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_ABGELEGT:
             /* Abgelegte Akte: Felder sichtbar aber nicht editierbar, Reaktivierung möglich */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
-            apply_widget_style(priv->regnr_entry, FALSE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
-            apply_widget_style(priv->textview_gegenstand, FALSE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, FALSE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, FALSE);
 
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, priv->ablegen_vorgemerkt || priv->reaktivieren_vorgemerkt);
@@ -333,12 +237,12 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             /* Nur Ansicht ohne Sperre; ein neues Suchen ist jederzeit möglich.
              * Ablegen/Reaktivieren erst nach "Bearbeiten" (dann gesperrt). */
             gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
-            apply_widget_style(priv->regnr_entry, TRUE);
+            sond_akten_suche_stil_apply(priv->regnr_entry, TRUE);
 
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
 
-            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
-            apply_widget_style(priv->textview_gegenstand, FALSE);
+            sond_akten_suche_stil_apply(priv->entry_kurzbezeichnung, FALSE);
+            sond_akten_suche_stil_apply(priv->textview_gegenstand, FALSE);
 
             /* Keine Sperre gehalten: nichts zu bestätigen oder zu verwerfen */
             gtk_widget_set_sensitive(priv->btn_ok, FALSE);
@@ -374,59 +278,23 @@ static gboolean akte_ist_abgelegt(SondModuleAktePrivate *priv) {
 /* Freischaltung der Knöpfe. Es gibt keinen Online-Zustand: Serverfunktionen
  * (Neue Akte, Bearbeiten, Speichern, Ablegen ...) sind bedienbar, wo sie
  * inhaltlich Sinn haben, und scheitern beim Klick mit einer Meldung, wenn der
- * Server nicht zu erreichen ist. Import und zond brauchen nur die gewählte
- * Akte und das SeaDrive-Laufwerk; bei einer abgelegten Akte sind beide gesperrt
- * (erst reaktivieren). */
-//Start oder Ende von zond bzw. des Dokumentenfensters einer Akte
-static void on_exklusiv_geaendert(gpointer data) {
-    update_action_widgets(data);
-}
-
-//Library-Name der gewählten Akte (z.B. "2026-1"), NULL ohne Auswahl (g_free())
-static gchar* aktuelle_lib_name(SondModuleAktePrivate *priv) {
-    guint lfd_nr = 0;
-    guint year = 0;
-
-    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
-        return NULL;
-
-    return sond_module_akte_library_name(lfd_nr, year);
-}
-
+ * Server nicht zu erreichen ist. Import braucht nur die gewählte Akte und das
+ * SeaDrive-Laufwerk; bei einer abgelegten Akte ist er gesperrt (erst reaktivieren). */
 static void update_action_widgets(SondModuleAktePrivate *priv) {
     gboolean gewaehlt = sond_client_get_current_akte(priv->client, NULL, NULL);
     gboolean arbeit = gewaehlt && !akte_ist_abgelegt(priv);
     AkteState st = priv->state;
-    g_autofree gchar *lib = arbeit ? aktuelle_lib_name(priv) : NULL;
-    //zond und das Dokumentenfenster einer Akte laufen nie gleichzeitig
-    gboolean doku_offen = lib && sond_dokumente_is_open(lib);
-    gboolean zond_laeuft = lib && sond_zond_prozess_laeuft(lib);
 
     gtk_widget_set_sensitive(priv->btn_neue_akte,
             st == AKTE_STATE_INITIAL || st == AKTE_STATE_AUSGEWAEHLT);
 
     gtk_widget_set_sensitive(priv->btn_import,
             arbeit && st != AKTE_STATE_CREATING);
-    gtk_widget_set_sensitive(priv->btn_zond,
-            arbeit && st != AKTE_STATE_CREATING && !priv->lease_wait_source && !doku_offen);
-    gtk_widget_set_tooltip_text(priv->btn_zond, doku_offen ?
-            "Das Dokumentenfenster dieser Akte ist geöffnet. Bitte zuerst schließen." :
-            "Die Projektdatei der gewählten Akte in zond öffnen");
-    gtk_widget_set_sensitive(priv->btn_dokumente,
-            arbeit && st != AKTE_STATE_CREATING && !zond_laeuft);
-    gtk_widget_set_tooltip_text(priv->btn_dokumente, zond_laeuft ?
-            "zond hat diese Akte geöffnet. Bitte zond zuerst beenden." :
-            "Das Dokumentenverzeichnis der Akte zeigen, z. B. um Dateien dauerhaft "
-            "offline verfügbar zu machen");
 
     //"Bearbeiten": solange die Akte gewählt oder nur gesperrt angezeigt wird
     gtk_widget_set_sensitive(priv->btn_break_lock,
             gewaehlt && (st == AKTE_STATE_READONLY ||
                     st == AKTE_STATE_AUSGEWAEHLT));
-
-    //Lease-Zeile nur bei gewählter, nicht abgelegter Akte (Inhalt: lease_refresh)
-    if (priv->lease_box && !arbeit)
-        gtk_widget_set_visible(priv->lease_box, FALSE);
 }
 
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
@@ -450,7 +318,6 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
 
     /* Andere Module sollen keine Akte mehr vorgeschlagen bekommen */
     sond_client_clear_current_akte(priv->client);
-    lease_refresh(priv, FALSE);   //ohne gewählte Akte: Lease-Zeile ausblenden
 }
 
 /* ========================================================================
@@ -482,218 +349,6 @@ static void speicher_hinweis(SondModuleAktePrivate *priv, const gchar *message) 
     show_info_dialog(priv->main_widget, "Gespeichert", message);
 }
 
-static gboolean parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) {
-    if (!regnr_str || strlen(regnr_str) == 0) {
-        return FALSE;
-    }
-    
-    /* Fall 1: Format mit "/" (z.B. "12/26") */
-    if (strchr(regnr_str, '/')) {
-        gchar **parts = g_strsplit(regnr_str, "/", 2);
-        if (g_strv_length(parts) != 2) {
-            g_strfreev(parts);
-            return FALSE;
-        }
-        
-        *lfd_nr = (guint)g_ascii_strtoull(parts[0], NULL, 10);
-        *year = (guint)g_ascii_strtoull(parts[1], NULL, 10);
-        
-        if (*year < 100) {
-            *year += 2000;
-        }
-        
-        g_strfreev(parts);
-        return (*lfd_nr > 0 && *year >= 2000);
-    }
-    
-    /* Fall 2: Nur Ziffern (z.B. "1226", "126", "12326") */
-    /* Mindestens 3 Ziffern, letzte 2 = Jahr, Rest = lfd_nr */
-    gsize len = strlen(regnr_str);
-    if (len < 3) {
-        return FALSE;
-    }
-    
-    /* Prüfen ob alle Zeichen Ziffern sind */
-    for (gsize i = 0; i < len; i++) {
-        if (!g_ascii_isdigit(regnr_str[i])) {
-            return FALSE;
-        }
-    }
-    
-    /* Letzte 2 Ziffern = Jahr */
-    gchar *year_str = g_strndup(regnr_str + (len - 2), 2);
-    *year = (guint)g_ascii_strtoull(year_str, NULL, 10);
-    g_free(year_str);
-    
-    if (*year < 100) {
-        *year += 2000;
-    }
-    
-    /* Rest = lfd. Nr. */
-    gchar *lfd_str = g_strndup(regnr_str, len - 2);
-    *lfd_nr = (guint)g_ascii_strtoull(lfd_str, NULL, 10);
-    g_free(lfd_str);
-    
-    return (*lfd_nr > 0 && *year >= 2000);
-}
-
-static gchar* format_regnr(guint lfd_nr, guint year) {
-    guint short_year = year % 100;
-    return g_strdup_printf("%u/%02u", lfd_nr, short_year);
-}
-
-/**
- * format_regnr_storage:
- *
- * Formatiert RegNr für Speicherung/Pfade: "2026-1"
- * Verwendet NICHT "/" sondern "-" um Pfadprobleme zu vermeiden.
- */
-static gchar* format_regnr_storage(guint lfd_nr, guint year) {
-    return g_strdup_printf("%u-%u", year, lfd_nr);
-}
-
-/**
- * akte_search_result_free:
- * 
- * Gibt Speicher eines Suchergebnisses frei.
- */
-static void akte_search_result_free(AkteSearchResult *result) {
-    if (!result) return;
-    
-    if (result->node) {
-        g_object_unref(result->node);
-    }
-    g_free(result->regnr_display);
-    g_free(result->kurzbezeichnung);
-    g_free(result->gegenstand);
-    g_free(result);
-}
-
-/**
- * is_valid_regnr_format:
- * 
- * Prüft ob ein String ein gültiges RegNr-Format hat.
- * Gültig sind:
- * - Nur Ziffern (mindestens 3): "126", "1226", "12326"
- * - Ziffern mit "/": "12/26", "123/26"
- * 
- * Returns: TRUE wenn gültiges Format
- */
-static gboolean is_valid_regnr_format(const gchar *str) {
-    if (!str || strlen(str) == 0) {
-        return FALSE;
-    }
-    
-    gsize len = strlen(str);
-    gboolean has_slash = FALSE;
-    
-    for (gsize i = 0; i < len; i++) {
-        gchar c = str[i];
-        
-        if (c == '/') {
-            if (has_slash) {
-                return FALSE;  /* Mehr als ein "/" */
-            }
-            has_slash = TRUE;
-        } else if (!g_ascii_isdigit(c)) {
-            return FALSE;  /* Nicht-Ziffer und nicht "/" */
-        }
-    }
-    
-    /* Format mit "/" muss mindestens ein Zeichen vor und nach "/" haben */
-    if (has_slash) {
-        gchar **parts = g_strsplit(str, "/", 2);
-        gboolean valid = (g_strv_length(parts) == 2 && 
-                         strlen(parts[0]) > 0 && 
-                         strlen(parts[1]) > 0);
-        g_strfreev(parts);
-        return valid;
-    }
-    
-    /* Format ohne "/" muss mindestens 3 Ziffern haben */
-    return len >= 3;
-}
-
-/**
- * search_akten_by_property:
- * 
- * Sucht Akten anhand einer Eigenschaft (z. B. "kurzb" oder "ggstd"; serverseitige Suche).
- * Die Datenbank führt die Teilstring-Suche durch.
- * 
- * Returns: (transfer full): Array von AkteSearchResult oder NULL bei Fehler
- */
-static GPtrArray* search_akten_by_property(SondModuleAktePrivate *priv, 
-                                            const gchar *key, 
-                                            const gchar *search_term, 
-                                            GError **error) {
-    /* Suche Akten mit Property-Filter auf "kurzb" */
-    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-    criteria->label = g_strdup("Akte");
-    
-    /* Wildcard-Pattern für Teilstring-Suche erstellen: *search_term* */
-    gchar *pattern = g_strdup_printf("*%s*", search_term);
-    
-    /* Property-Filter für Kurzbezeichnung (Teilstring-Suche via Wildcards) */
-    sond_graph_node_search_criteria_add_property_filter(criteria, key, pattern);
-    g_free(pattern);
-
-    criteria->limit = 100;  /* Maximal 100 Ergebnisse */
-    
-    GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
-    sond_graph_node_search_criteria_free(criteria);
-    
-    if (!nodes) {
-        return NULL;
-    }
-    
-    /* Ergebnis-Array erstellen */
-    GPtrArray *results = g_ptr_array_new_with_free_func((GDestroyNotify)akte_search_result_free);
-    
-    /* Alle zurückgegebenen Nodes sind bereits gefiltert */
-    for (guint i = 0; i < nodes->len; i++) {
-        SondGraphNode *node = g_ptr_array_index(nodes, i);
-        
-        /* Kurzbezeichnung holen */
-        gchar *kurzb = sond_graph_node_get_property_string(node, "kurzb");
-        
-        /* RegNr extrahieren */
-            GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
-            if (regnr_values && regnr_values->len == 2) {
-                guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-                guint lfd_nr = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-                
-                /* Suchergebnis erstellen */
-                AkteSearchResult *result = g_new0(AkteSearchResult, 1);
-                result->node = g_object_ref(node);
-                result->lfd_nr = lfd_nr;
-                result->year = year;
-                result->regnr_display = format_regnr(lfd_nr, year);
-                result->kurzbezeichnung = kurzb;  /* Ownership übernehmen */
-                result->gegenstand = sond_graph_node_get_property_string(node, "ggstd");
-                kurzb = NULL;  /* Nicht freigeben */
-                
-                g_ptr_array_add(results, result);
-                
-                g_ptr_array_unref(regnr_values);
-            }
-
-        g_free(kurzb);
-    }
-    
-    g_ptr_array_unref(nodes);
-    
-    return results;
-}
-
-/* Callback-Daten für Suchergebnis-Dialog */
-typedef struct {
-    SondModuleAktePrivate *priv;
-    GPtrArray *results;
-    GtkWidget *dialog;
-    GtkWidget *listbox;
-    SuchServer server;      /* für den Zusatz in der Trefferliste */
-} SearchDialogData;
-
 /**
  * select_akte:
  *
@@ -706,11 +361,11 @@ typedef struct {
  */
 static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
                         const gchar *bezeichnung, const gchar *gegenstand,
-                        SondGraphNode *node, SuchServer server) {
+                        SondGraphNode *node, SondSucheServer server) {
     SondGraphNode *geladen = NULL;
     const gchar *herkunft = NULL;
 
-    if (!node && server == SERVER_OK) {
+    if (!node && server == SOND_SUCHE_SERVER_OK) {
         GError *error = NULL;
         guint alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
 
@@ -722,7 +377,7 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
             herkunft = "auf dem Server nicht gefunden";
         g_clear_error(&error);
         node = geladen;
-    } else if (!node && server == SERVER_FEHLER)
+    } else if (!node && server == SOND_SUCHE_SERVER_FEHLER)
         herkunft = "nur lokal bekannt (Server nicht erreichbar)";
     else if (!node)
         herkunft = "nur lokal bekannt (Server nicht befragt)";
@@ -753,7 +408,7 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
         gtk_label_set_text(GTK_LABEL(priv->status_label), status);
         g_free(status);
     } else {
-        gchar *regnr_display = format_regnr(lfd_nr, year);
+        gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
         gchar *status = g_strdup_printf("Status: %s", herkunft);
 
         clear_akte_fields(priv);
@@ -773,9 +428,6 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
 
     set_akte_state(priv, AKTE_STATE_AUSGEWAEHLT);
 
-    //Schreibberechtigung anzeigen; den Server nur fragen, wenn er die Akte lieferte
-    lease_refresh(priv, priv->current_node != NULL);
-
     /* Wird die Akte gerade wiederhergestellt: Stand abfragen und, wenn der Job fertig
      * ist, die Akte gleich fertigstellen (nur wenn angemeldet) */
     if (priv->current_node && sond_client_is_logged_in(priv->client) &&
@@ -784,427 +436,6 @@ static void select_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year,
         if (priv->current_node && !sond_archiv_wiederherstellung(priv->current_node, NULL))
             update_ui_from_node(priv);   //inzwischen abgeschlossen: Anzeige aktualisieren
     }
-}
-
-/**
- * on_search_result_selected:
- *
- * Callback wenn Benutzer ein Suchergebnis auswählt (Doppelklick oder Enter).
- */
-static void on_search_result_selected(GtkListBox *listbox,
-                                      GtkListBoxRow *row,
-                                      SearchDialogData *data) {
-    if (!row) return;
-
-    gint index = gtk_list_box_row_get_index(row);
-    if (index < 0 || index >= (gint)data->results->len) {
-        return;
-    }
-
-    AkteSearchResult *result = g_ptr_array_index(data->results, index);
-
-    select_akte(data->priv, result->lfd_nr, result->year,
-                result->kurzbezeichnung, result->gegenstand, result->node,
-                data->server);
-
-    /* Dialog schließen */
-    gtk_window_close(GTK_WINDOW(data->dialog));
-}
-
-/* Ergebnis für RegNr suchen oder neu anlegen; bei Treffer gleicher RegNr
- * werden Server- und SeaDrive-Angaben zusammengeführt. */
-static AkteSearchResult* find_or_add_result(GPtrArray *results, guint lfd_nr,
-                                             guint year) {
-    AkteSearchResult *r = NULL;
-
-    for (guint i = 0; i < results->len; i++) {
-        r = g_ptr_array_index(results, i);
-        if (r->lfd_nr == lfd_nr && r->year == year)
-            return r;
-    }
-
-    r = g_new0(AkteSearchResult, 1);
-    r->lfd_nr = lfd_nr;
-    r->year = year;
-    r->regnr_display = format_regnr(lfd_nr, year);
-    g_ptr_array_add(results, r);
-
-    return r;
-}
-
-static gint search_result_compare(gconstpointer a, gconstpointer b) {
-    const AkteSearchResult *ra = *(AkteSearchResult* const*) a;
-    const AkteSearchResult *rb = *(AkteSearchResult* const*) b;
-
-    if (ra->year != rb->year)
-        return ra->year < rb->year ? 1 : -1;
-    if (ra->lfd_nr != rb->lfd_nr)
-        return ra->lfd_nr < rb->lfd_nr ? 1 : -1;
-
-    return 0;
-}
-
-//Nach einem Fehlschlag wird der Server so lange nicht erneut versucht (Mikrosekunden),
-//damit die Suche offline nicht jedes Mal auf die Zeitgrenze wartet
-#define SERVER_PAUSE_US (120 * G_USEC_PER_SEC)
-
-/* Verbindung zum Server herstellen (Anmeldung, falls noch keine Sitzung besteht;
- * kurze Zeitgrenze). FALSE: nicht erreichbar oder Anmeldung gescheitert, *fehler
- * (nullable) erhält die Meldung. */
-static gboolean server_verbinden(SondModuleAktePrivate *priv, gchar **fehler) {
-    GError *error = NULL;
-    guint alt = 0;
-    gboolean ok = FALSE;
-
-    if (sond_client_is_logged_in(priv->client))
-        return TRUE;
-
-    if (g_get_monotonic_time() < priv->server_pause_bis) {
-        if (fehler)
-            *fehler = g_strdup("Server zuletzt nicht erreichbar");
-
-        return FALSE;
-    }
-
-    alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-    ok = sond_client_login(priv->client, &error);
-    sond_client_set_io_timeout(priv->client, alt);
-
-    if (!ok) {
-        priv->server_pause_bis = g_get_monotonic_time() + SERVER_PAUSE_US;
-        if (fehler)
-            *fehler = g_strdup(error ? error->message : "Anmeldung nicht möglich");
-    }
-    g_clear_error(&error);
-
-    return ok;
-}
-
-/* Kennung der Datenbank des Servers: ein Knoten "Instanz", der beim ersten Bedarf
- * angelegt wird. Neue Volumes bedeuten eine neue Kennung. g_free() oder NULL. */
-static gchar* server_instanz_id(SondModuleAktePrivate *priv) {
-    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-    GPtrArray *nodes = NULL;
-    SondGraphNode *best = NULL;
-    gchar *id = NULL;
-    GError *error = NULL;
-
-    criteria->label = g_strdup("Instanz");
-    criteria->limit = 0;
-    nodes = sond_client_search_nodes(priv->client, criteria, &error);
-    sond_graph_node_search_criteria_free(criteria);
-
-    if (!nodes) {
-        g_clear_error(&error);
-
-        return NULL;
-    }
-
-    //bei Dubletten (gleichzeitig angelegt) gilt der Knoten mit der kleinsten ID
-    for (guint i = 0; i < nodes->len; i++) {
-        SondGraphNode *node = g_ptr_array_index(nodes, i);
-
-        if (!best || sond_graph_node_get_id(node) < sond_graph_node_get_id(best))
-            best = node;
-    }
-    if (best)
-        id = sond_graph_node_get_property_string(best, "uuid");
-    g_ptr_array_unref(nodes);
-
-    if (id && *id)
-        return id;
-    g_free(id);
-
-    {
-        SondGraphNode *neu = sond_graph_node_new();
-
-        id = g_uuid_string_random();
-        sond_graph_node_set_label(neu, "Instanz");
-        sond_graph_node_set_property_string(neu, "uuid", id);
-        if (!sond_client_save_node(priv->client, neu, &error)) {
-            g_free(id);
-            id = NULL;
-            g_clear_error(&error);
-        }
-        g_object_unref(neu);
-    }
-
-    return id;
-}
-
-/* Merkliste auf die Akten kürzen, die der Server kennt (einmal je Sitzung) */
-static void merkliste_abgleichen(SondModuleAktePrivate *priv, const gchar *merkliste) {
-    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-    GPtrArray *nodes = NULL;
-    GPtrArray *namen = NULL;
-    GError *error = NULL;
-
-    criteria->label = g_strdup("Akte");
-    criteria->limit = 0;
-    nodes = sond_client_search_nodes(priv->client, criteria, &error);
-    sond_graph_node_search_criteria_free(criteria);
-
-    if (!nodes) {
-        g_clear_error(&error);
-
-        return;
-    }
-
-    namen = g_ptr_array_new_with_free_func(g_free);
-    for (guint i = 0; i < nodes->len; i++) {
-        GPtrArray *regnr = sond_graph_node_get_property(g_ptr_array_index(nodes, i),
-                "regnr");
-
-        if (regnr && regnr->len == 2)
-            g_ptr_array_add(namen, format_regnr_storage(
-                    (guint) g_ascii_strtoull(g_ptr_array_index(regnr, 1), NULL, 10),
-                    (guint) g_ascii_strtoull(g_ptr_array_index(regnr, 0), NULL, 10)));
-        if (regnr)
-            g_ptr_array_unref(regnr);
-    }
-
-    sond_akten_bereinigen(merkliste, namen);
-    priv->merkliste_abgeglichen = TRUE;
-
-    g_ptr_array_unref(namen);
-    g_ptr_array_unref(nodes);
-}
-
-/**
- * collect_results:
- *
- * Eine Suche für online und offline. Zuerst wird der Server befragt (mit
- * Anmeldung, falls nötig, und kurzer Zeitgrenze); antwortet er, ist seine
- * Antwort maßgeblich: Libraries im SeaDrive, die er nicht kennt, erscheinen
- * nicht, und die Merkliste wird auf seinen Stand gekürzt. Nur wenn der Server
- * nicht erreichbar ist, gilt die lokale Liste (Libraries im SeaDrive mit der
- * Bezeichnung aus .sond/akte oder der Merkliste). Gleiche Akten erscheinen
- * einmal. @server sagt, ob und wie der Server beteiligt war; bei einem Fehler
- * enthält @fehler (nullable) die Meldung.
- *
- * Returns: (transfer full): Array von AkteSearchResult, neueste zuerst
- */
-static GPtrArray* collect_results(SondModuleAktePrivate *priv, const gchar *text,
-                                  SuchServer *server, gchar **fehler) {
-    GPtrArray *results = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)akte_search_result_free);
-    gchar *root = sond_client_find_seadrive_root(priv->client, NULL);
-    gchar *merkliste = sond_akten_merkliste_pfad();
-    guint lfd_nr = 0;
-    guint year = 0;
-
-    *server = SERVER_NICHT_BEFRAGT;
-    if (fehler)
-        *fehler = NULL;
-
-    /* 1. Server zuerst */
-    if (server_verbinden(priv, fehler)) {
-        GError *error = NULL;
-        guint alt_timeout = sond_client_set_io_timeout(priv->client,
-                                                       SERVER_KURZ_TIMEOUT);
-
-        *server = SERVER_OK;
-
-        if (is_valid_regnr_format(text) && parse_regnr(text, &lfd_nr, &year)) {
-            SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
-
-            if (node) {
-                AkteSearchResult *r = find_or_add_result(results, lfd_nr, year);
-                gchar *kurzb = sond_graph_node_get_property_string(node, "kurzb");
-
-                if (r->node)
-                    g_object_unref(r->node);
-                r->node = node;
-                if (kurzb) {
-                    g_free(r->kurzbezeichnung);
-                    r->kurzbezeichnung = kurzb;
-                }
-                g_free(r->gegenstand);
-                r->gegenstand = sond_graph_node_get_property_string(node, "ggstd");
-            } else if (error && error->code != G_IO_ERROR_NOT_FOUND) {
-                *server = SERVER_FEHLER;
-                if (fehler)
-                    *fehler = g_strdup(error->message);
-            }
-        } else {
-            //Suchtext in Kurzbezeichnung und in Gegenstand
-            static const gchar *felder[] = { "kurzb", "ggstd" };
-
-            for (guint k = 0; k < G_N_ELEMENTS(felder) && *server == SERVER_OK; k++) {
-                GPtrArray *srv = search_akten_by_property(priv, felder[k], text,
-                                                          &error);
-
-                if (srv) {
-                    for (guint i = 0; i < srv->len; i++) {
-                        AkteSearchResult *s = g_ptr_array_index(srv, i);
-                        AkteSearchResult *r = find_or_add_result(results, s->lfd_nr,
-                                                                 s->year);
-
-                        if (r->node)
-                            g_object_unref(r->node);
-                        r->node = s->node ? g_object_ref(s->node) : NULL;
-                        if (s->kurzbezeichnung) {
-                            g_free(r->kurzbezeichnung);
-                            r->kurzbezeichnung = g_strdup(s->kurzbezeichnung);
-                        }
-                        g_free(r->gegenstand);
-                        r->gegenstand = g_strdup(s->gegenstand);
-                    }
-                    g_ptr_array_unref(srv);
-                } else if (error) {
-                    *server = SERVER_FEHLER;
-                    if (fehler)
-                        *fehler = g_strdup(error->message);
-                }
-                g_clear_error(&error);
-            }
-        }
-        g_clear_error(&error);
-
-        if (*server == SERVER_OK) {
-            //Die Merkliste gehört zu genau diesem Server (Kennung der Datenbank)
-            //und enthält nur, was er kennt
-            if (!priv->merkliste_abgeglichen) {
-                gchar *instanz = server_instanz_id(priv);
-
-                if (instanz) {
-                    sond_akten_instanz_pruefen(merkliste, instanz);
-                    g_free(instanz);
-                }
-                merkliste_abgleichen(priv, merkliste);
-            }
-
-            for (guint i = 0; i < results->len; i++) {
-                AkteSearchResult *r = g_ptr_array_index(results, i);
-                gchar *lib = format_regnr_storage(r->lfd_nr, r->year);
-
-                //Bezeichnungen vom Server auch für die Offline-Suche merken
-                if (r->node && r->kurzbezeichnung)
-                    sond_akten_merken(merkliste, lib, r->kurzbezeichnung,
-                                      r->gegenstand ? r->gegenstand : "");
-
-                //liegt die Library auch im SeaDrive?
-                if (root) {
-                    gchar *dir = sond_import_find_library_dir(root, lib, NULL);
-
-                    r->lokal = (dir != NULL);
-                    g_free(dir);
-                }
-                g_free(lib);
-            }
-        } else {
-            priv->server_pause_bis = g_get_monotonic_time() + SERVER_PAUSE_US;
-        }
-
-        sond_client_set_io_timeout(priv->client, alt_timeout);
-    } else {
-        *server = SERVER_FEHLER;
-    }
-
-    /* 2. Rückfall: der Server hat nicht geantwortet, dann gilt die lokale Liste */
-    if (*server != SERVER_OK && root) {
-        GPtrArray *alle = sond_akten_scan(root, merkliste, NULL);
-
-        if (alle) {
-            GPtrArray *treffer = sond_akten_suchen(alle, text);
-
-            for (guint i = 0; i < treffer->len; i++) {
-                SondAkteEintrag *e = g_ptr_array_index(treffer, i);
-                AkteSearchResult *r = find_or_add_result(results, e->lfd_nr,
-                                                         e->year);
-
-                r->lokal = TRUE;
-                if (!r->kurzbezeichnung && e->bezeichnung)
-                    r->kurzbezeichnung = g_strdup(e->bezeichnung);
-                if (!r->gegenstand && e->gegenstand)
-                    r->gegenstand = g_strdup(e->gegenstand);
-            }
-            g_ptr_array_unref(treffer);
-            g_ptr_array_unref(alle);
-        }
-    }
-
-    g_free(root);
-    g_free(merkliste);
-    g_ptr_array_sort(results, search_result_compare);
-
-    return results;
-}
-
-/**
- * show_akte_search_results:
- * 
- * Zeigt Suchergebnisse in einem Dialog an.
- */
-static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term, SuchServer server) {
-    if (!results || results->len == 0) {
-        gchar *msg = g_strdup_printf(
-            "Keine Akten gefunden mit Suchbegriff: \"%s\"",
-            search_term);
-        show_info_dialog(priv->main_widget, "Keine Ergebnisse", msg);
-        g_free(msg);
-        return;
-    }
-    
-    /* Dialog erstellen */
-    GtkWidget *dialog = gtk_window_new();
-    gchar *title = g_strdup_printf("Aktensuche: \"%s\" (%u Ergebnisse)%s", search_term, results->len, server == SERVER_FEHLER ? " - Server nicht erreichbar, nur lokale Treffer" : "");
-    gtk_window_set_title(GTK_WINDOW(dialog), title);
-    g_free(title);
-    
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 400);
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_transient_for(GTK_WINDOW(dialog), 
-                                 GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
-    
-    /* ScrolledWindow für Liste */
-    GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_window_set_child(GTK_WINDOW(dialog), scrolled);
-    
-    /* ListBox für Ergebnisse */
-    GtkWidget *listbox = gtk_list_box_new();
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), listbox);
-    
-    /* Callback-Daten */
-    SearchDialogData *data = g_new0(SearchDialogData, 1);
-    data->priv = priv;
-    data->results = g_ptr_array_ref(results);  /* Referenz erhöhen */
-    data->dialog = dialog;
-    data->listbox = listbox;
-    data->server = server;
-    
-    /* Ergebnisse in ListBox einfügen */
-    for (guint i = 0; i < results->len; i++) {
-        AkteSearchResult *result = g_ptr_array_index(results, i);
-        
-        gchar *label_text = g_strdup_printf("%s - %s%s%s%s", result->regnr_display,
-                                           result->kurzbezeichnung ? result->kurzbezeichnung : "",
-                                           (result->gegenstand && *result->gegenstand) ? "  |  " : "",
-                                           result->gegenstand ? result->gegenstand : "",
-                                           result->node ? "" : (server == SERVER_OK ? "   (nur im SeaDrive)" :
-                                               server == SERVER_FEHLER ? "   (Server nicht erreichbar)" : ""));
-        GtkWidget *label = gtk_label_new(label_text);
-        gtk_label_set_xalign(GTK_LABEL(label), 0.0);  /* Links ausrichten */
-        gtk_widget_set_margin_start(label, 10);
-        gtk_widget_set_margin_end(label, 10);
-        gtk_widget_set_margin_top(label, 5);
-        gtk_widget_set_margin_bottom(label, 5);
-        g_free(label_text);
-        
-        gtk_list_box_append(GTK_LIST_BOX(listbox), label);
-    }
-    
-    /* Signal verbinden */
-    g_signal_connect(listbox, "row-activated", 
-                    G_CALLBACK(on_search_result_selected), data);
-    
-    /* Cleanup bei Dialog-Schließung */
-    g_signal_connect_swapped(dialog, "destroy", 
-                             G_CALLBACK(g_ptr_array_unref), data->results);
-    g_signal_connect_swapped(dialog, "destroy", 
-                             G_CALLBACK(g_free), data);
-    
-    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 /**
@@ -1219,7 +450,7 @@ static void suggest_last_regnr(SondModuleAktePrivate *priv) {
         return;  /* Keine RegNr gespeichert */
     }
     
-    gchar *regnr_display = format_regnr(lfd_nr, year);
+    gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
     g_free(regnr_display);
     
@@ -1290,15 +521,6 @@ SondAkteStatus sond_module_akte_get_status(SondGraphNode *node) {
 
     return (von_count > bis_count) ? SOND_AKTE_STATUS_AKTIV :
             SOND_AKTE_STATUS_ABGELEGT;
-}
-
-gboolean sond_module_akte_parse_regnr(const gchar *regnr_str, guint *lfd_nr,
-        guint *year) {
-    return parse_regnr(regnr_str, lfd_nr, year);
-}
-
-gchar* sond_module_akte_library_name(guint lfd_nr, guint year) {
-    return format_regnr_storage(lfd_nr, year);
 }
 
 /**
@@ -1495,7 +717,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     if (regnr_values && regnr_values->len == 2) {
         year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
         lfd_nr = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
-        gchar *regnr_display = format_regnr(lfd_nr, year);
+        gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
         gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
         g_free(regnr_display);
         g_ptr_array_unref(regnr_values);
@@ -1524,86 +746,13 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     g_free(priv->library_name);
     priv->library_name = NULL;
     if (sond_graph_node_get_id(priv->current_node) > 0) {
-        priv->library_name = format_regnr_storage(lfd_nr, year);
+        priv->library_name = sond_akten_library_name(lfd_nr, year);
     }
-}
-
-/* ========================================================================
- * Server Communication
- * ======================================================================== */
-SondGraphNode* sond_module_akte_find_by_regnr(SondClient *client,
-		guint lfd_nr, guint year, GError **error) {
-	/* Search Criteria erstellen */
-	SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-	criteria->label = g_strdup("Akte");
-
-	/* Zahlen zu Strings konvertieren */
-	gchar *year_str = g_strdup_printf("%u", year);
-	gchar *lfdnr_str = g_strdup_printf("%u", lfd_nr);
-
-	/* NEU: Zwei separate Filter für Jahr und lfd. Nummer mit array_index */
-	SondPropertyFilter *jahr_filter = sond_property_filter_new_with_index(
-		"regnr",           // key
-		year_str,          // value = "2026"
-		0                  // array_index = 0 (erstes Element im Array)
-	);
-	g_ptr_array_add(criteria->property_filters, jahr_filter);
-
-	SondPropertyFilter *lfdnr_filter = sond_property_filter_new_with_index(
-		"regnr",           // key
-		lfdnr_str,         // value = "123"
-		1                  // array_index = 1 (zweites Element im Array)
-	);
-	g_ptr_array_add(criteria->property_filters, lfdnr_filter);
-
-	/* Strings freigeben */
-	g_free(year_str);
-	g_free(lfdnr_str);
-
-	criteria->limit = 100;
-
-	/* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
-	GPtrArray *nodes = sond_client_search_nodes(client, criteria, error);
-	sond_graph_node_search_criteria_free(criteria);
-
-	if (!nodes) {
-	    return NULL;
-	}
-
-	/* Ersten passenden Node finden */
-	SondGraphNode *result_node = NULL;
-
-	for (guint i = 0; i < nodes->len; i++) {
-	    SondGraphNode *node = g_ptr_array_index(nodes, i);
-	    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
-
-	    if (regnr_values && regnr_values->len == 2) {
-	        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-	        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-
-	        if (node_lfd == lfd_nr && node_year == year) {
-	            result_node = g_object_ref(node);  /* Referenz erhöhen */
-	            g_ptr_array_unref(regnr_values);
-	            break;
-	        }
-
-	        g_ptr_array_unref(regnr_values);
-	    }
-	}
-
-	g_ptr_array_unref(nodes);
-
-	if (!result_node) {
-	    g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-	               "Akte mit RegNr %u/%u nicht gefunden", lfd_nr, year);
-	}
-
-	return result_node;
 }
 
 static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
 		guint lfd_nr, guint year, GError **error) {
-	return sond_module_akte_find_by_regnr(priv->client, lfd_nr, year, error);
+	return sond_akten_suche_node_by_regnr(priv->client, lfd_nr, year, error);
 }
 
 static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint *year, GError **error) {
@@ -2515,7 +1664,7 @@ static void namensdateien_abgleichen(SondModuleAktePrivate *priv) {
             g_ptr_array_unref(rn);
         return;
     }
-    lib_name = sond_module_akte_library_name(
+    lib_name = sond_akten_library_name(
             (guint)g_ascii_strtoull(g_ptr_array_index(rn, 1), NULL, 10),
             (guint)g_ascii_strtoull(g_ptr_array_index(rn, 0), NULL, 10));
     g_ptr_array_unref(rn);
@@ -2897,7 +2046,7 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
 
 /* Nachfrage, ob eine noch nicht vorhandene Akte angelegt werden soll (online) */
 static void ask_new_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year) {
-    gchar *regnr_display = format_regnr(lfd_nr, year);
+    gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
     gchar *message = g_strdup_printf(
         "Akte %s existiert nicht.\n\nNeue Akte mit dieser Registernummer anlegen?",
         regnr_display);
@@ -2928,100 +2077,17 @@ static void ask_new_akte(SondModuleAktePrivate *priv, guint lfd_nr, guint year) 
     g_object_unref(dialog);
 }
 
-/* Nachfrage nach einer Suche ohne Treffer, wenn der Server nicht geantwortet
- * hat: erneut suchen? */
-typedef struct {
-    SondModuleAktePrivate *priv;
-    gchar *such;
-} ServerSucheData;
-
-static void such_ausfuehren(SondModuleAktePrivate *priv, const gchar *such);
-
-static void on_server_suche_response(GObject *source, GAsyncResult *result,
-                                     gpointer user_data) {
-    ServerSucheData *d = user_data;
-    GError *error = NULL;
-    int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result,
-                                                &error);
-
-    g_clear_error(&error);
-
-    if (button == 0) {
-        d->priv->server_pause_bis = 0;   //ausdrücklich noch einmal versuchen
-        such_ausfuehren(d->priv, d->such);
-    }
-
-    g_free(d->such);
-    g_free(d);
+/* Eine Akte wurde im Suchfeld gewählt (einziger Treffer oder Wahl in der Liste) */
+static void on_akte_gewaehlt(const SondAkteTreffer *t, SondSucheServer server, gpointer user_data) {
+    select_akte(user_data, t->lfd_nr, t->year, t->kurzbezeichnung, t->gegenstand, t->node, server);
 }
 
-static void frage_server_suche(SondModuleAktePrivate *priv, const gchar *such,
-                               const gchar *fehler) {
-    GtkAlertDialog *dialog = gtk_alert_dialog_new("Server nicht erreichbar");
-    ServerSucheData *d = g_new0(ServerSucheData, 1);
-    gchar *detail = g_strdup_printf("Im SeaDrive-Laufwerk wurde nichts gefunden, "
-            "und der Server hat nicht geantwortet (%s). Erneut suchen?",
-            fehler ? fehler : "unbekannter Fehler");
-    const char *buttons[] = {"Erneut suchen", "Abbrechen", NULL};
+/* Die Registernummer ist dem Server unbekannt: neue Akte anlegen? */
+static void on_akte_unbekannt(guint lfd_nr, guint year, gpointer user_data) {
+    SondModuleAktePrivate *priv = user_data;
 
-    d->priv = priv;
-    d->such = g_strdup(such);
-
-    gtk_alert_dialog_set_detail(dialog, detail);
-    g_free(detail);
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_default_button(dialog, 0);
-    gtk_alert_dialog_set_cancel_button(dialog, 1);
-    gtk_alert_dialog_set_modal(dialog, TRUE);
-
-    gtk_alert_dialog_choose(dialog,
-                            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
-                            NULL, on_server_suche_response, d);
-    g_object_unref(dialog);
-}
-
-/* Suche ausführen: RegNr oder Suchtext, zuerst auf dem Server (mit Anmeldung),
- * nur bei Nichterreichbarkeit im SeaDrive (s. collect_results). Ein einziger
- * Treffer wird gleich gewählt, bei mehreren erscheint die Trefferliste. Ohne
- * Treffer und ohne Antwort des Servers wird gefragt, ob erneut gesucht werden soll. */
-static void such_ausfuehren(SondModuleAktePrivate *priv, const gchar *such) {
-    guint lfd_nr = 0;
-    guint year = 0;
-    gchar *fehler = NULL;
-    SuchServer server = SERVER_NICHT_BEFRAGT;
-    GPtrArray *results = collect_results(priv, such, &server, &fehler);
-
-    if (results->len == 1) {
-        AkteSearchResult *r = g_ptr_array_index(results, 0);
-
-        select_akte(priv, r->lfd_nr, r->year, r->kurzbezeichnung, r->gegenstand,
-                    r->node, server);
-    } else if (results->len > 1) {
-        show_akte_search_results(priv, results, such, server);
-    } else if (server != SERVER_OK) {
-        frage_server_suche(priv, such, fehler);
-    } else if (is_valid_regnr_format(such) && parse_regnr(such, &lfd_nr, &year)) {
-        sond_client_set_last_regnr(priv->client, lfd_nr, year);
-        ask_new_akte(priv, lfd_nr, year);
-    } else {
-        gchar *msg = g_strdup_printf("Keine Akten gefunden mit Suchbegriff: \"%s\"",
-                                     such);
-
-        show_info_dialog(priv->main_widget, "Keine Ergebnisse", msg);
-        g_free(msg);
-    }
-
-    g_free(fehler);
-    g_ptr_array_unref(results);
-}
-
-/* Enter im Suchfeld */
-static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
-    gchar *such = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(entry))));
-
-    if (*such)
-        such_ausfuehren(priv, such);
-    g_free(such);
+    sond_client_set_last_regnr(priv->client, lfd_nr, year);
+    ask_new_akte(priv, lfd_nr, year);
 }
 
 static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -3039,7 +2105,7 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     /* Entry insensitiv machen + Placeholder */
     gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
-    apply_widget_style(priv->regnr_entry, FALSE);
+    sond_akten_suche_stil_apply(priv->regnr_entry, FALSE);
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "Neue Akte");
     
     /* Felder leer lassen */
@@ -3188,7 +2254,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 			
 			update_ui_from_node(priv);
 
-			gchar *regnr_display = format_regnr(lfd_nr, year);
+			gchar *regnr_display = sond_akten_regnr_anzeige(lfd_nr, year);
 			gchar *msg = g_strdup_printf("Akte %s wurde erfolgreich gespeichert.", regnr_display);
 			speicher_hinweis(priv, msg);
 			g_free(msg);
@@ -3377,7 +2443,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             if (rn && rn->len == 2) {
                 guint year = (guint)g_ascii_strtoull(g_ptr_array_index(rn, 0), NULL, 10);
                 guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(rn, 1), NULL, 10);
-                gchar *lib_name = sond_module_akte_library_name(lfd, year);
+                gchar *lib_name = sond_akten_library_name(lfd, year);
                 GError *name_error = NULL;
 
                 if (!sond_client_set_library_bezeichnung(priv->client, lib_name,
@@ -3574,7 +2640,7 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
  * (z.B. Tab-Wechsel/Fenster schliessen, ohne vorher "Ok" oder "Abbrechen" zu
  * klicken) nichts aufgeraeumt - der g_object_set_data_full()-Destroy-Callback
  * fuer "priv" ruft nur g_free() auf priv selbst auf, ohne Lock, current_node,
- * client oder css_provider freizugeben. Das fuehrt dazu, dass eine noch
+ * client oder den Stil freizugeben. Das fuehrt dazu, dass eine noch
  * gesperrte Akte fuer immer gesperrt bleibt. Unlock-Versuch unbedingt bei
  * node_id > 0 (wie in on_abbrechen_clicked()/on_ok_clicked(); ein Unlock fuer
  * eine nicht von uns gehaltene Sperre (AKTE_STATE_READONLY) ist serverseitig
@@ -3602,9 +2668,6 @@ static void akte_abort_cb(GtkWidget *module, gpointer user_data) {
 static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     SondModuleAktePrivate *priv = (SondModuleAktePrivate *) user_data;
 
-    sond_zond_prozess_set_func(NULL, NULL);
-    sond_dokumente_set_func(NULL, NULL);
-
     //Abbruch, falls das Fenster nicht über "Schließen" ging (sonst ist er schon gelaufen)
     sond_module_abort(widget);
 
@@ -3613,18 +2676,7 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
         priv->current_node = NULL;
     }
 
-    if (priv->css_provider) {
-        /* setup_css_provider() registriert den Provider global am Display
-         * (gtk_style_context_add_provider_for_display) - muss daher beim
-         * Zerstoeren des Moduls explizit wieder entfernt werden, sonst bleibt
-         * er dauerhaft (und bei jedem erneuten Oeffnen des Moduls ein
-         * weiteres Mal) am Display registriert. */
-        gtk_style_context_remove_provider_for_display(
-            gdk_display_get_default(),
-            GTK_STYLE_PROVIDER(priv->css_provider));
-        g_object_unref(priv->css_provider);
-        priv->css_provider = NULL;
-    }
+    sond_akten_suche_stil_unref();
 
     g_free(priv->library_name);
     priv->library_name = NULL;
@@ -3639,16 +2691,6 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
     g_free(priv->wh_status);
     priv->wh_status = NULL;
 
-    if (priv->lease_wait_source) {
-        g_source_remove(priv->lease_wait_source);
-        priv->lease_wait_source = 0;
-    }
-    g_clear_pointer(&priv->lease_wait_name, g_free);
-
-    //die Berechtigung bleibt bestehen (lokaler Zustand in der Datei)
-    sond_akte_lease_free(priv->lease);
-    priv->lease = NULL;
-
     g_signal_handlers_disconnect_by_data(priv->client, priv);
     g_object_unref(priv->client);
     priv->client = NULL;
@@ -3657,732 +2699,6 @@ static void on_main_box_destroy(GtkWidget *widget, gpointer user_data) {
 /* =======================================================================
  * Anmelden, Import, zond
  * ======================================================================= */
-
-/* =======================================================================
- * Schreibberechtigung (Lease) für das Projekt
- * ======================================================================= */
-
-static void on_zond_clicked(GtkButton *button, SondModuleAktePrivate *priv);
-static void start_zond(SondModuleAktePrivate *priv, gboolean force_ro);
-
-//Ergebnis von lease_ensure(): in welchem Modus darf zond starten?
-typedef enum {
-    LEASE_ZUGRIFF_NEIN,       //gar nicht (dem Nutzer wurde bereits etwas erklärt)
-    LEASE_ZUGRIFF_SCHREIBEN,  //mit Schreibberechtigung
-    LEASE_ZUGRIFF_LESEN       //nur schreibgeschützt
-} LeaseZugriff;
-
-/* Library-Name der gewählten Akte (g_free) oder NULL */
-static gchar* lease_current_name(SondModuleAktePrivate *priv) {
-    guint lfd_nr = 0;
-    guint year = 0;
-
-    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
-        return NULL;
-
-    return sond_module_akte_library_name(lfd_nr, year);
-}
-
-/* Node-ID der gewählten Akte: vom Server geladener Knoten, sonst laut lokalem
- * Lease-Zustand (offline); 0, wenn beides fehlt */
-static gint64 lease_current_akte_id(SondModuleAktePrivate *priv,
-        const gchar *name) {
-    if (priv->current_node) {
-        gint64 id = sond_graph_node_get_id(priv->current_node);
-
-        if (id > 0)
-            return id;
-    }
-
-    return sond_akte_lease_find_by_name(priv->lease, name);
-}
-
-static gchar* lease_idle_text(gint64 seconds) {
-    if (seconds < 0)
-        return g_strdup("unbekannt");
-    if (seconds < 120)
-        return g_strdup("gerade eben");
-    if (seconds < 3600)
-        return g_strdup_printf("vor %" G_GINT64_FORMAT " Min.", seconds / 60);
-    if (seconds < 48 * 3600)
-        return g_strdup_printf("vor %" G_GINT64_FORMAT " Std.",
-                seconds / 3600);
-
-    return g_strdup_printf("vor %" G_GINT64_FORMAT " Tagen", seconds / 86400);
-}
-
-static gchar* lease_info_text(const SondLeaseInfo *info) {
-    gchar *idle = NULL;
-    gchar *text = NULL;
-
-    if (!info->found || !info->held)
-        return g_strdup("Projekt: nicht ausgecheckt");
-
-    if (info->expired)
-        return g_strdup_printf("Projekt: Berechtigung von %s (%s) abgelaufen, "
-                "frei", info->user ? info->user : "?",
-                info->device_name ? info->device_name : "?");
-
-    if (info->mine)
-        return g_strdup("Projekt: auf diesem Rechner ausgecheckt");
-
-    if (info->by_job)
-        return g_strdup_printf("Projekt: Index-Job auf dem Server (gestartet von %s)",
-                info->user ? info->user : "?");
-
-    idle = lease_idle_text(info->idle_seconds);
-    text = g_strdup_printf("Projekt: ausgecheckt von %s auf %s, zuletzt aktiv "
-            "%s%s", info->user ? info->user : "?",
-            info->device_name ? info->device_name : "?", idle,
-            info->zond_open ? " (zond läuft)" : "");
-    g_free(idle);
-
-    return text;
-}
-
-/* Anzeige der Schreibberechtigung der gewählten Akte. ask_server: zusätzlich
- * den Server fragen (kurze Zeitgrenze), sonst nur der lokale Stand. */
-static void lease_refresh(SondModuleAktePrivate *priv, gboolean ask_server) {
-    gchar *name = NULL;
-    gint64 akte_id = 0;
-    gboolean lokal = FALSE;
-    gchar *text = NULL;
-    SondLeaseInfo info = { 0 };
-
-    if (!priv->lease_box)
-        return;
-
-    name = lease_current_name(priv);
-    if (!name || akte_ist_abgelegt(priv)) {
-        gtk_widget_set_visible(priv->lease_box, FALSE);
-        g_free(name);
-
-        return;
-    }
-
-    akte_id = lease_current_akte_id(priv, name);
-    lokal = akte_id > 0 && sond_akte_lease_may_write(priv->lease, akte_id);
-
-    if (ask_server && priv->current_node && akte_id > 0 &&
-            sond_client_is_logged_in(priv->client)) {
-        GError *error = NULL;
-        guint alt = sond_client_set_io_timeout(priv->client,
-                SERVER_KURZ_TIMEOUT);
-
-        if (sond_akte_lease_get_info(priv->lease, akte_id, &info, &error))
-            text = lease_info_text(&info);
-        sond_client_set_io_timeout(priv->client, alt);
-        g_clear_error(&error);
-    }
-
-    if (!text)
-        text = lokal ?
-                g_strdup("Projekt: auf diesem Rechner ausgecheckt (Stand ohne "
-                        "Server)") :
-                g_strdup("Projekt: Stand unbekannt (Server nicht befragt)");
-
-    gtk_label_set_text(GTK_LABEL(priv->lease_label), text);
-    gtk_widget_set_visible(priv->btn_lease_release, lokal);
-    gtk_widget_set_visible(priv->lease_box, TRUE);
-
-    sond_akte_lease_info_clear(&info);
-    g_free(text);
-    g_free(name);
-}
-
-/* Daten für Dialog-Rückrufe: Modul, Akte und Library-Name */
-typedef struct {
-    SondModuleAktePrivate *priv;
-    gint64 akte_id;
-    gchar *name;
-} LeaseDlg;
-
-static LeaseDlg* lease_dlg_new(SondModuleAktePrivate *priv, gint64 akte_id,
-        const gchar *name) {
-    LeaseDlg *d = g_new0(LeaseDlg, 1);
-
-    d->priv = priv;
-    d->akte_id = akte_id;
-    d->name = g_strdup(name ? name : "?");
-
-    return d;
-}
-
-static void lease_dlg_free(LeaseDlg *d) {
-    g_free(d->name);
-    g_free(d);
-}
-
-static void lease_denied_dialog(SondModuleAktePrivate *priv,
-        gint64 akte_id, const gchar *name, const SondLeaseInfo *info);
-
-static void lease_unsynced_dialog(SondModuleAktePrivate *priv, gint64 akte_id,
-        gint offen);
-
-/* Berechtigung der Akte zurückgeben und das Ergebnis melden.
- * ignore_unsynced: auch freigeben, wenn SeaDrive noch nicht alles hochgeladen hat */
-static void lease_release_akte(SondModuleAktePrivate *priv, gint64 akte_id,
-        gboolean ignore_unsynced) {
-    GError *error = NULL;
-    guint alt = 0;
-    SondLeaseResult res = SOND_LEASE_ERROR;
-
-    //läuft zond mit dem Projekt: schreibschützen und das Speichern abwarten
-    if (!sond_akte_lease_zond_settle(priv->lease, akte_id, 8000)) {
-        show_error_dialog(priv->main_widget, "zond hat noch nicht gespeichert",
-                "zond konnte nicht innerhalb weniger Sekunden speichern und "
-                "schreibgeschützt werden. Bitte zond schließen (dabei "
-                "speichern) und dann erneut freigeben.");
-        lease_refresh(priv, TRUE);
-
-        return;
-    }
-
-    //hat SeaDrive alle Änderungen hochgeladen? (-1: nicht feststellbar)
-    if (!ignore_unsynced) {
-        gint offen = sond_akte_lease_unsynced(priv->lease, akte_id);
-
-        if (offen > 0) {
-            lease_unsynced_dialog(priv, akte_id, offen);
-            lease_refresh(priv, TRUE);
-
-            return;
-        }
-    }
-
-    alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-    res = sond_akte_lease_release(priv->lease, akte_id, &error);
-
-    sond_client_set_io_timeout(priv->client, alt);
-
-    if (res == SOND_LEASE_ERROR) {
-        show_error_dialog(priv->main_widget, "Freigabe nicht möglich",
-                "Der Server ist nicht erreichbar. Die Berechtigung bleibt bei "
-                "diesem Rechner; bitte später erneut versuchen.");
-    } else if (res == SOND_LEASE_LOST) {
-        show_error_dialog(priv->main_widget, "Berechtigung nicht mehr vorhanden",
-                "Die Berechtigung gehörte diesem Rechner nicht mehr (sie wurde "
-                "übernommen oder ist abgelaufen). Der lokale Eintrag wurde "
-                "entfernt.");
-    }
-
-    g_clear_error(&error);
-    lease_refresh(priv, TRUE);
-}
-
-static void on_lease_release_response(GObject *source, GAsyncResult *result,
-        gpointer user_data) {
-    LeaseDlg *d = user_data;
-    GError *error = NULL;
-    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source),
-            result, &error);
-
-    if (!error && button == 0 && d->priv->client)
-        lease_release_akte(d->priv, d->akte_id, FALSE);
-
-    g_clear_error(&error);
-    lease_dlg_free(d);
-}
-
-static void on_lease_unsynced_response(GObject *source, GAsyncResult *result,
-        gpointer user_data) {
-    LeaseDlg *d = user_data;
-    GError *error = NULL;
-    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source),
-            result, &error);
-
-    if (!error && button == 0 && d->priv->client)
-        lease_release_akte(d->priv, d->akte_id, TRUE);
-
-    g_clear_error(&error);
-    lease_dlg_free(d);
-}
-
-//SeaDrive hat noch nicht alles hochgeladen: warnen, auf Wunsch trotzdem freigeben
-static void lease_unsynced_dialog(SondModuleAktePrivate *priv, gint64 akte_id,
-        gint offen) {
-    GtkAlertDialog *dialog = gtk_alert_dialog_new("Noch nicht alles hochgeladen");
-    const char *buttons[] = { "Trotzdem freigeben", "Abbrechen", NULL };
-    gchar *detail = g_strdup_printf("SeaDrive hat noch %d geänderte Datei(en) "
-            "nicht hochgeladen. Gibt man die Akte jetzt frei, fehlen sie dem "
-            "nächsten Bearbeiter oder erscheinen als Konfliktkopie.\n\nBesser "
-            "warten, bis SeaDrive fertig ist, und dann erneut freigeben.", offen);
-
-    gtk_alert_dialog_set_detail(dialog, detail);
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_default_button(dialog, 1);
-    gtk_alert_dialog_set_cancel_button(dialog, 1);
-    gtk_alert_dialog_set_modal(dialog, TRUE);
-    gtk_alert_dialog_choose(dialog,
-            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
-            on_lease_unsynced_response, lease_dlg_new(priv, akte_id, NULL));
-
-    g_free(detail);
-    g_object_unref(dialog);
-}
-
-/* Rückfrage vor dem Freigeben. requested: ein anderer Rechner wünscht die
- * Übergabe (sonst: der Nutzer hat selbst "Freigeben" gedrückt) */
-static void lease_confirm_release(SondModuleAktePrivate *priv, gint64 akte_id,
-        const gchar *name, gboolean requested) {
-    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s",
-            requested ? "Übernahme angefordert" : "Projekt freigeben?");
-    const char *buttons_req[] = { "Jetzt freigeben", "Später", NULL };
-    const char *buttons_own[] = { "Freigeben", "Abbrechen", NULL };
-    gchar *detail = NULL;
-
-    if (requested)
-        detail = g_strdup_printf("Ihr anderer Rechner möchte die Akte %s "
-                "bearbeiten.%s\n\nDie Übergabe ließ sich nicht selbständig "
-                "abschließen: zond ist schreibgeschützt, aber ob SeaDrive alle "
-                "Änderungen hochgeladen hat, steht nicht fest oder es dauert "
-                "lange. Bitte SeaDrive prüfen und dann freigeben. (Über "
-                "\"Freigeben\" bei der Akte geht das auch später.)",
-                name ? name : "?",
-                sond_akte_lease_zond_open(priv->lease, akte_id) ?
-                        " zond lief hier noch." : "");
-    else
-        detail = g_strdup("Danach kann ein anderer Rechner die Akte "
-                "bearbeiten.\n\nLäuft zond mit dem Projekt, wird es "
-                "schreibgeschützt geschaltet und speichert vorher. Bitte "
-                "abwarten, bis SeaDrive alle Änderungen hochgeladen hat, sonst "
-                "fehlen sie dem nächsten Bearbeiter.");
-
-    gtk_alert_dialog_set_detail(dialog, detail);
-    gtk_alert_dialog_set_buttons(dialog, requested ? buttons_req : buttons_own);
-    gtk_alert_dialog_set_default_button(dialog, 1);
-    gtk_alert_dialog_set_cancel_button(dialog, 1);
-    gtk_alert_dialog_set_modal(dialog, TRUE);
-
-    gtk_alert_dialog_choose(dialog,
-            GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
-            on_lease_release_response, lease_dlg_new(priv, akte_id, name));
-
-    g_free(detail);
-    g_object_unref(dialog);
-}
-
-static void on_lease_release_clicked(GtkButton *button,
-        SondModuleAktePrivate *priv) {
-    gchar *name = lease_current_name(priv);
-    gint64 akte_id = name ? lease_current_akte_id(priv, name) : 0;
-
-    if (akte_id > 0)
-        lease_confirm_release(priv, akte_id, name, FALSE);
-    g_free(name);
-}
-
-/* Ereignisse des Hintergrundtakts */
-static void lease_event_cb(SondAkteLease *lease, gint64 akte_id,
-        const gchar *name, SondLeaseEvent event, gpointer user_data) {
-    SondModuleAktePrivate *priv = user_data;
-
-    if (event == SOND_LEASE_EVENT_TAKEOVER_REQUESTED) {
-        //die Übergabe läuft selbständig (zond speichert, SeaDrive lädt hoch)
-        if (priv->lease_label)
-            gtk_label_set_text(GTK_LABEL(priv->lease_label),
-                    "Projekt: Übergabe an Ihren anderen Rechner läuft (zond "
-                    "speichert, SeaDrive lädt hoch) ...");
-
-        return;
-    }
-
-    if (event == SOND_LEASE_EVENT_HANDED_OVER) {
-        lease_refresh(priv, TRUE);
-
-        return;
-    }
-
-    if (event == SOND_LEASE_EVENT_HANDOVER_STUCK) {
-        lease_confirm_release(priv, akte_id, name, TRUE);
-
-        return;
-    }
-
-    {
-        gchar *detail = g_strdup_printf("Die Schreibberechtigung für die Akte "
-                "%s liegt nicht mehr bei diesem Rechner: sie wurde von einem "
-                "anderen Rechner übernommen oder war abgelaufen.\n\nLäuft zond hier mit "
-                "dem Projekt, wurde es schreibgeschützt. Änderungen seit dem "
-                "letzten Speichern werden nicht gespeichert.", name ? name : "?");
-
-        show_error_dialog(priv->main_widget, "Schreibberechtigung verloren",
-                detail);
-        g_free(detail);
-    }
-    lease_refresh(priv, TRUE);
-}
-
-/* ---- Übernahme anfordern und auf die Freigabe warten ---- */
-
-#define LEASE_WAIT_STEP 5
-#define LEASE_WAIT_MAX 180
-
-//Warten beenden (Quelle nur entfernen, wenn sie nicht gerade selbst läuft)
-static void lease_wait_stop(SondModuleAktePrivate *priv) {
-    if (priv->lease_wait_source) {
-        g_source_remove(priv->lease_wait_source);
-        priv->lease_wait_source = 0;
-    }
-    g_clear_pointer(&priv->lease_wait_name, g_free);
-    priv->lease_wait_akte = 0;
-    update_action_widgets(priv);
-}
-
-static gboolean lease_wait_tick(gpointer data) {
-    SondModuleAktePrivate *priv = data;
-    SondLeaseInfo info = { 0 };
-    GError *error = NULL;
-    gchar *cur_name = lease_current_name(priv);
-    gint64 cur_id = cur_name ? lease_current_akte_id(priv, cur_name) : 0;
-    gchar *name = g_strdup(priv->lease_wait_name);
-    gint64 akte_id = priv->lease_wait_akte;
-    guint alt = 0;
-    SondLeaseResult res = SOND_LEASE_ERROR;
-
-    g_free(cur_name);
-
-    if (cur_id != akte_id) {   //andere Akte gewählt: nicht mehr warten
-        priv->lease_wait_source = 0;
-        lease_wait_stop(priv);
-        g_free(name);
-
-        return G_SOURCE_REMOVE;
-    }
-
-    alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-    res = sond_akte_lease_acquire(priv->lease, akte_id, &info, &error);
-    sond_client_set_io_timeout(priv->client, alt);
-    g_clear_error(&error);
-
-    if (res == SOND_LEASE_OK) {
-        sond_akte_lease_set_name(priv->lease, akte_id, name);
-        priv->lease_wait_source = 0;
-        lease_wait_stop(priv);
-        lease_refresh(priv, TRUE);
-        on_zond_clicked(NULL, priv);   //jetzt mit Berechtigung
-    } else {
-        priv->lease_wait_elapsed += LEASE_WAIT_STEP;
-        if (priv->lease_wait_elapsed < LEASE_WAIT_MAX) {
-            sond_akte_lease_info_clear(&info);
-            g_free(name);
-
-            return G_SOURCE_CONTINUE;
-        }
-
-        priv->lease_wait_source = 0;
-        lease_wait_stop(priv);
-        if (res == SOND_LEASE_DENIED) {
-            lease_refresh(priv, TRUE);
-            lease_denied_dialog(priv, akte_id, name, &info);
-        } else {
-            show_error_dialog(priv->main_widget, "Keine Antwort",
-                    "Der Server ist nicht erreichbar. Die Übernahme wurde "
-                    "nicht abgeschlossen.");
-        }
-    }
-
-    sond_akte_lease_info_clear(&info);
-    g_free(name);
-
-    return G_SOURCE_REMOVE;
-}
-
-static void lease_request_takeover(SondModuleAktePrivate *priv,
-        gint64 akte_id, const gchar *name) {
-    GError *error = NULL;
-    guint alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-    SondLeaseResult res = sond_akte_lease_takeover(priv->lease, akte_id, FALSE,
-            NULL, &error);
-
-    sond_client_set_io_timeout(priv->client, alt);
-
-    if (res == SOND_LEASE_OK) {   //inzwischen frei
-        sond_akte_lease_set_name(priv->lease, akte_id, name);
-        lease_refresh(priv, TRUE);
-        on_zond_clicked(NULL, priv);
-    } else if (res == SOND_LEASE_REQUESTED) {
-        lease_wait_stop(priv);
-        priv->lease_wait_akte = akte_id;
-        priv->lease_wait_name = g_strdup(name);
-        priv->lease_wait_elapsed = 0;
-        priv->lease_wait_source = g_timeout_add_seconds(LEASE_WAIT_STEP,
-                lease_wait_tick, priv);
-        gtk_label_set_text(GTK_LABEL(priv->lease_label),
-                "Projekt: warte auf die Freigabe durch den anderen Rechner ...");
-        update_action_widgets(priv);
-    } else {
-        show_error_dialog(priv->main_widget, "Übernahme nicht möglich",
-                error ? error->message :
-                        "Die Übernahme konnte nicht angefordert werden.");
-    }
-
-    g_clear_error(&error);
-}
-
-/* Antwort auf die Frage bei einer ausgecheckten Akte: 0 = Übernahme anfordern,
- * 1 = erzwingen, 2 = schreibgeschützt öffnen, sonst nichts */
-static void on_lease_force_response(GObject *source, GAsyncResult *result,
-        gpointer user_data) {
-    LeaseDlg *d = user_data;
-    SondModuleAktePrivate *priv = d->priv;
-    GError *error = NULL;
-    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source),
-            result, &error);
-
-    if (error || !priv->client || (button != 0 && button != 1 && button != 2)) {
-        g_clear_error(&error);
-        lease_dlg_free(d);
-
-        return;
-    }
-
-    if (button == 2) {
-        start_zond(priv, TRUE);   //schreibgeschützt öffnen
-    } else if (button == 0) {
-        lease_request_takeover(priv, d->akte_id, d->name);
-    } else {
-        guint alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-        SondLeaseResult res = sond_akte_lease_takeover(priv->lease, d->akte_id,
-                TRUE, NULL, &error);
-
-        sond_client_set_io_timeout(priv->client, alt);
-
-        if (res == SOND_LEASE_OK) {
-            sond_akte_lease_set_name(priv->lease, d->akte_id, d->name);
-            lease_refresh(priv, TRUE);
-            on_zond_clicked(NULL, priv);   //jetzt mit Berechtigung
-        } else {
-            show_error_dialog(priv->main_widget, "Übernahme nicht möglich",
-                    error ? error->message :
-                            "Die Berechtigung konnte nicht übernommen werden.");
-            lease_refresh(priv, TRUE);
-        }
-    }
-
-    g_clear_error(&error);
-    lease_dlg_free(d);
-}
-
-/* Antwort bei einer Akte eines anderen Nutzers: 0 = schreibgeschützt öffnen */
-static void on_lease_readonly_response(GObject *source, GAsyncResult *result,
-        gpointer user_data) {
-    LeaseDlg *d = user_data;
-    GError *error = NULL;
-    gint button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source),
-            result, &error);
-
-    if (!error && button == 0 && d->priv->client)
-        start_zond(d->priv, TRUE);
-
-    g_clear_error(&error);
-    lease_dlg_free(d);
-}
-
-/* Die Akte ist an einem anderen Rechner/von einem anderen Nutzer ausgecheckt */
-/* Die Berechtigung gehört einem Index-Job auf dem Server. Läuft er noch (laut
- * /ocr/status mit derselben Kennung, oder ist er eben erst gestartet), bleibt nur
- * Lesen. Ist er beendet oder verwaist, wird die Berechtigung zurückgeholt: an den
- * Nutzer, der sie übergeben hatte, sonst frei. */
-static void lease_job_denied(SondModuleAktePrivate *priv, gint64 akte_id,
-        const gchar *name, const SondLeaseInfo *info) {
-    GError *error = NULL;
-    OcrStatus *status = sond_client_ocr_get_status(priv->client, name, &error);
-    gboolean alive = FALSE;
-
-    //unbekannt (Server nicht erreichbar) gilt als "läuft noch": nichts anfassen
-    if (error)
-        alive = TRUE;
-    else if (status && status->running &&
-            !g_strcmp0(status->job_token, info->job_token))
-        alive = TRUE;
-    else if (info->idle_seconds >= 0 && info->idle_seconds < 90)
-        alive = TRUE;   //eben erst übergeben: der Start kann noch ausstehen
-
-    if (alive) {
-        GtkAlertDialog *dialog = gtk_alert_dialog_new("Index-Job läuft");
-        const char *buttons_ro[] = { "Schreibgeschützt öffnen", "Abbrechen", NULL };
-        gchar *detail = NULL;
-
-        if (status && status->running)
-            detail = g_strdup_printf("Für diese Akte läuft ein Index-Job auf dem "
-                    "Server (%d von %d Dateien). Solange er läuft, darf niemand "
-                    "die Projektdaten schreiben.", status->processed_files,
-                    status->total_files);
-        else
-            detail = g_strdup("Für diese Akte läuft ein Index-Job auf dem Server "
-                    "(oder der Server ist gerade nicht erreichbar). Solange er "
-                    "läuft, darf niemand die Projektdaten schreiben.");
-
-        gtk_alert_dialog_set_detail(dialog, detail);
-        gtk_alert_dialog_set_buttons(dialog, buttons_ro);
-        gtk_alert_dialog_set_default_button(dialog, 1);
-        gtk_alert_dialog_set_cancel_button(dialog, 1);
-        gtk_alert_dialog_set_modal(dialog, TRUE);
-        gtk_alert_dialog_choose(dialog,
-                GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
-                on_lease_readonly_response, lease_dlg_new(priv, akte_id, name));
-        g_object_unref(dialog);
-        g_free(detail);
-    } else {
-        GError *reclaim_error = NULL;
-        SondLeaseResult res = sond_akte_lease_reclaim_from_job(priv->lease, akte_id,
-                info->job_token, info->same_user, &reclaim_error);
-
-        if (res == SOND_LEASE_OK && info->same_user) {
-            //der Job ist fertig: die Berechtigung ist wieder bei diesem Rechner
-            sond_akte_lease_set_name(priv->lease, akte_id, name);
-            lease_refresh(priv, TRUE);
-            on_zond_clicked(NULL, priv);
-        } else if (res == SOND_LEASE_OK) {
-            lease_refresh(priv, TRUE);
-            show_error_dialog(priv->main_widget, "Akte wieder frei",
-                    "Der Index-Job auf dem Server ist beendet. Die Akte ist wieder "
-                    "frei, bitte erneut versuchen.");
-        } else {
-            show_error_dialog(priv->main_widget, "Übernahme nicht möglich",
-                    reclaim_error ? reclaim_error->message :
-                            "Die Berechtigung konnte nicht aus dem Index-Job "
-                            "zurückgeholt werden.");
-        }
-        g_clear_error(&reclaim_error);
-    }
-
-    if (status)
-        sond_client_ocr_status_free(status);
-    g_clear_error(&error);
-}
-
-static void lease_denied_dialog(SondModuleAktePrivate *priv, gint64 akte_id,
-        const gchar *name, const SondLeaseInfo *info) {
-    gchar *idle = NULL;
-    gchar *detail = NULL;
-
-    if (info->by_job) {
-        lease_job_denied(priv, akte_id, name, info);
-
-        return;
-    }
-
-    idle = lease_idle_text(info->idle_seconds);
-
-    if (!info->same_user) {
-        detail = g_strdup_printf("Die Akte ist von %s auf dem Rechner %s "
-                "ausgecheckt (zuletzt aktiv %s).\n\nSie kann nur dort "
-                "freigegeben werden. Ohne Lebenszeichen läuft die "
-                "Berechtigung nach zwei Tagen ab.",
-                info->user ? info->user : "?",
-                info->device_name ? info->device_name : "?", idle);
-        {
-            GtkAlertDialog *dialog = gtk_alert_dialog_new("Akte ist ausgecheckt");
-            const char *buttons_ro[] = { "Schreibgeschützt öffnen", "Abbrechen",
-                    NULL };
-
-            gtk_alert_dialog_set_detail(dialog, detail);
-            gtk_alert_dialog_set_buttons(dialog, buttons_ro);
-            gtk_alert_dialog_set_default_button(dialog, 1);
-            gtk_alert_dialog_set_cancel_button(dialog, 1);
-            gtk_alert_dialog_set_modal(dialog, TRUE);
-            gtk_alert_dialog_choose(dialog,
-                    GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
-                    on_lease_readonly_response, lease_dlg_new(priv, akte_id, name));
-            g_object_unref(dialog);
-        }
-    } else {
-        GtkAlertDialog *dialog = gtk_alert_dialog_new("Akte ist ausgecheckt");
-        const char *buttons[] = { "Übernahme anfordern", "Erzwingen",
-                "Schreibgeschützt öffnen", "Abbrechen", NULL };
-
-        detail = g_strdup_printf("Die Akte ist auf Ihrem anderen Rechner %s "
-                "ausgecheckt (zuletzt aktiv %s%s).\n\nÜbernahme anfordern: der "
-                "andere Rechner wird gebeten, die Akte freizugeben (das "
-                "dauert, bis er sich meldet).\n\nErzwingen übernimmt die "
-                "Berechtigung sofort. Was dort noch nicht hochgeladen wurde, "
-                "geht dann verloren oder erscheint als Konfliktkopie.\n\n"
-                "Schreibgeschützt öffnen zeigt den Stand ohne die Akte zu "
-                "ändern.",
-                info->device_name ? info->device_name : "?", idle,
-                info->zond_open ? ", zond läuft dort" : "");
-        gtk_alert_dialog_set_detail(dialog, detail);
-        gtk_alert_dialog_set_buttons(dialog, buttons);
-        gtk_alert_dialog_set_default_button(dialog, 3);
-        gtk_alert_dialog_set_cancel_button(dialog, 3);
-        gtk_alert_dialog_set_modal(dialog, TRUE);
-        gtk_alert_dialog_choose(dialog,
-                GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), NULL,
-                on_lease_force_response, lease_dlg_new(priv, akte_id, name));
-        g_object_unref(dialog);
-    }
-
-    g_free(detail);
-    g_free(idle);
-}
-
-/* Schreibberechtigung für den Zond-Start sicherstellen. TRUE: zond darf starten
- * (*akte_id_out: Node-ID der Akte). Bei FALSE wurde dem Nutzer bereits erklärt,
- * warum nicht. */
-static LeaseZugriff lease_ensure(SondModuleAktePrivate *priv, const gchar *name,
-        gint64 *akte_id_out) {
-    GError *error = NULL;
-    SondLeaseInfo info = { 0 };
-    gint64 akte_id = lease_current_akte_id(priv, name);
-    SondLeaseResult res = SOND_LEASE_ERROR;
-    LeaseZugriff zugriff = LEASE_ZUGRIFF_NEIN;
-    guint alt = 0;
-
-    alt = sond_client_set_io_timeout(priv->client, SERVER_KURZ_TIMEOUT);
-
-    if (akte_id <= 0) {
-        //nur lokal gewählte Akte: ihre ID beim Server erfragen
-        guint lfd_nr = 0;
-        guint year = 0;
-
-        if (sond_client_get_current_akte(priv->client, &lfd_nr, &year)) {
-            SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year,
-                    &error);
-
-            if (node) {
-                akte_id = sond_graph_node_get_id(node);
-                g_object_unref(node);
-            }
-            g_clear_error(&error);
-        }
-    }
-
-    if (akte_id > 0)
-        res = sond_akte_lease_acquire(priv->lease, akte_id, &info, &error);
-
-    sond_client_set_io_timeout(priv->client, alt);
-
-    switch (res) {
-    case SOND_LEASE_OK:
-        sond_akte_lease_set_name(priv->lease, akte_id, name);
-        zugriff = LEASE_ZUGRIFF_SCHREIBEN;
-        break;
-    case SOND_LEASE_DENIED:
-        lease_denied_dialog(priv, akte_id, name, &info);
-        break;
-    default:
-        //Server nicht erreichbar: schreiben, solange die Berechtigung lokal
-        //gilt, sonst nur lesen (zond zeigt den Schreibschutz selbst an)
-        if (akte_id > 0 && sond_akte_lease_may_write(priv->lease, akte_id))
-            zugriff = LEASE_ZUGRIFF_SCHREIBEN;
-        else
-            zugriff = LEASE_ZUGRIFF_LESEN;
-        break;
-    }
-
-    if (zugriff != LEASE_ZUGRIFF_NEIN && akte_id_out)
-        *akte_id_out = akte_id;
-
-    sond_akte_lease_info_clear(&info);
-    g_clear_error(&error);
-
-    //Server-Stand zeigen, sofern er überhaupt geantwortet hat
-    lease_refresh(priv, res != SOND_LEASE_ERROR && akte_id > 0);
-
-    return zugriff;
-}
 
 /* Import-Dialog für die gewählte Akte (geht auch offline) */
 static void on_import_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -4397,136 +2713,6 @@ static void on_import_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
             gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)));
 }
 
-/* Dokumentenverzeichnis der gewählten Akte (geht auch offline) */
-static void on_dokumente_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    guint lfd_nr = 0;
-    guint year = 0;
-
-    (void) button;
-
-    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
-        return;
-
-    {
-        g_autofree gchar *lib = sond_module_akte_library_name(lfd_nr, year);
-
-        if (sond_zond_prozess_laeuft(lib)) {
-            show_error_dialog(priv->main_widget, "Dokumente nicht verfügbar",
-                    "zond hat diese Akte geöffnet. Bitte zond zuerst beenden.");
-            update_action_widgets(priv);
-
-            return;
-        }
-    }
-
-    {
-        gchar *lease_name = lease_current_name(priv);
-        gint64 akte_id = lease_name ? lease_current_akte_id(priv, lease_name) : 0;
-
-        sond_dokumente_show(priv->client, priv->lease,
-                GTK_WINDOW(gtk_widget_get_root(priv->main_widget)), lfd_nr, year,
-                gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung)),
-                akte_id);
-        g_free(lease_name);
-    }
-}
-
-/* zond mit der Projektdatei der gewählten Akte starten. Mit Schreibberechtigung
- * (Lease) darf zond schreiben; sie wird online geholt und gilt dann auch offline
- * weiter. Ohne sie (oder mit force_ro) öffnet zond das Projekt schreibgeschützt.
- * Der Modus wird zond über eine Steuerdatei mitgeteilt (sond_zond_ctl.h). */
-static void start_zond(SondModuleAktePrivate *priv, gboolean force_ro) {
-    LeaseZugriff zugriff = LEASE_ZUGRIFF_LESEN;
-    guint lfd_nr = 0;
-    guint year = 0;
-    gchar *root = NULL;
-    gchar *lib_name = NULL;
-    gchar *lib_dir = NULL;
-    gchar *exe = NULL;
-    gchar *project = NULL;
-    GError *error = NULL;
-    gint64 akte_id = 0;
-    GPid pid = 0;
-
-    if (!sond_client_get_current_akte(priv->client, &lfd_nr, &year))
-        return;
-
-    lib_name = sond_module_akte_library_name(lfd_nr, year);
-
-    //zond und das Dokumentenfenster einer Akte laufen nie gleichzeitig
-    if (sond_dokumente_is_open(lib_name)) {
-        show_error_dialog(priv->main_widget, "zond kann nicht gestartet werden",
-                "Das Dokumentenfenster dieser Akte ist geöffnet. Bitte zuerst schließen.");
-        update_action_widgets(priv);
-        goto out;
-    }
-
-    root = sond_client_find_seadrive_root(priv->client, &error);
-    if (!root) {
-        show_error_dialog(priv->main_widget, "SeaDrive nicht gefunden",
-                error ? error->message : "unbekannt");
-        goto out;
-    }
-
-    lib_dir = sond_import_find_library_dir(root, lib_name, &error);
-    if (!lib_dir) {
-        show_error_dialog(priv->main_widget,
-                "Akte im SeaDrive-Laufwerk nicht erreichbar",
-                error ? error->message : "unbekannt");
-        goto out;
-    }
-
-    exe = sond_zond_find_exe(sond_client_get_zond_exe(priv->client), &error);
-    if (!exe) {
-        show_error_dialog(priv->main_widget, "zond nicht gefunden",
-                error ? error->message : "unbekannt");
-        goto out;
-    }
-
-    if (!force_ro) {
-        zugriff = lease_ensure(priv, lib_name, &akte_id);
-        if (zugriff == LEASE_ZUGRIFF_NEIN)
-            goto out;
-    }
-
-    project = sond_zond_project_file(lib_dir, lib_name);
-
-    //Modus festlegen, bevor zond das Projekt öffnet (es liest ihn beim Öffnen)
-    if (zugriff == LEASE_ZUGRIFF_SCHREIBEN && akte_id > 0)
-        sond_akte_lease_note_project(priv->lease, akte_id, project);
-    if (!sond_zond_ctl_set_mode(project, zugriff == LEASE_ZUGRIFF_SCHREIBEN ?
-            SOND_ZOND_MODE_RW : SOND_ZOND_MODE_RO, &error)) {
-        show_error_dialog(priv->main_widget, "zond kann nicht gestartet werden",
-                error ? error->message : "Die Steuerdatei konnte nicht "
-                        "geschrieben werden.");
-        goto out;
-    }
-
-    if (!sond_zond_start_pid(exe, project, &pid, &error)) {
-        show_error_dialog(priv->main_widget, "zond konnte nicht gestartet werden",
-                error ? error->message : "unbekannt");
-    } else {
-        //jeden Start verfolgen (auch den schreibgeschützten): das sperrt das Dokumentenfenster
-        sond_zond_prozess_merken(lib_name, pid);
-        if (zugriff == LEASE_ZUGRIFF_SCHREIBEN && akte_id > 0)
-            sond_akte_lease_note_zond_started(priv->lease, akte_id, pid);
-        else
-            g_spawn_close_pid(pid);
-    }
-
-out:
-    g_clear_error(&error);
-    g_free(project);
-    g_free(exe);
-    g_free(lib_dir);
-    g_free(root);
-    g_free(lib_name);
-}
-
-static void on_zond_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    start_zond(priv, FALSE);
-}
-
 /* ========================================================================
  * Public API
  * ======================================================================== */
@@ -4534,9 +2720,6 @@ static void on_zond_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
 GtkWidget* sond_module_akte_new(SondClient *client) {
     SondModuleAktePrivate *priv = g_new0(SondModuleAktePrivate, 1);
     priv->client = g_object_ref(client);
-    priv->lease = sond_akte_lease_new(client);
-    sond_akte_lease_set_event_handler(priv->lease, lease_event_cb, priv);
-    sond_akte_lease_start_heartbeat(priv->lease);
 
     /* Generische Konflikt-Meldungen des Clients (gesperrt/geaendert/geloescht) */
     g_signal_connect(priv->client, "node-conflict", G_CALLBACK(on_client_node_conflict), priv);
@@ -4545,7 +2728,7 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     priv->is_new_from_entry = FALSE;
 
     /* CSS Provider einrichten */
-    priv->css_provider = setup_css_provider();
+    sond_akten_suche_stil_ref();
 
     /* Haupt-Container */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
@@ -4570,11 +2753,8 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     GtkWidget *wahl_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_grid_attach(GTK_GRID(top_grid), wahl_box, 1, 0, 1, 1);
 
-    priv->regnr_entry = gtk_entry_new();
-    gtk_editable_set_width_chars(GTK_EDITABLE(priv->regnr_entry), 30);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(priv->regnr_entry),
-            "Registernummer oder Suchtext, dann Enter");
-    g_signal_connect(priv->regnr_entry, "activate", G_CALLBACK(on_regnr_entry_activate), priv);
+    priv->regnr_entry = sond_akten_suche_new(priv->client);
+    sond_akten_suche_set_funcs(priv->regnr_entry, on_akte_gewaehlt, on_akte_unbekannt, priv);
     gtk_box_append(GTK_BOX(wahl_box), priv->regnr_entry);
 
     priv->btn_neue_akte = gtk_button_new_with_label("Neue Akte");
@@ -4594,20 +2774,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
             "Dokumente in die gewählte Akte importieren");
     g_signal_connect(priv->btn_import, "clicked", G_CALLBACK(on_import_clicked), priv);
     gtk_box_append(GTK_BOX(tun_box), priv->btn_import);
-
-    priv->btn_zond = gtk_button_new_with_label("zond starten");
-    gtk_widget_set_tooltip_text(priv->btn_zond,
-            "Die Projektdatei der gewählten Akte in zond öffnen");
-    g_signal_connect(priv->btn_zond, "clicked", G_CALLBACK(on_zond_clicked), priv);
-    gtk_box_append(GTK_BOX(tun_box), priv->btn_zond);
-
-    priv->btn_dokumente = gtk_button_new_with_label("Dokumente ...");
-    gtk_widget_set_tooltip_text(priv->btn_dokumente,
-            "Das Dokumentenverzeichnis der Akte zeigen, z. B. um Dateien dauerhaft "
-            "offline verfügbar zu machen");
-    g_signal_connect(priv->btn_dokumente, "clicked",
-            G_CALLBACK(on_dokumente_clicked), priv);
-    gtk_box_append(GTK_BOX(tun_box), priv->btn_dokumente);
 
     priv->btn_break_lock = gtk_button_new_with_label("Bearbeiten");
     gtk_widget_set_tooltip_text(priv->btn_break_lock,
@@ -4670,24 +2836,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);  /* Initial unsichtbar */
     gtk_box_append(GTK_BOX(status_box), priv->btn_reaktivieren);
 
-    /* Schreibberechtigung für das Projekt (Lease) */
-    priv->lease_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_box_append(GTK_BOX(main_box), priv->lease_box);
-
-    priv->lease_label = gtk_label_new("Projekt: -");
-    gtk_widget_set_halign(priv->lease_label, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(priv->lease_box), priv->lease_label);
-
-    priv->btn_lease_release = gtk_button_new_with_label("Freigeben");
-    gtk_widget_set_tooltip_text(priv->btn_lease_release,
-            "Die Schreibberechtigung für das Projekt zurückgeben, damit ein "
-            "anderer Rechner die Akte bearbeiten kann");
-    g_signal_connect(priv->btn_lease_release, "clicked",
-            G_CALLBACK(on_lease_release_clicked), priv);
-    gtk_widget_set_visible(priv->btn_lease_release, FALSE);
-    gtk_box_append(GTK_BOX(priv->lease_box), priv->btn_lease_release);
-    gtk_widget_set_visible(priv->lease_box, FALSE);
-
     /* Separator */
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append(GTK_BOX(main_box), separator2);
@@ -4711,14 +2859,13 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     /* Private Daten am Widget speichern */
     g_object_set_data_full(G_OBJECT(main_box), "priv", priv, g_free);
 
-    /* Aufraeumen (Unlock, current_node/client unref, css_provider entfernen)
+    /* Aufraeumen (Unlock, current_node/client unref, Stil freigeben)
      * beim Zerstoeren des Widgets - s. on_main_box_destroy(). */
     g_signal_connect(main_box, "destroy", G_CALLBACK(on_main_box_destroy), priv);
+
     sond_module_set_abort(main_box, akte_abort_cb, priv);
 
-    //Start und Ende von zond bzw. des Dokumentenfensters: Schaltflächen nachführen
-    sond_zond_prozess_set_func(on_exklusiv_geaendert, priv);
-    sond_dokumente_set_func(on_exklusiv_geaendert, priv);
+    //von einem früheren Lauf des Clients gestartete zond-Prozesse wiederfinden
     sond_zond_prozess_wiederfinden();
 
     /* Initial State setzen */

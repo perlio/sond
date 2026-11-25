@@ -485,7 +485,8 @@ GPtrArray* sond_akten_scan(const gchar *seadrive_root, const gchar *merkliste,
  * Suche
  * ======================================================================== */
 
-/* "23", "23/26", "23/2026", "2026-23": erkannte RegNr; year 0 = jedes Jahr */
+/* "23", "23/26", "23/2026", "2026-23", "2326": erkannte RegNr; year 0 = jedes Jahr. Nur Ziffern: ab drei
+ * Stellen sind die letzten beiden das Jahr ("126" = 1/26), kürzer ist es die laufende Nummer in jedem Jahr. */
 static gboolean parse_regnr_suche(const gchar *text, guint *lfd, guint *year) {
     gchar **teile = NULL;
     gboolean ok = FALSE;
@@ -502,8 +503,18 @@ static gboolean parse_regnr_suche(const gchar *text, guint *lfd, guint *year) {
             alle_ziffern = FALSE;
 
     if (alle_ziffern) {
-        *lfd = (guint) g_ascii_strtoull(text, NULL, 10);
-        *year = 0;
+        gsize len = strlen(text);
+
+        if (len >= 3) {
+            gchar *nummer = g_strndup(text, len - 2);
+
+            *lfd = (guint) g_ascii_strtoull(nummer, NULL, 10);
+            *year = 2000 + (guint) g_ascii_strtoull(text + len - 2, NULL, 10);
+            g_free(nummer);
+        } else {
+            *lfd = (guint) g_ascii_strtoull(text, NULL, 10);
+            *year = 0;
+        }
 
         return *lfd > 0;
     }
@@ -586,4 +597,123 @@ GPtrArray* sond_akten_suchen(GPtrArray *alle, const gchar *text) {
     g_free(such);
 
     return treffer;
+}
+
+/* ========================================================================
+ * Registernummern
+ * ======================================================================== */
+
+gboolean sond_akten_parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) {
+    if (!regnr_str || strlen(regnr_str) == 0) {
+        return FALSE;
+    }
+    
+    /* Fall 1: Format mit "/" (z.B. "12/26") */
+    if (strchr(regnr_str, '/')) {
+        gchar **parts = g_strsplit(regnr_str, "/", 2);
+        if (g_strv_length(parts) != 2) {
+            g_strfreev(parts);
+            return FALSE;
+        }
+        
+        *lfd_nr = (guint)g_ascii_strtoull(parts[0], NULL, 10);
+        *year = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+        
+        if (*year < 100) {
+            *year += 2000;
+        }
+        
+        g_strfreev(parts);
+        return (*lfd_nr > 0 && *year >= 2000);
+    }
+    
+    /* Fall 2: Nur Ziffern (z.B. "1226", "126", "12326") */
+    /* Mindestens 3 Ziffern, letzte 2 = Jahr, Rest = lfd_nr */
+    gsize len = strlen(regnr_str);
+    if (len < 3) {
+        return FALSE;
+    }
+    
+    /* Prüfen ob alle Zeichen Ziffern sind */
+    for (gsize i = 0; i < len; i++) {
+        if (!g_ascii_isdigit(regnr_str[i])) {
+            return FALSE;
+        }
+    }
+    
+    /* Letzte 2 Ziffern = Jahr */
+    gchar *year_str = g_strndup(regnr_str + (len - 2), 2);
+    *year = (guint)g_ascii_strtoull(year_str, NULL, 10);
+    g_free(year_str);
+    
+    if (*year < 100) {
+        *year += 2000;
+    }
+    
+    /* Rest = lfd. Nr. */
+    gchar *lfd_str = g_strndup(regnr_str, len - 2);
+    *lfd_nr = (guint)g_ascii_strtoull(lfd_str, NULL, 10);
+    g_free(lfd_str);
+    
+    return (*lfd_nr > 0 && *year >= 2000);
+}
+
+gchar* sond_akten_regnr_anzeige(guint lfd_nr, guint year) {
+    guint short_year = year % 100;
+    return g_strdup_printf("%u/%02u", lfd_nr, short_year);
+}
+
+/**
+ * sond_akten_library_name:
+ *
+ * Formatiert RegNr für Speicherung/Pfade: "2026-1"
+ * Verwendet NICHT "/" sondern "-" um Pfadprobleme zu vermeiden.
+ */
+gchar* sond_akten_library_name(guint lfd_nr, guint year) {
+    return g_strdup_printf("%u-%u", year, lfd_nr);
+}
+
+/**
+ * sond_akten_ist_regnr:
+ * 
+ * Prüft ob ein String ein gültiges RegNr-Format hat.
+ * Gültig sind:
+ * - Nur Ziffern (mindestens 3): "126", "1226", "12326"
+ * - Ziffern mit "/": "12/26", "123/26"
+ * 
+ * Returns: TRUE wenn gültiges Format
+ */
+gboolean sond_akten_ist_regnr(const gchar *str) {
+    if (!str || strlen(str) == 0) {
+        return FALSE;
+    }
+    
+    gsize len = strlen(str);
+    gboolean has_slash = FALSE;
+    
+    for (gsize i = 0; i < len; i++) {
+        gchar c = str[i];
+        
+        if (c == '/') {
+            if (has_slash) {
+                return FALSE;  /* Mehr als ein "/" */
+            }
+            has_slash = TRUE;
+        } else if (!g_ascii_isdigit(c)) {
+            return FALSE;  /* Nicht-Ziffer und nicht "/" */
+        }
+    }
+    
+    /* Format mit "/" muss mindestens ein Zeichen vor und nach "/" haben */
+    if (has_slash) {
+        gchar **parts = g_strsplit(str, "/", 2);
+        gboolean valid = (g_strv_length(parts) == 2 && 
+                         strlen(parts[0]) > 0 && 
+                         strlen(parts[1]) > 0);
+        g_strfreev(parts);
+        return valid;
+    }
+    
+    /* Format ohne "/" muss mindestens 3 Ziffern haben */
+    return len >= 3;
 }

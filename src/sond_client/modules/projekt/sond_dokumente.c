@@ -20,25 +20,25 @@
 
 #include <glib/gstdio.h>
 
-#include "sond_import.h"
-#include "sond_module_akte.h"
+#include "../sond_import.h"
+#include "../sond_akten.h"
 #include "sond_zond_start.h"
-#include "../../gtk4/sond_projekt_treeviewfm.h"
-#include "../../sond_client/sond_client.h"
-#include "../../seadrive/sond_seadrive_core.h"
-#include "../../sond_zond_ctl.h"
-#include "../sond_zond_prozess.h"
-#include "../../sond_eingang_cache.h"
-#include "../../tvfm/sond_tvfm_status.h"
-#include "../../tvfm/sond_tvfm_unlock.h"
-#include "../sond_password_dialog.h"
-#include "../../sond_index.h"
-#include "../../znd/dbase_zond.h"
+#include "../../../gtk4/sond_projekt_treeviewfm.h"
+#include "../../sond_client.h"
+#include "../../../seadrive/sond_seadrive_core.h"
+#include "../../../sond_zond_ctl.h"
+#include "../../sond_zond_prozess.h"
+#include "../../../sond_eingang_cache.h"
+#include "../../../tvfm/sond_tvfm_status.h"
+#include "../../../tvfm/sond_tvfm_unlock.h"
+#include "../../sond_password_dialog.h"
+#include "../../../sond_index.h"
+#include "../../../znd/dbase_zond.h"
 
 typedef struct {
     gchar *lib_dir;
     gchar *lib_name;
-    GtkWidget *window;
+    GtkWidget *box;            /* Wurzel des Widgets; DokData lebt mit ihr */
     GtkWidget *tree;
     GtkWidget *schalter;       /* nur Projektdateien offline verfügbar */
     GtkWidget *schalter_ganz;  /* ganzes Projektverzeichnis offline verfügbar */
@@ -79,26 +79,17 @@ typedef struct {
 
 //offene Dokumentenfenster: Library-Name -> Fenster
 static GHashTable *offene_fenster = NULL;
-static void (*offen_func)(gpointer) = NULL;
-static gpointer offen_data = NULL;
 
-gboolean sond_dokumente_is_open(const gchar *lib_name) {
+static gboolean sond_dokumente_is_open(const gchar *lib_name) {
     return lib_name && offene_fenster && g_hash_table_contains(offene_fenster, lib_name);
-}
-
-void sond_dokumente_set_func(void (*func)(gpointer), gpointer data) {
-    offen_func = func;
-    offen_data = data;
 }
 
 static void dok_free(gpointer data) {
     DokData *d = data;
 
     if (d->lib_name && sond_dokumente_is_open(d->lib_name) &&
-            g_hash_table_lookup(offene_fenster, d->lib_name) == (gpointer) d->window) {
+            g_hash_table_lookup(offene_fenster, d->lib_name) == (gpointer) d->box) {
         g_hash_table_remove(offene_fenster, d->lib_name);
-        if (offen_func)
-            offen_func(offen_data);
     }
 
     if (d->index_timer)
@@ -139,6 +130,13 @@ static void meldung(GtkWindow *parent, const gchar *titel, const gchar *text) {
     gtk_alert_dialog_set_modal(dialog, TRUE);
     gtk_alert_dialog_show(dialog, parent);
     g_object_unref(dialog);
+}
+
+//Fenster, in dem das Widget gerade steht (Elternfenster für Dialoge); NULL, solange es nirgends eingebaut ist
+static GtkWindow* dok_fenster(DokData *d) {
+    GtkRoot *root = d->box ? gtk_widget_get_root(d->box) : NULL;
+
+    return root && GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL;
 }
 
 //weiter unten
@@ -255,10 +253,10 @@ static gboolean zond_laeuft(DokData *d) {
             sond_akte_lease_zond_open(d->lease, d->akte_id));
 }
 
-/* Solange ein Index-Job läuft, darf der Baum nichts ändern (die Aktionen sind ausgegraut). Fehlt
- * dagegen nur die Schreibberechtigung, bleibt er bedienbar: sie wird bei der Aktion geholt. zond kann
- * nicht gleichzeitig laufen (der Client öffnet dieses Fenster nur, wenn für die Akte kein zond
- * läuft); die Prüfung vor jeder Aktion (projekt_modus) bleibt als Sicherheitsnetz. */
+/* Solange ein Index-Job oder zond mit der Akte läuft, darf der Baum nichts ändern (die Aktionen
+ * sind ausgegraut; Ansehen und Öffnen bleiben möglich). Fehlt dagegen nur die Schreibberechtigung,
+ * bleibt er bedienbar: sie wird bei der Aktion geholt. Die Prüfung vor jeder Aktion (projekt_modus)
+ * bleibt als Sicherheitsnetz. */
 static void sperre_pruefen(DokData *d) {
     gchar const *grund = NULL;
 
@@ -267,6 +265,8 @@ static void sperre_pruefen(DokData *d) {
 
     if (d->job_token)
         grund = "Ein Index-Job läuft. Solange er läuft, sind keine Änderungen möglich.";
+    else if (zond_laeuft(d))
+        grund = "zond hat diese Akte geöffnet. Solange es läuft, sind hier keine Änderungen möglich.";
 
     sond_treeviewfm_set_read_only(SOND_TREEVIEWFM(d->tree), grund);
     if (d->sperre) {
@@ -410,7 +410,7 @@ static gboolean projekt_setzen(DokData *d, gboolean an) {
         for (guint i = 0; i < MIN(fehler->len, 5); i++)
             g_string_append_printf(text, "\n%s",
                     (const gchar*) g_ptr_array_index(fehler, i));
-        meldung(GTK_WINDOW(d->window), "SeaDrive", text->str);
+        meldung(dok_fenster(d), "SeaDrive", text->str);
         g_string_free(text, TRUE);
         ok = FALSE;
     }
@@ -466,7 +466,7 @@ static void on_schalter_ganz_aktiv(GObject *schalter, GParamSpec *pspec, gpointe
 
     if (!sond_seadrive_set_pin_state(d->lib_dir, an ? STVFM_PIN_STATE_PINNED :
             STVFM_PIN_STATE_UNSPECIFIED, TRUE, &error)) {
-        meldung(GTK_WINDOW(d->window), "SeaDrive", error ? error->message : "unbekannt");
+        meldung(dok_fenster(d), "SeaDrive", error ? error->message : "unbekannt");
         g_clear_error(&error);
         schalter_setzen(d, d->schalter_ganz, ganz_pruefen_pin(d));
 
@@ -666,7 +666,7 @@ static void on_abbruch_clicked(GtkButton *knopf, gpointer user_data) {
     (void) knopf;
 
     if (!sond_client_ocr_cancel_job(d->client, d->lib_name, &error))
-        meldung(GTK_WINDOW(d->window), "Abbruch nicht möglich",
+        meldung(dok_fenster(d), "Abbruch nicht möglich",
                 error ? error->message : "unbekannt");
     else
         gtk_label_set_text(GTK_LABEL(d->job_label),
@@ -695,13 +695,13 @@ static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verze
     gint offen = 0;
 
     if (d->job_token) {
-        meldung(GTK_WINDOW(d->window), "Index-Job", "Es läuft bereits ein Index-Job.");
+        meldung(dok_fenster(d), "Index-Job", "Es läuft bereits ein Index-Job.");
 
         return JOB_FEHLER;
     }
 
     if (!d->lease || d->akte_id <= 0 || !sond_akte_lease_may_write(d->lease, d->akte_id)) {
-        meldung(GTK_WINDOW(d->window), "Schreibberechtigung fehlt",
+        meldung(dok_fenster(d), "Schreibberechtigung fehlt",
                 "Ein Index-Job schreibt in das Projektverzeichnis (Index, Texterkennung). "
                 "Dafür brauchen Sie die Schreibberechtigung der Akte. Sie erhalten sie, "
                 "wenn Sie im Akten-Fenster zond starten (bzw. die Akte bearbeiten).");
@@ -710,7 +710,7 @@ static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verze
     }
 
     if (!sond_akte_lease_zond_settle(d->lease, d->akte_id, 8000)) {
-        meldung(GTK_WINDOW(d->window), "zond hat noch nicht gespeichert",
+        meldung(dok_fenster(d), "zond hat noch nicht gespeichert",
                 "zond konnte nicht innerhalb weniger Sekunden speichern und "
                 "schreibgeschützt werden. Bitte zond schließen (dabei speichern) und "
                 "dann erneut senden.");
@@ -734,7 +734,7 @@ static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verze
         text = g_strdup_printf("Es sind noch %d Dateien nicht hochgeladen. Der "
                 "Server sieht Änderungen erst, wenn sie hochgeladen sind. Bitte warten, "
                 "bis die Anzeige \"alles synchron\" zeigt.", offen);
-        meldung(GTK_WINDOW(d->window), "Noch nicht alles hochgeladen", text);
+        meldung(dok_fenster(d), "Noch nicht alles hochgeladen", text);
         g_free(text);
 
         return JOB_FEHLER;
@@ -743,7 +743,7 @@ static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verze
     token = job_token_neu();
     res = sond_akte_lease_handover_to_job(d->lease, d->akte_id, token, &error);
     if (res != SOND_LEASE_OK) {
-        meldung(GTK_WINDOW(d->window), "Übergabe nicht möglich",
+        meldung(dok_fenster(d), "Übergabe nicht möglich",
                 res == SOND_LEASE_LOST ? "Die Schreibberechtigung gehört diesem Rechner "
                         "nicht mehr." : (error ? error->message :
                         "Die Schreibberechtigung konnte nicht übergeben werden."));
@@ -774,7 +774,7 @@ static JobStart job_starten(DokData *d, GPtrArray *dateien_arr, GPtrArray *verze
 
         sond_akte_lease_reclaim_from_job(d->lease, d->akte_id, token, TRUE, &reclaim_error);
         g_clear_error(&reclaim_error);
-        meldung(GTK_WINDOW(d->window), "Index-Job konnte nicht gestartet werden",
+        meldung(dok_fenster(d), "Index-Job konnte nicht gestartet werden",
                 error ? error->message : "unbekannt");
         g_clear_error(&error);
         g_free(token);
@@ -871,13 +871,13 @@ static void on_gesperrt_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpoi
 
     g_clear_error(&error);
 
-    if (knopf == 0 && d->window) {
+    if (knopf == 0 && d->box) {
         SondUnlockHooks hooks;
         SondUnlockResult res;
         GString *text = g_string_new(NULL);
 
         if (!schreibberechtigung_holen(d, &error)) {
-            meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", error->message);
+            meldung(dok_fenster(d), "Dauerhaft entsperren", error->message);
             g_clear_error(&error);
             g_string_free(text, TRUE);
             locked_ctx_free(ctx);
@@ -917,7 +917,7 @@ static void on_gesperrt_bestaetigt(GObject *quelle, GAsyncResult *ergebnis, gpoi
         else if (res.done > 0)
             g_string_append(text, "\n\nSobald der Upload fertig ist, werden die entsperrten "
                     "Dateien erneut an den Server übergeben.");
-        meldung(GTK_WINDOW(d->window), "Dauerhaft entsperren", text->str);
+        meldung(dok_fenster(d), "Dauerhaft entsperren", text->str);
         g_string_free(text, TRUE);
         sond_tvfm_unlock_result_clear(&res);
 
@@ -989,7 +989,7 @@ static void gesperrte_nachbearbeiten(DokData *d, OcrStatus *status) {
     gtk_alert_dialog_set_default_button(frage, 1);
     gtk_alert_dialog_set_cancel_button(frage, 1);
     gtk_alert_dialog_set_modal(frage, TRUE);
-    gtk_alert_dialog_choose(frage, GTK_WINDOW(d->window), NULL, on_gesperrt_bestaetigt, ctx);
+    gtk_alert_dialog_choose(frage, dok_fenster(d), NULL, on_gesperrt_bestaetigt, ctx);
     g_object_unref(frage);
 }
 
@@ -1055,7 +1055,7 @@ static void index_dialog_zeigen(DokData *d) {
     auswahl_sammeln(d, dlg->dateien, dlg->verzeichnisse);
 
     if (dlg->dateien->len == 0 && dlg->verzeichnisse->len == 0) {
-        meldung(GTK_WINDOW(d->window), "Index-Job",
+        meldung(dok_fenster(d), "Index-Job",
                 "Bitte zuerst Dateien oder Verzeichnisse im Baum markieren.");
         indexdlg_free(dlg);
 
@@ -1065,7 +1065,7 @@ static void index_dialog_zeigen(DokData *d) {
     d->dialog = gtk_window_new();
     g_object_add_weak_pointer(G_OBJECT(d->dialog), (gpointer*) &d->dialog);
     gtk_window_set_title(GTK_WINDOW(d->dialog), "Zum Indizieren an den Server senden");
-    gtk_window_set_transient_for(GTK_WINDOW(d->dialog), GTK_WINDOW(d->window));
+    gtk_window_set_transient_for(GTK_WINDOW(d->dialog), dok_fenster(d));
     gtk_window_set_modal(GTK_WINDOW(d->dialog), TRUE);
     g_object_set_data_full(G_OBJECT(d->dialog), "sond-indexdlg", dlg, indexdlg_free);
 
@@ -1301,7 +1301,7 @@ static SondEingangCache* hook_eingang_cache(gpointer data) {
 }
 
 static void hook_message(gpointer data, gchar const *title, gchar const *text) {
-    meldung(GTK_WINDOW(((DokData*) data)->window), title, text);
+    meldung(dok_fenster((DokData*) data), title, text);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1317,34 +1317,32 @@ static void unlock_hooks_init(SondUnlockHooks *hooks, DokData *d) {
         sond_treeviewfm_unlock_hooks_init(SOND_TREEVIEWFM(d->tree), hooks);
 }
 
-void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
-        guint lfd_nr, guint year, const gchar *bezeichnung, gint64 akte_id) {
+GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
+        guint lfd_nr, guint year, gint64 akte_id, GError **fehler) {
     GError *error = NULL;
     gchar *root = NULL;
     DokData *d = NULL;
-    gchar *titel = NULL;
     GtkWidget *box = NULL;
     GtkWidget *kopf = NULL;
     GtkWidget *label = NULL;
 
-    //schon offen: nach vorn holen
+    //dieselbe Akte nie zweimal zeigen (Index, Projektdatei und Passwörter gehören je einem Widget)
     {
-        g_autofree gchar *name = sond_module_akte_library_name(lfd_nr, year);
-        GtkWidget *offen = offene_fenster ? g_hash_table_lookup(offene_fenster, name) : NULL;
+        g_autofree gchar *name = sond_akten_library_name(lfd_nr, year);
 
-        if (offen) {
-            gtk_window_present(GTK_WINDOW(offen));
+        if (sond_dokumente_is_open(name)) {
+            g_set_error(fehler, G_IO_ERROR, G_IO_ERROR_BUSY,
+                    "Das Dokumentenverzeichnis dieser Akte ist bereits geöffnet.");
 
-            return;
+            return NULL;
         }
     }
 
     root = sond_client_find_seadrive_root(client, &error);
     if (!root) {
-        meldung(parent, "SeaDrive nicht gefunden", error ? error->message : "unbekannt");
-        g_clear_error(&error);
+        g_propagate_error(fehler, error);
 
-        return;
+        return NULL;
     }
 
     sond_client_password_dialog_init();
@@ -1353,35 +1351,25 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     d->client = g_object_ref(client);
     d->lease = lease;
     d->akte_id = akte_id;
-    d->lib_name = sond_module_akte_library_name(lfd_nr, year);
+    d->lib_name = sond_akten_library_name(lfd_nr, year);
     d->lib_dir = sond_import_find_library_dir(root, d->lib_name, &error);
     g_free(root);
 
     if (!d->lib_dir) {
-        meldung(parent, "Akte im SeaDrive-Laufwerk nicht erreichbar",
-                error ? error->message : "unbekannt");
-        g_clear_error(&error);
+        g_propagate_error(fehler, error);
         dok_free(d);
 
-        return;
+        return NULL;
     }
 
-    titel = g_strdup_printf("Dokumentenverzeichnis %s%s%s", d->lib_name,
-            (bezeichnung && *bezeichnung) ? " - " : "",
-            (bezeichnung && *bezeichnung) ? bezeichnung : "");
-    d->window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(d->window), titel);
-    gtk_window_set_default_size(GTK_WINDOW(d->window), 900, 600);
-    if (parent)
-        gtk_window_set_transient_for(GTK_WINDOW(d->window), parent);
-    g_free(titel);
-
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    d->box = box;
+    gtk_widget_set_vexpand(box, TRUE);
+    gtk_widget_set_hexpand(box, TRUE);
     gtk_widget_set_margin_start(box, 8);
     gtk_widget_set_margin_end(box, 8);
     gtk_widget_set_margin_top(box, 8);
     gtk_widget_set_margin_bottom(box, 8);
-    gtk_window_set_child(GTK_WINDOW(d->window), box);
 
     //Kopfzeile: Sync-Zustand und Offline-Haltung
     kopf = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -1499,7 +1487,7 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
 
     eingang_oeffnen(d);
     if (sond_treeviewfm_set_root(SOND_TREEVIEWFM(d->tree), d->lib_dir, &error)) {
-        meldung(parent, "Verzeichnis nicht lesbar", error ? error->message : "unbekannt");
+        meldung(NULL, "Verzeichnis nicht lesbar", error ? error->message : "unbekannt");
         g_clear_error(&error);
     }
 
@@ -1525,12 +1513,24 @@ void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *pa
     gtk_widget_set_sensitive(d->schalter, FALSE);
 #endif
 
-    //DokData lebt mit dem Fenster
-    g_object_set_data_full(G_OBJECT(d->window), "sond-dok", d, dok_free);
+    //DokData lebt mit dem Widget
+    g_object_set_data_full(G_OBJECT(box), "sond-dok", d, dok_free);
     if (!offene_fenster)
         offene_fenster = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    g_hash_table_insert(offene_fenster, g_strdup(d->lib_name), d->window);
-    if (offen_func)
-        offen_func(offen_data);
-    gtk_window_present(GTK_WINDOW(d->window));
+    g_hash_table_insert(offene_fenster, g_strdup(d->lib_name), box);
+
+    return box;
+}
+
+void sond_dokumente_sperre_pruefen(GtkWidget *widget) {
+    DokData *d = widget ? g_object_get_data(G_OBJECT(widget), "sond-dok") : NULL;
+
+    if (d)
+        sperre_pruefen(d);
+}
+
+gboolean sond_dokumente_busy(GtkWidget *widget) {
+    DokData *d = widget ? g_object_get_data(G_OBJECT(widget), "sond-dok") : NULL;
+
+    return d && d->job_token;
 }

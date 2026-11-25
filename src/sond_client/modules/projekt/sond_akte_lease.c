@@ -22,10 +22,10 @@
 #include <string.h>
 #include <glib/gstdio.h>
 
-#include "../../sond_graph/sond_graph_node.h"
-#include "../../sond_graph/sond_graph_db.h"
-#include "../../sond_zond_ctl.h"
-#include "../../seadrive/sond_seadrive_core.h"
+#include "../../../sond_graph/sond_graph_node.h"
+#include "../../../sond_graph/sond_graph_db.h"
+#include "../../../sond_zond_ctl.h"
+#include "../../../seadrive/sond_seadrive_core.h"
 
 #define LEASE_LABEL "ProjektLease"
 //Halter-Kennung eines Index-Jobs auf dem Server (s. sond_akte_lease_handover_to_job)

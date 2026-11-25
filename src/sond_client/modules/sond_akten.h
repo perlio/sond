@@ -138,4 +138,36 @@ void sond_akten_bereinigen(const gchar *merkliste, GPtrArray *bekannt);
  */
 void sond_akten_instanz_pruefen(const gchar *merkliste, const gchar *instanz_id);
 
+/**
+ * sond_akten_parse_regnr:
+ * @regnr_str: Eingabe, z.B. "23/26" oder "2326"
+ * @lfd_nr: (out): laufende Nummer
+ * @year: (out): Jahr (vollständig)
+ *
+ * Returns: TRUE, wenn die Eingabe eine Registernummer ist
+ */
+gboolean sond_akten_parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year);
+
+/**
+ * sond_akten_ist_regnr:
+ *
+ * Hat der Text die Form einer Registernummer (nur Ziffern, mindestens drei, oder
+ * mit einem "/")?
+ */
+gboolean sond_akten_ist_regnr(const gchar *str);
+
+/**
+ * sond_akten_regnr_anzeige:
+ *
+ * Returns: (transfer full): Anzeigeform "23/26"
+ */
+gchar* sond_akten_regnr_anzeige(guint lfd_nr, guint year);
+
+/**
+ * sond_akten_library_name:
+ *
+ * Returns: (transfer full): Name der Library, z.B. "2026-23"
+ */
+gchar* sond_akten_library_name(guint lfd_nr, guint year);
+
 #endif /* SOND_AKTEN_H */

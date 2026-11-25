@@ -18,10 +18,12 @@
 
 #include "sond_import_dialog.h"
 #include "sond_module_akte.h"
-#include "sond_import.h"
-#include "../../sond_log_and_error.h"
-#include "../../sond_eingang_zettel.h"
-#include "../../sond_graph/sond_graph_node.h"
+#include "../sond_import.h"
+#include "../sond_akten.h"
+#include "../sond_akten_suche.h"
+#include "../../../sond_log_and_error.h"
+#include "../../../sond_eingang_zettel.h"
+#include "../../../sond_graph/sond_graph_node.h"
 
 #include <string.h>
 
@@ -386,12 +388,12 @@ static void init_akte(ImportPriv *priv, guint lfd_nr, guint year,
     gchar *msg = NULL;
     gboolean fehler = FALSE;
 
-    priv->library_name = sond_module_akte_library_name(lfd_nr, year);
+    priv->library_name = sond_akten_library_name(lfd_nr, year);
     priv->gesperrt = FALSE;
 
     if (sond_client_is_logged_in(priv->client)) {
         GError *error = NULL;
-        SondGraphNode *node = sond_module_akte_find_by_regnr(priv->client,
+        SondGraphNode *node = sond_akten_suche_node_by_regnr(priv->client,
                 lfd_nr, year, &error);
 
         if (node) {

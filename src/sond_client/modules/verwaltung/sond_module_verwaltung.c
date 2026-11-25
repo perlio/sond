@@ -17,13 +17,14 @@
  */
 
 #include "sond_module_verwaltung.h"
-#include "../sond_module.h"
-#include "sond_archiv_kandidaten.h"
-#include "sond_module_akte.h"
-#include "../../sond_graph/sond_graph_property.h"
-#include "../../sond_log_and_error.h"
-#include "../../sond_graph/sond_graph_node.h"
-#include "../../sond_graph/sond_graph_db.h"
+#include "../../sond_module.h"
+#include "../sond_archiv_kandidaten.h"
+#include "../akte/sond_module_akte.h"
+#include "../sond_akten_suche.h"
+#include "../../../sond_graph/sond_graph_property.h"
+#include "../../../sond_log_and_error.h"
+#include "../../../sond_graph/sond_graph_node.h"
+#include "../../../sond_graph/sond_graph_db.h"
 
 #include <string.h>
 
@@ -599,7 +600,7 @@ static gboolean lauf_schritt(gpointer data) {
         const gchar *grund = NULL;
 
         //frisch vom Server laden: zwischen Suche und Sperre kann sich etwas geändert haben
-        priv->aktuell_node = sond_module_akte_find_by_regnr(priv->client,
+        priv->aktuell_node = sond_akten_suche_node_by_regnr(priv->client,
                 z->k->lfd_nr, z->k->year, &error);
         if (!priv->aktuell_node) {
             lauf_zeile_fehler(priv, z, error ? error->message : "Akte nicht geladen", TRUE);

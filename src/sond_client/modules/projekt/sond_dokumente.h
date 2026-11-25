@@ -18,7 +18,7 @@
 
 /**
  * @file sond_dokumente.h
- * @brief Fenster "Dokumentenverzeichnis" einer Akte
+ * @brief Widget "Dokumentenverzeichnis" einer Akte
  *
  * Zeigt das Verzeichnis der Akte im SeaDrive-Laufwerk als Baum (SondTreeviewFM)
  * und erlaubt, Dateien und Ordner dauerhaft offline verfügbar zu machen
@@ -31,25 +31,27 @@
 
 #include <gtk/gtk.h>
 
-#include "../sond_client.h"
+#include "../../sond_client.h"
 #include "sond_akte_lease.h"
 
 G_BEGIN_DECLS
 
-/* Öffnet das Fenster für die Akte (lfd_nr/year); bezeichnung (nullable) für die
- * Titelzeile. Meldungen bei Fehlern (SeaDrive oder Library nicht gefunden) kommen
- * als Dialog über parent. lease und akte_id (0 = unbekannt) brauchen die Übergabe
- * der Schreibberechtigung an einen Index-Job; die Lease gehört dem Aufrufer und muss
- * das Fenster überdauern. */
-void sond_dokumente_show(SondClient *client, SondAkteLease *lease, GtkWindow *parent,
-        guint lfd_nr, guint year, const gchar *bezeichnung, gint64 akte_id);
+/* Baut das Widget "Dokumentenverzeichnis" für die Akte (lfd_nr/year): Kopfzeile, Schalter für die
+ * Offline-Haltung und der Dateibaum. Der Aufrufer setzt es in ein Fenster oder eine Seite ein und
+ * zerstört es, wenn die Akte nicht mehr gezeigt wird (dabei räumt es Timer, Datenbanken und
+ * Passwörter auf). NULL mit fehler, wenn SeaDrive oder die Library nicht erreichbar ist oder die
+ * Akte schon in einem Widget gezeigt wird. lease und akte_id (0 = unbekannt) brauchen die Übergabe
+ * der Schreibberechtigung an einen Index-Job; die Lease gehört dem Aufrufer und muss das Widget
+ * überdauern. */
+GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
+        guint lfd_nr, guint year, gint64 akte_id, GError **fehler);
 
-/* Ist das Dokumentenfenster der Akte (Library-Name wie "2026-1") offen? Es läuft nie zusammen mit
- * zond für dieselbe Akte. */
-gboolean sond_dokumente_is_open(const gchar *lib_name);
+/* Sperre des Baums sofort neu bestimmen (läuft ein Index-Job oder zond mit der Akte, sind
+ * Änderungen ausgegraut). Das Widget tut das auch selbst alle 5 Sekunden. */
+void sond_dokumente_sperre_pruefen(GtkWidget *widget);
 
-//Rückruf, wenn ein Dokumentenfenster geöffnet oder geschlossen wurde; func NULL entfernt ihn
-void sond_dokumente_set_func(void (*func)(gpointer), gpointer data);
+/* Läuft im Widget ein Index-Job? Dann darf die Akte nicht gewechselt werden. */
+gboolean sond_dokumente_busy(GtkWidget *widget);
 
 G_END_DECLS
 

@@ -20,7 +20,7 @@
 #define SOND_IMPORT_DIALOG_H
 
 #include <gtk/gtk.h>
-#include "../sond_client.h"
+#include "../../sond_client.h"
 
 G_BEGIN_DECLS
 

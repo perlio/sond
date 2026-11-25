@@ -38,7 +38,7 @@
 #define SOND_AKTE_LEASE_H
 
 #include <glib.h>
-#include "../sond_client.h"
+#include "../../sond_client.h"
 
 G_BEGIN_DECLS
 

@@ -20,8 +20,8 @@
 #define SOND_MODULE_AKTE_H
 
 #include <gtk/gtk.h>
-#include "../sond_client.h"
-#include "../../sond_graph/sond_graph_node.h"
+#include "../../sond_client.h"
+#include "../../../sond_graph/sond_graph_node.h"
 
 G_BEGIN_DECLS
 
@@ -44,21 +44,6 @@ GtkWidget* sond_module_akte_new(SondClient *client);
 void sond_module_akte_focus_entry(GtkWidget *module);
 
 /**
- * sond_module_akte_find_by_regnr:
- * @client: SondClient
- * @lfd_nr: Laufende Nummer
- * @year: Jahr (vollständig, z.B. 2026)
- * @error: Fehler-Rückgabe (G_IO_ERROR_NOT_FOUND, wenn es die Akte nicht gibt)
- *
- * Sucht den Akten-Node zu einer Registernummer (nur Lesen, kein Lock).
- *
- * Returns: (transfer full) (nullable): Node oder NULL
- */
-SondGraphNode* sond_module_akte_find_by_regnr(SondClient *client,
-                                              guint lfd_nr, guint year,
-                                              GError **error);
-
-/**
  * SondAkteStatus:
  * @SOND_AKTE_STATUS_NICHT_ANGELEGT: nie gespeichert (keine "von"-Eigenschaft);
  *                        der Node reserviert nur die RegNr, die Library gibt
@@ -79,26 +64,6 @@ typedef enum {
  * Returns: Zustand der Akte
  */
 SondAkteStatus sond_module_akte_get_status(SondGraphNode *node);
-
-/**
- * sond_module_akte_parse_regnr:
- * @regnr_str: Eingabe, z.B. "23/26" oder "2326"
- * @lfd_nr: (out): Laufende Nummer
- * @year: (out): Jahr (vollständig)
- *
- * Returns: TRUE, wenn die Eingabe eine Registernummer ist
- */
-gboolean sond_module_akte_parse_regnr(const gchar *regnr_str, guint *lfd_nr,
-                                      guint *year);
-
-/**
- * sond_module_akte_library_name:
- * @lfd_nr: Laufende Nummer
- * @year: Jahr (vollständig)
- *
- * Returns: (transfer full): Name der zugehörigen Library, z.B. "2026-23"
- */
-gchar* sond_module_akte_library_name(guint lfd_nr, guint year);
 
 G_END_DECLS
 
