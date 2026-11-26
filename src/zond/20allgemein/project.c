@@ -86,13 +86,16 @@ static gchar* project_ctl_path(Projekt *zond) {
 	return g_build_filename(zond->proj.project_dir, zond->proj.project_name, NULL);
 }
 
+/* Titelzeile: im Akten-Modus RegNr und Bezeichnung mit dem Gegenstand als Untertitel (die Angaben
+ * kommen vom Client), sonst der Dateiname. */
 static void project_set_title(Projekt *zond) {
-	gchar *title = g_strdup_printf("%s%s", zond->proj.project_name,
+	GtkHeaderBar *bar = GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window)));
+	gchar *title = g_strdup_printf("%s%s",
+			zond->app.akte_titel ? zond->app.akte_titel : zond->proj.project_name,
 			zond->proj.readonly ? " [schreibgeschützt]" : "");
 
-	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window))),
-			title);
+	gtk_header_bar_set_title(bar, title);
+	gtk_header_bar_set_subtitle(bar, zond->app.akte_titel ? zond->app.akte_untertitel : NULL);
 	g_free(title);
 }
 
@@ -1245,9 +1248,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	project_set_widgets_sensitive(zond, TRUE);
 
 	// Set window title
-	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(zond->win.app_window))),
-			zond->proj.project_name);
+	project_set_title(zond);
 
 	// Save project path to settings
 	g_settings_set_string(zond->app.settings, "project", abs_path);

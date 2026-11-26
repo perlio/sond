@@ -45,6 +45,8 @@ struct _SondZondStarter {
     gchar *wait_name;
     gint wait_elapsed;
 
+    gchar *titel;               /* Titelzeile von zond: "1/26    Bezeichnung" */
+    gchar *untertitel;          /* Gegenstand */
     gchar *message;             /* Hinweis zum Stand der Lease einer Akte (z. B. Übergabe läuft) */
     gint64 message_akte;
 };
@@ -132,6 +134,8 @@ static void starter_unref(SondZondStarter *s) {
 
     g_clear_object(&s->client);
     g_free(s->wait_name);
+    g_free(s->titel);
+    g_free(s->untertitel);
     g_free(s->message);
     g_free(s);
 }
@@ -199,6 +203,22 @@ void sond_zond_starter_free(SondZondStarter *s) {
         s->wait_source = 0;
     }
     starter_unref(s);
+}
+
+void sond_zond_starter_set_info(SondZondStarter *s, guint lfd_nr, guint year,
+        const gchar *kurz, const gchar *gegenstand) {
+    g_return_if_fail(s != NULL);
+
+    g_clear_pointer(&s->titel, g_free);
+    g_clear_pointer(&s->untertitel, g_free);
+
+    if (kurz && *kurz) {
+        g_autofree gchar *regnr = sond_akten_regnr_anzeige(lfd_nr, year);
+
+        s->titel = g_strdup_printf("%s    %s", regnr, kurz);
+    }
+    if (gegenstand && *gegenstand)
+        s->untertitel = g_strdup(gegenstand);
 }
 
 gboolean sond_zond_starter_waiting(SondZondStarter *s) {
@@ -598,7 +618,7 @@ static void starter_start(SondZondStarter *s, guint lfd_nr, guint year, gint64 a
         goto out;
     }
 
-    if (!sond_zond_start_pid(exe, project, &pid, &error)) {
+    if (!sond_zond_start_pid(exe, project, s->titel, s->untertitel, &pid, &error)) {
         fehler_dialog(s, "zond konnte nicht gestartet werden",
                 error ? error->message : "unbekannt");
     } else {

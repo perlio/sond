@@ -101,9 +101,10 @@ gchar* sond_zond_find_exe(const gchar *configured, GError **error) {
 }
 
 gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
-        GPid *pid, GError **error) {
+        const gchar *titel, const gchar *untertitel, GPid *pid, GError **error) {
     gchar *work_dir = NULL;
-    gchar *argv[3] = { NULL, NULL, NULL };
+    gchar *argv[5] = { NULL, NULL, NULL, NULL, NULL };
+    guint n = 2;
     gboolean ok = FALSE;
 
     g_return_val_if_fail(exe != NULL && project_file != NULL, FALSE);
@@ -123,11 +124,16 @@ gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
     work_dir = g_path_get_dirname(exe);
     argv[0] = (gchar*) exe;
     argv[1] = g_strdup_printf("--akte-projekt=%s", project_file);
+    if (titel && *titel)
+        argv[n++] = g_strdup_printf("--akte-titel=%s", titel);
+    if (untertitel && *untertitel)
+        argv[n++] = g_strdup_printf("--akte-untertitel=%s", untertitel);
 
     ok = g_spawn_async(work_dir, argv, NULL,
             pid ? G_SPAWN_DO_NOT_REAP_CHILD : G_SPAWN_DEFAULT, NULL, NULL, pid,
             error);
-    g_free(argv[1]);
+    for (guint i = 1; i < n; i++)
+        g_free(argv[i]);
     g_free(work_dir);
 
     return ok;
@@ -135,5 +141,5 @@ gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
 
 gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
         GError **error) {
-    return sond_zond_start_pid(exe, project_file, NULL, error);
+    return sond_zond_start_pid(exe, project_file, NULL, NULL, NULL, error);
 }

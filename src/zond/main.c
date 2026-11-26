@@ -32,10 +32,18 @@
 //Wert der Kommandozeilenoption --akte-projekt (vom Client; s. Projekt.app.akte_projekt)
 static gchar *akte_projekt_opt = NULL;
 
+//Titel und Untertitel der Titelzeile (--akte-titel, --akte-untertitel; vom Client)
+static gchar *akte_titel_opt = NULL;
+static gchar *akte_untertitel_opt = NULL;
+
 static GOptionEntry optionen[] = {
 	{ "akte-projekt", 0, 0, G_OPTION_ARG_FILENAME, &akte_projekt_opt,
 			"Projektdatei einer Akte; zond öffnet nur dieses Projekt (vom Client gestartet)",
 			"DATEI" },
+	{ "akte-titel", 0, 0, G_OPTION_ARG_STRING, &akte_titel_opt,
+			"Titel der Titelzeile (RegNr und Bezeichnung der Akte)", "TEXT" },
+	{ "akte-untertitel", 0, 0, G_OPTION_ARG_STRING, &akte_untertitel_opt,
+			"Untertitel der Titelzeile (Gegenstand der Akte)", "TEXT" },
 	{ NULL, 0, 0, 0, NULL, NULL, NULL }
 };
 
@@ -53,6 +61,8 @@ static void cb_startup(GApplication *app, gpointer user_data) {
 		zond->app.akte_projekt = g_strdup(akte_projekt_opt);
 		g_strdelimit(zond->app.akte_projekt, "\\", '/');
 	}
+	zond->app.akte_titel = g_strdup(akte_titel_opt);
+	zond->app.akte_untertitel = g_strdup(akte_untertitel_opt);
 
 	zond_init(GTK_APPLICATION(app), zond);
 
@@ -187,7 +197,11 @@ int main(int argc, char **argv) {
 
 	g_object_unref(app);
 	g_free(akte_projekt_opt);
+	g_free(akte_titel_opt);
+	g_free(akte_untertitel_opt);
 	g_free(zond.app.akte_projekt);
+	g_free(zond.app.akte_titel);
+	g_free(zond.app.akte_untertitel);
 
 	LOG_INFO("zond beendet");
 	logging_cleanup();

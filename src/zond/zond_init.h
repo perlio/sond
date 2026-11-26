@@ -128,6 +128,10 @@ typedef struct _ZondApp {
 	 * NULL: normaler Betrieb. */
 	gchar *akte_projekt;
 
+	//Titelzeile im Akten-Modus (Optionen des Clients): RegNr und Bezeichnung, Gegenstand; sonst NULL
+	gchar *akte_titel;
+	gchar *akte_untertitel;
+
 	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
 	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
 	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt

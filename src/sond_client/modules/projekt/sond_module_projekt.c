@@ -281,6 +281,7 @@ static void akte_waehlen(ProjektPriv *p, guint lfd_nr, guint year, const gchar *
         p->doku = NULL;
         g_clear_pointer(&p->doku_lib, g_free);
         info_setzen(p, NULL, NULL);
+        sond_zond_starter_set_info(p->starter, lfd_nr, year, NULL, NULL);
         anzeige_aktualisieren(p);
     }
 
@@ -302,6 +303,7 @@ static void akte_waehlen(ProjektPriv *p, guint lfd_nr, guint year, const gchar *
     p->doku_akte_id = akte_id;
 
     info_setzen(p, bezeichnung, gegenstand);
+    sond_zond_starter_set_info(p->starter, lfd_nr, year, bezeichnung, gegenstand);
     anzeige_aktualisieren(p);
 }
 

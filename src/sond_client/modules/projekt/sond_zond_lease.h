@@ -55,6 +55,11 @@ void sond_zond_starter_free(SondZondStarter *s);
  * unbekannt, der Starter fragt den Server bzw. nimmt den lokalen Lease-Zustand. */
 void sond_zond_starter_start(SondZondStarter *s, guint lfd_nr, guint year, gint64 akte_id);
 
+/* Bezeichnung und Gegenstand der gezeigten Akte für die Titelzeile von zond (beide dürfen NULL
+ * sein; NULL für kurz und ggs löscht die Angaben). Gelten für die folgenden Starts. */
+void sond_zond_starter_set_info(SondZondStarter *s, guint lfd_nr, guint year,
+        const gchar *kurz, const gchar *gegenstand);
+
 /* Wartet der Starter gerade auf die Freigabe durch einen anderen Rechner? */
 gboolean sond_zond_starter_waiting(SondZondStarter *s);
 

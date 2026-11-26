@@ -60,6 +60,9 @@ gchar* sond_zond_find_exe(const gchar *configured, GError **error);
 gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
         GError **error);
 
+/* Titel und Untertitel für die Titelzeile von zond (statt des Dateinamens), z. B.
+ * "1/26    Müller ./. Meier" und der Gegenstand; beide dürfen NULL sein. */
+
 /**
  * sond_zond_start_pid:
  * @pid: (out) (nullable): Prozess-Kennung des gestarteten zond. Wird sie
@@ -67,10 +70,10 @@ gboolean sond_zond_start(const gchar *exe, const gchar *project_file,
  *   muss sie mit g_spawn_close_pid() schließen (oder g_child_watch_add()
  *   verwenden).
  *
- * Wie sond_zond_start(). Der Akten-Modus ist nie die Einzelinstanz: auch wenn ein normales zond
+ * Wie sond_zond_start(), mit Titel und Untertitel (--akte-titel, --akte-untertitel). Der Akten-Modus ist nie die Einzelinstanz: auch wenn ein normales zond
  * läuft, gehört der Prozess zu diesem Projekt.
  */
 gboolean sond_zond_start_pid(const gchar *exe, const gchar *project_file,
-        GPid *pid, GError **error);
+        const gchar *titel, const gchar *untertitel, GPid *pid, GError **error);
 
 #endif /* SOND_ZOND_START_H */
