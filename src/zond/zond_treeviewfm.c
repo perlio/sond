@@ -13,6 +13,8 @@
 #include "../sond_file_helper.h"
 #include "../sond_mime.h"
 #include "../znd/sond_projekt_index.h"
+#include "../znd/sond_projekt_auswahl.h"
+#include "../tvfm/sond_tvfm_fileparts.h"
 #include "zond_indexsuche.h"
 #include "zond_eingang.h"
 #include "zond_pdf_document.h"
@@ -667,237 +669,40 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 			sond_tvfm_item_get_path_or_section(stvfm_item), text, error);
 }
 
-/* Reiner readdir-Scanner für "wirkliche" (nicht in einem Container liegende)
- * Dateisystem-Verzeichnisse - ersetzt für diesen Fall den Weg über
- * sond_tvfm_item_load_children()/sond_file_part_create() (Inhalts-Sniffing
- * der ersten 2 KB, SeaDrive-Hydrierung). Benutzt nur sond_dir_open()/
- * sond_dir_read_name() (Verzeichnis-Listing) und sond_stat() (Metadaten,
- * kein Inhalt) - beides zieht bei SeaDrive-Platzhaltern keine Hydrierung
- * nach sich. Der Dateityp wird ausschließlich über die Endung bestimmt
- * (mime_from_extension()) und über sond_file_part_create_leaf() verpackt
- * (ebenfalls ohne Dateizugriff) - für den Zweck hier (Soll/Ist-Abgleich
- * beim Durchsuchen/Löschen des Index gegen die DB) reicht das:
- * check_coverage_one() erkennt PDFs zusätzlich über die Endung, nicht nur
- * über den GObject-Typ (zond_indexsuche.c).
- *
- * In Container (ZIP/E-Mail/PDF mit Einbettungen) wird hier NICHT
- * hineingestiegen: ein frisch entdeckter Container-Top-Knoten hat
- * sond_file_part != NULL UND path_or_section == NULL, fällt unten in
- * zond_treeviewfm_item_get_fileparts() also stets in den ELSE-Zweig (ein
- * einziger, opaker Filepart, da "application/zip" & Co. ohnehin nicht
- * indizierbar sind). Inhalte innerhalb eines Containers werden nur über
- * eine explizite Auswahl darin erreicht (sond_file_part != NULL UND
- * path_or_section gesetzt) - dafür dient der echte Weg in
- * zond_treeviewfm_item_get_fileparts(). */
-#define READDIR_MAX_DEPTH 64
+/* Auswahl -> Fileparts: die Auflösung steht GTK-frei in tvfm/sond_tvfm_fileparts.c. Hier kommen
+ * nur die Angaben dieses Baums dazu: Wurzel, Index-Kontext und die Deutung einer Section (in
+ * BAUM_FS immer eine Anbindung, s. sond_projekt_auswahl.h). */
+static void ztvfm_fileparts_opts(SondTreeviewFM *stvfm, gboolean skip_fully_covered,
+		SondProjektSectionRegeln *regeln, SondTVFMFilepartsOpts *opts) {
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(stvfm));
 
-static gint zond_treeviewfm_readdir_rek(SondTreeviewFM *stvfm,
-		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
-		guint depth, GError **error) {
-	gchar const *root = sond_treeviewfm_get_root(stvfm);
-	gchar *path_dir = NULL;
-	SondDir *dir = NULL;
-	gchar const *filename = NULL;
-
-	//Schutz vor Verzeichnis-Schleifen (Junction/Symlink auf einen Vorfahren)
-	if (depth > READDIR_MAX_DEPTH) {
-		LOG_WARN("%s: Verzeichnistiefe > %d bei '%s' - übersprungen "
-				"(Verzeichnisschleife?)", __func__, READDIR_MAX_DEPTH,
-				rel_dir ? rel_dir : "");
-
-		return 0;
-	}
-
-	/* Derselbe Verzeichnis-
-	 * Kurzschluss wie in scan_coverage_gaps_fs() (zond_indexsuche.c) - ein
-	 * bereits vollständig indizierter Ast wird gar nicht erst per readdir
-	 * aufgeschlüsselt, erneutes Indizieren wäre per Definition von
-	 * "Coverage" ein No-Op. rel_dir == NULL (Projektwurzel) wird nie
-	 * geprüft - Coverage wird nie über die oberste Ebene hinaus
-	 * zusammengefasst (sond_index_ctx_coverage_try_collapse()), ein
-	 * Eintrag fürs ganze Projekt existiert also nie. Der Aufrufer trägt
-	 * die Verantwortung, skip_fully_covered nicht zu setzen, wenn der
-	 * OCR-Modus "erzwingen" ist (s. Doc-Kommentar im Header). */
-	if (skip_fully_covered && rel_dir) {
-		ZondTreeviewFMPrivate *priv =
-				zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(stvfm));
-
-		if (priv->zond->proj.wctx && priv->zond->proj.wctx->index_ctx) {
-			SondIndexStatus status = sond_index_ctx_get_dir_status(
-					priv->zond->proj.wctx->index_ctx, rel_dir);
-
-			if (status == SOND_INDEX_STATUS_FULL)
-				return 0; /* ganzer Ast abgedeckt - nichts zu tun */
-		}
-	}
-
-	path_dir = rel_dir ? g_strconcat(root, "/", rel_dir, NULL) : g_strdup(root);
-	dir = sond_dir_open(path_dir, error);
-	g_free(path_dir);
-	if (!dir)
-		return -1;
-
-	while ((filename = sond_dir_read_name(dir)) != NULL) {
-		gchar *rel_path_child = NULL;
-		GStatBuf st = { 0 };
-		GError *error_stat = NULL;
-
-		rel_path_child = rel_dir ?
-				g_strconcat(rel_dir, "/", filename, NULL) : g_strdup(filename);
-
-		/* absoluter Pfad: ein projektrelativer hinge am Arbeitsverzeichnis
-		 * des Prozesses */
-		{
-			gchar *abs_path_child = g_strconcat(root, "/", rel_path_child,
-					NULL);
-			gint rc_stat = sond_stat(abs_path_child, &st, &error_stat);
-
-			g_free(abs_path_child);
-			if (rc_stat) {
-				LOG_WARN("%s: sond_stat('%s') gibt Fehler zurück: %s", __func__,
-						rel_path_child,
-						error_stat ? error_stat->message : "?");
-				g_clear_error(&error_stat);
-				g_free(rel_path_child);
-				continue;
-			}
-		}
-
-		if (S_ISDIR(st.st_mode)) {
-			gint rc = zond_treeviewfm_readdir_rek(stvfm, rel_path_child, ht,
-					skip_fully_covered, depth + 1, error);
-			g_free(rel_path_child);
-			if (rc) {
-				sond_dir_close(dir);
-				return -1;
-			}
-		} else if (sond_file_name_not_indexable(filename)) {
-			//am Namen als nicht indizierbar erkennbar (Bild, Video, ...)
-			g_free(rel_path_child);
-		} else {
-			gchar const *mime = mime_from_extension(filename);
-			SondFilePart *sfp_leaf = sond_file_part_create_leaf(
-					rel_path_child, NULL, mime);
-
-			g_free(rel_path_child);
-			g_hash_table_insert(ht, sfp_leaf, NULL);
-		}
-	}
-
-	sond_dir_close(dir);
-
-	return 0;
+	opts->root = sond_treeviewfm_get_root(stvfm);
+	opts->index_ctx = priv->zond->proj.wctx ? priv->zond->proj.wctx->index_ctx : NULL;
+	opts->skip_fully_covered = skip_fully_covered;
+	opts->section_range = sond_projekt_section_range;
+	opts->section_data = regeln;
 }
 
 gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
 		GError **error) {
-	return zond_treeviewfm_readdir_rek(stvfm, rel_dir, ht, skip_fully_covered,
-			0, error);
+	SondProjektSectionRegeln regeln = { FALSE };
+	SondTVFMFilepartsOpts opts = { 0 };
+
+	ztvfm_fileparts_opts(stvfm, skip_fully_covered, &regeln, &opts);
+
+	return sond_tvfm_fileparts_readdir(rel_dir, ht, &opts, error);
 }
 
-/* zond_treeviewfm_get_fileparts() und Helfer:
- *
- * Die generische Basisklasse weiß bewusst nicht, was eine "Section" eines
- * SOND_TVFM_ITEM_TYPE_LEAF_SECTION-Knotens bedeutet (bei PDF ein
- * Seitenbereich, bei anderen Dateitypen ggf. etwas ganz anderes - z.B.
- * ein Zeitausschnitt bei Audio/Video). Nur zond selbst weiß: in BAUM_FS
- * ist ein LEAF_SECTION-Knoten immer eine Anbindung (angelegt in
- * ziele.c), deren path_or_section ein Seitenbereich ist. Deshalb baut
- * diese Funktion die Hashtable selbst, ausschließlich über die
- * öffentlichen SondTVFMItem-Zugriffsfunktionen (sond_treeviewfm.h). */
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GHashTable *ht, gboolean reject_unterseitig,
 		gboolean skip_fully_covered, GError **error) {
-	SondTVFMItemType type = sond_tvfm_item_get_item_type(stvfm_item);
-	gchar const *path_or_section = sond_tvfm_item_get_path_or_section(stvfm_item);
-	SondFilePart *sond_file_part = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	SondProjektSectionRegeln regeln = { reject_unterseitig };
+	SondTVFMFilepartsOpts opts = { 0 };
 
-	//Wirkliches Dateisystem-Verzeichnis (auch verschachtelt - sond_file_part
-	//bleibt dabei auf dem gesamten Ast NULL, s. sond_tvfm_item_load_fs_dir()):
-	//reiner readdir-Scanner, s. dortigen Kommentar.
-	if (type == SOND_TVFM_ITEM_TYPE_DIR && !sond_file_part) {
-		return zond_treeviewfm_item_get_fileparts_readdir(
-				sond_tvfm_item_get_stvfm(stvfm_item), path_or_section, ht,
-				skip_fully_covered, error);
-	}
-	//Innerhalb eines Containers (ZIP/E-Mail/PDF mit Einbettungen), nur über
-	//eine explizite Auswahl darin erreichbar - unverändert der bisherige,
-	//echte Weg (der Nutzer hat diesen Container durch eigenes Navigieren
-	//bereits geöffnet, s. Kommentar an zond_treeviewfm_item_get_fileparts_readdir).
-	else if (type == SOND_TVFM_ITEM_TYPE_DIR && path_or_section) {
-		g_autoptr(GPtrArray) arr_children = NULL;
-		gint rc = 0;
+	ztvfm_fileparts_opts(sond_tvfm_item_get_stvfm(stvfm_item), skip_fully_covered, &regeln, &opts);
 
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
-		if (rc)
-			return -1;
-
-		for (guint i = 0; i < arr_children->len; i++) {
-			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
-
-			rc = zond_treeviewfm_item_get_fileparts(child, ht,
-					reject_unterseitig, skip_fully_covered, error);
-			if (rc)
-				return -1;
-		}
-	}
-	else {
-		/* eigene Ref pro Key nötig (ht: key-destroy-func g_object_unref,
-		 * s. zond_treeviewfm_get_fileparts() unten) - sond_file_part
-		 * gehört sonst dem stvfm_item. */
-		SondPageRange *range = NULL;
-
-		if (type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION && path_or_section) {
-			/* Anbindung - path_or_section ist deren Seitenbereich-String
-			 * (s. Anlage in ziele.c). Ohne "bis" (reiner Punkt) liefert
-			 * anbindung_build_file_section() ein bis mit seite==0 UND
-			 * index==0 - dieselbe Bedingung erkennt hier, dass nur eine
-			 * einzelne Seite (nicht seite 0 als Bereichsende) gemeint ist. */
-			Anbindung anbindung = { 0 };
-
-			anbindung_parse_file_section(path_or_section, &anbindung);
-
-			/* Index erstellen/löschen (Auswahl): unterseitige Anbindungen
-			 * sind dafür nicht zulässig - s. anbindung_ist_unterseitig()
-			 * (anbindung.h). */
-			if (reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
-				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-						"Die Auswahl enthält eine unterseitige Anbindung "
-						"(beginnt/endet nicht an einer Seitengrenze) - das "
-						"ist für Indizierung/Index löschen nicht zulässig.");
-				return -1;
-			}
-
-			range = sond_page_range_new(anbindung.von.seite,
-					anbindung_bis_seite(anbindung));
-		}
-		else if (type == SOND_TVFM_ITEM_TYPE_LEAF && !path_or_section &&
-				SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
-			/* Der "Message"-Knoten einer E-Mail: type==LEAF, path_or_section
-			 * ist NULL (der "//message"-Marker wird beim Erzeugen des Items
-			 * sofort gelöscht, s. sond_tvfm_item_create()), und sond_file_part
-			 * ist derselbe SondFilePart wie der der gesamten eml - eindeutig
-			 * unterscheidbar von "das ganze Dir/die ganze Datei" nur über
-			 * diesen Item-Typ zum Zeitpunkt der Auswahl. Statt der
-			 * ganzen Mail wird für diesen Eintrag nur der Header indiziert. */
-			range = sond_page_range_new_gmessage_header();
-		}
-		else if (type == SOND_TVFM_ITEM_TYPE_LEAF &&
-				SOND_IS_FILE_PART_PDF(sond_file_part) &&
-				sond_tvfm_item_is_content_root_marker(stvfm_item)) {
-			/* "PageTree"-Knoten einer PDF mit Einbettungen: nur die Seiten,
-			 * die Einbettungen sind eigene Kind-Knoten. Die
-			 * PDF selbst (DIR) bleibt "ganze Datei". */
-			range = sond_page_range_new_pdf_pagetree();
-		}
-
-		/* Mehrere markierte Punkte derselben Datei (z.B. zwei Anbindungen):
-		 * Vereinigung statt Ersetzen des bisherigen Eintrags */
-		sond_page_range_merge(ht, g_object_ref(sond_file_part), range);
-	}
-
-	return 0;
+	return sond_tvfm_item_get_fileparts(stvfm_item, ht, &opts, error);
 }
 
 typedef struct {

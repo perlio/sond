@@ -36,7 +36,7 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(shell find $(SRC_DIRS)/znd -name '*.c')) \
 	$(SRC_DIRS)/icons.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/gtk3/sond_dialoge.c $(SRC_DIRS)/gtk3/sond_info_window.c $(SRC_DIRS)/gtk3/sond_wait_cursor.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/gtk3/sond_treeview.c $(SRC_DIRS)/gtk3/sond_treeviewfm.c \
-	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_preflight.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_preflight.c $(SRC_DIRS)/tvfm/sond_tvfm_fileparts.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_render_doc.c $(SRC_DIRS)/sond_gtk_compat.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c \
@@ -93,7 +93,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(SRC_DIRS)/seadrive/sond_seadrive_core.c $(SRC_DIRS)/seadrive/sond_seadrive_watcher.c \
 	$(SRC_DIRS)/gtk4/sond_treeview.c $(SRC_DIRS)/gtk4/sond_treeviewfm.c $(SRC_DIRS)/gtk4/sond_treeviewfm_lazy.c $(SRC_DIRS)/gtk4/sond_treeviewfm_cells.c $(SRC_DIRS)/gtk4/sond_treeviewfm_watch.c $(SRC_DIRS)/gtk4/sond_treeviewfm_edit.c $(SRC_DIRS)/gtk4/sond_treeviewfm_search.c $(SRC_DIRS)/gtk4/sond_treeviewfm_unlock.c $(SRC_DIRS)/gtk4/sond_busy_dialog.c $(SRC_DIRS)/gtk4/sond_seadrive_load_dialog.c $(SRC_DIRS)/gtk4/sond_treeviewfm_transfer.c $(SRC_DIRS)/gtk4/sond_projekt_treeviewfm.c \
 	$(SRC_DIRS)/sond_icon_util.c $(SRC_DIRS)/icons.c \
-	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_preflight.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c $(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_item.c $(SRC_DIRS)/tvfm/sond_tvfm_owner.c $(SRC_DIRS)/tvfm/sond_tvfm_search.c $(SRC_DIRS)/tvfm/sond_tvfm_load.c $(SRC_DIRS)/tvfm/sond_tvfm_preflight.c $(SRC_DIRS)/tvfm/sond_tvfm_fileparts.c $(SRC_DIRS)/tvfm/sond_tvfm_status.c $(SRC_DIRS)/tvfm/sond_tvfm_unlock.c $(SRC_DIRS)/tvfm/sond_tvfm_index_sync.c \
 	$(SRC_DIRS)/sond_fileparts.c \
 	$(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_pdf_helper.c \
@@ -147,6 +147,9 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_fileparts_root.c \
 	$(SRC_DIRS)/tests/test_projekt_index.c \
 	$(SRC_DIRS)/znd/sond_projekt_index.c \
+	$(SRC_DIRS)/znd/sond_projekt_auswahl.c \
+	$(SRC_DIRS)/tests/test_tvfm_fileparts.c \
+	$(SRC_DIRS)/tvfm/sond_tvfm_fileparts.c \
 	$(SRC_DIRS)/tests/test_akte_lease.c \
 	$(SRC_DIRS)/tests/fake_server.c \
 	$(SRC_DIRS)/sond_client/modules/projekt/sond_akte_lease.c \
