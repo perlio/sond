@@ -23,6 +23,7 @@
 #include <glib/gstdio.h>
 #include <tesseract/capi.h>
 
+#include "../../znd/sond_projekt_index.h"
 #include "../../gtk3/sond_dialoge.h"
 #include "../../gtk3/sond_info_window.h"
 #include "../../gtk3/sond_wait_cursor.h"
@@ -638,9 +639,6 @@ static void do_index_loeschen_gesamt(Projekt *zond) {
  * destruktiv (bereits geleistete OCR-/Embedding-Arbeit geht verloren,
  * bis neu indiziert wird). */
 static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
-	GHashTableIter iter = { 0 };
-	gpointer key = NULL;
-	gpointer value = NULL;
 	gint rc = 0;
 
 	rc = abfrage_frage(zond->win.app_window, "Index löschen",
@@ -651,95 +649,8 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 		return;
 	}
 
-	/* Alle Löschungen in einer Transaktion (ein Commit statt einer je
-	 * Statement); jede einzelne ist für sich schon atomar (Savepoint in
-	 * sond_index_ctx_delete_index()), ein Fehler bei einer Datei betrifft
-	 * die anderen also nicht. */
 	wait_cursor_set(zond->win.app_window);
-	gboolean in_tx = (sqlite3_exec(zond->proj.wctx->index_ctx->db, "BEGIN;",
-			NULL, NULL, NULL) == SQLITE_OK);
-
-	g_hash_table_iter_init(&iter, ht_index);
-	while (g_hash_table_iter_next(&iter, &key, &value)) {
-		SondFilePart *sfp = SOND_FILE_PART(key);
-		SondPageRange *range = (SondPageRange*) value; /* NULL = ganze Datei */
-		gchar *file_part_raw = sond_file_part_get_filepart(sfp);
-
-		/* Angebundene E-Mail: Header und Inline-Teile einzeln
-		 * löschen, Anhänge bleiben */
-		if (range && range->gmessage_message) {
-			GPtrArray *parts = sond_index_ctx_gmessage_message_parts(
-					zond->proj.wctx->index_ctx, file_part_raw, NULL);
-
-			for (guint i = 0; i < parts->len; i++) {
-				GError *error = NULL;
-
-				if (!sond_index_ctx_delete_index(zond->proj.wctx->index_ctx,
-						g_ptr_array_index(parts, i), -1, -1,
-						zond->proj.project_dir, &error)) {
-					LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
-							(gchar const*) g_ptr_array_index(parts, i),
-							error ? error->message : "?");
-					g_clear_error(&error);
-				}
-			}
-			g_ptr_array_unref(parts);
-			g_free(file_part_raw);
-
-			continue;
-		}
-		/* Der "Message"-Knoten einer E-Mail teilt sich denselben SondFilePart
-		 * mit der ganzen .eml-Datei (s. zond_treeviewfm_item_get_fileparts()) -
-		 * sond_file_part_get_filepart() liefert dafür also nur den nackten
-		 * Dateinamen, ohne "//header". Ohne diese Umrechnung würde
-		 * "Index löschen" für den Message-Knoten die GANZE .eml als "ganze
-		 * Datei" an delete_index() übergeben: hat "mail.eml" selbst einen
-		 * coverage-Eintrag (aus dem Ganze-Datei-Indizierlauf), träfe das
-		 * Fall 1 in coverage_invalidate() (Vorfahre == path selbst) - der
-		 * Eintrag wird dort gelöscht, OHNE die Geschwister-Rekonstruktion
-		 * aus Fall 2, die nur greift, wenn path selbst NICHT der eigene
-		 * coverage-Träger ist; Message- UND alle Mimepart-Badges
-		 * verschwänden. Analog zu coverage_key in sond_process_fileparts()
-		 * (sond_process_file.c) muss deshalb auch hier für gmessage_header_only
-		 * der Pfad "file_part//header" verwendet werden - derselbe Pfad, unter
-		 * dem sond_index() den Header abgelegt/abgedeckt hat. */
-		gchar *file_part = (range && range->gmessage_header_only) ?
-				g_strdup_printf("%s//header", file_part_raw) : file_part_raw;
-		GError *error = NULL;
-		gint von = range ? range->von : -1;
-		gint bis = range ? range->bis : -1;
-
-		/* Nur die Seiten einer PDF: als Seitenbereich über
-		 * alle Seiten löschen - "ganze Datei" träfe auch die eingebetteten
-		 * Dateien (x.pdf//...). Der Seiten-Eintrag "x.pdf//" wird dabei von
-		 * coverage_invalidate() mit entfernt. */
-		if (range && range->pdf_pagetree_only) {
-			gint n_pages = sond_index_ctx_get_page_count(
-					zond->proj.wctx->index_ctx, file_part);
-
-			von = 0;
-			bis = (n_pages > 0) ? n_pages - 1 : G_MAXINT;
-		}
-
-		/* Mehrere (disjunkte) Seitenbereiche einzeln löschen - Seiten
-		 * dazwischen gehören nicht zur Auswahl. */
-		for (gint r = 0; r < sond_page_range_count(range); r++) {
-			if (range && !range->pdf_pagetree_only && range->von >= 0)
-				sond_page_range_get(range, r, &von, &bis);
-
-			if (!sond_index_ctx_delete_index(zond->proj.wctx->index_ctx, file_part,
-					von, bis, zond->proj.project_dir, &error)) {
-				LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
-						file_part, error ? error->message : "?");
-				g_clear_error(&error);
-			}
-		}
-		if (file_part != file_part_raw) g_free(file_part);
-		g_free(file_part_raw);
-	}
-
-	if (in_tx)
-		sqlite3_exec(zond->proj.wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+	sond_projekt_index_loeschen(zond->proj.wctx->index_ctx, ht_index, zond->proj.project_dir);
 	wait_cursor_reset(zond->win.app_window);
 
 	g_hash_table_destroy(ht_index);

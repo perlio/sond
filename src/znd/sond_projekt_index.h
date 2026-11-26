@@ -27,6 +27,7 @@
 #include <glib.h>
 
 #include "../sond_index.h"
+#include "../sond_process_file.h"
 
 G_BEGIN_DECLS
 
@@ -36,6 +37,13 @@ G_BEGIN_DECLS
  * der Dateityp indizierbar ist, prüft der Aufrufer nicht, PDF ist es immer. */
 SondIndexStatus sond_projekt_index_status_abschnitt(SondIndexCtx *index_ctx,
 		gchar const *filepart, gchar const *section);
+
+/* Löscht den Index der Auswahl ht (Schlüssel SondFilePart, Wert SondPageRange* oder NULL für die
+ * ganze Datei, s. tvfm/sond_tvfm_fileparts.h) in einer Transaktion. Es ändert nichts am
+ * Dateisystem und nichts an Anbindungen. project_dir: Projektverzeichnis (für die Pfade der
+ * Index-Löschung). Ein Fehler bei einem Eintrag betrifft die anderen nicht; Rückgabe: Zahl der
+ * Einträge, die sich nicht löschen ließen (0 = alles gelöscht). */
+gint sond_projekt_index_loeschen(SondIndexCtx *index_ctx, GHashTable *ht, gchar const *project_dir);
 
 G_END_DECLS
 

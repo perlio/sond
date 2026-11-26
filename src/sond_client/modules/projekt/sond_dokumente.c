@@ -34,6 +34,8 @@
 #include "../../sond_password_dialog.h"
 #include "../../../sond_index.h"
 #include "../../../znd/dbase_zond.h"
+#include "../../../znd/sond_projekt_index.h"
+#include "../../../znd/sond_projekt_auswahl.h"
 
 typedef struct {
     gchar *lib_dir;
@@ -1306,6 +1308,112 @@ static void hook_message(gpointer data, gchar const *title, gchar const *text) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Index der Auswahl löschen                                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    DokData *d;
+    GHashTable *auswahl;
+} LoeschCtx;
+
+//Löscht den Index der Auswahl; am Dateisystem und an den Anbindungen ändert sich nichts
+static void index_loeschen_ausfuehren(DokData *d, GHashTable *auswahl) {
+    GError *error = NULL;
+    gint fehler = 0;
+
+    if (hook_write_begin(d, FALSE, &error) < 0) {
+        meldung(dok_fenster(d), "Index löschen", error ? error->message : "Keine Schreibberechtigung.");
+        g_clear_error(&error);
+
+        return;
+    }
+
+    if (!d->index_schreib) {
+        hook_write_end(d);
+        meldung(dok_fenster(d), "Index löschen", "Es gibt noch keinen Index.");
+
+        return;
+    }
+
+    fehler = sond_projekt_index_loeschen(d->index_schreib, auswahl, d->lib_dir);
+    hook_write_end(d);
+
+    //Index-DB neu lesen und die Symbole auffrischen
+    d->index_mtime = -1;
+    index_pruefen(d);
+
+    if (fehler > 0) {
+        g_autofree gchar *text = g_strdup_printf("%d Eintrag/Einträge ließen sich nicht löschen.",
+                fehler);
+
+        meldung(dok_fenster(d), "Index löschen", text);
+    }
+}
+
+static void on_loesch_antwort(GObject *quelle, GAsyncResult *res, gpointer user_data) {
+    LoeschCtx *ctx = user_data;
+    gint antwort = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(quelle), res, NULL);
+
+    if (antwort == 0 && ctx->d->tree)
+        index_loeschen_ausfuehren(ctx->d, ctx->auswahl);
+
+    g_hash_table_destroy(ctx->auswahl);
+    g_free(ctx);
+}
+
+static void on_index_loeschen_aktion(GSimpleAction *aktion, GVariant *parameter, gpointer user_data) {
+    DokData *d = user_data;
+    SondProjektSectionRegeln regeln = { TRUE };
+    SondTVFMFilepartsOpts opts = { 0 };
+    GError *error = NULL;
+    GHashTable *auswahl = NULL;
+    GtkAlertDialog *frage = NULL;
+    LoeschCtx *ctx = NULL;
+    const char *knoepfe[] = { "Index löschen", "Abbrechen", NULL };
+
+    (void) aktion;
+    (void) parameter;
+
+    if (!d->index_ctx) {
+        meldung(dok_fenster(d), "Index löschen", "Es gibt noch keinen Index.");
+
+        return;
+    }
+
+    //unterseitige Anbindungen lassen sich nicht seitenweise löschen
+    opts.section_range = sond_projekt_section_range;
+    opts.section_data = &regeln;
+    auswahl = sond_treeviewfm_get_selection_fileparts(SOND_TREEVIEWFM(d->tree), &opts, &error);
+    if (!auswahl) {
+        meldung(dok_fenster(d), "Index löschen", error ? error->message : "Auswahl nicht lesbar.");
+        g_clear_error(&error);
+
+        return;
+    }
+
+    if (g_hash_table_size(auswahl) == 0) {
+        g_hash_table_destroy(auswahl);
+        meldung(dok_fenster(d), "Index löschen", "Bitte zuerst Einträge im Baum markieren.");
+
+        return;
+    }
+
+    ctx = g_new0(LoeschCtx, 1);
+    ctx->d = d;
+    ctx->auswahl = auswahl;
+
+    frage = gtk_alert_dialog_new("Index der Auswahl löschen?");
+    gtk_alert_dialog_set_detail(frage, "Der Index der markierten Einträge wird unwiderruflich "
+            "gelöscht (auch bereits geleistete Texterkennung). Dateien und Anbindungen bleiben "
+            "unverändert; neu indiziert wird erst auf Anforderung.");
+    gtk_alert_dialog_set_buttons(frage, knoepfe);
+    gtk_alert_dialog_set_default_button(frage, 1);
+    gtk_alert_dialog_set_cancel_button(frage, 1);
+    gtk_alert_dialog_choose(frage, dok_fenster(d), NULL, on_loesch_antwort, ctx);
+    g_object_unref(frage);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Dauerhaft entsperren                                               */
 /* ------------------------------------------------------------------ */
 
@@ -1472,7 +1580,8 @@ GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
     //Kontextmenü: Auswahl zum Indizieren senden
     {
         static const GActionEntry aktionen[] = {
-            { "index-senden", on_index_aktion, NULL, NULL, NULL }
+            { "index-senden", on_index_aktion, NULL, NULL, NULL },
+            { "index-loeschen", on_index_loeschen_aktion, NULL, NULL, NULL }
         };
         SondTreeview *basis = SOND_TREEVIEW(d->tree);
 
@@ -1480,6 +1589,8 @@ GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
                 G_N_ELEMENTS(aktionen), d);
         g_menu_append(sond_treeview_get_menu(basis),
                 "Zum Indizieren an den Server senden ...", "tv.index-senden");
+        g_menu_append(sond_treeview_get_menu(basis),
+                "Index der Auswahl löschen ...", "tv.index-loeschen");
     }
 
     //Index-Symbole: Index-DB lesen und bei Änderungen neu öffnen

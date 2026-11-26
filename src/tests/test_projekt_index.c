@@ -24,6 +24,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#include "../sond_fileparts.h"
 #include "../znd/sond_projekt_index.h"
 
 typedef struct {
@@ -123,8 +124,85 @@ static void test_fehlende_angaben(void) {
 	idx_free(i);
 }
 
+static GHashTable* ht_neu(void) {
+	return g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
+}
+
+static void trage_ein(GHashTable *ht, gchar const *pfad, SondPageRange *range) {
+	g_hash_table_insert(ht, sond_file_part_create_leaf(pfad, NULL, "application/pdf"), range);
+}
+
+static void test_loeschen_ganze_datei(void) {
+	Idx *i = idx_new();
+	GHashTable *ht = ht_neu();
+
+	markiere(i, "a.pdf");
+	markiere(i, "b.pdf");
+	trage_ein(ht, "a.pdf", NULL);
+
+	g_assert_cmpint(sond_projekt_index_loeschen(i->ctx, ht, i->dir), ==, 0);
+	g_assert_cmpint(sond_index_ctx_get_file_status(i->ctx, "a.pdf", 0, 99999), ==,
+			SOND_INDEX_STATUS_NONE);
+	g_assert_cmpint(sond_index_ctx_get_file_status(i->ctx, "b.pdf", 0, 99999), ==,
+			SOND_INDEX_STATUS_FULL);
+
+	g_hash_table_destroy(ht);
+	idx_free(i);
+}
+
+static void test_loeschen_seitenbereich(void) {
+	Idx *i = idx_new();
+	GHashTable *ht = ht_neu();
+
+	markiere(i, "a.pdf");
+	trage_ein(ht, "a.pdf", sond_page_range_new(1, 2));
+
+	g_assert_cmpint(sond_projekt_index_loeschen(i->ctx, ht, i->dir), ==, 0);
+	g_assert_cmpint(sond_projekt_index_status_abschnitt(i->ctx, "a.pdf", "{{1,0}{2,99999}}"), ==,
+			SOND_INDEX_STATUS_NONE);
+
+	g_hash_table_destroy(ht);
+	idx_free(i);
+}
+
+static void test_loeschen_mail_header(void) {
+	Idx *i = idx_new();
+	GHashTable *ht = ht_neu();
+
+	markiere(i, "x.eml//header");
+	markiere(i, "x.eml//0");
+	trage_ein(ht, "x.eml", sond_page_range_new_gmessage_header());
+
+	g_assert_cmpint(sond_projekt_index_loeschen(i->ctx, ht, i->dir), ==, 0);
+	g_assert_cmpint(sond_index_ctx_get_file_status(i->ctx, "x.eml//header", -1, -1), ==,
+			SOND_INDEX_STATUS_NONE);
+	g_assert_cmpint(sond_index_ctx_get_file_status(i->ctx, "x.eml//0", -1, -1), ==,
+			SOND_INDEX_STATUS_FULL);
+
+	g_hash_table_destroy(ht);
+	idx_free(i);
+}
+
+static void test_loeschen_leer(void) {
+	Idx *i = idx_new();
+	GHashTable *ht = ht_neu();
+
+	markiere(i, "a.pdf");
+	g_assert_cmpint(sond_projekt_index_loeschen(i->ctx, ht, i->dir), ==, 0);
+	g_assert_cmpint(sond_projekt_index_loeschen(NULL, ht, i->dir), ==, 0);
+	g_assert_cmpint(sond_index_ctx_get_file_status(i->ctx, "a.pdf", 0, 99999), ==,
+			SOND_INDEX_STATUS_FULL);
+
+	g_hash_table_destroy(ht);
+	idx_free(i);
+}
+
 void test_projekt_index_register(void) {
 	g_test_add_func("/projekt_index/abschnitt", test_abschnitt);
 	g_test_add_func("/projekt_index/abschnitt_in_container", test_abschnitt_in_container);
 	g_test_add_func("/projekt_index/fehlende_angaben", test_fehlende_angaben);
+	g_test_add_func("/projekt_index/loeschen_ganze_datei", test_loeschen_ganze_datei);
+	g_test_add_func("/projekt_index/loeschen_seitenbereich", test_loeschen_seitenbereich);
+	g_test_add_func("/projekt_index/loeschen_mail_header", test_loeschen_mail_header);
+	g_test_add_func("/projekt_index/loeschen_leer", test_loeschen_leer);
 }

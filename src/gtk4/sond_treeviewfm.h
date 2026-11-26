@@ -35,6 +35,7 @@
 #include "sond_treeview.h"
 #include "../sond_icon_util.h" /* SondSeadriveBadge, SondSeadriveDirStatus, SondIndexStatus */
 #include "../tvfm/sond_tvfm_item.h"
+#include "../tvfm/sond_tvfm_fileparts.h"
 #include "../tvfm/sond_tvfm_search.h"
 #include "../tvfm/sond_tvfm_unlock.h"
 
@@ -154,6 +155,12 @@ GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM*);
  * liegen (g_free(), g_ptr_array_unref()); Verzeichnisse im Container und Teile einer Datei sind
  * nicht dabei. Ergänzt sond_treeviewfm_get_selected_paths(). */
 GPtrArray* sond_treeviewfm_get_selected_fileparts(SondTreeviewFM*);
+
+/* Die markierten Einträge als Auswahl für Index-Operationen (Schlüssel SondFilePart, Wert
+ * SondPageRange* oder NULL, s. tvfm/sond_tvfm_fileparts.h). opts->root wird mit der Wurzel des
+ * Baums gefüllt, wenn es NULL ist. Neue Tabelle (g_hash_table_destroy()), NULL bei Fehler. */
+GHashTable* sond_treeviewfm_get_selection_fileparts(SondTreeviewFM*,
+		SondTVFMFilepartsOpts const *opts, GError **error);
 
 /* Pin-Zustand (STVFM_PIN_STATE_*, s. sond_seadrive_core.h) der Markierten setzen;
  * Verzeichnisse rekursiv. Gescheiterte Einträge werden in einem Dialog gemeldet.

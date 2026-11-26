@@ -371,6 +371,34 @@ GPtrArray* sond_treeviewfm_get_selected_fileparts(SondTreeviewFM *self) {
 	return fileparts;
 }
 
+GHashTable* sond_treeviewfm_get_selection_fileparts(SondTreeviewFM *self,
+		SondTVFMFilepartsOpts const *opts, GError **error) {
+	SondTVFMFilepartsOpts o = { 0 };
+	GHashTable *ht = NULL;
+	GPtrArray *items = NULL;
+
+	g_return_val_if_fail(SOND_IS_TREEVIEWFM(self), NULL);
+
+	if (opts)
+		o = *opts;
+	if (!o.root)
+		o.root = sond_treeviewfm_get_root(self);
+
+	ht = g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
+	items = sond_treeview_get_selected_items(SOND_TREEVIEW(self));
+	for (guint i = 0; i < items->len; i++) {
+		if (sond_tvfm_item_get_fileparts(g_ptr_array_index(items, i), ht, &o, error)) {
+			g_ptr_array_unref(items);
+			g_hash_table_destroy(ht);
+
+			return NULL;
+		}
+	}
+	g_ptr_array_unref(items);
+
+	return ht;
+}
+
 GPtrArray* sond_treeviewfm_get_selected_paths(SondTreeviewFM *self) {
 	GPtrArray *items = NULL;
 	GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
