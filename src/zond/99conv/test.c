@@ -6,7 +6,7 @@
 #include "../../gtk3/sond_info_window.h"
 #include "../../misc_stdlib.h"
 
-#include "../zond_pdf_document.h"
+#include "../../viewer/zond_pdf_document.h"
 #include "../zond_tree_store.h"
 
 #include "../../znd/anbindung.h"

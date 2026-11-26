@@ -3,12 +3,12 @@
 #include <mupdf/fitz.h>
 #include <cairo.h>
 
-#include "../../sond_log_and_error.h"
-#include "../../sond_pdf_helper.h"
-#include "../../sond_fileparts.h"
-#include "../../gtk3/sond_dialoge.h"
+#include "../sond_log_and_error.h"
+#include "../sond_pdf_helper.h"
+#include "../sond_fileparts.h"
+#include "../gtk3/sond_dialoge.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "viewer_draw.h"

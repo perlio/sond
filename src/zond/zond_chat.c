@@ -30,13 +30,13 @@
 
 #include "zond_init.h"
 #include "zond_indexsuche.h"
-#include "zond_pdf_document.h"
-#include "anbindung_zaehlung.h"
+#include "../viewer/zond_pdf_document.h"
+#include "../viewer/anbindung_zaehlung.h"
 
 #include "20allgemein/project.h"
 
 #include "../znd/anbindung.h"
-#include "40viewer/viewer.h"
+#include "../viewer/viewer.h"
 
 /* Wieviele Fundstellen höchstens an das Chat-Modell als Kontext übergeben
  * werden (muss mit SOND_CHAT_MAX_CONTEXT_HITS in sond_chat.c nicht exakt

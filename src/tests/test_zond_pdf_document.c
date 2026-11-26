@@ -29,7 +29,7 @@
 
 #include "../sond_fileparts.h"
 #include "../znd/anbindung.h"
-#include "../zond/zond_pdf_document.h"
+#include "../viewer/zond_pdf_document.h"
 #include "tvfm_test_support.h"
 
 /* ---------------------------------------------------------------------------------------- */

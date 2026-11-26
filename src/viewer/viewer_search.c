@@ -27,13 +27,13 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../sond_log_and_error.h"
-#include "../../sond_pdf_helper.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../sond_log_and_error.h"
+#include "../sond_pdf_helper.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 
 #include "document.h"
@@ -563,7 +563,7 @@ static gint text_search_slice(PdfViewer *pv, GError **error) {
 							&& run->punkt.punkt.y == (gfloat) EOP)) {
 				pv->text_occ.not_found = TRUE;
 				gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-				display_message(pv->vf, "Kein Treffer", NULL);
+				display_message(viewer_parent(pv), "Kein Treffer", NULL);
 
 				return 0;
 			} else //ansonsten referenz-index ( pdf_punkt) verstellen, damit das nur einmal durchlaufen wird
@@ -613,7 +613,7 @@ static gboolean text_search_idle(gpointer data) {
 
 	if (rc == -1) {
 		gtk_label_set_text(GTK_LABEL(pv->label_search), "");
-		display_message(pv->vf, "Fehler bei Textsuche\n\n",
+		display_message(viewer_parent(pv), "Fehler bei Textsuche\n\n",
 				error ? error->message : "", NULL);
 		g_clear_error(&error);
 	}
@@ -636,7 +636,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 
 	//dokument durchsucht und kein Fund: return
 	if (pv->text_occ.not_found == TRUE) {
-		display_message(pv->vf, "Kein Treffer", NULL);
+		display_message(viewer_parent(pv), "Kein Treffer", NULL);
 
 		return 0;
 	}

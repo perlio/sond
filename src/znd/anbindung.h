@@ -31,7 +31,7 @@ gint anbindung_bis_seite(Anbindung);
 void anbindung_ges_nur_anbindung(Anbindung, gchar const *section_parent,
 		Anbindung *ges);
 
-/* "unterseitig" (etablierter Begriff, s. 40viewer/seiten.c) - beginnt
+/* "unterseitig" (etablierter Begriff, s. viewer/seiten.c) - beginnt
  * oder endet die Anbindung an einer Position INNERHALB einer Seite,
  * statt an deren Anfang/Ende? Ein Punkt (anbindung_is_pdf_punkt) ist
  * per Definition immer unterseitig - er markiert nie eine (oder

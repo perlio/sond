@@ -454,9 +454,28 @@ znd/sond_projekt_auswahl, znd/sond_projekt_index (Status, Löschen).
 
 ### #262 Viewer als einbettbares Widget
 
-Status: zurückgestellt (Vorarbeit: viewer_einrichten_fenster ist in Hilfsfunktionen zerlegt)
+Status: Schritte 1 bis 5 umgesetzt und getestet (26.11.2026), Verzeichnis-Umzug umgesetzt (26.11.2026,
+Bau durch den Nutzer steht aus); Rest aus #265 zurückgestellt
 
 ```text
+ Umsetzung 26.11.2026 (GTK3, Verhalten unverändert): (1) viewer_parent(pv) liefert das Fenster, in dem
+ der Viewer steckt (Elternfenster für Meldungen, Dialoge, Dateiauswahl, Druck, Info-Fenster), und
+ viewer_fenster_praesentieren(pv); alle Stellen, die pv->vf als Elternfenster brauchten, laufen darüber.
+ (2) Die Mauszeiger werden auf der Zeichenfläche (Layout) gesetzt, viewer_cursor_setzen(); pv->gdk_window und
+ der Fenster-Handler motion-notify-event entfallen (außerhalb des Layouts gilt der Zeiger des Fensters).
+ (3) Die Kürzel Strg+C und Strg+X hängen an pv->accel_group, die per Signal hierarchy-changed an das Fenster
+ gebunden wird, in dem das Widget gerade steckt (Hülle oder Fenster eines Embedders). (4) viewer_einrichten_widget
+ baut den Kern als Widget (pv->widget, schon angezeigt, Vorschau verborgen) samt Signalen; die Kopfzeile
+ pv->headerbar gehört nicht zum Widget (eigene Referenz), das Fenster setzt sie als Titelleiste
+ (viewer_einrichten_fenster, eigenes delete-event). viewer_init() erzeugt wie bisher Fenster und Widget,
+ viewer_init_widget() nur das Widget. (5) pv->vf ist in pv->widget (Kern) und pv->fenster (Hülle, sonst NULL)
+ geteilt; viewer_schliessen zerstört Fenster oder Widget, löst die Kürzel und gibt die Kopfzeile frei.
+ Noch nicht ausprobiert: viewer_init_widget() in einem fremden Fenster (kein Embedder vorhanden).
+ Verzeichnis (26.11.2026): der Viewer liegt jetzt in src/viewer/ (vorher zond/40viewer) zusammen mit
+ zond_pdf_document.[ch], zond_pdf_part.c und anbindung_zaehlung.[ch] (vorher in zond/); viewer_host bleibt
+ in zond/. Makefile: Ziel viewer und test nehmen src/viewer per find bzw. Liste, Ziel zond fügt src/viewer
+ hinzu (ohne stand_alone.c); Includes in zond/, 10init, 20allgemein, 99conv und den Tests angepasst.
+ Ältere Einträge in HISTORY.md nennen noch die alten Pfade.
  Rest aus #265: Annot-Helfer (annot_deep_copy, annot_free) von zond_pdf_document.c in ein eigenes
  Modul, die Typedefs aus viewer.h, PdfViewer in Zustand und Widgets teilen, Verzeichnis 40viewer
  aus zond/ heraus.

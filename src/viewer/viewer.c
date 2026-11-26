@@ -25,13 +25,13 @@ G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
-#include "../../sond_log_and_error.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
+#include "../sond_log_and_error.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 
 #include "document.h"
@@ -81,6 +81,21 @@ void viewer_get_iter_thumb(PdfViewer *pv, gint page_pv, GtkTreeIter *iter) {
 	model = gtk_tree_view_get_model(GTK_TREE_VIEW(pv->tree_thumb));
 	gtk_tree_model_get_iter(model, iter, path);
 	gtk_tree_path_free(path);
+
+	return;
+}
+
+GtkWidget* viewer_parent(PdfViewer *pv) {
+	GtkWidget *top = gtk_widget_get_toplevel(pv->widget);
+
+	return GTK_IS_WINDOW(top) ? top : NULL;
+}
+
+void viewer_fenster_praesentieren(PdfViewer *pv) {
+	GtkWidget *fenster = viewer_parent(pv);
+
+	if (fenster)
+		gtk_window_present(GTK_WINDOW(fenster));
 
 	return;
 }
@@ -222,7 +237,7 @@ static void viewer_create_layout(PdfViewer *pv) {
 
 typedef struct {
 	PdfViewer *pv;
-	GtkWidget *vf; //Weak-Pointer: NULL, wenn der Viewer inzwischen geschlossen wurde
+	GtkWidget *widget; //Weak-Pointer: NULL, wenn der Viewer inzwischen geschlossen wurde
 	PdfPos pdf_pos;
 	gdouble delta;
 } SSpringArgs;
@@ -230,8 +245,8 @@ typedef struct {
 static gboolean viewer_springen_idle(gpointer data) {
 	SSpringArgs *args = (SSpringArgs*) data;
 
-	if (args->vf) {
-		g_object_remove_weak_pointer(G_OBJECT(args->vf), (gpointer*) &args->vf);
+	if (args->widget) {
+		g_object_remove_weak_pointer(G_OBJECT(args->widget), (gpointer*) &args->widget);
 		viewer_springen_zu_pos_pdf(args->pv, args->pdf_pos, args->delta);
 	}
 	g_free(args);
@@ -242,8 +257,8 @@ void viewer_springen_zu_pos_pdf_idle(PdfViewer *pv, PdfPos pdf_pos,
 		gdouble delta) {
 	SSpringArgs *args = g_new0(SSpringArgs, 1);
 	args->pv = pv;
-	args->vf = pv->vf;
-	g_object_add_weak_pointer(G_OBJECT(args->vf), (gpointer*) &args->vf);
+	args->widget = pv->widget;
+	g_object_add_weak_pointer(G_OBJECT(args->widget), (gpointer*) &args->widget);
 	args->pdf_pos = pdf_pos;
 	args->delta = delta;
 	g_idle_add(viewer_springen_idle, args);
@@ -280,6 +295,7 @@ void viewer_schliessen(PdfViewer *pv) {
 
 	/* Beim Zerstören des Fensters können sich Bildlauf-Bereiche und Auswahl ändern; die Handler
 	 * greifen auf pv zu, das unten teilweise schon freigegeben wird. */
+	g_signal_handlers_disconnect_by_data(pv->widget, pv);
 	g_signal_handlers_disconnect_by_data(pv->v_adj, pv);
 	g_signal_handlers_disconnect_by_data(
 			gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(pv->swindow_tree)), pv);
@@ -305,7 +321,26 @@ void viewer_schliessen(PdfViewer *pv) {
 
 	viewer_dd_signale_trennen(pv);
 
-	gtk_widget_destroy(pv->vf);
+	/* Kürzel vom Fenster lösen, bevor das Widget (mit dem Fenster der Hülle) zerstört wird; die Gruppe
+	 * selbst erst danach freigeben: die Menüeinträge (Accel-Beschriftungen) greifen beim Zerstören
+	 * noch auf sie zu. */
+	if (pv->accel_group) {
+		GtkWidget *top = gtk_widget_get_toplevel(pv->widget);
+
+		if (GTK_IS_WINDOW(top))
+			gtk_window_remove_accel_group(GTK_WINDOW(top), pv->accel_group);
+	}
+
+	//mit eigenem Fenster dieses, sonst nur das Widget (es verschwindet beim Embedder)
+	if (pv->fenster)
+		gtk_widget_destroy(pv->fenster);
+	else
+		gtk_widget_destroy(pv->widget);
+
+	//die Kopfzeile ist nur dann mit zerstört, wenn jemand sie eingebaut hat
+	gtk_widget_destroy(pv->headerbar);
+	g_object_unref(pv->headerbar);
+	g_clear_object(&pv->accel_group);
 
 	document_free_displayed_documents(pv->dd);
 
@@ -360,7 +395,7 @@ void viewer_save_and_close(PdfViewer *pdfv) {
 
 			ret = viewer_save_dirty_dds(pdfv, &error);
 			if (ret) {
-				display_message(pdfv->vf, "Speichern nicht erfoglreich\n\n", error->message, NULL);
+				display_message(viewer_parent(pdfv), "Speichern nicht erfoglreich\n\n", error->message, NULL);
 				g_error_free(error);
 
 				return;

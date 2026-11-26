@@ -27,7 +27,7 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "document.h"
 #include "pdf_annot_ops.h"
@@ -240,7 +240,7 @@ void viewer_part_praesentieren(PdfViewerSession *session, ZPDFDPart *zpdfd_part)
 
 		for (DisplayedDocument *dd = pv->dd; dd; dd = dd->next)
 			if (dd->zpdfd_part == zpdfd_part) {
-				gtk_window_present(GTK_WINDOW(pv->vf));
+				gtk_window_present(GTK_WINDOW(viewer_parent(pv)));
 
 				return;
 			}

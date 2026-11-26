@@ -25,7 +25,7 @@
 #include "../../sond_log_and_error.h"
 #include "../zond_init.h"
 #include "../../znd/zond_dbase.h"
-#include "../40viewer/viewer_session.h"
+#include "../../viewer/viewer_session.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeviewfm.h"

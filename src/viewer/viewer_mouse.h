@@ -6,6 +6,9 @@
 gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
 		PdfPunkt *pdf_punkt);
 
+//Mauszeiger der Zeichenfläche setzen (die Zeichenfläche muss angezeigt sein)
+void viewer_cursor_setzen(PdfViewer *pv, GdkCursor *cursor);
+
 void viewer_set_cursor(PdfViewer *pv, gint rc, ViewerPageNew *viewer_page,
 		PdfDocumentPageAnnot *pdf_document_page_annot, PdfPunkt pdf_punkt);
 

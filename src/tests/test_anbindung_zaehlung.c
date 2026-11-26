@@ -29,7 +29,7 @@
 
 #include <glib.h>
 
-#include "../zond/anbindung_zaehlung.h"
+#include "../viewer/anbindung_zaehlung.h"
 #include "../znd/anbindung.h"
 
 /* ---------------------------------------------------------------------------------------- */

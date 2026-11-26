@@ -38,16 +38,16 @@
 #include "zond_init.h"
 #include "zond_treeviewfm.h"
 #include "zond_treeview.h"
-#include "zond_pdf_document.h"
-#include "anbindung_zaehlung.h"
+#include "../viewer/zond_pdf_document.h"
+#include "../viewer/anbindung_zaehlung.h"
 
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 #include "20allgemein/project.h"
 
-#include "40viewer/viewer.h"
-#include "40viewer/viewer_search.h"
-#include "40viewer/document.h"
+#include "../viewer/viewer.h"
+#include "../viewer/viewer_search.h"
+#include "../viewer/document.h"
 
 #include "../znd/anbindung.h"
 

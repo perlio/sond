@@ -18,9 +18,9 @@
 
 #include <gtk/gtk.h>
 
-#include "../../sond_log_and_error.h"
+#include "../sond_log_and_error.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "viewer_render.h"

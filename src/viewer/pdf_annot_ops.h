@@ -5,7 +5,7 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 //Größe des Symbols einer Text-Annotation in PDF-Einheiten
 #ifndef ANNOT_ICON_WIDTH

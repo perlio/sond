@@ -21,11 +21,11 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
-#include "../../sond_log_and_error.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
+#include "../sond_log_and_error.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "document.h"
 #include "seiten.h"
@@ -97,7 +97,7 @@ static void cb_pv_speichern(GtkButton *button, gpointer data) {
 
 	rc = viewer_save_dirty_dds(pv, &error);
 	if (rc) {
-		display_message(pv->vf, "Speichern nicht erfolgreich\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Speichern nicht erfolgreich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -145,7 +145,7 @@ static void cb_viewer_text_search(GtkWidget *widget, gpointer data) {
 	// Wrapper: Delegiert die Logik an viewer.c
 	rc = viewer_handle_text_search(pv, widget, &error);
 	if (rc) {
-		display_message(pv->vf, "Fehler bei Textsuche\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler bei Textsuche\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -288,7 +288,7 @@ static gboolean cb_viewer_swindow_key_press(GtkWidget *swindow,
 
 	rc = viewer_annot_handle_delete(pv, &error);
 	if (rc) {
-		display_message(pv->vf, "Fehler beim Löschen der Anmerkung\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler beim Löschen der Anmerkung\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -329,7 +329,7 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 
 			rc = viewer_annot_create_markup(pv, viewer_page, pdf_punkt, &error);
 			if (rc) {
-				display_message(pv->vf, "Annotation konnte nicht erstellt werden\n\n",
+				display_message(viewer_parent(pv), "Annotation konnte nicht erstellt werden\n\n",
 						error->message, NULL);
 				g_error_free(error);
 				return TRUE;
@@ -348,7 +348,7 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 
 		rc = viewer_annot_handle_release_clicked_annot(pv, viewer_page, pdf_punkt, &error);
 		if (rc) {
-			display_message(pv->vf, "Annotation konnte nicht bearbeitet werden\n\n",
+			display_message(viewer_parent(pv), "Annotation konnte nicht bearbeitet werden\n\n",
 					error->message, NULL);
 			g_error_free(error);
 		}
@@ -362,17 +362,6 @@ static gboolean cb_viewer_delete_event(GtkWidget *window, GdkEvent *event, gpoin
 	viewer_save_and_close((PdfViewer*) data);
 
 	return TRUE;
-}
-
-static gboolean cb_viewer_motion_notify(GtkWidget *window, GdkEvent *event,
-		gpointer data) {
-	PdfViewer *pv = (PdfViewer*) data;
-
-	// Signal wird nur durchgelassen, wenn layout keines erhält
-	// Cursor außerhalb des Layouts zurücksetzen
-	gdk_window_set_cursor(pv->gdk_window, pv->cursor_default);
-
-	return FALSE;
 }
 
 static gboolean cb_viewer_layout_motion_notify(GtkWidget *layout,
@@ -405,7 +394,7 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 	// Wrapper: Delegiert die Logik an viewer.c
 	rc = viewer_handle_button_press(pv, event, &error);
 	if (rc) {
-		display_message(pv->vf, "Fehler bei Maus-Button-Event\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler bei Maus-Button-Event\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -419,7 +408,7 @@ static void cb_viewer_annot_edit_closed(GtkWidget *popover, gpointer data) {
 
 	rc = viewer_annot_handle_edit_closed(pdfv, popover, &error);
 	if (rc) {
-		display_message(pdfv->vf, "Annotation editieren fehlgeschlagen\n",
+		display_message(viewer_parent(pdfv), "Annotation editieren fehlgeschlagen\n",
 				error->message, NULL);
 		g_error_free(error);
 	}
@@ -546,13 +535,12 @@ static GtkWidget* viewer_ui_menu_erzeugen(PdfViewer *pv, GtkAccelGroup *accel_gr
 	return button_menu_viewer;
 }
 
-//Kopfzeile des Fensters mit den Feldern für Seite und Textsuche
+/* Kopfzeile mit den Feldern für Seite und Textsuche und dem Titel. Sie gehört nicht zum Widget: das
+ * Fenster setzt sie als Titelleiste ein, ein Embedder, wohin er will. Der Viewer hält eine eigene
+ * Referenz, damit sie auch unverbaut freigegeben wird. */
 static void viewer_ui_kopfzeile_erzeugen(PdfViewer *pv) {
-	pv->headerbar = gtk_header_bar_new();
-	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(pv->headerbar), TRUE);
+	pv->headerbar = g_object_ref_sink(gtk_header_bar_new());
 	gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(pv->headerbar), TRUE);
-	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(pv->headerbar), ":minimize,maximize,close");
-	gtk_window_set_titlebar(GTK_WINDOW(pv->vf), pv->headerbar);
 
 	pv->entry = gtk_entry_new();
 	gtk_entry_set_input_purpose(GTK_ENTRY(pv->entry), GTK_INPUT_PURPOSE_DIGITS);
@@ -590,6 +578,7 @@ static void viewer_ui_kopfzeile_erzeugen(PdfViewer *pv) {
 
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(pv->headerbar), frame_seiten);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(pv->headerbar), frame_search);
+	gtk_widget_show_all(pv->headerbar);
 }
 
 //Werkzeugleiste links: Menü, Speichern, Drucken, Vorschau, Auswahlwerkzeuge, Zoom, Anbindung
@@ -663,7 +652,7 @@ static GtkWidget* viewer_ui_toolbox_erzeugen(PdfViewer *pv, GtkWidget *button_me
 	return vbox_tools;
 }
 
-//Seitenfläche mit Bildlauf und die Vorschau der Seiten, dazu die Werkzeugleiste, im Fenster
+//Seitenfläche mit Bildlauf und die Vorschau der Seiten, dazu die Werkzeugleiste: das Widget des Viewers
 static void viewer_ui_hauptbereich_erzeugen(PdfViewer *pv, GtkWidget *vbox_tools,
 		ViewerFensterWidgets *w) {
 	pv->layout = gtk_layout_new(NULL, NULL);
@@ -695,7 +684,7 @@ static void viewer_ui_hauptbereich_erzeugen(PdfViewer *pv, GtkWidget *vbox_tools
 	gtk_box_pack_start(GTK_BOX(hbox), vbox_tools, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), paned, TRUE, TRUE, 0);
 
-	gtk_container_add(GTK_CONTAINER(pv->vf), hbox);
+	pv->widget = hbox;
 
 	w->vadj_thumb = vadj_thumb;
 }
@@ -718,10 +707,10 @@ static void viewer_ui_popovers_erzeugen(PdfViewer *pv) {
 			G_CALLBACK(cb_viewer_annot_edit_closed), pv);
 }
 
-//Mauszeiger des Viewers (das Fenster muss angezeigt sein)
+//Mauszeiger des Viewers; gesetzt werden sie auf der Zeichenfläche (viewer_cursor_setzen), außerhalb
+//davon gilt der Zeiger des umgebenden Fensters
 static void viewer_ui_cursor_erzeugen(PdfViewer *pv) {
-	pv->gdk_window = gtk_widget_get_window(pv->vf);
-	GdkDisplay *display = gdk_window_get_display(pv->gdk_window);
+	GdkDisplay *display = gtk_widget_get_display(pv->layout);
 	pv->cursor_default = gdk_cursor_new_from_name(display, "default");
 	pv->cursor_text = gdk_cursor_new_from_name(display, "text");
 	pv->cursor_vtext = gdk_cursor_new_from_name(display, "vertical-text");
@@ -729,7 +718,36 @@ static void viewer_ui_cursor_erzeugen(PdfViewer *pv) {
 	pv->cursor_annot = gdk_cursor_new_from_name(display, "pointer");
 }
 
-/* Verbindet die Signale. Erst nach dem Anzeigen des Fensters: Beim Anzeigen ändern sich die
+//Ist die Gruppe schon an das Fenster gebunden?
+static gboolean accel_group_in_fenster(GtkWindow *fenster, GtkAccelGroup *gruppe) {
+	for (GSList *l = gtk_accel_groups_from_object(G_OBJECT(fenster)); l; l = l->next)
+		if (l->data == gruppe)
+			return TRUE;
+
+	return FALSE;
+}
+
+/* Die Kürzel gelten in dem Fenster, in dem das Widget steckt, auch wenn es später umgesetzt wird
+ * (Fenster der Hülle oder Fenster des Embedders). */
+static void cb_viewer_hierarchy_changed(GtkWidget *widget, GtkWidget *previous_toplevel,
+		gpointer data) {
+	PdfViewer *pv = (PdfViewer*) data;
+	GtkWidget *top = gtk_widget_get_toplevel(widget);
+
+	if (previous_toplevel == top)
+		return;
+
+	if (GTK_IS_WINDOW(previous_toplevel) &&
+			accel_group_in_fenster(GTK_WINDOW(previous_toplevel), pv->accel_group))
+		gtk_window_remove_accel_group(GTK_WINDOW(previous_toplevel), pv->accel_group);
+
+	if (GTK_IS_WINDOW(top) && !accel_group_in_fenster(GTK_WINDOW(top), pv->accel_group))
+		gtk_window_add_accel_group(GTK_WINDOW(top), pv->accel_group);
+
+	return;
+}
+
+/* Verbindet die Signale. Erst nach dem Anzeigen der Widgets: Beim Anzeigen ändern sich die
  * Bildlauf-Bereiche, dabei sollen die Handler noch nicht laufen. */
 static void viewer_ui_signale_verbinden(PdfViewer *pv, ViewerFensterWidgets *w) {
 	g_signal_connect(pv->item_kopieren, "activate", G_CALLBACK(cb_seiten_kopieren), pv);
@@ -778,31 +796,25 @@ static void viewer_ui_signale_verbinden(PdfViewer *pv, ViewerFensterWidgets *w) 
 	g_signal_connect(pv->layout, "key-press-event",
 			G_CALLBACK(cb_viewer_swindow_key_press), (gpointer)pv);
 
-	g_signal_connect(pv->vf, "motion-notify-event",
-			G_CALLBACK(cb_viewer_motion_notify), (gpointer)pv);
-
-	g_signal_connect(pv->vf, "delete-event",
-			G_CALLBACK(cb_viewer_delete_event), (gpointer)pv);
+	g_signal_connect(pv->widget, "hierarchy-changed",
+			G_CALLBACK(cb_viewer_hierarchy_changed), (gpointer)pv);
 }
 
-static void viewer_einrichten_fenster(PdfViewer *pv) {
+//Kern: baut den Viewer als Widget (pv->widget), ohne Fenster
+static void viewer_einrichten_widget(PdfViewer *pv) {
 	ViewerFensterWidgets w = { 0 };
 	GtkWidget *button_menu_viewer = NULL;
 	GtkWidget *vbox_tools = NULL;
 
-	pv->vf = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_default_size(GTK_WINDOW(pv->vf), VIEWER_WIDTH, VIEWER_HEIGHT);
+	pv->accel_group = gtk_accel_group_new();
 
-	GtkAccelGroup *accel_group = gtk_accel_group_new();
-	gtk_window_add_accel_group(GTK_WINDOW(pv->vf), accel_group);
-
-	button_menu_viewer = viewer_ui_menu_erzeugen(pv, accel_group);
+	button_menu_viewer = viewer_ui_menu_erzeugen(pv, pv->accel_group);
 	viewer_ui_kopfzeile_erzeugen(pv);
 	vbox_tools = viewer_ui_toolbox_erzeugen(pv, button_menu_viewer, &w);
 	viewer_ui_hauptbereich_erzeugen(pv, vbox_tools, &w);
 	viewer_ui_popovers_erzeugen(pv);
 
-	gtk_widget_show_all(pv->vf);
+	gtk_widget_show_all(pv->widget);
 	gtk_widget_hide(pv->swindow_tree);
 
 	viewer_ui_cursor_erzeugen(pv);
@@ -811,8 +823,26 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	return;
 }
 
-PdfViewer*
-viewer_init(PdfViewerSession *session) {
+//Hülle: eigenes Fenster um das Widget, die Kopfzeile ist die Titelleiste
+static void viewer_einrichten_fenster(PdfViewer *pv) {
+	pv->fenster = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_default_size(GTK_WINDOW(pv->fenster), VIEWER_WIDTH, VIEWER_HEIGHT);
+
+	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(pv->headerbar), TRUE);
+	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(pv->headerbar), ":minimize,maximize,close");
+	gtk_window_set_titlebar(GTK_WINDOW(pv->fenster), pv->headerbar);
+
+	gtk_container_add(GTK_CONTAINER(pv->fenster), pv->widget);
+
+	g_signal_connect(pv->fenster, "delete-event", G_CALLBACK(cb_viewer_delete_event), (gpointer)pv);
+
+	//die Kinder sind schon angezeigt (die Vorschau bewusst nicht): nur das Fenster zeigen
+	gtk_widget_show(pv->fenster);
+
+	return;
+}
+
+static PdfViewer* viewer_neu(PdfViewerSession *session) {
 	PdfViewer *pv = g_malloc0(sizeof(PdfViewer));
 
 	pv->session = session;
@@ -840,10 +870,27 @@ viewer_init(PdfViewerSession *session) {
 
 	g_mutex_init(&pv->mutex_arr_rendered);
 
-	//  Fenster erzeugen und anzeigen
+	viewer_einrichten_widget(pv);
+
+	return pv;
+}
+
+PdfViewer*
+viewer_init(PdfViewerSession *session) {
+	PdfViewer *pv = viewer_neu(session);
+
 	viewer_einrichten_fenster(pv);
 
-	//Host kann das Fenster ergänzen (z.B. Menüeinträge)
+	//Host kann den Viewer ergänzen (z.B. Menüeinträge)
+	pdf_viewer_session_viewer_created(session, pv);
+
+	return pv;
+}
+
+PdfViewer*
+viewer_init_widget(PdfViewerSession *session) {
+	PdfViewer *pv = viewer_neu(session);
+
 	pdf_viewer_session_viewer_created(session, pv);
 
 	return pv;

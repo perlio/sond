@@ -22,10 +22,10 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "seiten.h"
@@ -102,7 +102,7 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 	gchar *text = NULL;
 	GPtrArray *arr_document_pages = NULL;
 
-	GtkWidget *dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(pv->vf),
+	GtkWidget *dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(viewer_parent(pv)),
 			GTK_DIALOG_MODAL, "Ok", GTK_RESPONSE_OK, "Abbrechen",
 			GTK_RESPONSE_CANCEL, NULL);
 
@@ -217,7 +217,7 @@ gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 
 	// Dialog erzeugen
 	GtkWidget *dialog = gtk_dialog_new_with_buttons("Seiten einfügen:",
-			GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL, "Datei", 1, "Clipboard", 2,
+			GTK_WINDOW(viewer_parent(pv)), GTK_DIALOG_MODAL, "Datei", 1, "Clipboard", 2,
 			"Abbrechen", GTK_RESPONSE_CANCEL, NULL);
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
@@ -245,7 +245,7 @@ gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 	if (res == 1 || res == 2) {
 		rc = string_to_guint(gtk_entry_get_text(GTK_ENTRY(entry)), num);
 		if (rc) {
-			display_message(pv->vf, "Seiten einfügen\n\n",
+			display_message(viewer_parent(pv), "Seiten einfügen\n\n",
 					"Ungültige oder fehlende Seitenzahl bei \"nach Seite:\"", NULL);
 			res = -1;
 		}

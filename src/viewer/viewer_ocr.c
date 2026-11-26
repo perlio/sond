@@ -21,14 +21,14 @@
 #include <gtk/gtk.h>
 #include <tesseract/capi.h>
 
-#include "../../sond_log_and_error.h"
-#include "../../sond_ocr.h"
-#include "../../sond_pdf_helper.h"
-#include "../../gtk3/sond_dialoge.h"
-#include "../../gtk3/sond_info_window.h"
-#include "../../misc_stdlib.h"
+#include "../sond_log_and_error.h"
+#include "../sond_ocr.h"
+#include "../sond_pdf_helper.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../gtk3/sond_info_window.h"
+#include "../misc_stdlib.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "viewer_ocr.h"
@@ -59,7 +59,7 @@ static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
 	gint res = 0;
 
 	dialog = gtk_dialog_new_with_buttons("Seite enthält bereits Text",
-			GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL,
+			GTK_WINDOW(viewer_parent(pv)), GTK_DIALOG_MODAL,
 			"Verwerfen und neu OCRen", GTK_RESPONSE_YES,
 			"Seite überspringen", GTK_RESPONSE_NO,
 			"Abbrechen", GTK_RESPONSE_CANCEL, NULL);
@@ -430,7 +430,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-	info_window = info_window_open(pv->vf, &cancel, "OCR");
+	info_window = info_window_open(viewer_parent(pv), &cancel, "OCR");
 
 	exe_dir = get_exe_dir();
 	datadir = g_build_filename(exe_dir, "../share/tessdata", NULL);

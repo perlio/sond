@@ -21,7 +21,14 @@
 
 typedef struct _Pdf_Viewer PdfViewer;
 
+/* Viewer in einem eigenen Fenster (Hülle um das Widget, Kopfzeile als Titelleiste). */
 PdfViewer* viewer_init(PdfViewerSession*);
+
+/* Viewer als Widget ohne Fenster: pv->widget setzt der Aufrufer in seine Oberfläche ein (es ist
+ * schon angezeigt). Die Kopfzeile pv->headerbar (Seite, Textsuche, Titel) gehört nicht zum Widget;
+ * der Aufrufer setzt sie in seine Titelleiste oder in eine Leiste. Geschlossen wird mit
+ * viewer_save_and_close() oder viewer_schliessen(), das Widget wird dabei zerstört. */
+PdfViewer* viewer_init_widget(PdfViewerSession*);
 void viewer_ui_recreate_tree_thumb(PdfViewer*);
 
 #endif // VIEWER_UI_H_INCLUDED

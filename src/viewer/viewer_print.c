@@ -23,9 +23,9 @@
 #include <mupdf/fitz.h>
 #include <cairo.h>
 
-#include "../../gtk3/sond_dialoge.h"
+#include "../gtk3/sond_dialoge.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "viewer_render.h"
@@ -56,7 +56,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 	 * abgefangen wird (Absturz statt Fehlerdialog). */
 	if (!viewer_page->pdf_document_page->display_list) {
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nSeite konnte nicht gerendert werden", NULL);
 		g_free(errmsg);
 
@@ -73,7 +73,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 	ctx = fz_clone_context(zond_pdf_document_get_ctx(viewer_page->pdf_document_page->document));
 	if (!ctx) {
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nfz_context konnte nicht geklont werden", NULL);
 		g_free(errmsg);
 		return;
@@ -88,7 +88,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), irect, NULL, 0);
 	fz_catch(ctx) {
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nBei Aufruf fz_new_pixmap_with_bbox:\n", fz_caught_message(ctx), NULL);
 		g_free(errmsg);
 		fz_drop_context(ctx);
@@ -99,7 +99,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 		fz_clear_pixmap_with_value(ctx, pixmap, 255);
 	fz_catch(ctx) {
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nBei Aufruf fz_pixmap_with_value:\n", fz_caught_message(ctx), NULL);
 		g_free(errmsg);
 		fz_drop_context(ctx);
@@ -112,7 +112,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 	fz_catch(ctx) {
 		fz_drop_pixmap(ctx, pixmap);
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nBei Aufruf fz_new_draw_device:\n", fz_caught_message(ctx), NULL);
 		g_free(errmsg);
 		fz_drop_context(ctx);
@@ -129,7 +129,7 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 	fz_catch(ctx) {
 		fz_drop_pixmap(ctx, pixmap);
 		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
-		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+		display_message(viewer_parent(pdfv), "Fehler Drucken ", errmsg,
 				" -\n\nBei Aufruf fz_run_display_list:\n", fz_caught_message(ctx), NULL);
 		g_free(errmsg);
 		fz_drop_context(ctx);
@@ -173,11 +173,11 @@ void cb_viewer_render_print(GtkButton *button, gpointer data) {
 			G_CALLBACK(cb_viewer_render_page_for_printing), pdfv);
 
 	res = gtk_print_operation_run(print,
-			GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, GTK_WINDOW(pdfv->vf), &error);
+			GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, GTK_WINDOW(viewer_parent(pdfv)), &error);
 	g_object_unref(print);
 
 	if (res == GTK_PRINT_OPERATION_RESULT_ERROR) {
-		display_message(pdfv->vf,
+		display_message(viewer_parent(pdfv),
 				"Fehler Ausdruck -\n\nBei Aufruf gtk_print_operation_run:\n",
 				error->message, NULL);
 		g_clear_error(&error);

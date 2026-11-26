@@ -21,17 +21,17 @@
 #include <gtk/gtk.h>
 #include <tesseract/capi.h>
 
-#include "../../sond_log_and_error.h"
-#include "../../sond_fileparts.h"
-#include "../../sond_pdf_helper.h"
-#include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
+#include "../sond_log_and_error.h"
+#include "../sond_fileparts.h"
+#include "../sond_pdf_helper.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
 
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 
 #include "viewer.h"
@@ -273,7 +273,7 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 	rc = seiten_drehen(pv, arr_document_page, winkel, &error);
 	g_ptr_array_unref(arr_document_page);
 	if (rc) {
-		display_message(pv->vf, "Fehler in Seiten drehen -\n\nBei Aufruf "
+		display_message(viewer_parent(pv), "Fehler in Seiten drehen -\n\nBei Aufruf "
 				"seiten_drehen\n", error->message, NULL);
 		g_error_free(error);
 
@@ -346,9 +346,9 @@ static gboolean seiten_loeschen_erlaubt(PdfViewer *pv, GPtrArray *arr_document_p
 	rc = pdf_viewer_session_pages_deleting(pv->session, pv, arr_document_page, &error);
 	if (rc) {
 		if (rc == -1)
-			display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
+			display_message(viewer_parent(pv), "Fehler Seiten Löschen\n\n", error->message, NULL);
 		else
-			display_message(pv->vf, error->message, NULL);
+			display_message(viewer_parent(pv), error->message, NULL);
 		g_error_free(error);
 
 		return FALSE;
@@ -477,7 +477,7 @@ gint seiten_viewer_einfuegen(PdfViewer *pv, ViewerPageNew* viewer_page,
 static gboolean seiten_einfuegen_pos_pruefen(PdfViewer *pv, guint pos, ViewerPageNew *viewer_page) {
 	if (pos == 0) {
 		if (viewer_page->dd->zpdfd_part->first_index != 0) {
-			display_message(pv->vf,
+			display_message(viewer_parent(pv),
 					"Abschnitt beginnt nicht am Beginn der Seite -\n"
 							"Einfügen vor erster Seite daher nicht möglich",
 					NULL);
@@ -487,7 +487,7 @@ static gboolean seiten_einfuegen_pos_pruefen(PdfViewer *pv, guint pos, ViewerPag
 	}
 	else if (pos == pv->arr_pages->len) {
 		if (viewer_page->dd->zpdfd_part->last_index != EOP) {//einfügen nach letzter Seite
-			display_message(pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
+			display_message(viewer_parent(pv), "Abschnitt Ende nicht am Schluß der Seite -\n"
 					"Einfügen nach Ende eines Abschnitts daher nicht möglich", NULL);
 
 			return FALSE;
@@ -504,13 +504,13 @@ static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart *
 	GError *error = NULL;
 
 	//Datei auswählen
-	path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
+	path_merge = filename_oeffnen(GTK_WINDOW(viewer_parent(pv)), NULL);
 	if (!path_merge) //Dialog abgebrochen
 		return NULL;
 
 	//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts einfügen)
 	if (!pdf_viewer_session_load_file(pv->session,
-			GTK_WINDOW(pv->vf), path_merge)) {
+			GTK_WINDOW(viewer_parent(pv)), path_merge)) {
 		g_free(path_merge);
 
 		return NULL;
@@ -521,14 +521,14 @@ static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart *
 	*sfp = sond_file_part_create(NULL, path_merge, &error);
 	g_free(path_merge);
 	if (!*sfp) {
-		display_message(pv->vf, "Datei einfügen\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Datei einfügen\n\n", error->message, NULL);
 		g_error_free(error);
 
 		return NULL;
 	}
 
 	if (!SOND_IS_FILE_PART_PDF(*sfp)) {
-		display_message(pv->vf, "Keine PDF-Datei", NULL);
+		display_message(viewer_parent(pv), "Keine PDF-Datei", NULL);
 		g_object_unref(*sfp);
 		*sfp = NULL;
 
@@ -538,7 +538,7 @@ static pdf_document* seiten_einfuegen_quelle_datei(PdfViewer *pv, SondFilePart *
 	doc_merge = sond_file_part_pdf_open_document(pv->session->ctx,
 			SOND_FILE_PART_PDF(*sfp), TRUE, &error);
 	if (!doc_merge) {
-		display_message(pv->vf, "Datei einfügen\n\n"
+		display_message(viewer_parent(pv), "Datei einfügen\n\n"
 				"Einzufügende Datei konnte nicht geöffnet werden:\n",
 				error->message, NULL);
 		g_error_free(error);
@@ -564,7 +564,7 @@ static gint seiten_einfuegen_zaehlen(PdfViewer *pv, pdf_document *doc_merge, Son
 			g_object_unref(sfp);
 
 		err_message = g_strdup_printf("%s\n%s", __func__, fz_caught_message(pv->session->ctx));
-		display_message(pv->vf, "Einfügen nicht möglich\n\n", err_message, NULL);
+		display_message(viewer_parent(pv), "Einfügen nicht möglich\n\n", err_message, NULL);
 		g_free(err_message);
 
 		return -1;
@@ -594,7 +594,7 @@ static void seiten_einfuegen_ausfuehren(PdfViewer *pv, ViewerPageNew *viewer_pag
 	if (ret == 1)
 		g_object_unref(sfp);
 	if (rc) {
-		display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+		display_message(viewer_parent(pv), "Fehler Einfügen\n\n", error->message,
 				"\n\nViewer wird geschlossen", NULL);
 		g_error_free(error);
 		viewer_schliessen(pv);
@@ -636,7 +636,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	SondFilePart* sfp = NULL;
 
 	if (pv->dd->next) {
-		display_message(pv->vf,
+		display_message(viewer_parent(pv),
 				"Virtuelles PDF -\n\n"
 						"Einfügen noch nicht implementiert",
 				NULL);
@@ -739,7 +739,7 @@ void cb_seiten_kopieren(GtkMenuItem *item, gpointer data) {
 
 	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
 	if (rc) {
-		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler Kopieren Seiten\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -771,7 +771,7 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
 	g_array_unref(arr_page_pv);
 	if (rc) {
-		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler Kopieren Seiten\n\n", error->message, NULL);
 		g_error_free(error);
 		g_ptr_array_unref(arr_document_page);
 

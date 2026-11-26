@@ -14,8 +14,8 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 
-#include "../../znd/anbindung.h"
-#include "../../znd/zond_error.h"
+#include "../znd/anbindung.h"
+#include "../znd/zond_error.h"
 #include "viewer_session.h"
 
 typedef struct _GtkTreeIter GtkTreeIter;
@@ -26,6 +26,7 @@ typedef struct _GdkWindow GdkWindow;
 typedef struct _GdkCursor GdkCursor;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkAdjustment GtkAdjustment;
+typedef struct _GtkAccelGroup GtkAccelGroup;
 typedef struct _GSettings GSettings;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef struct _ZPDFD_Part ZPDFDPart;
@@ -92,8 +93,9 @@ typedef struct _Text_Occ {
 typedef struct _Pdf_Viewer {
 	PdfViewerSession *session;
 
-	GtkWidget *vf;
-	GdkWindow *gdk_window;
+	GtkWidget *widget;  //Kern: Seitenfläche, Vorschau und Werkzeugleiste, ohne Fenster
+	GtkWidget *fenster; //Hülle (GtkWindow) um das Widget; NULL, wenn der Viewer eingebettet ist
+	GtkAccelGroup *accel_group; //Kürzel Strg+C und Strg+X, am Fenster, in dem das Widget steckt
 	GdkCursor *cursor_text;
 	GdkCursor *cursor_vtext;
 	GdkCursor *cursor_default;
@@ -202,6 +204,13 @@ void viewer_save_and_close(PdfViewer*);
 /* viewer_save_dirty_dds(): siehe viewer_save.h */
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
+
+/* Fenster, in dem der Viewer angezeigt wird (Elternfenster für Meldungen, Dialoge, Dateiauswahl,
+ * Druck); NULL, wenn der Viewer in keinem Fenster steckt. Nicht freigeben. */
+GtkWidget* viewer_parent(PdfViewer*);
+
+//Bringt das Fenster des Viewers nach vorn (ohne Fenster: nichts)
+void viewer_fenster_praesentieren(PdfViewer*);
 
 /* viewer_handle_text_search()/viewer_highlight_at_char_pos(): siehe
  * viewer_search.h */

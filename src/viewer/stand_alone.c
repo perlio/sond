@@ -20,14 +20,14 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../misc_stdlib.h"
-#include "../../sond_fileparts.h"
-#include "../../sond_log_and_error.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../misc_stdlib.h"
+#include "../sond_fileparts.h"
+#include "../sond_log_and_error.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 #include "viewer.h"
 #include "viewer_ui.h"
@@ -79,7 +79,7 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 	gtk_popover_popdown(GTK_POPOVER(pv->annot_pop));
 
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
-		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
+		rc = abfrage_frage(viewer_parent(pv), "PDF geändert", "Speichern?", NULL);
 		if (rc == GTK_RESPONSE_CANCEL)
 			return -1;
 
@@ -88,7 +88,7 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 			if (rc) {
 				error->message = add_string(g_strdup("Dokument kann nicht gespeichert "
 						"werden: "), error->message);
-				rc = abfrage_frage(pv->vf, error->message, "Trotzdem schließen?", NULL);
+				rc = abfrage_frage(viewer_parent(pv), error->message, "Trotzdem schließen?", NULL);
 				g_error_free(error);
 
 				if (rc != GTK_RESPONSE_YES)
@@ -180,18 +180,18 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 
 	if (pv->dd) {
 		//Abfrage, ob Datei geschlossen werden soll
-		rc = abfrage_frage(pv->vf, "PDF öffnen",
+		rc = abfrage_frage(viewer_parent(pv), "PDF öffnen",
 				"Geöffnete PDF-Datei schließen?", NULL);
 		if (rc != GTK_RESPONSE_YES)
 			return;
 	}
 
-	gchar *filename = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
+	gchar *filename = filename_oeffnen(GTK_WINDOW(viewer_parent(pv)), NULL);
 	if (!filename)
 		return;
 
 	//nicht geladene SeaDrive-Datei: erst laden (Abbruch: nichts öffnen)
-	if (!pdf_viewer_session_load_file(pv->session, GTK_WINDOW(pv->vf),
+	if (!pdf_viewer_session_load_file(pv->session, GTK_WINDOW(viewer_parent(pv)),
 			filename)) {
 		g_free(filename);
 
@@ -209,7 +209,7 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 	rc = pv_oeffnen_datei(pv, filename, &error);
 	g_free(filename);
 	if (rc) {
-		display_message(pv->vf, "Fehler - Datei öffnen\n\n"
+		display_message(viewer_parent(pv), "Fehler - Datei öffnen\n\n"
 				"Bei Aufruf pv_oeffnen_datei:\n", error->message, NULL);
 		g_error_free(error);
 	}
@@ -228,11 +228,11 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 	if (!pv)
 		return;
 
-	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
+	gtk_application_add_window(app, GTK_WINDOW(pv->fenster));
 
 	gchar *filename = g_file_get_path(((GFile**)files)[0]);
 	if (!filename) {
-		display_message(pv->vf, "Fehler - Datei öffnen:\n",
+		display_message(viewer_parent(pv), "Fehler - Datei öffnen:\n",
 				"Kein lokaler Dateipfad ermittelbar", NULL);
 		return;
 	}
@@ -240,7 +240,7 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 	rc = pv_oeffnen_datei(pv, filename, &error);
 	g_free(filename);
 	if (rc) {
-		display_message(pv->vf, "Fehler - Datei öffnen:\n", error->message, NULL);
+		display_message(viewer_parent(pv), "Fehler - Datei öffnen:\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -256,7 +256,7 @@ static void activate_app(GtkApplication *app, gpointer user_data) {
 	if (!pdfv)
 		return;
 
-	gtk_application_add_window(app, GTK_WINDOW(pdfv->vf));
+	gtk_application_add_window(app, GTK_WINDOW(pdfv->fenster));
 
 	pv_activate_widgets(pdfv, FALSE);
 

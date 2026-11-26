@@ -41,9 +41,9 @@
 
 #include "zond_init.h"
 #include "zond_convert.h"
-#include "zond_pdf_document.h"
+#include "../viewer/zond_pdf_document.h"
 #include "viewer_host.h"
-#include "40viewer/viewer_session.h"
+#include "../viewer/viewer_session.h"
 
 #include "20allgemein/project.h"
 

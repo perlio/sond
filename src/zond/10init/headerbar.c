@@ -38,7 +38,7 @@
 #include "../../sond_index.h"
 #include "../../seadrive/sond_seadrive_gtk3.h"
 
-#include "../zond_pdf_document.h"
+#include "../../viewer/zond_pdf_document.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeview.h"
 #include "../../znd/zond_dbase.h"
@@ -57,8 +57,8 @@
 #include "../20allgemein/xjustiz_import.h"
 #include "../20allgemein/db_check_fenster.h"
 #include "../20allgemein/zond_update.h"
-#include "../40viewer/viewer.h"
-#include "../40viewer/document.h"
+#include "../../viewer/viewer.h"
+#include "../../viewer/document.h"
 #include "../99conv/test.h"
 
 #include "headerbar.h"

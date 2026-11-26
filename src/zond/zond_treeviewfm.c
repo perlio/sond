@@ -17,7 +17,7 @@
 #include "../tvfm/sond_tvfm_fileparts.h"
 #include "zond_indexsuche.h"
 #include "zond_eingang.h"
-#include "zond_pdf_document.h"
+#include "../viewer/zond_pdf_document.h"
 
 #include "../znd/zond_dbase.h"
 #include "zond_treeview.h"
@@ -28,8 +28,8 @@
 #include "../znd/dbase_zond.h"
 #include "../znd/sond_projekt_pflege.h"
 #include "20allgemein/project.h"
-#include "40viewer/viewer.h"
-#include "40viewer/document.h"
+#include "../viewer/viewer.h"
+#include "../viewer/document.h"
 #include "../znd/anbindung.h"
 
 typedef struct {

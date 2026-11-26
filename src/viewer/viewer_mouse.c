@@ -23,11 +23,11 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../sond_log_and_error.h"
+#include "../sond_log_and_error.h"
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 #include "document.h"
 #include "viewer_mouse.h"
@@ -190,23 +190,33 @@ viewer_on_annot(PdfViewer *pv, ViewerPageNew *viewer_page, fz_point point) {
 	return NULL;
 }
 
+//Mauszeiger der Zeichenfläche (Layout) setzen; das Layout muss angezeigt sein
+void viewer_cursor_setzen(PdfViewer *pv, GdkCursor *cursor) {
+	GdkWindow *window = gtk_widget_get_window(pv->layout);
+
+	if (window)
+		gdk_window_set_cursor(window, cursor);
+
+	return;
+}
+
 void viewer_set_cursor(PdfViewer *pv, gint rc,
 		ViewerPageNew *viewer_page,
 		PdfDocumentPageAnnot *pdf_document_page_annot, PdfPunkt pdf_punkt) {
 	gint on_text = 0;
 
 	if (rc)
-		gdk_window_set_cursor(pv->gdk_window, pv->cursor_default);
+		viewer_cursor_setzen(pv, pv->cursor_default);
 	else if (pdf_document_page_annot)
-		gdk_window_set_cursor(pv->gdk_window, pv->cursor_annot);
+		viewer_cursor_setzen(pv, pv->cursor_annot);
 	else if ((viewer_page->pdf_document_page->thread & 8) && (on_text =
 			viewer_on_text(pv, viewer_page, pdf_punkt.punkt))) {
 		if (on_text == 1)
-			gdk_window_set_cursor(pv->gdk_window, pv->cursor_text);
+			viewer_cursor_setzen(pv, pv->cursor_text);
 		else if (on_text == 2)
-			gdk_window_set_cursor(pv->gdk_window, pv->cursor_vtext);
+			viewer_cursor_setzen(pv, pv->cursor_vtext);
 	} else
-		gdk_window_set_cursor(pv->gdk_window, pv->cursor_default);
+		viewer_cursor_setzen(pv, pv->cursor_default);
 
 	return;
 }
@@ -475,7 +485,7 @@ static gint klick_neben_annot(PdfViewer *pv, ViewerPageNew *viewer_page, PdfPunk
 			&& viewer_on_text(pv, viewer_page, pdf_punkt.punkt))
 		pv->click_on_text = TRUE;
 	else
-		gdk_window_set_cursor(pv->gdk_window, pv->cursor_grab);
+		viewer_cursor_setzen(pv, pv->cursor_grab);
 
 	return 0;
 }

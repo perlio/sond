@@ -33,14 +33,14 @@
 #include "zond_init.h"
 #include "../znd/zond_dbase.h"
 #include "../znd/dbase_zond.h"
-#include "zond_pdf_document.h"
-#include "anbindung_zaehlung.h"
+#include "../viewer/zond_pdf_document.h"
+#include "../viewer/anbindung_zaehlung.h"
 #include "../znd/anbindung.h"
 #include "20allgemein/project.h"
 #include "20allgemein/ziele.h"
-#include "40viewer/viewer.h"
-#include "40viewer/document.h"
-#include "40viewer/viewer_save.h"
+#include "../viewer/viewer.h"
+#include "../viewer/document.h"
+#include "../viewer/viewer_save.h"
 
 typedef struct {
 	Projekt *zond;

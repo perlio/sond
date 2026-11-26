@@ -30,15 +30,15 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
-#include "../../gtk3/sond_dialoge.h"
-#include "../../sond_fileparts.h"
-#include "../../sond_log_and_error.h"
-#include "../../sond_pdf_helper.h"
+#include "../gtk3/sond_dialoge.h"
+#include "../sond_fileparts.h"
+#include "../sond_log_and_error.h"
+#include "../sond_pdf_helper.h"
 
-#include "../zond_pdf_document.h"
-#include "../anbindung_zaehlung.h"
+#include "zond_pdf_document.h"
+#include "anbindung_zaehlung.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
 
 #include "document.h"

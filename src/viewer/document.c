@@ -2,13 +2,13 @@
 
 #include "viewer.h"
 #include "document.h"
-#include "../zond_pdf_document.h"
-#include "../anbindung_zaehlung.h"
+#include "zond_pdf_document.h"
+#include "anbindung_zaehlung.h"
 #include "pdf_annot_ops.h"
 
-#include "../../znd/anbindung.h"
+#include "../znd/anbindung.h"
 
-#include"../../sond_log_and_error.h"
+#include"../sond_log_and_error.h"
 
 void document_free_displayed_documents(DisplayedDocument *dd) {
 	if (!dd)

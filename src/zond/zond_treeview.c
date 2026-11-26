@@ -40,7 +40,7 @@
 #include "../znd/zond_dbase.h"
 #include "zond_tree_store.h"
 #include "zond_treeviewfm.h"
-#include "zond_pdf_document.h"
+#include "../viewer/zond_pdf_document.h"
 
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
@@ -49,9 +49,9 @@
 #include "zond_knoten.h"
 #include "20allgemein/project.h"
 
-#include "40viewer/viewer.h"
-#include "40viewer/viewer_ui.h"
-#include "40viewer/document.h"
+#include "../viewer/viewer.h"
+#include "../viewer/viewer_ui.h"
+#include "../viewer/document.h"
 
 #include "../znd/anbindung.h"
 #include "zond_indexsuche.h"
@@ -2441,7 +2441,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 			}
 
 			if (pv->dd && dd_int == NULL && dd_loop == NULL) {
-				gtk_window_present(GTK_WINDOW(pv->vf));
+				gtk_window_present(GTK_WINDOW(viewer_parent(pv)));
 				if (pos_pdf)
 					pos_von = *pos_pdf;
 				viewer_springen_zu_pos_pdf(pv, pos_von, 0);

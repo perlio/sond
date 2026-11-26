@@ -23,7 +23,7 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "pdf_annot_ops.h"
 

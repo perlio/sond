@@ -23,7 +23,7 @@
 #include <mupdf/pdf.h>
 #include <cairo.h>
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
 #include "viewer.h"
 #include "viewer_draw.h"
