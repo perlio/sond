@@ -75,6 +75,7 @@ typedef struct {
     gint64 projekt_mtime;      /* Stand der Datei beim letzten Öffnen */
     gint64 projekt_size;
     GtkWidget *sperre;         /* Hinweis, warum der Baum nichts ändern darf */
+    GtkWidget *projekt_hinweis; /* Hinweis, dass die Projektdaten fehlen */
     SondEingangCache *eingang_cache; /* lokale Tabelle der Eingangsangaben; NULL, wenn nicht verfügbar */
     DBaseZond *projekt_schreib; /* nur während eines Änderungsvorgangs offen */
     SondIndexCtx *index_schreib; /* dito */
@@ -200,7 +201,7 @@ static void ganz_abgleichen(DokData *d);
 /* Projektdatei wie die Index-DB: nur lesend, bei geänderter Datei neu öffnen (Seafile ersetzt
  * sie beim Abgleich). Eine noch nicht geladene SeaDrive-Datei wird nicht geöffnet. Fehlt die
  * Projektdatei oder ist sie nicht lesbar, bleibt projekt_db NULL. */
-static void projekt_pruefen(DokData *d) {
+static void projekt_laden(DokData *d) {
     GStatBuf st = { 0 };
     gboolean vorhanden = !g_stat(d->projekt_pfad, &st);
     gint64 mtime = vorhanden ? (gint64) st.st_mtime : 0;
@@ -234,6 +235,30 @@ static void projekt_pruefen(DokData *d) {
     //Abschnitte und Treffer im Baum aus der neuen Projekt-DB lesen
     if (d->tree)
         sond_treeviewfm_refresh_names(SOND_TREEVIEWFM(d->tree));
+}
+
+//Projektdatei liegt vor, ist aber nicht lesbar (noch nicht geladen, z. B. offline): Hinweis zeigen
+static void projekt_pruefen(DokData *d) {
+    gboolean fehlt = FALSE;
+
+    projekt_laden(d);
+
+    if (!d->projekt_hinweis)
+        return;
+
+    fehlt = !d->projekt_db && g_file_test(d->projekt_pfad, G_FILE_TEST_EXISTS);
+    if (fehlt) {
+        SondSeadriveBadge badge = sond_tvfm_badge_seadrive_live(d->projekt_pfad);
+        gboolean noch_nicht_lokal = badge == SOND_SEADRIVE_BADGE_OFFLINE ||
+                badge == SOND_SEADRIVE_BADGE_PENDING;
+
+        gtk_label_set_text(GTK_LABEL(d->projekt_hinweis), noch_nicht_lokal ?
+                "Die Projektdatei ist noch nicht auf diesem Rechner (offline?). Anbindungen und "
+                "Abschnitte werden erst angezeigt, wenn sie geladen ist." :
+                "Die Projektdatei ist nicht lesbar. Anbindungen und Abschnitte werden nicht "
+                "angezeigt.");
+    }
+    gtk_widget_set_visible(d->projekt_hinweis, fehlt);
 }
 
 /* Hat zond das Projekt offen? Die vom Client gestarteten Prozesse gelten als verlässlich, sie
@@ -1559,6 +1584,13 @@ GtkWidget* sond_dokumente_widget_new(SondClient *client, SondAkteLease *lease,
     gtk_widget_add_css_class(d->sperre, "warning");
     gtk_widget_set_visible(d->sperre, FALSE);
     gtk_box_append(GTK_BOX(box), d->sperre);
+
+    d->projekt_hinweis = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(d->projekt_hinweis), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(d->projekt_hinweis), TRUE);
+    gtk_widget_add_css_class(d->projekt_hinweis, "dim-label");
+    gtk_widget_set_visible(d->projekt_hinweis, FALSE);
+    gtk_box_append(GTK_BOX(box), d->projekt_hinweis);
 
     //Baum
     d->tree = sond_projekt_treeviewfm_new();
