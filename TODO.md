@@ -2,11 +2,11 @@
 
 Offene Punkte für zond. Erledigtes steht in [HISTORY.md](HISTORY.md), Hinweise zum Bauen in [BUILD.md](BUILD.md).
 
-Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #276.
+Neue Einträge werden ab #200 nummeriert, die nächste freie Nummer ist #278.
 
 ## Inhalt
 
-Offen: #245, #247, #256, #258
+Offen: #245, #247, #256, #258, #276
 Zurückgestellt: #202, #220, #234, #236, #238, #239, #240, #241, #251, #252, #253, #259, #260, #262
 Ideen: #167, #169, #205, #232, #233
 
@@ -441,6 +441,16 @@ Status: Phase 1 erledigt; Phasen 2 bis 5 zurückgestellt (erst mit der Umstellun
  Ort: zond/, nicht znd/ (der Client zeigt diese Bäume nicht; wer so tief einsteigen will,
  öffnet zond).
 ```
+
+### #276 Indexsuche im Client (mit der GTK4-Umstellung von zond)
+
+Status: zurückgestellt. Der Client kann den Index anzeigen (Symbole), erstellen und löschen; das
+Arbeiten mit dem Index (Suchen, Treffer öffnen) bleibt zond. Beim GTK4-Umbau von zond:
+- GTK-freien Kern aus zond_indexsuche.c lösen (Suche, Treffer, Coverage-Abgleich),
+- Ergebnisliste als GTK4-Widget,
+- Treffer im Client: Datei öffnen; Seitensprung erst mit dem GTK4-Viewer (#262).
+Schon vorhanden und dafür nutzbar: tvfm/sond_tvfm_fileparts (Auswahl -> Fileparts),
+znd/sond_projekt_auswahl, znd/sond_projekt_index (Status, Löschen).
 
 ### #262 Viewer als einbettbares Widget
 

@@ -6416,3 +6416,22 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Der Server ließ sich nur auf Syntax prüfen (gebaut wird in WSL); der Lauf eines Jobs mit
  Teilen und mit Abbruch steht noch aus.
 ```
+
+## Index im Client: Symbole, Indizieren, Löschen (26.11.2026) (#277)
+
+```text
+ Der Client zeigt im Projekt-Baum Index-Symbole für Dateien, Teile in Containern und Abschnitte
+ (Anbindungen) und löscht den Index der Auswahl, ohne zond zu starten. Die Logik liegt GTK-frei und
+ wird auch von zond benutzt, damit sie bei der GTK4-Umstellung von zond schon bereitsteht:
+ - znd/sond_projekt_index: Status eines Abschnitts (Seitenbereich einer Anbindung) und
+   sond_projekt_index_loeschen() (ganze Datei, Seitenbereiche, E-Mail-Header, PageTree,
+   angebundene Mail-Teile; eine Transaktion).
+ - tvfm/sond_tvfm_fileparts: Auswahl -> Fileparts mit Seitenbereichen (readdir-Scanner,
+   Container, Mail, PageTree). Was eine Section bedeutet, liefert der Besitzer des Baums über
+   section_range; znd/sond_projekt_auswahl deutet sie als Anbindung (unterseitig ablehnen).
+ - tvfm/sond_tvfm_status: Section-Status über sond_tvfm_item_section_index_status().
+ zond_treeviewfm.c und headerbar.c rufen diese Funktionen nur noch auf. Client: Kontextmenü
+ "Index der Auswahl löschen ..." (Rückfrage, Schreibberechtigung der Lease, Index neu lesen).
+ Tests: test_tvfm_fileparts, test_projekt_index. Die Bedienung im Client ist noch nicht
+ ausprobiert. Die Indexsuche im Client ist zurückgestellt (#276).
+```
