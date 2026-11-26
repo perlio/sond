@@ -306,4 +306,3 @@ SondIndexStatus sond_tvfm_item_index_status(SondTVFMItem *stvfm_item,
 
 	return status;
 }
-

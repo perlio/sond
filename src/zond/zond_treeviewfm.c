@@ -12,6 +12,7 @@
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
 #include "../sond_mime.h"
+#include "../znd/sond_projekt_index.h"
 #include "zond_indexsuche.h"
 #include "zond_eingang.h"
 #include "zond_pdf_document.h"
@@ -955,51 +956,16 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
 	return ht;
 }
 
-/* Vfunc für sond_treeviewfm.c (Indizierungsstatus-Overlay): ein
- * LEAF_SECTION-Knoten in BAUM_FS ist bei zond immer eine Anbindung
- * (angelegt in ziele.c), deren path_or_section ein Seitenbereich-String
- * ist - dieselbe Auswertung wie in zond_treeviewfm_item_get_fileparts().
- *
- * Liefert den fertigen SondIndexStatus (s. ausführlichen Doc-Kommentar an
- * der vfunc-Deklaration in sond_treeviewfm.h) - "Section = Seitenbereich" ist
- * eine zond/PDF-spezifische Interpretation, die hier (in der zond-Subklasse)
- * hingehört und nicht in die generische Basisklasse. Übernimmt dafür
- * auch die Mime-Type-Prüfung von sond_treeviewfm_get_index_status() (Leaf-
- * eigener, gesniffter Mime-Type bevorzugt, PDF/GMessage-Bypass) - dieselbe
- * Logik wie dort, hier auf die zugrundeliegende Datei der Section
- * angewandt. */
+/* Vfunc für sond_treeviewfm.c (Indizierungsstatus-Overlay): ein LEAF_SECTION-Knoten in BAUM_FS ist
+ * bei zond immer eine Anbindung (angelegt in ziele.c), deren path_or_section ein
+ * Seitenbereich-String ist; die Auswertung steht in sond_projekt_index_status_abschnitt(). */
 static SondIndexStatus zond_treeviewfm_get_section_index_status(
 		SondTVFMItem *stvfm_item, SondIndexCtx *index_ctx) {
-	gchar const *section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-	Anbindung anbindung = { 0 };
-	gchar *coverage_path = NULL;
-	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
-	gint von_seite = -1;
-	gint bis_seite = -1;
+	g_autofree gchar *filepart = sfp ? sond_file_part_get_filepart(sfp) : NULL;
 
-	if (!section || !sfp)
-		return SOND_INDEX_STATUS_NONE;
-
-	coverage_path = sond_file_part_get_filepart(sfp);
-	if (!coverage_path)
-		return SOND_INDEX_STATUS_NONE;
-
-	if (!sond_treeviewfm_file_part_indexable(sfp, coverage_path)) {
-		g_free(coverage_path);
-		return SOND_INDEX_STATUS_NONE;
-	}
-
-	anbindung_parse_file_section(section, &anbindung);
-
-	von_seite = anbindung.von.seite;
-	bis_seite = anbindung_bis_seite(anbindung);
-
-	status = sond_index_ctx_get_file_status(index_ctx, coverage_path, von_seite,
-			bis_seite);
-	g_free(coverage_path);
-
-	return status;
+	return sond_projekt_index_status_abschnitt(index_ctx, filepart,
+			sond_tvfm_item_get_path_or_section(stvfm_item));
 }
 
 static void zond_treeviewfm_finalize(GObject *obj) {

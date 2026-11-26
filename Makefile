@@ -98,7 +98,7 @@ SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
 	$(SRC_DIRS)/sond_index.c $(SRC_DIRS)/sond_text_extract.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_mime.c $(SRC_DIRS)/sond_password.c $(SRC_DIRS)/sond_pdf_helper.c \
 	$(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_tmpfiles.c \
-	$(SRC_DIRS)/znd/zond_dbase.c $(SRC_DIRS)/znd/dbase_zond.c $(SRC_DIRS)/znd/anbindung.c \
+	$(SRC_DIRS)/znd/zond_dbase.c $(SRC_DIRS)/znd/dbase_zond.c $(SRC_DIRS)/znd/anbindung.c $(SRC_DIRS)/znd/sond_projekt_index.c \
 	$(SRC_DIRS)/sond_zond_schema.c $(SRC_DIRS)/znd/sond_projekt_pflege.c $(SRC_DIRS)/sond_process_file.c \
 	$(SRC_DIRS)/znd/dbase_zond_index.c $(SRC_DIRS)/znd/zond_error.c \
 	$(SRC_DIRS)/sond_eingang_cache.c $(SRC_DIRS)/sond_eingang_pflege.c \
@@ -145,6 +145,8 @@ SRCS += $(SRC_DIRS)/tests/test_main.c \
 	$(SRC_DIRS)/tests/test_tvfm_passwort.c \
 	$(SRC_DIRS)/tests/test_tvfm_status.c \
 	$(SRC_DIRS)/tests/test_fileparts_root.c \
+	$(SRC_DIRS)/tests/test_projekt_index.c \
+	$(SRC_DIRS)/znd/sond_projekt_index.c \
 	$(SRC_DIRS)/tests/test_akte_lease.c \
 	$(SRC_DIRS)/tests/fake_server.c \
 	$(SRC_DIRS)/sond_client/modules/projekt/sond_akte_lease.c \

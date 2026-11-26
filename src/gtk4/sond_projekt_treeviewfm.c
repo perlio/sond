@@ -23,6 +23,7 @@
 #include "../sond_eingang_pflege.h"
 #include "../sond_log_and_error.h"
 #include "../tvfm/sond_tvfm_index_sync.h"
+#include "../znd/sond_projekt_index.h"
 
 typedef struct {
 	SondProjektHooks hooks;
@@ -1112,11 +1113,21 @@ static void sond_projekt_treeviewfm_finalize(GObject *object) {
 	G_OBJECT_CLASS(sond_projekt_treeviewfm_parent_class)->finalize(object);
 }
 
+//Index-Status eines Abschnitts (Anbindung): der Seitenbereich in der PDF, wie in zond
+static SondIndexStatus vfunc_section_index_status(SondTVFMItem *item, SondIndexCtx *index_ctx) {
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(item);
+	g_autofree gchar *filepart = sfp ? sond_file_part_get_filepart(sfp) : NULL;
+
+	return sond_projekt_index_status_abschnitt(index_ctx, filepart,
+			sond_tvfm_item_get_path_or_section(item));
+}
+
 static void sond_projekt_treeviewfm_class_init(SondProjektTreeviewFMClass *klass) {
 	SondTreeviewFMClass *tclass = SOND_TREEVIEWFM_CLASS(klass);
 
 	G_OBJECT_CLASS(klass)->finalize = sond_projekt_treeviewfm_finalize;
 
+	tclass->get_section_index_status = vfunc_section_index_status;
 	tclass->has_sections = vfunc_has_sections;
 	tclass->load_sections = vfunc_load_sections;
 	tclass->text_from_section = vfunc_text_from_section;

@@ -43,6 +43,7 @@ void test_sond_password_register(void);
 void test_tvfm_passwort_register(void);
 void test_tvfm_status_register(void);
 void test_akte_lease_register(void);
+void test_projekt_index_register(void);
 void test_fileparts_root_register(void);
 
 int
@@ -68,6 +69,7 @@ main(int argc, char *argv[])
     test_tvfm_passwort_register();
     test_tvfm_status_register();
     test_akte_lease_register();
+    test_projekt_index_register();
     test_fileparts_root_register();
 
     return g_test_run();
