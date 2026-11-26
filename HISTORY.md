@@ -6435,3 +6435,16 @@ Dialog nur im Hauptthread (Callback von zond, Modul password_dialog.c).
  Tests: test_tvfm_fileparts, test_projekt_index. Die Bedienung im Client ist noch nicht
  ausprobiert. Die Indexsuche im Client ist zurückgestellt (#276).
 ```
+
+## Client: Hinweis bei fehlender Projektdatei, Titelzeile von zond (26.11.2026) (#278)
+
+```text
+ Projekt-Baum im Client: Ist die Projektdatei (.ZND) vorhanden, aber nicht lesbar (SeaDrive-
+ Platzhalter noch nicht geladen, z. B. offline, oder defekt), steht über dem Baum ein Hinweis, dass
+ Anbindungen und Abschnitte fehlen. Vorher sah eine PDF ohne Sections wie eine ohne Anbindung aus.
+ zond im Akten-Modus: Die Titelzeile zeigt statt des Dateinamens "1/26    Bezeichnung" mit dem
+ Gegenstand als kleinerem Untertitel. Der Client merkt sich die Angaben der gezeigten Akte im
+ Starter (sond_zond_starter_set_info) und übergibt sie mit --akte-titel und --akte-untertitel;
+ zond setzt sie in project_set_title() (Projekt.app.akte_titel/akte_untertitel). Ohne die Optionen
+ bleibt der Dateiname. Der Titel gilt für die Laufzeit von zond.
+```
